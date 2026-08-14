@@ -165,6 +165,7 @@ from ai_market_monitor.services.market_preview import (
 )
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError
 from ai_market_monitor.services.setup_chat_agent import (
+    PROVIDER_FAILURE_CODES,
     SCAN_SCOPE_QUESTION,
     SetupAgentError,
     SetupAgentTurnInput,
@@ -206,6 +207,24 @@ _LAUNCH_STAGE_BY_AGENT_STAGE: dict[str, LaunchStage] = {
     "compile": "compile",
     "response_composition": "serialize",
 }
+
+
+def _launch_stage_for(code: str, agent_stage: str) -> LaunchStage:
+    """Which stage the customer is told about.
+
+    A provider outage belongs to the provider, whatever step happened to be
+    running when it struck. The table above maps by step alone, so a model
+    timeout during planning reached the customer as ``extract`` — the product
+    saying it could not read the rules they had just written correctly. The
+    request was fine; the model never answered.
+
+    Only outages move. A model that answered with something unusable is still a
+    failure of the step that asked for it, and keeps its own stage.
+    """
+
+    if code in PROVIDER_FAILURE_CODES:
+        return "provider"
+    return _LAUNCH_STAGE_BY_AGENT_STAGE.get(agent_stage, "interpret")
 
 #: Bumped whenever the meaning of a stored data check changes — a new field in the
 #: manifest, a different rule for choosing the contract, a change to what counts as
@@ -4374,7 +4393,7 @@ return tostring(next_value)
             raise SetupLaunchError(
                 exc.code,
                 str(exc),
-                stage=_LAUNCH_STAGE_BY_AGENT_STAGE.get(exc.stage, "interpret"),
+                stage=_launch_stage_for(exc.code, exc.stage),
                 retryable=exc.retryable,
                 status_code=503 if exc.retryable else 422,
             ) from exc

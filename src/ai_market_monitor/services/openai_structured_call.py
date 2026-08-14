@@ -152,14 +152,25 @@ async def structured_call[ModelT: BaseModel](
 
     ``store=false`` and non-streaming on purpose: a stored transcript is not needed,
     and a partially streamed body is a failure mode with no benefit here.
+
+    **Who owns a failure decides what the customer is told.** ``stage`` names the
+    step that made this call, and every failure used to be labelled with it — so a
+    provider timeout or a 429 arrived at the customer as a failure of *reading
+    their rules*. It is not: the model never answered. Below, a failure of the
+    connection or of the provider's own response carries ``provider``, and only a
+    reply that arrived and could not be used keeps the caller's stage. Nothing
+    else about the error changes; the difference is only whose problem it is
+    reported as, and that is exactly what the customer reads.
     """
+
+    provider_stage = "provider"
 
     if settings.openai_api_key is None:
         raise StructuredCallError(
             "TARGET_PROVIDER_NOT_CONFIGURED",
             "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
             retryable=True,
-            stage=stage,
+            stage=provider_stage,
         )
     pricing = (
         settings.openai_fast_model_pricing_usd_per_million.get(model)
@@ -220,7 +231,7 @@ async def structured_call[ModelT: BaseModel](
             "TARGET_PROVIDER_NOT_CONFIGURED",
             "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
             retryable=True,
-            stage=stage,
+            stage=provider_stage,
         )
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -279,28 +290,28 @@ async def structured_call[ModelT: BaseModel](
             "SETUP_AGENT_CIRCUIT_OPEN",
             "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
             retryable=True,
-            stage=stage,
+            stage=provider_stage,
         ) from exc
     except httpx.ConnectTimeout as exc:
         raise StructuredCallError(
             "TARGET_CONNECT_TIMEOUT",
             "The interpreter could not be reached in time.",
             retryable=True,
-            stage=stage,
+            stage=provider_stage,
         ) from exc
     except httpx.ReadTimeout as exc:
         raise StructuredCallError(
             "TARGET_READ_TIMEOUT",
             "The interpreter timed out.",
             retryable=True,
-            stage=stage,
+            stage=provider_stage,
         ) from exc
     except httpx.RemoteProtocolError as exc:
         raise StructuredCallError(
             "TARGET_PARTIAL_STREAM",
             "The interpreter disconnected before completing its response.",
             retryable=True,
-            stage=stage,
+            stage=provider_stage,
         ) from exc
     except httpx.ConnectError as exc:
         raise StructuredCallError(
@@ -311,14 +322,14 @@ async def structured_call[ModelT: BaseModel](
             ),
             "The interpreter could not be reached.",
             retryable=True,
-            stage=stage,
+            stage=provider_stage,
         ) from exc
     except httpx.TimeoutException as exc:
         raise StructuredCallError(
             "TARGET_TOTAL_TIMEOUT",
             "The interpreter exceeded its bounded turn time.",
             retryable=True,
-            stage=stage,
+            stage=provider_stage,
         ) from exc
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
@@ -351,7 +362,7 @@ async def structured_call[ModelT: BaseModel](
             ),
             "The interpreter could not complete this turn.",
             retryable=status in {401, 403, 429} or status >= 500,
-            stage=stage,
+            stage=provider_stage,
             details=tuple(details),
         ) from exc
     except ValidationError as exc:

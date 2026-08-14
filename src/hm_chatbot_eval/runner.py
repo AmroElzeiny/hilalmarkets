@@ -442,26 +442,41 @@ class EvaluationRunner:
         *,
         expected_fault: str,
     ) -> bool:
-        """Recognize only the integrated target's explicit expected fault response.
+        """Recognize the integrated target's proof that the fault reached the model.
 
-        ``empty_once`` is deliberately not a valid assistant reply.  A normal
-        reply would mean the header was ignored; an unmarked empty reply remains a
-        target outage.  The test-only response marker is emitted only after the
-        target accepted evaluator control in its test environment.
+        **The marker is the proof, and recovering is not a failure to prove it.**
+        This used to also require a 4xx or 5xx status, which made the check
+        impossible to satisfy with the fault it actually probes with. The product
+        is *designed* to survive one bad response shape: ``empty_once`` is
+        consumed at the model boundary, the single recovery allowed in production
+        runs, and the turn answers 200 carrying the marker. The gate saw 200,
+        refused to look at the marker, and reported fault injection as
+        unavailable — so every provider-fault topic was unrunnable against a
+        target where fault injection worked correctly the whole time.
+
+        The original worry was that a normal reply might mean the header was
+        ignored. The marker answers that completely: the target sets it only after
+        the one-shot fault was consumed at the routed model client, so an ignored
+        header cannot produce one. An unmarked reply, empty or not, still counts
+        as no proof.
+
+        A target that surfaces the fault as an error must still surface the
+        *right* error, so the error branch keeps its error-code check.
         """
 
         raw: dict[str, Any] = reply.raw if isinstance(reply.raw, dict) else {}
+        if raw.get("_evaluator_fault_applied") != expected_fault:
+            return False
+        if reply.status_code is not None and reply.status_code < 400:
+            # Marked and recovered: the fault reached the boundary and the product
+            # handled it. That is the behaviour under test, working.
+            return True
         error_candidate = raw.get("error")
         error: dict[str, Any] = (
             error_candidate if isinstance(error_candidate, dict) else {}
         )
         expected_codes = _EXPECTED_EVALUATOR_FAULT_ERRORS.get(expected_fault, frozenset())
-        return (
-            reply.status_code is not None
-            and reply.status_code >= 400
-            and raw.get("_evaluator_fault_applied") == expected_fault
-            and str(error.get("error_code") or "") in expected_codes
-        )
+        return str(error.get("error_code") or "") in expected_codes
 
     @staticmethod
     def _readiness_message() -> str:

@@ -6596,7 +6596,14 @@ def _record_cost_telemetry(
     telemetry.notes["planner_repair_success_count"] = int(usage.get("_setup_repair_successes") or 0)
 
 
-_CIRCUIT_FAILURE_CODES = frozenset(
+#: Failures where the provider never gave a usable answer at all: the connection,
+#: the timeout budget, or the provider's own status code. Nothing about the
+#: customer's request is wrong in any of these.
+#:
+#: Shared with the error envelope so a customer is told the same thing the circuit
+#: breaker believes. Reported as the step that happened to be running, an outage
+#: read as "we could not read your rules", which is both false and alarming.
+PROVIDER_FAILURE_CODES: frozenset[str] = frozenset(
     {
         "TARGET_CONNECT_TIMEOUT",
         "TARGET_READ_TIMEOUT",
@@ -6608,6 +6615,8 @@ _CIRCUIT_FAILURE_CODES = frozenset(
         "TARGET_HTTP_5XX",
     }
 )
+
+_CIRCUIT_FAILURE_CODES = PROVIDER_FAILURE_CODES
 
 #: Failures where the answer arrived but could not be read at all. There are no intents
 #: to correct, so the only recovery is one more attempt at the same compact contract.
