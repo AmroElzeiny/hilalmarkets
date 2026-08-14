@@ -1,5 +1,26 @@
 # First adversarial QA run — 2026-08-14
 
+> **All eight findings below are fixed.** This document is the record of the run that
+> found them, and it is left exactly as it was written, at the commit it measured. Where
+> it says "nothing is fixed", that was true of the QA phase — that phase was forbidden to
+> fix anything.
+>
+> The fixes are on branch `setup-chat-semantic-closeout`, one commit per finding group,
+> each with a permanent test named after the finding it closes. Sixty of the eighty-eight
+> promoted tests fail at `211aecc5` and all of them pass after. The promotion decision and
+> its evidence are recorded in `docs/OI_ADVERSARIAL_QA.md` §8.
+>
+> Two corrections this run got wrong, found while fixing it:
+>
+> - **OI4-008 was misdiagnosed.** Fault injection was never broken. The readiness gate
+>   demanded a 4xx or 5xx before it would accept the evidence marker, and the fault it
+>   probes with (`empty_once`) is one the product is built to recover from — so the turn
+>   answered 200 with the marker attached and the gate threw the proof away.
+> - **The provider-fault attacks are no longer unverified.** With the gate fixed, the
+>   Phase 5 invariant was measurable for the first time, and it did not hold: a provider
+>   outage reached the customer labelled with whatever step was running. It does not any
+>   more, and an injected outage now proves it.
+
 **Commit:** `211aecc5` (branch `phase5-closeout`), start and end.
 **Target:** local `APP_ENV=test`, throwaway SQLite, mock providers. Never production.
 **Corpus:** 1.1.0, 51 cases. **Attack catalogue:** 2026-08-14.2, 24 attacks.
