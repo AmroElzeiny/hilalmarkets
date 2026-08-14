@@ -94,7 +94,25 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
   const title = config.title ?? "Figma Make App"
   const description = config.description ?? ''
   const favicon = config.icons?.icon ?? ''
-  const socialImage = config.openGraph?.image ?? ''
+  // A social preview address must be absolute. Every scraper resolves `og:image`
+  // against nothing, so `/hilalmarkets-social-preview.png` is not a smaller version of
+  // the right answer — it is an address no scraper can fetch, published as though it
+  // were one.
+  //
+  // `site.json` holds a site-relative path, which is correct for the file but not for
+  // the tag, so it is joined to the configured site origin here. When no origin is
+  // configured the tags are left out entirely rather than emitted relative: the page is
+  // also served through the FastAPI shell, which builds the same tags from
+  // `PUBLIC_BASE_URL` and forces HTTPS, and one correct set of tags beats two sets that
+  // disagree.
+  const configuredSiteUrl = (process.env.VITE_SITE_URL ?? '').trim().replace(/\/+$/, '')
+  const configuredImage = config.openGraph?.image ?? ''
+  const socialImage = (() => {
+    if (!configuredImage) return ''
+    if (/^https?:\/\//i.test(configuredImage)) return configuredImage
+    if (!configuredSiteUrl) return ''
+    return `${configuredSiteUrl}/${configuredImage.replace(/^\/+/, '')}`
+  })()
   const language = sanitizeHtmlValue(config.language) || 'en'
   const headStart = config.customScripts?.headStart ?? ''
   const headEnd = config.customScripts?.headEnd ?? ''

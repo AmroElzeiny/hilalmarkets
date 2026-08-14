@@ -1,11 +1,38 @@
 /**
  * Hilal Markets waitlist receiver for a Google Apps Script Web App.
  *
- * Visible columns are intentionally business-friendly. Delivery metadata is
- * retained in one hidden column so retries remain idempotent.
+ * THE CONTRACT THIS FILE IMPLEMENTS
+ * ---------------------------------
+ * The server builds one fixed request body, in exactly one place:
+ * `src/ai_market_monitor/services/waitlist_sheet_contract.py`. It sends six fields and
+ * no others:
+ *
+ *   secret, email, name, source, country, status
+ *
+ * Until 14 August 2026 this file read a different set. It authorised on `webhook_secret`
+ * and required `event_id` and `submitted_at`, none of which the server sends. Deploying
+ * it as it stood would have answered `unauthorized` to every single signup, and the
+ * rejection would have looked like an ordinary delivery failure in the retry log.
+ *
+ * `WAITLIST_SHEET_FIELDS` in the Python module is the contract. This file is the other
+ * half of it. Changing either one without the other breaks every signup silently, so
+ * `tests/unit/test_invariant_waitlist_sheet_payload.py` reads both and fails if the two
+ * stop agreeing.
+ *
+ * WHAT IS DEDUPLICATED, AND WHAT IS NOT
+ * -------------------------------------
+ * The server sends no delivery id, so a retry cannot be recognised by one. Duplicates
+ * are prevented by email address instead, which is the right key for a waitlist: one
+ * person, one row. The email check runs before the append, so a retry of a delivery
+ * that already succeeded adds nothing.
+ *
+ * `Joined At (UTC)` is the moment this script received the signup, not the moment the
+ * person submitted it. The server does not send its own timestamp, and inventing one
+ * from an absent field is how the previous version rejected everything. The authoritative
+ * submission time stays in `waitlist_signups` in the product's own database.
  *
  * Script properties required:
- *   WAITLIST_WEBHOOK_SECRET: same value as the server environment setting.
+ *   WAITLIST_WEBHOOK_SECRET: same value as WAITLIST_GOOGLE_SHEETS_WEBHOOK_SECRET.
  *   WAITLIST_SPREADSHEET_ID: ID from the destination Google Sheet URL.
  * Optional:
  *   WAITLIST_SHEET_NAME: defaults to "Waitlist".
@@ -16,20 +43,28 @@ const WAITLIST_HEADERS = [
   'Joined At (UTC)',
   'Country',
   'Signup Source',
+  'Status',
+  'Notes',
+];
+
+/**
+ * Layouts this script can bring forward, newest first.
+ *
+ * Both older shapes carried a `System Delivery ID` column fed by the `event_id` the
+ * server no longer sends. The column is dropped rather than kept empty: a column that
+ * can never be filled again reads as missing data instead of retired data.
+ */
+const WAITLIST_HEADERS_WITH_DELIVERY_ID = [
+  'Email Address',
+  'Joined At (UTC)',
+  'Country',
+  'Signup Source',
   'Campaign',
   'Status',
   'Notes',
   'System Delivery ID',
 ];
 
-/**
- * The layout used while the form asked for beta-testing consent.
- *
- * The question was withdrawn: the box was offered already ticked, so its answer was not
- * a choice anybody made. A sheet still holding that column is brought back to the layout
- * above. Every row keeps its email, date, source, status and notes; only the consent cell
- * is dropped, because it never held a real answer to keep.
- */
 const WAITLIST_HEADERS_WITH_CONSENT = [
   'Email Address',
   'Joined At (UTC)',
@@ -50,10 +85,9 @@ const WAITLIST_STATUS_OPTIONS = [
   'Not Interested',
 ];
 
-const WAITLIST_STATUS_COLUMN = 6;
-const WAITLIST_NOTES_COLUMN = 7;
-const WAITLIST_DELIVERY_ID_COLUMN = 8;
-const WAITLIST_VISIBLE_COLUMNS = WAITLIST_DELIVERY_ID_COLUMN - 1;
+const WAITLIST_STATUS_COLUMN = 5;
+const WAITLIST_NOTES_COLUMN = 6;
+const WAITLIST_COLUMN_COUNT = WAITLIST_HEADERS.length;
 
 function doPost(event) {
   const lock = LockService.getScriptLock();
@@ -65,8 +99,15 @@ function doPost(event) {
     const sheetName = properties.getProperty('WAITLIST_SHEET_NAME') || 'Waitlist';
     const payload = JSON.parse((event && event.postData && event.postData.contents) || '{}');
 
-    if (!expectedSecret || !spreadsheetId || payload.webhook_secret !== expectedSecret) {
+    // `secret`, matching `WAITLIST_SHEET_FIELDS[0]`. Reading `webhook_secret` here is
+    // what rejected every signup, so the name is checked against the contract by test.
+    if (!expectedSecret || !spreadsheetId || payload.secret !== expectedSecret) {
       return jsonResponse_({ ok: false, error: 'unauthorized' });
+    }
+
+    const email = safeCellText_(payload.email);
+    if (!email || email.indexOf('@') === -1) {
+      return jsonResponse_({ ok: false, error: 'invalid_signup' });
     }
 
     const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
@@ -75,32 +116,19 @@ function doPost(event) {
 
     prepareWaitlistSheet_(sheet);
 
-    const deliveryId = String(payload.event_id || '').slice(0, 255);
-    if (!deliveryId) return jsonResponse_({ ok: false, error: 'event_id_required' });
-    if (findDeliveryId_(sheet, deliveryId)) {
-      return jsonResponse_({ ok: true, created: false });
-    }
-
-    const email = safeCellText_(payload.email);
-    const submittedAt = new Date(String(payload.submitted_at || ''));
-    if (!email || Number.isNaN(submittedAt.getTime())) {
-      return jsonResponse_({ ok: false, error: 'invalid_signup' });
-    }
+    // One person, one row. This is the whole retry defence now that no delivery id is
+    // sent, and it is checked before the append rather than after it.
     if (findEmail_(sheet, email)) {
       return jsonResponse_({ ok: true, created: false });
     }
 
-    const source = safeCellText_(payload.utm_source || payload.source_page || 'Direct');
-    const campaign = safeCellText_(payload.utm_campaign || '');
     sheet.appendRow([
       email,
-      submittedAt,
-      safeCellText_(payload.country || 'Unknown'),
-      source,
-      campaign,
+      new Date(),
+      safeCellText_(payload.country || 'unknown'),
+      safeCellText_(payload.source || 'Direct'),
       'New',
       '',
-      deliveryId,
     ]);
     formatWaitlistRows_(sheet);
     return jsonResponse_({ ok: true, created: true });
@@ -113,16 +141,16 @@ function doPost(event) {
 
 function prepareWaitlistSheet_(sheet) {
   if (sheet.getLastRow() === 0) {
-    sheet.getRange(1, 1, 1, WAITLIST_HEADERS.length).setValues([WAITLIST_HEADERS]);
+    sheet.getRange(1, 1, 1, WAITLIST_COLUMN_COUNT).setValues([WAITLIST_HEADERS]);
   } else {
     const currentHeaders = sheet
-      .getRange(1, 1, 1, Math.min(sheet.getLastColumn(), WAITLIST_HEADERS.length))
+      .getRange(1, 1, 1, Math.max(sheet.getLastColumn(), WAITLIST_COLUMN_COUNT))
       .getDisplayValues()[0];
-    if (!headersMatch_(currentHeaders)) upgradeSheetLayout_(sheet);
+    if (!matchesHeaderSet_(currentHeaders, WAITLIST_HEADERS)) upgradeSheetLayout_(sheet);
   }
 
-  const header = sheet.getRange(1, 1, 1, WAITLIST_HEADERS.length);
-  header
+  sheet
+    .getRange(1, 1, 1, WAITLIST_COLUMN_COUNT)
     .setValues([WAITLIST_HEADERS])
     .setBackground('#2b2e35')
     .setFontColor('#ffffff')
@@ -132,15 +160,9 @@ function prepareWaitlistSheet_(sheet) {
   sheet.setColumnWidth(2, 170);
   sheet.setColumnWidth(3, 100);
   sheet.setColumnWidth(4, 150);
-  sheet.setColumnWidth(5, 170);
   sheet.setColumnWidth(WAITLIST_STATUS_COLUMN, 130);
   sheet.setColumnWidth(WAITLIST_NOTES_COLUMN, 300);
-  sheet.hideColumns(WAITLIST_DELIVERY_ID_COLUMN);
   formatWaitlistRows_(sheet);
-}
-
-function headersMatch_(headers) {
-  return WAITLIST_HEADERS.every((header, index) => headers[index] === header);
 }
 
 function matchesHeaderSet_(row, expected) {
@@ -148,11 +170,10 @@ function matchesHeaderSet_(row, expected) {
 }
 
 /**
- * Bring a sheet in any other recognised shape to the current layout, losing no rows.
+ * Bring a sheet in any recognised earlier shape to the current layout, losing no rows.
  *
- * Two other shapes are recognised: the one that carried the withdrawn consent column,
- * and the oldest delivery-id-first layout. Anything else throws, so an unknown sheet is
- * left exactly as it is rather than being overwritten by a guess.
+ * Anything unrecognised throws, so an unknown sheet is left exactly as it is rather than
+ * being overwritten by a guess.
  */
 function upgradeSheetLayout_(sheet) {
   const values = sheet.getDataRange().getValues();
@@ -161,22 +182,11 @@ function upgradeSheetLayout_(sheet) {
 
   let migrated;
   if (matchesHeaderSet_(rows[0], WAITLIST_HEADERS_WITH_CONSENT)) {
-    migrated = rows.slice(1).map(row => {
-      const joinedAt = new Date(String(row[1] || ''));
-      if (Number.isNaN(joinedAt.getTime())) throw new Error('waitlist_legacy_timestamp_invalid');
-      return [
-        safeCellText_(row[0]),
-        joinedAt,
-        safeCellText_(row[2] || 'Unknown'),
-        safeCellText_(row[3] || 'Direct'),
-        safeCellText_(row[4] || ''),
-        // row[5] was the consent cell and is dropped. Status, notes and the delivery id
-        // shift back one place; every one of them is carried across.
-        safeCellText_(row[6] || 'New'),
-        safeCellText_(row[7] || ''),
-        String(row[8] || '').slice(0, 255),
-      ];
-    });
+    // Email, Joined, Country, Source, Campaign, Consent, Status, Notes, DeliveryId
+    migrated = rows.slice(1).map(row => carryRow_(row, 6, 7));
+  } else if (matchesHeaderSet_(rows[0], WAITLIST_HEADERS_WITH_DELIVERY_ID)) {
+    // Email, Joined, Country, Source, Campaign, Status, Notes, DeliveryId
+    migrated = rows.slice(1).map(row => carryRow_(row, 5, 6));
   } else {
     migrated = migrateLegacyRows_(rows);
   }
@@ -184,10 +194,24 @@ function upgradeSheetLayout_(sheet) {
   const existingFilter = sheet.getFilter();
   if (existingFilter) existingFilter.remove();
   sheet.clear();
-  sheet.getRange(1, 1, 1, WAITLIST_HEADERS.length).setValues([WAITLIST_HEADERS]);
+  sheet.getRange(1, 1, 1, WAITLIST_COLUMN_COUNT).setValues([WAITLIST_HEADERS]);
   if (migrated.length > 0) {
-    sheet.getRange(2, 1, migrated.length, WAITLIST_HEADERS.length).setValues(migrated);
+    sheet.getRange(2, 1, migrated.length, WAITLIST_COLUMN_COUNT).setValues(migrated);
   }
+}
+
+/** One older row carried across, told where its Status and Notes cells sit. */
+function carryRow_(row, statusIndex, notesIndex) {
+  const joinedAt = new Date(String(row[1] || ''));
+  if (Number.isNaN(joinedAt.getTime())) throw new Error('waitlist_legacy_timestamp_invalid');
+  return [
+    safeCellText_(row[0]),
+    joinedAt,
+    safeCellText_(row[2] || 'unknown'),
+    safeCellText_(row[3] || 'Direct'),
+    safeCellText_(row[statusIndex] || 'New'),
+    safeCellText_(row[notesIndex] || ''),
+  ];
 }
 
 function migrateLegacyRows_(rows) {
@@ -196,7 +220,7 @@ function migrateLegacyRows_(rows) {
   const canMigrate = legacyRows.every(row => {
     const deliveryId = String(row[0] || '');
     const email = String(row[1] || '');
-    return deliveryId.startsWith('waitlist:') && email.includes('@');
+    return deliveryId.startsWith('waitlist:') && email.indexOf('@') !== -1;
   });
   if (!canMigrate) throw new Error('waitlist_sheet_schema_unrecognized');
 
@@ -208,12 +232,10 @@ function migrateLegacyRows_(rows) {
     return [
       safeCellText_(row[1]),
       submittedAt,
-      safeCellText_(row[3] || 'Unknown'),
+      safeCellText_(row[3] || 'unknown'),
       safeCellText_(row[5] || row[4] || 'Direct'),
-      safeCellText_(row[7] || ''),
       'New',
       '',
-      String(row[0]).slice(0, 255),
     ];
   });
 }
@@ -221,16 +243,7 @@ function migrateLegacyRows_(rows) {
 function isLegacyHeader_(row) {
   const first = String(row[0] || '').trim().toLowerCase().replace(/[_-]/g, ' ');
   const second = String(row[1] || '').trim().toLowerCase().replace(/[_-]/g, ' ');
-  return first.includes('event') && second.includes('email');
-}
-
-function findDeliveryId_(sheet, deliveryId) {
-  if (sheet.getLastRow() < 2) return null;
-  return sheet
-    .getRange(2, WAITLIST_DELIVERY_ID_COLUMN, sheet.getLastRow() - 1, 1)
-    .createTextFinder(deliveryId)
-    .matchEntireCell(true)
-    .findNext();
+  return first.indexOf('event') !== -1 && second.indexOf('email') !== -1;
 }
 
 function findEmail_(sheet, email) {
@@ -251,7 +264,7 @@ function formatWaitlistRows_(sheet) {
     .setAllowInvalid(false)
     .build();
   sheet.getRange(2, WAITLIST_STATUS_COLUMN, rowCount, 1).setDataValidation(validation);
-  sheet.getRange(2, 1, rowCount, WAITLIST_VISIBLE_COLUMNS).setVerticalAlignment('middle');
+  sheet.getRange(2, 1, rowCount, WAITLIST_COLUMN_COUNT).setVerticalAlignment('middle');
   sheet.getRange(2, WAITLIST_NOTES_COLUMN, rowCount, 1).setWrap(true);
   refreshWaitlistFilter_(sheet);
 }
@@ -263,13 +276,13 @@ function refreshWaitlistFilter_(sheet) {
     const range = existing.getRange();
     if (
       range.getNumRows() === requiredRows &&
-      range.getNumColumns() === WAITLIST_VISIBLE_COLUMNS
+      range.getNumColumns() === WAITLIST_COLUMN_COUNT
     ) {
       return;
     }
     existing.remove();
   }
-  sheet.getRange(1, 1, requiredRows, WAITLIST_VISIBLE_COLUMNS).createFilter();
+  sheet.getRange(1, 1, requiredRows, WAITLIST_COLUMN_COUNT).createFilter();
 }
 
 function safeCellText_(value) {
