@@ -192,6 +192,14 @@ def validate_runtime_configuration(settings: Settings) -> None:
             )
         if settings.allow_mock_providers:
             errors.append("ALLOW_MOCK_PROVIDERS must be false in staging and production")
+        if (settings.auth_test_fixed_code or "").strip():
+            # Refused for its presence, not for its effect. `Settings.fixed_auth_code`
+            # already ignores it outside `APP_ENV=test`, but a variable that quietly
+            # does nothing is one refactor away from doing exactly what its name says:
+            # handing every sign-in and every System Brain login the same known code.
+            errors.append(
+                "AUTH_TEST_FIXED_CODE must not be set in staging and production"
+            )
         if settings.app_secret_key.get_secret_value() == DEFAULT_SECRET:
             errors.append("APP_SECRET_KEY must not use the development default")
         if _looks_like_placeholder(settings.app_secret_key):

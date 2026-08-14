@@ -454,10 +454,7 @@ class WebAuthService:
         return hmac.new(secret, payload, hashlib.sha256).hexdigest()
 
     def _new_auth_code(self) -> str:
-        fixed = self.settings.auth_test_fixed_code
-        if self.settings.app_env == "test" and fixed and fixed.isdigit() and len(fixed) == 6:
-            return fixed
-        return f"{secrets.randbelow(1_000_000):06d}"
+        return self.settings.fixed_auth_code or f"{secrets.randbelow(1_000_000):06d}"
 
     def _request_ip_hash(self, requested_ip: str | None) -> str | None:
         if not requested_ip:

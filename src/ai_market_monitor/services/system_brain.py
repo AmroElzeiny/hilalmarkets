@@ -157,7 +157,10 @@ class SystemBrainAuthService:
         )
         for old in active:
             old.consumed_at = now
-        code = self.settings.auth_test_fixed_code or f"{secrets.randbelow(1_000_000):06d}"
+        # Through `fixed_auth_code`, which answers `None` outside the test environment.
+        # Reading `auth_test_fixed_code` directly made the governance console's second
+        # factor a fixed value in any environment where the variable happened to be set.
+        code = self.settings.fixed_auth_code or f"{secrets.randbelow(1_000_000):06d}"
         challenge = SystemBrainAuthChallenge(
             email=normalized,
             code_digest=self._otp_digest(normalized, code),

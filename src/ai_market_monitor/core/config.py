@@ -103,7 +103,7 @@ class Settings(BaseSettings):
             file_secret_settings,
         )
 
-    app_name: str = "HilalMarkets"
+    app_name: str = "Hilal Markets"
     app_env: Literal["development", "test", "staging", "production"] = "development"
     application_version: str = "development"
     app_secret_key: SecretStr = SecretStr("development-only-change-me-32-characters")
@@ -514,7 +514,10 @@ class Settings(BaseSettings):
     context_fetch_concurrency: int = Field(default=8, ge=1, le=50)
     market_breadth_max_symbols: int = Field(default=100, ge=10, le=1000)
     support_telegram_username: str | None = None
-    support_email: str | None = "contact@trace-edge.com"
+    # The default was `contact@trace-edge.com`, an earlier product's inbox. Because the
+    # field carried it, the property below never reached its own fallback: every
+    # deployment that had not set SUPPORT_EMAIL showed a customer that address.
+    support_email: str | None = "support@hilalmarkets.com"
     admin_notify_telegram_user_id: str | None = None
     email_adapter: Literal["none", "smtp", "memory"] = "none"
     smtp_host: str | None = None
@@ -930,8 +933,34 @@ class Settings(BaseSettings):
         return self.app_env in {"staging", "production"}
 
     @property
+    def fixed_auth_code(self) -> str | None:
+        """The predictable one-time code, or ``None`` when one must not be issued.
+
+        One owner for a decision two services were making separately. ``web_auth``
+        checked ``app_env == "test"`` and the six-digit shape before honouring
+        ``AUTH_TEST_FIXED_CODE``; the System Brain login read the raw setting with
+        neither check. So the same variable meant "a convenience for the test suite"
+        in one place and "the second factor on the governance console is now a value
+        printed in a config file" in the other.
+
+        The environment is part of the answer, not a caller's responsibility. A
+        deployed process is refused the code outright at startup as well, so this can
+        never be the only thing standing between an operator's mistake and a fixed
+        admin OTP.
+        """
+
+        candidate = (self.auth_test_fixed_code or "").strip()
+        if self.app_env != "test":
+            return None
+        if len(candidate) != 6 or not candidate.isdigit():
+            return None
+        return candidate
+
+    @property
     def support_inbox_email(self) -> str:
-        return (self.support_email or "contact@trace-edge.com").strip()
+        # The fallback used to be `contact@trace-edge.com`: the support address of an
+        # earlier product, shown to a customer whenever SUPPORT_EMAIL was unset.
+        return (self.support_email or "support@hilalmarkets.com").strip()
 
     @property
     def public_analytics_enabled(self) -> bool:
