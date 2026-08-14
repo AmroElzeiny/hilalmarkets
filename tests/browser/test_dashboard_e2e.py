@@ -1699,8 +1699,20 @@ def test_setup_observability_desktop_mobile_and_visual_qa(
     expect(page.get_by_role("heading", name="What is closest right now?")).to_be_visible()
     expect(page.locator(".activity-page-tabs")).to_have_count(0)
     expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(4, timeout=15_000)
-    assert page.locator(".readiness-candidate img").evaluate_all(
-        "images => images.every(image => image.complete && image.naturalWidth > 0)"
+    # The cards existing is not the same as their pictures having arrived. The count
+    # above waits for the cards; nothing waited for the images inside them, so this
+    # sampled `complete` at one instant and could catch the last logo mid-flight on
+    # a machine busy running the rest of the suite. That is the whole flake: the page
+    # was about to be correct and was measured a moment too early.
+    #
+    # Requiring at least one image closes a second hole. `every` on an empty list is
+    # true, so a page that rendered no logos at all passed this check.
+    page.wait_for_function(
+        "() => { const images = Array.from("
+        "document.querySelectorAll('.readiness-candidate img')); "
+        "return images.length > 0 && images.every("
+        "image => image.complete && image.naturalWidth > 0); }",
+        timeout=15_000,
     )
     state_control = page.locator("[data-radar-state]").locator("xpath=..")
     expect(state_control.locator("[data-hm-select-trigger]")).to_be_visible()
@@ -1714,9 +1726,16 @@ def test_setup_observability_desktop_mobile_and_visual_qa(
         "option", name="Near miss", exact=True
     ).click()
     expect(page.locator("[data-radar-state]")).to_have_value("near_miss")
-    expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(1)
+    # Each filter change is a round trip. The first count on this page already allows
+    # 15s for it; these two were left on the 5s default, which is the same race with
+    # a smaller margin.
+    expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(
+        1, timeout=15_000
+    )
     page.locator("[data-radar-state]").select_option("")
-    expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(4)
+    expect(page.locator("[data-radar-list] .readiness-candidate")).to_have_count(
+        4, timeout=15_000
+    )
     insight_cards = page.locator(".activity-insight-card")
     expect(insight_cards).to_have_count(2)
     insight_cards.nth(0).locator("summary").click()
