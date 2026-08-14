@@ -45,6 +45,7 @@ from ai_market_monitor.engine.strategy_state import (
     is_reversion_request,
     patches_for_turn,
     revert_patches,
+    unsupported_capability_requests,
 )
 from ai_market_monitor.engine.turn_fragments import classify_turn as classify_strategy_turn
 from ai_market_monitor.schemas.agent_control import (
@@ -3495,10 +3496,25 @@ class AISetupChatService:
             for item in (chat.ambiguities or [])
             if item.get("blocking", True)
         )
+        # Read the trader's own words for a capability the product does not have,
+        # rather than waiting for the model to notice. A boundary refusal that
+        # depends on the model is a refusal that disappears whenever the model has
+        # a bad turn, and these are exactly the requests that must never be
+        # half-served.
+        boundary_refusals = tuple(
+            refusal.key for refusal in unsupported_capability_requests(setup_text)
+        )
         unsupported_capabilities = tuple(
-            str(item.get("code") or item.get("field") or "unsupported_capability")
-            for item in (chat.unsupported_conditions or [])
-            if item.get("blocking", True)
+            dict.fromkeys(
+                (
+                    *(
+                        str(item.get("code") or item.get("field") or "unsupported_capability")
+                        for item in (chat.unsupported_conditions or [])
+                        if item.get("blocking", True)
+                    ),
+                    *boundary_refusals,
+                )
+            )
         )
         critical_lint = tuple(
             str(item.get("code") or "critical_lint")

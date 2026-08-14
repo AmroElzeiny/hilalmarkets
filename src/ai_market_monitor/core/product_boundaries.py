@@ -25,6 +25,7 @@ financial advice. They hold in every stage, on every surface, in every language.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
@@ -41,7 +42,9 @@ __all__ = [
     "UnsupportedCapability",
     "boundary_for",
     "evaluation_mode",
+    "refusals_for_text",
     "refuse",
+    "requested_boundaries",
     "supported_capabilities",
     "unsupported_capabilities",
 ]
@@ -49,7 +52,7 @@ __all__ = [
 #: Bumped whenever an entry is added, removed or changes support state. Customer
 #: answers quote it, so an answer given last month stays traceable to the boundary
 #: list that produced it.
-BOUNDARY_REGISTRY_VERSION: Final[str] = "2026-08-12.1"
+BOUNDARY_REGISTRY_VERSION: Final[str] = "2026-08-14.1"
 
 
 class SupportState(StrEnum):
@@ -84,6 +87,15 @@ class BoundaryEntry:
     #: supported ones: "yes" without "and here is what that means" is how a feature
     #: gets believed to do more than it does.
     reason: str
+    #: How a customer asks for this, in their own words. Setup Chat reads these to
+    #: recognise a request the product cannot serve **before** the request turns
+    #: into draft values. Without them the reading happened nowhere: a turn asking
+    #: for 10x leverage was refused by no one, and the timeframe and the symbol
+    #: from that same sentence landed on the draft as though the request had
+    #: worked.
+    #:
+    #: Supported entries carry none. There is nothing to refuse.
+    request_phrases: tuple[str, ...] = ()
 
     @property
     def is_supported(self) -> bool:
@@ -178,6 +190,30 @@ BOUNDARY_REGISTRY: Final[tuple[BoundaryEntry, ...]] = (
         title="Shares, funds and currencies",
         support=SupportState.NOT_YET_SUPPORTED,
         reason="Not covered yet. Today the product covers crypto spot markets only.",
+        request_phrases=(
+            "stock",
+            "stocks",
+            "share",
+            "shares",
+            "equity",
+            "equities",
+            "nasdaq",
+            "s&p",
+            "sp500",
+            "etf",
+            "mutual fund",
+            "index fund",
+            "forex",
+            "fx pair",
+            "currency pair",
+            "أسهم",
+            "اسهم",
+            "سهم",
+            "فوركس",
+            "عملات أجنبية",
+            "as-hom",
+            "forex",
+        ),
     ),
     # -- Never. These are product definition, not a backlog. -----------------
     BoundaryEntry(
@@ -187,6 +223,36 @@ BOUNDARY_REGISTRY: Final[tuple[BoundaryEntry, ...]] = (
         reason=(
             "Hilal Markets never buys or sells anything for you. It watches and tells "
             "you; the decision and the order are always yours."
+        ),
+        request_phrases=(
+            "stop loss",
+            "stop-loss",
+            "stoploss",
+            "take profit",
+            "take-profit",
+            "takeprofit",
+            "trailing stop",
+            "place an order",
+            "place orders",
+            "place the order",
+            "enter the trade",
+            "enter a trade",
+            "execute the trade",
+            "execute a trade",
+            "open a position",
+            "close my position",
+            "buy for me",
+            "sell for me",
+            "auto trade",
+            "auto-trade",
+            "autotrade",
+            "وقف الخسارة",
+            "وقف خسارة",
+            "جني الأرباح",
+            "جني الارباح",
+            "نفذ الصفقة",
+            "افتح صفقة",
+            "stop loss 3ashan",
         ),
     ),
     BoundaryEntry(
@@ -206,6 +272,33 @@ BOUNDARY_REGISTRY: Final[tuple[BoundaryEntry, ...]] = (
             "The product reports whether the rules you wrote were met. It never says "
             "an asset is a good or bad thing to own."
         ),
+        request_phrases=(
+            "what should i buy",
+            "what should i sell",
+            "which coin to buy",
+            "which coin should i buy",
+            "what to buy",
+            "what to sell",
+            "tell me what to buy",
+            "tell me which coin",
+            "should i buy",
+            "should i sell",
+            "is it a good buy",
+            # Request wording is written *without* any banned marketing phrase, for
+            # the same reason `guaranteed_returns` is titled the way it is: this file
+            # is itself scanned as customer copy, and a scanner cannot tell a claim
+            # from the question that asks for one. "which coin to buy" already covers
+            # the intent without putting the phrase in a scanned file.
+            "pick a coin for me",
+            "give me a signal",
+            "أشتري إيه",
+            "اشتري ايه",
+            "أبيع إيه",
+            "ابيع ايه",
+            "عملة أشتريها",
+            "ashteri eh",
+            "abee3 eh",
+        ),
     ),
     BoundaryEntry(
         key="financial_advice",
@@ -223,6 +316,25 @@ BOUNDARY_REGISTRY: Final[tuple[BoundaryEntry, ...]] = (
         reason=(
             "The product covers spot markets only. It does not support borrowed money "
             "or leveraged positions."
+        ),
+        request_phrases=(
+            "leverage",
+            "leveraged",
+            "margin trading",
+            "margin account",
+            "on margin",
+            "borrowed funds",
+            "borrow funds",
+            "short with leverage",
+            "cross margin",
+            "isolated margin",
+            "liquidation price",
+            "رافعة",
+            "الرافعة المالية",
+            "هامش",
+            "بالهامش",
+            "rafe3a",
+            "hamesh",
         ),
     ),
     BoundaryEntry(
@@ -310,6 +422,42 @@ def refuse(key: str) -> UnsupportedCapability:
         support=entry.support,
         reason=entry.reason,
     )
+
+
+#: One boundary phrase, word-guarded. Substring matching would refuse ``sharesight``
+#: for containing ``share`` and ``covered`` for containing ``over``; a refusal the
+#: customer cannot understand is as bad as no refusal at all.
+_PHRASE_PATTERNS: Final[tuple[tuple[str, re.Pattern[str]], ...]] = tuple(
+    (
+        entry.key,
+        re.compile(
+            r"(?<![0-9A-Za-z؀-ۿ])"
+            + r"\s+".join(re.escape(token) for token in phrase.split())
+            + r"(?![0-9A-Za-z؀-ۿ])",
+            re.IGNORECASE,
+        ),
+    )
+    for entry in BOUNDARY_REGISTRY
+    for phrase in entry.request_phrases
+)
+
+
+def requested_boundaries(text: str) -> tuple[BoundaryEntry, ...]:
+    """Boundaries this text asks for, in registry order.
+
+    Only unsupported ones can be returned, because only unsupported ones carry
+    request wording. The caller uses this to refuse **before** the request is
+    read as a set of draft values.
+    """
+    if not text:
+        return ()
+    matched = {key for key, pattern in _PHRASE_PATTERNS if pattern.search(text)}
+    return tuple(entry for entry in BOUNDARY_REGISTRY if entry.key in matched)
+
+
+def refusals_for_text(text: str) -> tuple[UnsupportedCapability, ...]:
+    """An explicit, named refusal for every unsupported capability this text asks for."""
+    return tuple(refuse(entry.key) for entry in requested_boundaries(text))
 
 
 class EvaluationMode(StrEnum):
