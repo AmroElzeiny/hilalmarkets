@@ -1238,7 +1238,12 @@ async def test_launch_v2_http_error_keeps_authoritative_draft_identity(test_cont
     assert failed.status_code == 503
     body = failed.json()
     assert body["error"]["error_code"] == "TARGET_READ_TIMEOUT"
-    assert body["error"]["stage"] == "extract"
+    # A provider read timeout is the provider's stage, not the step that happened to
+    # be running when it struck. This line asserted "extract" until August 2026, which
+    # is the product telling a customer it could not read rules they had written
+    # correctly, when the truth was that the model never answered. What this test is
+    # for - the draft identity surviving an HTTP failure - is unchanged below.
+    assert body["error"]["stage"] == "provider"
     assert body["error"]["draft_id"] == before["draft_id"]
     assert body["error"]["executable_version"] == before["executable_version"]
     assert body["error"]["executable_hash"] == before["executable_hash"]
