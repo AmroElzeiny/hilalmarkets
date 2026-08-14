@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import TypedDict
 from urllib.parse import urlsplit, urlunsplit
 
+from ai_market_monitor.core.launch_stage import STAGE_EXPOSURE, LaunchStage
+
 
 @dataclass(frozen=True, slots=True)
 class NavigationItem:
@@ -160,11 +162,21 @@ WAITLIST_ANCHOR = "/#waitlist"
 
 #: Pages that only make sense once anybody can open an account.
 #:
-#: While the public site is in waitlist mode there is nothing to buy and no dashboard to
-#: enter, so a menu entry pointing at either one is a promise the product cannot keep.
-#: One set, read by every menu, so the header and the footer can never disagree about
-#: what a visitor is allowed to reach.
-WAITLIST_HIDDEN_PAGES = frozenset({"pricing", "screened_market"})
+#: **This is a view of the launch stage, not a second list.** It used to be its own
+#: `frozenset({"pricing", "screened_market"})` sitting beside an identical set in
+#: `core/launch_stage.py`, and the two were read by different surfaces: the stage table
+#: by nothing at all, this one by the header, the footer, the sitemap and the public
+#: assistant — each gated on `waitlist_mode` rather than on the stage.
+#:
+#: They agreed on their contents and still disagreed on behaviour. `waitlist_mode` is
+#: only true in the `public_waitlist` stage, so at `internal` or `private_beta_invite`
+#: every one of those surfaces hid nothing: Pricing and Halal Assets appeared in the
+#: menus and in `sitemap.xml` while the stage's own exposure table said they were
+#: hidden and that pricing was not advertised.
+#:
+#: Kept as a name because it reads well at the call sites, but there is one definition
+#: now, and the surfaces below take the stage's set rather than deriving their own.
+WAITLIST_HIDDEN_PAGES = STAGE_EXPOSURE[LaunchStage.PUBLIC_WAITLIST].hidden_pages
 
 
 #: Every address that only works once the visitor has an account.
@@ -240,24 +252,27 @@ _PLAN_ARTICLE_WAITLIST: HelpArticle = {
 }
 
 
-def public_navigation(*, waitlist_mode: bool) -> tuple[NavigationItem, ...]:
-    """Header menu for the public site, with account-only pages removed in waitlist mode."""
+def public_navigation(*, hidden_pages: frozenset[str]) -> tuple[NavigationItem, ...]:
+    """Header menu for the public site, minus whatever the launch stage hides.
 
-    if not waitlist_mode:
+    Takes the set rather than a boolean on purpose. The boolean was ``waitlist_mode``,
+    which is true in exactly one of the four stages, so two stages that hide pricing
+    got a menu that advertised it.
+    """
+
+    if not hidden_pages:
         return PUBLIC_NAVIGATION
-    return tuple(item for item in PUBLIC_NAVIGATION if item.page not in WAITLIST_HIDDEN_PAGES)
+    return tuple(item for item in PUBLIC_NAVIGATION if item.page not in hidden_pages)
 
 
-def footer_navigation(*, waitlist_mode: bool) -> tuple[NavigationGroup, ...]:
+def footer_navigation(*, hidden_pages: frozenset[str]) -> tuple[NavigationGroup, ...]:
     """Footer menu for the public site, using the same hidden-page set as the header."""
 
-    if not waitlist_mode:
+    if not hidden_pages:
         return FOOTER_NAVIGATION
     groups = []
     for group in FOOTER_NAVIGATION:
-        items = tuple(
-            item for item in group.items if item.page not in WAITLIST_HIDDEN_PAGES
-        )
+        items = tuple(item for item in group.items if item.page not in hidden_pages)
         if items:
             groups.append(NavigationGroup(group.label, items))
     return tuple(groups)
@@ -355,7 +370,7 @@ PUBLIC_PAGES = (
         "/how-it-works",
         "How It Works",
         (
-            "See how HilalMarkets turns an idea from Halal Assets into an approved, "
+            "See how Hilal Markets turns an idea from Halal Assets into an approved, "
             "explainable Watchlist."
         ),
         "hilal/public/how_it_works.html",
@@ -376,7 +391,7 @@ PUBLIC_PAGES = (
         "public_pricing",
         "/pricing",
         "Pricing",
-        "Review current HilalMarkets access, limits, and billing availability.",
+        "Review current Hilal Markets access, limits, and billing availability.",
         "hilal/public/pricing.html",
     ),
     PublicPageMetadata(
@@ -396,7 +411,7 @@ PUBLIC_PAGES = (
         "/contact",
         "Contact",
         (
-            "Contact HilalMarkets product support, governance, partnerships, privacy, "
+            "Contact Hilal Markets product support, governance, partnerships, privacy, "
             "or security teams."
         ),
         "hilal/public/contact.html",
@@ -406,7 +421,8 @@ PUBLIC_PAGES = (
         "public_about",
         "/about",
         "About",
-        "Learn why HilalMarkets is building an evidence-led monitoring layer for Muslim investors.",
+        "Learn why Hilal Markets is building an evidence-led monitoring layer for "
+        "Muslim investors.",
         "hilal/public/about.html",
     ),
     PublicPageMetadata(
@@ -415,7 +431,7 @@ PUBLIC_PAGES = (
         "/trust-safety",
         "Trust & Safety",
         (
-            "Review HilalMarkets security, privacy, governance, data-integrity, and "
+            "Review Hilal Markets security, privacy, governance, data-integrity, and "
             "user-control boundaries."
         ),
         "hilal/public/trust_safety.html",
@@ -467,17 +483,17 @@ PUBLIC_PAGE_BY_PATH = {item.path: item for item in PUBLIC_PAGES}
 
 PURCHASE_FAQS: tuple[PurchaseFaq, ...] = (
     {
-        "question": "Does HilalMarkets decide what is halal?",
+        "question": "Does Hilal Markets decide what is halal?",
         "answer": (
-            "No. HilalMarkets applies disclosed, versioned methodologies to approved "
+            "No. Hilal Markets applies disclosed, versioned methodologies to approved "
             "evidence. Screening remains methodology-specific and subject to qualified "
             "human governance."
         ),
     },
     {
-        "question": "Does HilalMarkets place trades?",
+        "question": "Does Hilal Markets place trades?",
         "answer": (
-            "No. HilalMarkets monitors crypto spot markets and explains evidence. You "
+            "No. Hilal Markets monitors crypto spot markets and explains evidence. You "
             "retain every investment and trading decision."
         ),
     },

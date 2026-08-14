@@ -22,7 +22,6 @@ from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
 from ai_market_monitor.core.site_content import (
     PUBLIC_PAGES,
     PURCHASE_FAQS,
-    WAITLIST_HIDDEN_PAGES,
     is_account_only_path,
     public_help_categories,
 )
@@ -94,14 +93,22 @@ def offerable_route_ids(settings: Settings) -> frozenset[str]:
     rather than at each of the places that can produce one. Pre-launch, an address that
     needs an account is not a next step; it is a closed door, and the pricing page is a
     redirect. Both are dropped for every caller at once.
+
+    Both questions are answered by the launch stage, which declares them separately:
+    ``assistant_may_offer_account`` and ``hidden_pages``. They used to be answered by
+    ``waitlist_mode``, a boolean true in only one of the four stages — so in
+    ``internal`` and ``private_beta_invite`` the assistant offered sign-in and pricing
+    links that the very same stage table said it must not.
     """
 
-    if not settings.waitlist_mode:
+    exposure = settings.stage_exposure
+    if exposure.assistant_may_offer_account and not exposure.hidden_pages:
         return frozenset(PUBLIC_ROUTE_PATHS)
     return frozenset(
         route_id
         for route_id, (_label, path) in PUBLIC_ROUTE_PATHS.items()
-        if not is_account_only_path(path) and route_id not in WAITLIST_HIDDEN_PAGES
+        if (exposure.assistant_may_offer_account or not is_account_only_path(path))
+        and route_id not in exposure.hidden_pages
     )
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
@@ -597,9 +604,7 @@ class PublicKnowledgeService:
         # Pages the public site hides while it is pre-launch. The assistant reads the
         # same set the menus and the sitemap read, so it cannot describe a page a visitor
         # cannot open, and it cannot route an answer to one either.
-        hidden_pages = (
-            WAITLIST_HIDDEN_PAGES if self.settings.waitlist_mode else frozenset()
-        )
+        hidden_pages = self.settings.stage_exposure.hidden_pages
         plan_route = "home" if "pricing" in hidden_pages else "pricing"
         for index, item in enumerate(PURCHASE_FAQS):
             entries.append(

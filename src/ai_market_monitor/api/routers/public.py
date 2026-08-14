@@ -36,7 +36,6 @@ from ai_market_monitor.core.site_content import (
     WAITLIST_CTA_LABEL,
     WAITLIST_EYEBROW,
     WAITLIST_HEADLINE,
-    WAITLIST_HIDDEN_PAGES,
     HelpArticle,
     PurchaseFaq,
     footer_navigation,
@@ -198,10 +197,14 @@ def _public_context(
             "url": _absolute_url(settings, path),
             "description": description,
         }
-        if not waitlist_mode:
-            # An Offer tells search engines the product can be bought today. During the
-            # waitlist there is nothing to buy, so the claim is left out rather than
-            # published with a price no visitor can act on.
+        if settings.stage_exposure.advertises_pricing:
+            # An Offer tells search engines the product can be bought today. Before the
+            # product is open there is nothing to buy, so the claim is left out rather
+            # than published with a price no visitor can act on.
+            #
+            # Gated on the stage, not on `waitlist_mode`. The boolean is false in three
+            # of the four stages, so `internal` and `private_beta_invite` both published
+            # a purchasable Offer for a product nobody could open an account on.
             application["offers"] = {
                 "@type": "Offer",
                 "price": str(PLAN_DEFINITIONS["demo"].monthly_price),
@@ -297,8 +300,12 @@ def _public_context(
             "max-video-preview:-1"
         ),
         "json_ld": json_ld,
-        "public_navigation": public_navigation(waitlist_mode=waitlist_mode),
-        "footer_navigation": footer_navigation(waitlist_mode=waitlist_mode),
+        # The stage decides what a menu may point at, not `waitlist_mode`. Those two
+        # only agree in the `public_waitlist` stage; in `internal` and
+        # `private_beta_invite` the boolean is false while the stage still hides
+        # Pricing and Halal Assets.
+        "public_navigation": public_navigation(hidden_pages=settings.stage_exposure.hidden_pages),
+        "footer_navigation": footer_navigation(hidden_pages=settings.stage_exposure.hidden_pages),
         # Pre-launch state of the public site. While it is on, every public page asks
         # the visitor to join the waitlist instead of offering an account or a plan.
         # The wording comes from one place so the header, the closing section on every
@@ -684,7 +691,7 @@ async def sitemap(settings: Settings = Depends(get_settings)) -> Response:
     # A page that redirects is not a page to index. The same hidden-page set that empties
     # the menus keeps those addresses out of the sitemap, so the header, the footer and
     # search engines are told the same thing.
-    hidden = WAITLIST_HIDDEN_PAGES if settings.waitlist_mode else frozenset()
+    hidden = settings.stage_exposure.hidden_pages
     paths = ["/", *(item.path for item in PUBLIC_PAGES if item.page not in hidden)]
     locations = "".join(
         f"<url><loc>{_absolute_url(settings, path)}</loc></url>" for path in paths
