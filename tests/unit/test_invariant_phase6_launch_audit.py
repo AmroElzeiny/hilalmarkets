@@ -459,6 +459,62 @@ def test_p6_805_a_deployed_process_refuses_to_boot_with_a_fixed_code(env):
 
 
 # --------------------------------------------------------------------------------
+# An ordinary English word after "no" is not a coin to blocklist.
+#
+# Found while attributing a failing test to a clean worktree: it failed at the audit's
+# starting commit too, so it is not a regression from this work - it is a defect this
+# audit found and fixed. "with no carry-over" put CARRY/USDT on the exclusion list.
+# --------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "Bind approval to the exact reviewed hash with no carry-over.",
+        "No problem, keep it as it is.",
+        "No changes to the setup please.",
+        "No rush on this one.",
+        "There is no doubt about the direction.",
+        "Use no leverage.",
+        "No worries, that reads correctly.",
+        "no thanks",
+    ],
+)
+def test_p6_811_ordinary_prose_after_no_never_blocklists_a_market(sentence):
+    """The guard was a hand-written list of 24 English words.
+
+    Against an unbounded family of them, a blocklist can only ever be extended one
+    incident at a time. Capitalisation is the proof a bare word is a ticker, and it
+    was being thrown away by `re.IGNORECASE`.
+    """
+
+    from ai_market_monitor.engine.strategy_state import _explicit_bare_asset_exclusions
+
+    assert _explicit_bare_asset_exclusions(sentence, quote="USDT") == ()
+
+
+@pytest.mark.parametrize(
+    ("sentence", "expected"),
+    [
+        ("no LTC", ("LTCUSDT",)),
+        ("drop LTC", ("LTCUSDT",)),
+        ("exclude SOL", ("SOLUSDT",)),
+        ("no the LTC", ("LTCUSDT",)),
+        ("LTC is excluded", ("LTCUSDT",)),
+        ("XRP not included", ("XRPUSDT",)),
+    ],
+)
+def test_p6_812_a_capitalised_ticker_after_an_exclusion_word_still_excludes(
+    sentence, expected
+):
+    """The fix must not cost the behaviour the pattern exists for."""
+
+    from ai_market_monitor.engine.strategy_state import _explicit_bare_asset_exclusions
+
+    assert _explicit_bare_asset_exclusions(sentence, quote="USDT") == expected
+
+
+# --------------------------------------------------------------------------------
 # Invariant 17: both environment examples describe every setting.
 # --------------------------------------------------------------------------------
 

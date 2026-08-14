@@ -132,7 +132,7 @@ def test_wholly_unknown_mechanic_is_asked_as_a_phrase_not_an_english_word():
     assert fragment.status == "unknown"
     assert fragment.unknown_terms == ()
     assert fragment.clarification_question == (
-        "How should HilalMarkets measure 'Explain the moon wobble candidates'?"
+        "How should Hilal Markets measure 'Explain the moon wobble candidates'?"
     )
 
 

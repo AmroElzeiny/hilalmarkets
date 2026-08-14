@@ -1142,6 +1142,27 @@ def _explicit_bare_asset_exclusions(text: str, *, quote: str) -> tuple[str, ...]
         "WITH",
         "WITHOUT",
     }
+    # The bare-asset group is matched CASE SENSITIVELY, and that is the whole guard.
+    #
+    # These patterns ran under `re.IGNORECASE`, which defeated the `[A-Z]` the pattern
+    # already declared. Every ordinary English word after "no" therefore became a
+    # market to blocklist: "with no carry-over" excluded CARRY/USDT, and so would "no
+    # problem", "no changes", "no rush", "no worries". The only thing standing between
+    # a sentence and a silently blocklisted market was `reserved` below — 24
+    # hand-written English words, against an unbounded family of them. That is the
+    # hand-written-subset failure this codebase keeps repeating, and a blocklist can
+    # only ever be extended one incident at a time.
+    #
+    # A bare asset has no quote to prove it is a ticker, so it needs some other proof,
+    # and capitalisation is the one traders actually give: `no LTC`, `drop SOL`. This
+    # is the same rule `turn_fragments._CONCATENATED_QUOTES` applies for the same
+    # reason — without a separator, restrict what counts, so ordinary prose stays out
+    # of the symbol parser. The keywords stay case-insensitive; only the ticker does
+    # not.
+    #
+    # A symbol named in lower case is not lost: written with its quote (`ltcusdt`,
+    # `ltc/usdt`) it is read by `extract_symbols`, which upper-cases first because the
+    # quote proves the intent.
     patterns = (
         # Any word from the shared universe-exclusion vocabulary, standing in front
         # of a bare asset. This used to be a hand-written subset — `no`, `exclude`,
@@ -1154,16 +1175,22 @@ def _explicit_bare_asset_exclusions(text: str, *, quote: str) -> tuple[str, ...]
         # symbol, but standing directly in front of an asset — which is all this
         # pattern allows — `no LTC` can only mean one thing. `yes/no` stays guarded:
         # it is a question prefix, not a universe rule.
-        rf"(?<!yes/)(?<![0-9A-Za-z])(?:no|{UNIVERSE_EXCLUSION_ALTERNATION})\s+"
-        rf"(?:the\s+)?[*_`]*(?P<base>[A-Z][A-Z0-9]{{1,9}})\b",
+        rf"(?<!yes/)(?<![0-9A-Za-z])(?i:no|{UNIVERSE_EXCLUSION_ALTERNATION})\s+"
+        rf"(?i:the\s+)?[*_`]*(?P<base>[A-Z][A-Z0-9]{{1,9}})\b",
         r"\b(?P<base>[A-Z][A-Z0-9]{1,9})\b"
-        r"\s+(?:is\s+)?(?:excluded|not\s+included)\b",
+        r"\s+(?i:(?:is\s+)?(?:excluded|not\s+included))\b",
     )
     results: list[str] = []
     for pattern in patterns:
-        for match in re.finditer(pattern, text, re.IGNORECASE):
+        for match in re.finditer(pattern, text):
             base = match.group("base")
             if base in reserved or base.endswith(quote):
+                continue
+            # `CARRY-over`, `LONG-only`, `SPOT-only`: a hyphen joining the word to a
+            # lower-case one makes it half of an English compound, not a ticker. A
+            # real pair uses the hyphen as a quote separator (`BTC-USDT`), which the
+            # upper-case quote after it distinguishes.
+            if re.match(r"-[a-z]", text[match.end() : match.end() + 2]):
                 continue
             # `remove the RSI condition` names a mechanic, not an asset. Turning it
             # into RSI/USDT would silently blocklist a market on the strength of an

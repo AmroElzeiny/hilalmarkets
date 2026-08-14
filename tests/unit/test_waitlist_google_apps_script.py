@@ -30,32 +30,51 @@ def test_waitlist_receiver_creates_missing_named_sheet() -> None:
     assert "sheet_unavailable" not in source
 
 
-def test_waitlist_receiver_deduplicates_delivery_and_email() -> None:
+def test_waitlist_receiver_deduplicates_by_email() -> None:
+    """Email address is the whole retry defence, and it is checked before the append.
+
+    It used to be a delivery id, taken from `payload.event_id`. The server stopped
+    sending that field, so the check could never match and the required-field guard
+    above it rejected every signup outright. Email is the right key for a waitlist
+    anyway: one person, one row.
+    """
+
     source = SCRIPT.read_text(encoding="utf-8")
 
-    assert "if (findDeliveryId_(sheet, deliveryId))" in source
     assert "if (findEmail_(sheet, email))" in source
     assert "function findEmail_(sheet, email)" in source
     assert ".getRange(2, 1, sheet.getLastRow() - 1, 1)" in source
     assert ".matchCase(false)" in source
     assert ".matchEntireCell(true)" in source
+    # The dedup runs before the row is written, or it deduplicates nothing.
+    assert source.index("findEmail_(sheet, email)") < source.index("sheet.appendRow(")
+    # No delivery id is read from the payload, looked up, or written to a new row. The
+    # name still appears once, in the legacy-sheet reader, where it is the *old sheet's*
+    # first column being recognised so those rows can be carried across - reading
+    # history, not reading the request.
+    assert "payload.event_id" not in source
+    assert "findDeliveryId_" not in source
+    assert "WAITLIST_DELIVERY_ID_COLUMN" not in source
+    assert "'System Delivery ID'" not in _array_literal(source, "WAITLIST_HEADERS")
 
 
 def test_every_row_shape_agrees_with_the_headers() -> None:
     """Headers, new rows, migrated rows and the column numbers are one layout.
 
     Adding or removing a column touches five places. When they disagree the sheet does
-    not fail: it quietly writes each value one cell to the side, so the status column
-    fills with delivery ids and nobody notices until somebody reads the sheet.
+    not fail: it quietly writes each value one cell to the side, and nobody notices
+    until somebody reads the sheet.
     """
 
     source = SCRIPT.read_text(encoding="utf-8")
     columns = _array_length(source, "WAITLIST_HEADERS")
 
     assert _appended_row_length(source) == columns
-    # The hidden delivery id is the last column, and everything before it is visible.
-    assert f"const WAITLIST_DELIVERY_ID_COLUMN = {columns};" in source
-    assert "const WAITLIST_VISIBLE_COLUMNS = WAITLIST_DELIVERY_ID_COLUMN - 1;" in source
+    assert "const WAITLIST_COLUMN_COUNT = WAITLIST_HEADERS.length;" in source
+    # Status and Notes are the two cells the beta team owns, so their positions are
+    # named rather than counted from the end.
+    assert f"const WAITLIST_STATUS_COLUMN = {columns - 1};" in source
+    assert f"const WAITLIST_NOTES_COLUMN = {columns};" in source
     # Both migration paths build rows of exactly that width. The closing bracket is tied
     # to the opening indentation, or one block's match runs on into the next one's.
     blocks = re.findall(r"( *)return \[\n(.*?)\n\1\];", source, re.DOTALL)

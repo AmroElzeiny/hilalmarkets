@@ -96,10 +96,11 @@ def test_the_menus_and_the_assistant_hide_the_same_pages():
 
     waitlist_settings = _settings(waitlist_mode=True)
 
-    header_pages = {item.page for item in public_navigation(waitlist_mode=True)}
+    hidden = waitlist_settings.stage_exposure.hidden_pages
+    header_pages = {item.page for item in public_navigation(hidden_pages=hidden)}
     footer_pages = {
         item.page
-        for group in footer_navigation(waitlist_mode=True)
+        for group in footer_navigation(hidden_pages=hidden)
         for item in group.items
     }
     offerable = offerable_route_ids(waitlist_settings)
@@ -138,10 +139,11 @@ def test_the_unlinked_page_is_unlinked_everywhere():
 
     # 1 and 2 - the two menus, in both product states.
     for mode in (True, False):
-        assert unlinked not in {item.page for item in public_navigation(waitlist_mode=mode)}
+        pages = _settings(waitlist_mode=mode).stage_exposure.hidden_pages
+        assert unlinked not in {item.page for item in public_navigation(hidden_pages=pages)}
         assert unlinked not in {
             item.page
-            for group in footer_navigation(waitlist_mode=mode)
+            for group in footer_navigation(hidden_pages=pages)
             for item in group.items
         }
 
@@ -169,8 +171,8 @@ def test_the_unlinked_page_is_unlinked_everywhere():
 def test_turning_waitlist_mode_off_restores_every_menu_and_route():
     """The switch has to be a switch. A deletion would pass every pre-launch test."""
 
-    assert public_navigation(waitlist_mode=False) == PUBLIC_NAVIGATION
-    assert footer_navigation(waitlist_mode=False) == FOOTER_NAVIGATION
+    assert public_navigation(hidden_pages=frozenset()) == PUBLIC_NAVIGATION
+    assert footer_navigation(hidden_pages=frozenset()) == FOOTER_NAVIGATION
     assert public_help_categories(waitlist_mode=False) == HELP_CATEGORIES
     assert offerable_route_ids(_settings(waitlist_mode=False)) == frozenset(
         PUBLIC_ROUTE_PATHS
