@@ -66,7 +66,7 @@ STATE_EXPLANATIONS: dict[LifecycleState, str] = {
         "A few answers are missing. Fill them in and this can be reviewed."
     ),
     LifecycleState.UNSUPPORTED: (
-        "Part of this asks for something HilalMarkets cannot watch yet. "
+        "Part of this asks for something Hilal Markets cannot watch yet. "
         "Remove or change that part to continue."
     ),
     LifecycleState.PROVIDER_UNAVAILABLE: (

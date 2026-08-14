@@ -173,14 +173,14 @@ def _require_within_budget(root: ConditionNodeV2) -> ConditionNodeV2:
     if depth > BOOLEAN_MAX_DEPTH:
         raise BooleanStructureError(
             "BOOLEAN_TOO_DEEP",
-            f"That puts groups {depth} levels deep. HilalMarkets can run "
+            f"That puts groups {depth} levels deep. Hilal Markets can run "
             f"{BOOLEAN_MAX_DEPTH} levels. Move some rules up a level first.",
         )
     count = node_count(root)
     if count > BOOLEAN_MAX_NODES:
         raise BooleanStructureError(
             "BOOLEAN_TOO_LARGE",
-            f"That makes {count} parts in one setup. HilalMarkets can run "
+            f"That makes {count} parts in one setup. Hilal Markets can run "
             f"{BOOLEAN_MAX_NODES}. Remove a rule or a group first.",
         )
     return root

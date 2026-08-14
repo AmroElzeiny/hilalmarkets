@@ -696,7 +696,7 @@ body.dashboard-body.theme-light .hero-panel {
   }
 }
 
-/* HilalMarkets dashboard shell and contrast system */
+/* Hilal Markets dashboard shell and contrast system */
 :root {
   --dash-bg: #0a0a0a;
   --dash-panel: #111114;
@@ -1089,7 +1089,7 @@ body:not(.dashboard-body):not(.auth-body) .plan-card p {
   }
 }
 
-/* HilalMarkets evidence-led dashboard theme */
+/* Hilal Markets evidence-led dashboard theme */
 :root {
   --dash-bg: #082f29;
   --dash-panel: #0b4238;

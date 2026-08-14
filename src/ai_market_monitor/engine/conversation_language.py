@@ -594,17 +594,17 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
     },
     "refuse.unsupported": {
         ConversationLanguage.ENGLISH: (
-            "HilalMarkets cannot follow that kind of market behaviour yet."
+            "Hilal Markets cannot follow that kind of market behaviour yet."
         ),
         ConversationLanguage.ARABIC: "هيلال ماركتس لسه مش بتقدر تتابع نوع الحركة دي.",
         ConversationLanguage.FRENCH: (
-            "HilalMarkets ne peut pas encore suivre ce type de comportement de marché."
+            "Hilal Markets ne peut pas encore suivre ce type de comportement de marché."
         ),
         ConversationLanguage.SPANISH: (
-            "HilalMarkets todavía no puede seguir ese tipo de comportamiento de mercado."
+            "Hilal Markets todavía no puede seguir ese tipo de comportamiento de mercado."
         ),
         ConversationLanguage.RUSSIAN: (
-            "HilalMarkets пока не может отслеживать такое поведение рынка."
+            "Hilal Markets пока не может отслеживать такое поведение рынка."
         ),
     },
     "refuse.unsupported_reason": {
@@ -1544,37 +1544,37 @@ _CATALOGUE: Final[dict[str, dict[ConversationLanguage, str]]] = {
         ),
     },
     "ask.universe": {
-        ConversationLanguage.ENGLISH: "Which screened assets should HilalMarkets watch?",
-        ConversationLanguage.ARABIC: "أي أصول مفحوصة تريد من HilalMarkets مراقبتها؟",
+        ConversationLanguage.ENGLISH: "Which screened assets should Hilal Markets watch?",
+        ConversationLanguage.ARABIC: "أي أصول مفحوصة تريد من Hilal Markets مراقبتها؟",
         ConversationLanguage.FRENCH: (
-            "Quels actifs filtrés HilalMarkets doit-il surveiller ?"
+            "Quels actifs filtrés Hilal Markets doit-il surveiller ?"
         ),
-        ConversationLanguage.SPANISH: "¿Qué activos filtrados debe vigilar HilalMarkets?",
+        ConversationLanguage.SPANISH: "¿Qué activos filtrados debe vigilar Hilal Markets?",
         ConversationLanguage.RUSSIAN: (
-            "Какие проверенные активы должен отслеживать HilalMarkets?"
+            "Какие проверенные активы должен отслеживать Hilal Markets?"
         ),
     },
     "ask.watchlist": {
-        ConversationLanguage.ENGLISH: "Which Favorites list should HilalMarkets use?",
-        ConversationLanguage.ARABIC: "أي قائمة مفضلة تريد أن يستخدمها HilalMarkets؟",
+        ConversationLanguage.ENGLISH: "Which Favorites list should Hilal Markets use?",
+        ConversationLanguage.ARABIC: "أي قائمة مفضلة تريد أن يستخدمها Hilal Markets؟",
         ConversationLanguage.FRENCH: (
-            "Quelle liste de favoris HilalMarkets doit-il utiliser ?"
+            "Quelle liste de favoris Hilal Markets doit-il utiliser ?"
         ),
-        ConversationLanguage.SPANISH: "¿Qué lista de favoritos debe usar HilalMarkets?",
+        ConversationLanguage.SPANISH: "¿Qué lista de favoritos debe usar Hilal Markets?",
         ConversationLanguage.RUSSIAN: (
-            "Какой список избранного должен использовать HilalMarkets?"
+            "Какой список избранного должен использовать Hilal Markets?"
         ),
     },
     "ask.explicit_assets": {
         ConversationLanguage.ENGLISH: (
-            "Which eligible spot assets should HilalMarkets watch?"
+            "Which eligible spot assets should Hilal Markets watch?"
         ),
         ConversationLanguage.ARABIC: "ما أصول السبوت المؤهلة التي تريد مراقبتها؟",
         ConversationLanguage.FRENCH: (
-            "Quels actifs spot éligibles HilalMarkets doit-il surveiller ?"
+            "Quels actifs spot éligibles Hilal Markets doit-il surveiller ?"
         ),
         ConversationLanguage.SPANISH: (
-            "¿Qué activos spot elegibles debe vigilar HilalMarkets?"
+            "¿Qué activos spot elegibles debe vigilar Hilal Markets?"
         ),
         ConversationLanguage.RUSSIAN: (
             "Какие допустимые спотовые активы нужно отслеживать?"

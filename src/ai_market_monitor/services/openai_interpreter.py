@@ -267,7 +267,7 @@ class OpenAIStrategyInterpreter:
             # an unconstrained model name a capability that does not exist.
             fallback = await self.fallback.interpret(guided_setup)
             questions = exc.questions or (
-                f"How should HilalMarkets measure '{(guided_setup.setup_text or '').strip()}'?",
+                f"How should Hilal Markets measure '{(guided_setup.setup_text or '').strip()}'?",
             )
             return fallback.model_copy(
                 update={

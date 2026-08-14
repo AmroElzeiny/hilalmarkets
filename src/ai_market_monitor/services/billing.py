@@ -386,7 +386,7 @@ class NowPaymentsBillingProvider:
             "price_amount": float(amount),
             "price_currency": currency.lower(),
             "order_id": order_id,
-            "order_description": f"HilalMarkets {plan_name} 30-day access",
+            "order_description": f"Hilal Markets {plan_name} 30-day access",
             "ipn_callback_url": (
                 f"{str(self.settings.public_base_url).rstrip('/')}"
                 "/api/v1/billing/webhooks/nowpayments"

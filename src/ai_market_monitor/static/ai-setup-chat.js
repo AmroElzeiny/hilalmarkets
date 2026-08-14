@@ -116,8 +116,8 @@
     .replaceAll("'", "&#039;");
 
   // Persisted assistant records remain auditable. The current product name is
-  // adapted only when we render assistant content in the HilalMarkets UI.
-  const brandText = (value) => String(value ?? "").replace(/\bTraceEdge\b/gi, "HilalMarkets");
+  // adapted only when we render assistant content in the Hilal Markets UI.
+  const brandText = (value) => String(value ?? "").replace(/\bTraceEdge\b/gi, "Hilal Markets");
 
   async function request(path, options = {}) {
     const response = await fetch(`${apiBase}${path}`, {

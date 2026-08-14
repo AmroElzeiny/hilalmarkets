@@ -84,10 +84,10 @@ class AuthEmailService:
         screenshots: list[tuple[str, str, bytes]],
     ) -> None:
         subject = " ".join(subject.split())[:180] or "Support request"
-        email_subject = f"HilalMarkets support ticket: {subject}"
+        email_subject = f"Hilal Markets support ticket: {subject}"
         context_json = json.dumps(context, ensure_ascii=False, indent=2, default=str)
         body = (
-            "A new HilalMarkets support ticket was created.\n\n"
+            "A new Hilal Markets support ticket was created.\n\n"
             f"Ticket ID: {ticket_id}\n"
             f"User ID: {user_id}\n"
             f"Requester email: {requester_email or 'not provided'}\n"

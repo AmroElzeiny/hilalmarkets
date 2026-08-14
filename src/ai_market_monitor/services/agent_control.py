@@ -1223,7 +1223,7 @@ def _request_cost_upper_bound(
 
 def _coordinator_instructions() -> str:
     return (
-        "You are HilalMarkets' bounded orchestration layer for crypto spot monitoring. Your "
+        "You are Hilal Markets' bounded orchestration layer for crypto spot monitoring. Your "
         "current stage must be exactly one of DISCOVER_INTENT, CLARIFY_SETUP, "
         "RESOLVE_CAPABILITIES, BUILD_DRAFT, REVIEW_TRANSLATION, RUN_MARKET_CHECK, "
         "EXPLAIN_RESULTS, REQUEST_APPROVAL, MANAGE_EXISTING_PLAN, CREATE_CUSTOM_CAPABILITY, "

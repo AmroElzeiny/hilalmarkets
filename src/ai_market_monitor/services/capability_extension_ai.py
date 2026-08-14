@@ -201,7 +201,8 @@ def _draft_instructions() -> str:
         "Return only the strict schema. Preserve the user's logic exactly; do not add trade "
         "advice, "
         "profit assumptions, entry, stop, target, or extra filters. Use only the supplied bounded "
-        "HilalMarkets JSON expression language and OHLCV data. Never emit Python, JavaScript, SQL, "
+        "Hilal Markets JSON expression language and OHLCV data. Never emit Python, JavaScript, "
+        "SQL, "
         "network calls, file access, loops, imports, randomness, current market values, or "
         "provider claims. If a threshold is stated, preserve it. If a required threshold is "
         "absent, expose a parameter with a conservative visible default and list the assumption. "
@@ -213,7 +214,7 @@ def _draft_instructions() -> str:
 
 def _review_instructions() -> str:
     return (
-        "Act as an independent HilalMarkets mechanic reviewer. Compare the original conversation, "
+        "Act as an independent Hilal Markets mechanic reviewer. Compare the original conversation, "
         "generated JSON AST, deterministic build log, and real market-test statistics. Decide "
         "whether failure comes from user logic, implementation, market data, or ambiguity. Do not "
         "change the user's initial logic to manufacture candidates. Flag always-true, "

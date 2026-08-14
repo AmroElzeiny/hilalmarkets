@@ -203,8 +203,8 @@ class AgentToolService:
             {
                 "key": f"capability_meaning_{index}",
                 "question": item.clarification_question
-                or f"Which registered meaning should HilalMarkets use for '{item.fragment}'?",
-                "reason": "HilalMarkets will not silently substitute a different market mechanic.",
+                or f"Which registered meaning should Hilal Markets use for '{item.fragment}'?",
+                "reason": "Hilal Markets will not silently substitute a different market mechanic.",
                 "source_fragment": item.fragment,
                 "options": [
                     {
@@ -226,7 +226,7 @@ class AgentToolService:
             clarifications.append(
                 {
                     "key": "timeframe_choice",
-                    "question": "Which candle timeframe should HilalMarkets evaluate?",
+                    "question": "Which candle timeframe should Hilal Markets evaluate?",
                     "reason": "A timeframe is required and cannot be selected silently.",
                     "source_fragment": "",
                     "options": [],
@@ -379,7 +379,7 @@ class AgentToolService:
                 call_id=call_id,
                 data={"capability_key": args.capability_key},
                 warnings=[
-                    "HilalMarkets needs the user to provide numeric values for: "
+                    "Hilal Markets needs the user to provide numeric values for: "
                     + ", ".join(sorted(ungrounded_numbers))
                 ],
                 allowed_next_actions=["answer_clarification"],
@@ -984,7 +984,7 @@ class AgentToolService:
 _TOOL_MODELS_AND_DESCRIPTIONS: dict[str, tuple[type[BaseModel], str]] = {
     "resolve_trading_capabilities": (
         ResolveTradingCapabilitiesArgs,
-        "Resolve exact user-authored trading fragments against HilalMarkets' immutable capability "
+        "Resolve exact user-authored trading fragments against Hilal Markets' immutable capability "
         "registry. Use for setup language; never paraphrase the fragments.",
     ),
     "validate_capability_selection": (

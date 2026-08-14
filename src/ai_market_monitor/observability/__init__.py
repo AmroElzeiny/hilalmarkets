@@ -1,4 +1,4 @@
-"""Operational truth for HilalMarkets: what is measured, promised, and paged on.
+"""Operational truth for Hilal Markets: what is measured, promised, and paged on.
 
 One package rather than a helper beside each surface, because the previous
 arrangement — a recorder in the scanner, another in Setup Chat, a third in the

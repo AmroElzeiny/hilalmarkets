@@ -83,6 +83,27 @@ FORBIDDEN_CLAIM_PHRASES: Final[tuple[str, ...]] = (
 #: Capital ``Sharia`` not followed by an ``h``. Case sensitive; see the module note.
 SHARIA_SPELLING_PATTERN: Final[re.Pattern[str]] = re.compile(r"\bSharia\b")
 
+#: The brand name written without its space, in prose. Brand guide section 4: running
+#: text, legal text and product copy say **Hilal Markets**; ``HilalMarkets`` is not a
+#: permitted styling of it.
+#:
+#: Like the spelling rule above, this is safe to enforce only because it can tell prose
+#: from an identifier. A word character, an underscore, a dot or a slash on either side
+#: means the match is part of a name — ``HilalMarketsEmailRenderer``,
+#: ``window.HilalMarketsConsentConfig``, ``hilalmarkets-guide.css``,
+#: ``HilalMarkets/1.0`` in a User-Agent, ``HilalMarkets_Sharia_Methodology_Import_Pack``
+#: — and renaming any of those would be a code, asset or wire change rather than a copy
+#: change. Only the word standing on its own is caught, which is the only form a
+#: customer ever reads.
+#: The trailing dot is deliberately conditional. ``(?![\w./])`` excluded a following
+#: dot outright, which spared ``HilalMarkets.com`` — correct — but also spared every
+#: sentence that simply ends with the name: "Welcome to HilalMarkets." went unreported.
+#: A dot means "attribute or domain" only when a word character follows it; otherwise it
+#: is a full stop, and what precedes a full stop is prose.
+BRAND_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"(?<![\w.$/])HilalMarkets(?![\w/]|\.\w)"
+)
+
 CUSTOMER_COPY_SUFFIXES: Final[frozenset[str]] = frozenset({".html", ".py", ".js"})
 
 
@@ -111,6 +132,7 @@ def customer_copy_sources(root: Path) -> tuple[Path, ...]:
     candidates = (
         root / "src" / "ai_market_monitor" / "templates" / "hilal",
         root / "src" / "ai_market_monitor" / "templates" / "dashboard_public.html",
+        root / "src" / "ai_market_monitor" / "templates" / "auth.html",
         root / "src" / "ai_market_monitor" / "core" / "site_content.py",
         root / "src" / "ai_market_monitor" / "core" / "plans.py",
         root / "src" / "ai_market_monitor" / "core" / "product_boundaries.py",
@@ -121,6 +143,23 @@ def customer_copy_sources(root: Path) -> tuple[Path, ...]:
         root / "src" / "ai_market_monitor" / "observability" / "banners.py",
         root / "src" / "ai_market_monitor" / "services" / "product_language.py",
         root / "src" / "ai_market_monitor" / "services" / "public_chat_knowledge.py",
+        # Words a customer reads that do not come from a template.
+        #
+        # The list above was "the public website", and it left out every other place
+        # the product speaks: the email frame and its subjects, Telegram and WhatsApp
+        # messages, and the assistant's own replies. That is how the brand name went
+        # on being written without its space in five languages while a lint that
+        # existed to catch exactly that reported nothing — it was not looking.
+        root / "src" / "ai_market_monitor" / "services" / "email_branding.py",
+        root / "src" / "ai_market_monitor" / "services" / "account_emails.py",
+        root / "src" / "ai_market_monitor" / "services" / "payment_emails.py",
+        root / "src" / "ai_market_monitor" / "telegram" / "service.py",
+        root / "src" / "ai_market_monitor" / "whatsapp" / "rendering.py",
+        root / "src" / "ai_market_monitor" / "whatsapp" / "service.py",
+        root / "src" / "ai_market_monitor" / "engine" / "conversation_language.py",
+        root / "src" / "ai_market_monitor" / "engine" / "builder_contract.py",
+        root / "src" / "ai_market_monitor" / "engine" / "builder_operations.py",
+        root / "src" / "ai_market_monitor" / "engine" / "builder_boolean.py",
     )
     return tuple(path for path in candidates if path.exists())
 
@@ -147,6 +186,15 @@ def scan_text(text: str, path: Path) -> tuple[CopyViolation, ...]:
                     path,
                     number,
                     "spelling: technical usage is 'Shariah'",
+                    match.group(0),
+                )
+            )
+        for match in BRAND_NAME_PATTERN.finditer(line):
+            violations.append(
+                CopyViolation(
+                    path,
+                    number,
+                    "brand: the name in prose is 'Hilal Markets'",
                     match.group(0),
                 )
             )

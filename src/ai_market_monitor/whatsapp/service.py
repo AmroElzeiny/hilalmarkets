@@ -110,7 +110,7 @@ class WhatsAppAccountService:
     ) -> WhatsAppLinkResult:
         if not self.settings.whatsapp_enabled:
             raise WhatsAppServiceError(
-                "whatsapp_disabled", "WhatsApp is not enabled on this HilalMarkets server."
+                "whatsapp_disabled", "WhatsApp is not enabled on this Hilal Markets server."
             )
         business_phone = self.settings.whatsapp_business_phone_e164
         if not business_phone:
@@ -242,7 +242,7 @@ class WhatsAppAccountService:
         ):
             raise WhatsAppServiceError(
                 "whatsapp_account_assigned",
-                "This WhatsApp account is already assigned to another HilalMarkets user.",
+                "This WhatsApp account is already assigned to another Hilal Markets user.",
             )
         categories = [str(value) for value in metadata.get("categories", [])]
         locale = str(metadata.get("locale") or self.settings.whatsapp_default_language)
@@ -283,7 +283,7 @@ class WhatsAppAccountService:
         if identity is not None and identity.user_id != link.user_id:
             raise WhatsAppServiceError(
                 "whatsapp_account_assigned",
-                "This WhatsApp account is already assigned to another HilalMarkets user.",
+                "This WhatsApp account is already assigned to another Hilal Markets user.",
             )
         if identity is None:
             identity = UserIdentity(
@@ -532,7 +532,7 @@ class WhatsAppConversationService:
                 return WhatsAppSessionText(
                     to=message.wa_id,
                     body=(
-                        "WhatsApp connected to HilalMarkets. Alerts follow your saved categories "
+                        "WhatsApp connected to Hilal Markets. Alerts follow your saved categories "
                         f"and schedule. Manage them here: {settings_url}\n\nSend MENU at any time."
                     ),
                 )
@@ -545,7 +545,7 @@ class WhatsAppConversationService:
             return WhatsAppSessionText(
                 to=message.wa_id,
                 body=(
-                    "This WhatsApp account is not connected to HilalMarkets. "
+                    "This WhatsApp account is not connected to Hilal Markets. "
                     f"Sign in and connect it at {signin_url}"
                 ),
             )
@@ -613,7 +613,7 @@ class WhatsAppConversationService:
             return WhatsAppSessionText(
                 to=message.wa_id,
                 body=(
-                    "HilalMarkets turns your crypto spot research rules into explainable Watch "
+                    "Hilal Markets turns your crypto spot research rules into explainable Watch "
                     "Plans. It does not execute trades or promise outcomes. Send MENU to continue."
                 ),
             )
@@ -653,7 +653,7 @@ class WhatsAppConversationService:
     def _main_menu(wa_id: str) -> WhatsAppInteractiveList:
         return WhatsAppInteractiveList(
             to=wa_id,
-            body="HilalMarkets menu. Choose what you want to review.",
+            body="Hilal Markets menu. Choose what you want to review.",
             button_text="Open menu",
             sections=[
                 WhatsAppListSection(
@@ -688,7 +688,7 @@ class WhatsAppConversationService:
                         WhatsAppListRow(id="nav:billing", title="Trial and pricing"),
                         WhatsAppListRow(id="nav:support", title="Support"),
                         WhatsAppListRow(id="nav:dashboard", title="Dashboard"),
-                        WhatsAppListRow(id="nav:about", title="About HilalMarkets"),
+                        WhatsAppListRow(id="nav:about", title="About Hilal Markets"),
                     ],
                 ),
             ],
@@ -714,8 +714,9 @@ class WhatsAppConversationService:
             return WhatsAppSessionText(
                 to=connection.wa_id,
                 body=(
-                    "HilalMarkets provides explainable crypto spot research monitoring with Sharia "
-                    "screening evidence. It does not execute trades. Send MENU to continue."
+                    "Hilal Markets provides explainable crypto spot research monitoring with "
+                    "Shariah screening evidence. It does not execute trades. Send MENU to "
+                    "continue."
                 ),
             )
         path = paths.get(destination)
@@ -889,7 +890,7 @@ class WhatsAppIntegrationTestService:
             outbound: WhatsAppOutboundMessage = WhatsAppSessionText(
                 to=connection.wa_id,
                 body=(
-                    "HilalMarkets WhatsApp test succeeded. Your saved notification preferences "
+                    "Hilal Markets WhatsApp test succeeded. Your saved notification preferences "
                     f"remain in control: {settings_url}"
                 ),
             )
@@ -899,7 +900,7 @@ class WhatsAppIntegrationTestService:
                 locale=connection.preferred_locale,
                 to=connection.wa_id,
                 variables={
-                    "display_name": connection.profile_name or "HilalMarkets user",
+                    "display_name": connection.profile_name or "Hilal Markets user",
                     "settings_url": settings_url,
                 },
             )

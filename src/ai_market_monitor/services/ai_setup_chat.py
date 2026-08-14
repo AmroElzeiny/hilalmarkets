@@ -772,7 +772,7 @@ class AISetupChatService:
             role="assistant",
             message_type="welcome",
             content=(
-                "Hi, I'm your HilalMarkets setup assistant. Choose Scanner for a one-time market "
+                "Hi, I'm your Hilal Markets setup assistant. Choose Scanner for a one-time market "
                 "search or Monitor for persistent alerts. I'll make every rule clear before "
                 "anything is created."
             ),
@@ -2583,7 +2583,7 @@ class AISetupChatService:
         clarification = _with_other_option(
             SetupChatClarification(
                 key="screened_universe_mode",
-                question="Which screened assets should HilalMarkets watch?",
+                question="Which screened assets should Hilal Markets watch?",
                 reason=(
                     f"The selected methodology is {methodology.name}, version "
                     f"{methodology.version}. Assets without a current eligible assessment "
@@ -2695,7 +2695,7 @@ class AISetupChatService:
                     return
                 clarification = SetupChatClarification(
                     key="screened_watchlist",
-                    question="Which Favorites list should HilalMarkets use?",
+                    question="Which Favorites list should Hilal Markets use?",
                     reason=(
                         "Every asset is rechecked against the selected methodology before scanning."
                     ),
@@ -2723,7 +2723,7 @@ class AISetupChatService:
             if mode == ShariaUniverseMode.EXPLICIT_ASSETS:
                 clarification = SetupChatClarification(
                     key="screened_explicit_assets",
-                    question="Which eligible spot assets should HilalMarkets watch?",
+                    question="Which eligible spot assets should Hilal Markets watch?",
                     reason="Type symbols such as BTC, ETH, SOL or BTC/USDT, ETH/USDT.",
                 )
                 _set_awaiting_clarification(context, clarification)
@@ -4722,8 +4722,8 @@ def _fallback_turn_classification(
         intent = "out_of_scope"
         category = "out_of_scope"
         assistant_message = (
-            "I'm focused on HilalMarkets crypto spot monitoring and product help. Tell me a setup "
-            "condition or ask how a HilalMarkets feature works."
+            "I'm focused on Hilal Markets crypto spot monitoring and product help. Tell me a setup "
+            "condition or ask how a Hilal Markets feature works."
         )
         technical_fragments = []
     return SetupChatTurnClassification(
@@ -5008,7 +5008,7 @@ def _turn_response_fallback(
         if candidates:
             labels = ", ".join(dict.fromkeys(item["label"] for item in candidates[:3]))
             return (
-                f"HilalMarkets has registered mechanics related to {labels}. I haven't added "
+                f"Hilal Markets has registered mechanics related to {labels}. I haven't added "
                 "anything to your setup; ask me to compare them or tell me which meaning you want."
             )
         return (
@@ -5029,7 +5029,7 @@ def _turn_response_fallback(
         )
     if classification.intent == "out_of_scope":
         return (
-            "I'm focused on HilalMarkets crypto spot monitoring and product help. Ask me about a "
+            "I'm focused on Hilal Markets crypto spot monitoring and product help. Ask me about a "
             "feature or describe what market behavior you want to monitor."
         )
     return "Tell me what you would like to monitor."
@@ -5538,7 +5538,7 @@ def translation_sheet(
     )
     summary = (
         (
-            f"HilalMarkets will scan {definition.universe.exchange.title()} spot markets on "
+            f"Hilal Markets will scan {definition.universe.exchange.title()} spot markets on "
             f"{definition.base_timeframe} and return coins where all "
             f"{len(current_match_rules)} required current condition"
             f"{'s' if len(current_match_rules) != 1 else ''} match. "
@@ -5548,7 +5548,7 @@ def translation_sheet(
         )
         if setup_mode == "scanner"
         else (
-            f"HilalMarkets will watch {definition.universe.exchange.title()} spot markets on "
+            f"Hilal Markets will watch {definition.universe.exchange.title()} spot markets on "
             f"{definition.base_timeframe}. The trigger is "
             f"{trigger.label if trigger else 'not yet defined'}"
             f" with {required_filters} required filter"
@@ -6008,7 +6008,7 @@ def _improvement_suggestions(
         )
     if setup_mode == "monitor" and not definition.risk.enabled:
         suggestions.append(
-            "Optionally define an invalidation rule so HilalMarkets can explain when the idea "
+            "Optionally define an invalidation rule so Hilal Markets can explain when the idea "
             "is no longer valid."
         )
     if not definition.supporting_timeframes:
@@ -6129,7 +6129,7 @@ def _unresolved_ambiguities(text: str, resolved: dict[str, str]) -> list[SetupCh
             ],
         ),
         "confirmation": (
-            "What specific confirmation should HilalMarkets wait for?",
+            "What specific confirmation should Hilal Markets wait for?",
             "Confirmation must name a candle, indicator, volume, or close condition.",
             [
                 ("Candle close", "Wait for the trigger candle to close"),
@@ -6518,7 +6518,7 @@ def _plain_attention_item(code: str, message: str) -> tuple[str, str, str, str]:
         return (
             "One rule is not ready to run",
             "This idea is understood, but it is not yet connected to a verified monitor rule.",
-            "Choose a matching rule or ask HilalMarkets to build and test a candle-based version.",
+            "Choose a matching rule or ask Hilal Markets to build and test a candle-based version.",
             "Rule availability",
         )
     return (
@@ -6641,7 +6641,7 @@ def _resolver_clarifications(
                         )
                         if unknown_creatable
                         else fragment.clarification_question
-                        or f"How should HilalMarkets measure '{fragment.fragment}'?"
+                        or f"How should Hilal Markets measure '{fragment.fragment}'?"
                     ),
                     reason=(
                         (
@@ -6972,10 +6972,10 @@ def _extract_responses_output_text(payload: dict[str, Any]) -> str:
 
 def _turn_router_prompt() -> str:
     return (
-        "You are the context-aware turn router for HilalMarkets AI Setup Chat. Classify only the "
+        "You are the context-aware turn router for Hilal Markets AI Setup Chat. Classify only the "
         "user's current message after reading the curated conversation, accumulated setup, and "
         "active clarification. Users may greet you, think aloud, correct themselves, ask whether "
-        "HilalMarkets supports a concept, or ask about an option before answering. Those turns "
+        "Hilal Markets supports a concept, or ask about an option before answering. Those turns "
         "must "
         "not mutate the strategy. A question such as 'Do you have FVG in the system?' is a "
         "product_question, not a technical instruction. A question about wording or choices you "
@@ -7065,9 +7065,9 @@ def _turn_classification_schema() -> dict[str, Any]:
 
 def _system_prompt() -> str:
     return (
-        "You are HilalMarkets AI Setup Chat, a beginner-safe interviewer for crypto spot market "
+        "You are Hilal Markets AI Setup Chat, a beginner-safe interviewer for crypto spot market "
         "monitoring. Stay inside setup clarification, deterministic monitoring-rule design, "
-        "market-monitor explanations, and HilalMarkets product help. Never give financial advice, "
+        "market-monitor explanations, and Hilal Markets product help. Never give financial advice, "
         "trade signals, buy/sell instructions, profit promises, automatic execution guidance, "
         "or request exchange keys. Be friendly, humble, concise, and use simple trader language. "
         "Do not hide assumptions. Keep replies short and direct. Ask necessary measurable "

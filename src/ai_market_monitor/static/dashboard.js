@@ -2475,7 +2475,7 @@
         risk: {
           title: "Edit risk context",
           content: `
-            <div class="drawer-callout">Risk context filters and explains setups. HilalMarkets does not execute trades.</div>
+            <div class="drawer-callout">Risk context filters and explains setups. Hilal Markets does not execute trades.</div>
             <div class="drawer-field-grid">
               <label>Risk validation<select data-section-field="risk_enabled">${optionMarkup([{value: "false", label: "Disabled"}, {value: "true", label: "Enabled"}], String(schema.risk?.enabled === true))}</select></label>
               <label>Stop method<select data-section-field="stop_method">${optionMarkup(["structure", "fixed_percent", "atr", "swing_low", "swing_high"], schema.risk?.stop_method || schema.stop?.method)}</select></label>
@@ -4908,7 +4908,7 @@
     function renderBottlenecks(payload) {
       if (!bottleneckList) return;
       const items = safeArray(payload.items);
-      if (!items.length) { bottleneckList.innerHTML = `<div class="observability-empty"><strong>Not enough condition history</strong><p>HilalMarkets will rank blockers after retained lifecycle evidence is aggregated.</p></div>`; return; }
+      if (!items.length) { bottleneckList.innerHTML = `<div class="observability-empty"><strong>Not enough condition history</strong><p>Hilal Markets will rank blockers after retained lifecycle evidence is aggregated.</p></div>`; return; }
       bottleneckList.innerHTML = items.map((item, index) => `<article class="bottleneck-row ${item.sample_status === "low_sample" ? "low-sample" : ""}">
         <span class="bottleneck-rank">${index + 1}</span><div class="bottleneck-copy"><div><strong>${escapeHtml(item.condition_label)}</strong><span>${escapeHtml(pretty(item.rule_role))} · ${escapeHtml(item.timeframe || "Any timeframe")}</span></div><p>Final blocker for ${escapeHtml(valueText(item.final_blocker_share))}% of near-complete candidates · ${item.evaluation_count} evaluations</p>${item.median_actual_when_blocked !== null ? `<small>Median value when blocked: ${escapeHtml(valueText(item.median_actual_when_blocked))} · Required: ${escapeHtml(valueText(item.average_required))}</small>` : ""}<div class="bottleneck-bar"><i style="--blocker-share:${Math.min(100, safeNumber(item.final_blocker_share))}%"></i></div>${item.sample_status === "low_sample" ? `<span class="low-sample-label">Low sample · interpret cautiously</span>` : ""}${item.counterfactual ? `<div class="counterfactual-preview"><img src="${iconUrl("flask-conical")}" alt=""><p>${escapeHtml(item.counterfactual.message)}</p></div>` : ""}</div><div class="bottleneck-actions"><a href="/dashboard/strategies/new?refine=${escapeHtml(item.monitor_id)}&condition=${escapeHtml(item.condition_key)}">Discuss</a><a href="/dashboard/strategies/${escapeHtml(item.monitor_id)}/builder">Review rule</a></div>
       </article>`).join("");
@@ -5769,7 +5769,7 @@
           <div class="lifecycle-native-chart-frame">
             <canvas id="lifecycle-native-canvas" aria-label="Lifecycle candle evidence chart"></canvas>
           </div>
-          ${error ? `<p class="lifecycle-native-chart-note">Using the built-in HilalMarkets chart for this session.</p>` : ""}
+          ${error ? `<p class="lifecycle-native-chart-note">Using the built-in Hilal Markets chart for this session.</p>` : ""}
         </div>
       `;
       const canvas = document.getElementById("lifecycle-native-canvas");

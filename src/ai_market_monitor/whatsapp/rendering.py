@@ -142,7 +142,7 @@ class WhatsAppAlertRenderer:
             methodology = _plain(presentation.sharia_methodology or "Recorded in Passport")
             passport_url = presentation.sharia_passport_url or dashboard_url
             body = (
-                "Sharia screening update\n"
+                "Shariah screening update\n"
                 f"Asset: {_plain(presentation.symbol)}\n"
                 f"Status: {status}\n"
                 f"Methodology: {methodology}\n"
@@ -157,7 +157,7 @@ class WhatsAppAlertRenderer:
         elif event_type == "trial_update":
             state = _plain(presentation.lifecycle_state)
             body = (
-                "HilalMarkets account update\n"
+                "Hilal Markets account update\n"
                 f"Trial status: {state}\n"
                 f"Review billing and limits: {dashboard_url}"
             )
@@ -165,12 +165,12 @@ class WhatsAppAlertRenderer:
         elif event_type == "integration_failure":
             reason = _plain(presentation.title)
             body = (
-                "HilalMarkets delivery update\n"
+                "Hilal Markets delivery update\n"
                 f"Status: {reason}\n"
                 f"Review integrations: {dashboard_url}"
             )
             variables = {
-                "channel": "HilalMarkets",
+                "channel": "Hilal Markets",
                 "reason": reason,
                 "settings_url": dashboard_url,
             }
@@ -252,4 +252,4 @@ def _sharia_line(presentation: AlertPresentation) -> str:
         return ""
     status = _plain(presentation.sharia_status).replace("_", " ")
     freshness = _plain(presentation.sharia_reviewed_at or "review date in Passport")
-    return f"Sharia status: {status} | Evidence: {freshness}\n"
+    return f"Shariah status: {status} | Evidence: {freshness}\n"

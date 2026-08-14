@@ -1,8 +1,8 @@
-/* Contextual page guides for the authenticated HilalMarkets dashboard.
+/* Contextual page guides for the authenticated Hilal Markets dashboard.
  *
  * One engine, one registry, no runtime AI and no tour library. The registry below was
  * chosen by reading the rendered templates: a step exists only where the feature is core
- * to the product, non-obvious, specific to HilalMarkets, part of a consequential
+ * to the product, non-obvious, specific to Hilal Markets, part of a consequential
  * workflow, or carries a screening/evidence/approval consequence.
  *
  * Targeting is exact and fails closed. A step names one `data-hm-guide-target` marker.
@@ -50,7 +50,7 @@
         {
           target: "home-create-watchlist",
           title: "Build a Watchlist",
-          body: "Describe the market behaviour you want followed. HilalMarkets turns it into exact rules you review before anything runs.",
+          body: "Describe the market behaviour you want followed. Hilal Markets turns it into exact rules you review before anything runs.",
           placement: "bottom",
         },
         // The last three point at the side menu. The engine opens the menu for a target

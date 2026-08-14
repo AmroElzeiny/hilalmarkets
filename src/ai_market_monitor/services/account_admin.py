@@ -57,13 +57,13 @@ ACCOUNT_PLAN_OPTIONS = (
     {
         "value": "full_access",
         "label": "Full access",
-        "description": "All HilalMarkets features except WhatsApp, for a chosen number of months.",
+        "description": "All Hilal Markets features except WhatsApp, for a chosen number of months.",
         "rank": 2,
     },
     {
         "value": "lifetime_partner",
         "label": "Lifetime partner",
-        "description": "Permanent access to every HilalMarkets feature except WhatsApp.",
+        "description": "Permanent access to every Hilal Markets feature except WhatsApp.",
         "rank": 3,
     },
 )

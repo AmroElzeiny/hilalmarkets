@@ -17,7 +17,7 @@ class BrandedEmail:
 
 
 class HilalMarketsEmailRenderer:
-    """Render one email-safe HilalMarkets frame for every SMTP message."""
+    """Render one email-safe Hilal Markets frame for every SMTP message."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -53,7 +53,7 @@ class HilalMarketsEmailRenderer:
             ),
             "signup": (
                 "Verify your email",
-                "Use this code to finish creating your HilalMarkets account.",
+                "Use this code to finish creating your Hilal Markets account.",
             ),
             "system_brain": (
                 "System Brain access code",
@@ -65,12 +65,12 @@ class HilalMarketsEmailRenderer:
             ("Your verification code", "Use this code to continue securely."),
         )
         subjects = {
-            "login": "Your HilalMarkets login code",
-            "password_reset": "Your HilalMarkets password reset code",
-            "signup": "Verify your HilalMarkets email",
-            "system_brain": "Your HilalMarkets System Brain access code",
+            "login": "Your Hilal Markets login code",
+            "password_reset": "Your Hilal Markets password reset code",
+            "signup": "Verify your Hilal Markets email",
+            "system_brain": "Your Hilal Markets System Brain access code",
         }
-        subject = subjects.get(purpose, "Your HilalMarkets verification code")
+        subject = subjects.get(purpose, "Your Hilal Markets verification code")
         text_body = (
             f"{title}\n\n"
             f"{introduction}\n\n"
@@ -91,7 +91,7 @@ class HilalMarketsEmailRenderer:
             "If you did not request it, no action is needed.</p>"
             '<p style="margin:22px 0 0;color:#7a8089;font-size:12px;line-height:1.65">'
             f"Sent securely to {html.escape(_masked_email(recipient))}. "
-            "HilalMarkets will never ask you to reply with this code.</p>"
+            "Hilal Markets will never ask you to reply with this code.</p>"
         )
         return BrandedEmail(
             subject=subject,
@@ -111,7 +111,7 @@ class HilalMarketsEmailRenderer:
         duration_label: str,
         ends_at_label: str | None,
     ) -> BrandedEmail:
-        subject = f"Your HilalMarkets access is now {plan_name}"
+        subject = f"Your Hilal Markets access is now {plan_name}"
         greeting = f"Assalamu Alaikum {first_name or 'there'},"
         expiry_line = (
             f"Your access is scheduled through {ends_at_label}."
@@ -120,7 +120,7 @@ class HilalMarketsEmailRenderer:
         )
         text_body = (
             f"{greeting}\n\n"
-            "Your HilalMarkets access has been updated by our team.\n\n"
+            "Your Hilal Markets access has been updated by our team.\n\n"
             f"Access: {plan_name}\n"
             f"Duration: {duration_label}\n"
             f"{expiry_line}\n"
@@ -148,7 +148,7 @@ class HilalMarketsEmailRenderer:
         )
         content = (
             f'<p style="{_P}"><strong>{html.escape(greeting)}</strong></p>'
-            f'<p style="{_P}">Your HilalMarkets access has been updated by our team. '
+            f'<p style="{_P}">Your Hilal Markets access has been updated by our team. '
             "The change is active now.</p>"
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" '
             'style="margin:24px 0;border-collapse:collapse">'
@@ -157,9 +157,9 @@ class HilalMarketsEmailRenderer:
             f'<p style="margin:26px 0 10px"><a href="{html.escape(dashboard_url, quote=True)}" '
             'style="display:inline-block;padding:13px 21px;border-radius:999px;'
             'background:#cbfa4d;color:#2b2e35;text-decoration:none;font-weight:700">'
-            "Open HilalMarkets</a></p>"
+            "Open Hilal Markets</a></p>"
             '<p style="margin:20px 0 0;color:#7a8089;font-size:12px;line-height:1.65">'
-            "This access update does not authorize trade execution. HilalMarkets remains "
+            "This access update does not authorize trade execution. Hilal Markets remains "
             "a screening, evidence, and monitoring platform.</p>"
         )
         return BrandedEmail(
@@ -167,7 +167,7 @@ class HilalMarketsEmailRenderer:
             text_body=text_body,
             html_body=self.shell(
                 title=f"{plan_name} is active",
-                preheader=f"Your HilalMarkets access is now {plan_name}.",
+                preheader=f"Your Hilal Markets access is now {plan_name}.",
                 content_html=content,
             ),
         )
@@ -179,7 +179,7 @@ class HilalMarketsEmailRenderer:
         preheader: str,
         content_html: str,
     ) -> str:
-        legal_name = html.escape(self.settings.site_legal_name or "HilalMarkets")
+        legal_name = html.escape(self.settings.site_legal_name or "Hilal Markets")
         base_url = str(self.settings.public_base_url).rstrip("/")
         return (
             "<!doctype html>"
@@ -209,7 +209,7 @@ class HilalMarketsEmailRenderer:
             f'<tr><td style="padding:30px">{content_html}</td></tr>'
             '<tr><td style="padding:20px 30px;border-top:1px solid #e1e5ea;'
             'background:#fafbfc;color:#7a8089;font-size:11px;line-height:1.65">'
-            "HilalMarkets supports research, screening, and monitoring. It does not execute "
+            "Hilal Markets supports research, screening, and monitoring. It does not execute "
             "trades, hold funds, promise returns, or make personal religious rulings.<br>"
             f'<a href="{html.escape(base_url, quote=True)}" style="color:#55712a;'
             f'text-decoration:none">{legal_name}</a>'

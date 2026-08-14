@@ -253,7 +253,7 @@ def _require_mechanic(
     if mechanic is None:
         raise BuilderActionError(
             "MECHANIC_UNKNOWN",
-            "That kind of rule is not one HilalMarkets offers.",
+            "That kind of rule is not one Hilal Markets offers.",
         )
     if not mechanic.available:
         raise BuilderActionError(
@@ -557,7 +557,7 @@ def _build(
     except ValueError as exc:
         raise BuilderActionError(
             "RULE_INCOMPLETE",
-            "That rule is missing something HilalMarkets needs before it can watch it.",
+            "That rule is missing something Hilal Markets needs before it can watch it.",
         ) from exc
     return node, sentence
 

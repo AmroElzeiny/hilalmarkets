@@ -84,11 +84,11 @@ class PaymentEmailRenderer:
             "support_url": f"{base_url}/dashboard/support",
             "terms_url": f"{base_url}/terms",
             "risk_url": f"{base_url}/risk-disclosure",
-            "legal_name": self.settings.site_legal_name or "HilalMarkets",
+            "legal_name": self.settings.site_legal_name or "Hilal Markets",
             "company_address": self.settings.site_company_address,
         }
         return RenderedPaymentEmail(
-            subject=f"Your HilalMarkets {plan_name} plan is active",
+            subject=f"Your Hilal Markets {plan_name} plan is active",
             text_body=TEMPLATES.get_template("payment_success.txt").render(**context).strip(),
             html_body=TEMPLATES.get_template("payment_success.html").render(**context),
         )

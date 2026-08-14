@@ -314,7 +314,7 @@ class ShariaGovernanceService:
                     ),
                     "reason": (
                         "Automated publication retains only the external asset-level reference "
-                        "and HilalMarkets spot monitoring scope. Other product uses remain "
+                        "and Hilal Markets spot monitoring scope. Other product uses remain "
                         "separate and are not covered by this automation."
                     ),
                     "scope": definition.default_scope,
@@ -1671,21 +1671,21 @@ class ShariaGovernanceService:
         if rules.source_adapter == "sc_malaysia":
             return (
                 "The official SC Malaysia asset-level reference records this asset as "
-                f"{external.exact_status_wording}. HilalMarkets use-specific coverage is "
+                f"{external.exact_status_wording}. Hilal Markets use-specific coverage is "
                 "shown separately and does not infer unpublished SC reasoning.",
                 "sc_malaysia_reviewed_publication",
             )
         if rules.source_adapter == "fasset":
             return (
                 "The retained Fasset asset profile records the explicit verdict "
-                f"{external.exact_status_wording}. HilalMarkets identity and use-specific "
+                f"{external.exact_status_wording}. Hilal Markets identity and use-specific "
                 "coverage are reviewed separately and no missing source fact was inferred.",
                 "fasset_reviewed_publication",
             )
         if rules.source_adapter == "srb":
             return (
                 "The retained Shariah Review Bureau external reference records this asset "
-                f"as {external.exact_status_wording}. HilalMarkets factual and use-specific "
+                f"as {external.exact_status_wording}. Hilal Markets factual and use-specific "
                 "review remains separate, and restricted source content is not reproduced.",
                 "srb_reviewed_publication",
             )
@@ -2145,7 +2145,7 @@ class ShariaGovernanceService:
                         retrieved_at=snapshot.retrieved_at,
                         evidence_category=source.category,
                         evidence_summary=(
-                            "Official-source factual information captured for the HilalMarkets "
+                            "Official-source factual information captured for the Hilal Markets "
                             "profile; it is not unpublished authority reasoning."
                         ),
                     )
@@ -2251,15 +2251,15 @@ class ShariaGovernanceService:
                 "evidence_expires_at": evidence_expires_at.isoformat(),
                 "next_governance_review_at": next_governance_review.isoformat(),
                 "notice": (
-                    "HilalMarkets factual research is not SC Malaysia's unpublished reasoning "
+                    "Hilal Markets factual research is not SC Malaysia's unpublished reasoning "
                     "and is not an independent religious ruling."
                     if rules.source_adapter == "sc_malaysia"
                     else (
-                        "HilalMarkets factual research is not Fasset's unpublished reasoning "
+                        "Hilal Markets factual research is not Fasset's unpublished reasoning "
                         "and is not an independent religious ruling."
                         if rules.source_adapter == "fasset"
                         else (
-                            "HilalMarkets factual research is separate from the "
+                            "Hilal Markets factual research is separate from the "
                             "Shariah Review Bureau reference and is not an independent "
                             "religious ruling."
                         )

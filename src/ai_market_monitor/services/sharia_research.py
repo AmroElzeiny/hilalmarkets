@@ -97,7 +97,7 @@ class ShariaFactualAnalysis(BaseModel):
 
 
 class PassportEnrichmentProfile(BaseModel):
-    """Strict package-compatible HilalMarkets factual profile."""
+    """Strict package-compatible Hilal Markets factual profile."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -374,7 +374,7 @@ class ShariaAIResearchClient:
         service_tier: str,
     ) -> dict[str, Any]:
         instructions = (
-            "You are HilalMarkets' bounded factual research analyst. Analyze only the supplied "
+            "You are Hilal Markets' bounded factual research analyst. Analyze only the supplied "
             "official-source evidence for a crypto spot asset. You do not issue halal or haram "
             "rulings, reconstruct unpublished authority reasoning, change an external verdict, "
             "publish or reject assets, or treat third-party products as part of an asset-level "

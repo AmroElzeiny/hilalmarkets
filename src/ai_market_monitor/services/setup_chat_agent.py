@@ -833,7 +833,7 @@ class SetupChatAgent:
             scope = scan_scope_clarification(language.language)
             # The body is the reason, and only the reason. `SetupAgentTurnResult.message`
             # appends the attached question itself, so putting it here as well printed
-            # "Which screened assets should HilalMarkets watch?" twice in one reply.
+            # "Which screened assets should Hilal Markets watch?" twice in one reply.
             content = localized("scan.scope_required", language.language)
             telemetry.notes["scan_execution"] = "scope_required"
             # The half-collected scan is kept, and the scope becomes a question the next
@@ -6158,7 +6158,7 @@ _PRODUCT_BOUNDARIES = {
 
 
 _PLANNER_INSTRUCTIONS = """\
-You are the HilalMarkets Setup Chat planner for a beginner-friendly, Halal
+You are the Hilal Markets Setup Chat planner for a beginner-friendly, Halal
 crypto-monitoring product. You read one authenticated user turn and divide it into
 segments. You never execute anything: a deterministic server tool applies whatever
 survives its own checks. `response_language` is server-owned; all conversational intent
@@ -6375,7 +6375,7 @@ else. Do not change what you understood; only the shape was wrong.
 
 
 _REPAIR_INSTRUCTIONS = """\
-You correct one HilalMarkets Setup Chat reading, before anything is saved.
+You correct one Hilal Markets Setup Chat reading, before anything is saved.
 
 You are given only the invalid semantic intent, its verified exact source segment, at
 most one relevant existing value, a sanitized code/path, and the minimum turn-local
@@ -6417,7 +6417,7 @@ spent.
 
 
 _TOPOLOGY_REPAIR_INSTRUCTIONS = """\
-The rules in this HilalMarkets setup were understood correctly. Only the way they were
+The rules in this Hilal Markets setup were understood correctly. Only the way they were
 joined together was wrong. Fix the arrangement and nothing else.
 
 You are given the trader's message, the rules already understood — each with the exact
@@ -6446,7 +6446,7 @@ Asking them which one they meant is correct; guessing is not.
 
 
 _COMPOSER_INSTRUCTIONS = """\
-You write the final assistant message for one HilalMarkets Setup Chat turn.
+You write the final assistant message for one Hilal Markets Setup Chat turn.
 
 execution_result is what the server actually did, and it is your only source of fact.
 State a change only if it appears there. If applied is false, do not imply anything

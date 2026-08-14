@@ -279,7 +279,7 @@ class HybridCapabilityResolutionService:
                 unknown_terms=() if status == "matched" else source.unknown_terms,
                 clarification_question=(
                     clarification
-                    or f"How should HilalMarkets measure '{source.fragment}' precisely?"
+                    or f"How should Hilal Markets measure '{source.fragment}' precisely?"
                 ),
                 selected_capability_key=(selected.capability_key if status == "matched" else None),
                 selected_parameters=(decision.parameters if status == "matched" else None),
@@ -463,7 +463,7 @@ def _parameter_question(label: str, error: str) -> str:
     if "requires parameters" in error:
         names = error.rsplit(":", 1)[-1].strip().replace(",", " and")
         return f"For {label}, what should {names} be?"
-    return f"Which exact parameters should HilalMarkets use for {label}?"
+    return f"Which exact parameters should Hilal Markets use for {label}?"
 
 
 def _output_text(payload: dict[str, Any]) -> str:
@@ -478,7 +478,7 @@ def _output_text(payload: dict[str, Any]) -> str:
 
 def _rerank_instructions() -> str:
     return (
-        "You resolve plain trader language to HilalMarkets' existing crypto spot monitoring "
+        "You resolve plain trader language to Hilal Markets' existing crypto spot monitoring "
         "capabilities. Treat phrases such as I want, bring me, show me, check whether, and "
         "alert me as conversational framing, never as trading mechanics. Use conversation "
         "context to understand corrections and pronouns. For each fragment, choose only a "

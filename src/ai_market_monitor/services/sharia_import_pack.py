@@ -300,7 +300,7 @@ class ShariaMethodologyImportPackService:
                     description=_methodology_description(source_definition),
                     status=ShariaMethodologyStatus.ACTIVE,
                     governing_body=_required_text(source_definition, "authority"),
-                    reviewer_group="HilalMarkets governance reviewers",
+                    reviewer_group="Hilal Markets governance reviewers",
                     published_at=now,
                     effective_from=now,
                     rules_json=_methodology_rules(package_id),
@@ -964,7 +964,7 @@ def _methodology_rules(package_id: str) -> dict[str, Any]:
         ),
         (
             "use_specific_factual_review",
-            "HilalMarkets use-specific factual review",
+            "Hilal Markets use-specific factual review",
             "Review spot, staking, lending, yield, wrappers, and derivatives separately.",
             ["factual_dossier"],
         ),
@@ -1013,7 +1013,7 @@ def _methodology_rules(package_id: str) -> dict[str, Any]:
             {
                 "key": "spot_ownership_and_monitoring",
                 "label": "Spot ownership and market monitoring",
-                "description": "HilalMarkets spot-only, non-execution monitoring scope.",
+                "description": "Hilal Markets spot-only, non-execution monitoring scope.",
                 "required": True,
                 "allowed_decisions": use_decisions,
                 "criterion_keys": ["use_specific_factual_review"],

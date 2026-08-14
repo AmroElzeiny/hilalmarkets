@@ -1117,7 +1117,7 @@ def _coverage_status(value: str) -> tuple[str, str]:
     if "under_review" in normalized:
         return "under_review", "This use is currently under review."
     if "outside" in normalized or "excluded" in normalized:
-        return "excluded", "This use is outside HilalMarkets' crypto spot monitoring scope."
+        return "excluded", "This use is outside Hilal Markets' crypto spot monitoring scope."
     if "not_applicable" in normalized:
         return "not_applicable", "This use does not apply to this asset identity."
     return "not_covered", "The asset-level decision does not approve this separate use."

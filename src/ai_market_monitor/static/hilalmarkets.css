@@ -713,7 +713,7 @@ html[dir="rtl"] .sidebar-collapsed .sidebar-collapse>.icon-sm{transform:none}
   .step-list{grid-template-columns:repeat(4,1fr);gap:3px}.step-item{padding:7px}
 }
 
-/* Production observability components use the HilalMarkets semantic palette. */
+/* Production observability components use the Hilal Markets semantic palette. */
 body.hilal-dashboard{
   --dash-bg:var(--ivory-2);
   --dash-panel:var(--white);

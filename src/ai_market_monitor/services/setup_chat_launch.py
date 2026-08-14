@@ -2125,7 +2125,7 @@ return tostring(next_value)
                                     ShariaUniverseMode.APPROVED_WATCHLIST.value,
                                     ShariaUniverseMode.EXPLICIT_ASSETS.value,
                                 ],
-                                question="Which screened assets should HilalMarkets watch?",
+                                question="Which screened assets should Hilal Markets watch?",
                                 reason=(
                                     "A screened universe must be selected explicitly "
                                     "before this setup can be approved."
@@ -2223,7 +2223,7 @@ return tostring(next_value)
                             target_type="universe",
                             target_field="sharia_policy.approved_watchlist_id",
                             expected_answer_schema={"type": "string", "format": "uuid"},
-                            question="Which Favorites list should HilalMarkets use?",
+                            question="Which Favorites list should Hilal Markets use?",
                             reason=(
                                 "The approved watchlist and its immutable version are "
                                 "part of the executable Sharia policy."
@@ -2247,7 +2247,7 @@ return tostring(next_value)
                                 "items": {"type": "string"},
                                 "minItems": 1,
                             },
-                            question=("Which eligible spot assets should HilalMarkets watch?"),
+                            question=("Which eligible spot assets should Hilal Markets watch?"),
                             reason=(
                                 "Every explicitly bounded asset must be screened and "
                                 "runtime-verified before approval."
@@ -5434,7 +5434,7 @@ def _migration_policy_unresolved(
                 target_type="universe",
                 target_field="sharia_policy.approved_watchlist_id",
                 expected_answer_schema={"type": "string", "format": "uuid"},
-                question="Which current Favorites list should HilalMarkets use?",
+                question="Which current Favorites list should Hilal Markets use?",
                 reason=(
                     "The legacy setup did not preserve a complete immutable watchlist identity."
                 ),
@@ -5454,7 +5454,7 @@ def _migration_policy_unresolved(
                     "items": {"type": "string"},
                     "minItems": 1,
                 },
-                question="Which eligible spot assets should HilalMarkets watch?",
+                question="Which eligible spot assets should Hilal Markets watch?",
                 reason="The legacy setup did not preserve an explicit screened asset list.",
                 created_workflow_revision=workflow_revision,
             )
@@ -5476,7 +5476,7 @@ def _migration_policy_unresolved(
                         "enum": [item.value for item in ShariaUniverseMode],
                     },
                     allowed_options=[item.value for item in ShariaUniverseMode],
-                    question="Which screened universe should HilalMarkets use?",
+                    question="Which screened universe should Hilal Markets use?",
                     reason=(
                         "The legacy setup stored an unrecognized universe mode, so "
                         "the policy cannot be approved until it is selected again."

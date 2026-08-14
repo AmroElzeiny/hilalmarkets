@@ -108,7 +108,7 @@ _SYMBOL_RE = re.compile(
     r"\b(?P<base2>[A-Z][A-Z0-9]{2,9})(?P<quote2>" + "|".join(_CONCATENATED_QUOTES) + r")\b"
 )
 #: Unit words, including the Arabic and Arabizi forms traders actually type. A
-#: HilalMarkets user writing `فريم 15 دقيقة` or `3ala 15 de2i2a` is naming the same
+#: Hilal Markets user writing `فريم 15 دقيقة` or `3ala 15 de2i2a` is naming the same
 #: timeframe as `15m`; reading only the English form dropped the timeframe entirely.
 _TIMEFRAME_UNITS = (
     r"m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks|"
@@ -350,7 +350,7 @@ _DISCOURSE_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
-#: Governance and labelling policy. HilalMarkets never assigns a Sharia status from
+#: Governance and labelling policy. Hilal Markets never assigns a Sharia status from
 #: chat, so these instructions are product policy the platform already enforces —
 #: they are not market mechanics and can never be "converted into an executable
 #: rule". Routing them into the resolver produced blocking findings that no answer

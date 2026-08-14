@@ -572,12 +572,12 @@ class ShariaScreeningService:
                 f"Operationally shown as {STATUS_LABELS[ShariaAssetStatus.UNDER_REVIEW].lower()} "
                 f"under the configured safety policy; the last approved assessment was "
                 f"{STATUS_LABELS[assessment.status].lower()} under {methodology.name}, version "
-                f"{methodology.version}. HilalMarkets AI did not issue this status."
+                f"{methodology.version}. Hilal Markets AI did not issue this status."
                 if safety_hold
                 else f"Screened as {STATUS_LABELS[assessment.status].lower()} under "
                 f"{methodology.name}, version {methodology.version}, reviewed "
                 f"{assessment.reviewed_at.date().isoformat()}. This records the selected "
-                "methodology's conclusion; HilalMarkets AI does not issue religious rulings."
+                "methodology's conclusion; Hilal Markets AI does not issue religious rulings."
             ),
         )
 
@@ -628,7 +628,7 @@ class ShariaScreeningService:
             results=results,
             notice=(
                 "Different methodologies may apply different definitions, thresholds, or "
-                "evidence requirements. HilalMarkets shows each approved result separately "
+                "evidence requirements. Hilal Markets shows each approved result separately "
                 "rather than presenting false consensus."
             ),
         )

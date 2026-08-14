@@ -1446,7 +1446,8 @@ class GroundedObservabilityExplainer:
             "max_output_tokens": 260,
             "reasoning": {"effort": self.settings.openai_reasoning_effort},
             "instructions": (
-                "Explain the supplied deterministic HilalMarkets lifecycle investigation in plain, "
+                "Explain the supplied deterministic Hilal Markets lifecycle investigation in "
+                "plain, "
                 "beginner-friendly language. Use only supplied fields. Do not invent values, "
                 "override the deterministic conclusion, suggest a trade, claim an alert should "
                 "have fired, or modify rules. If evidence is incomplete, say so. Return a short "

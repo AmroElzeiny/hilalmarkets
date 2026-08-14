@@ -104,7 +104,7 @@ class AccountEmailOutboxService:
         ends_at = _optional_datetime(payload.get("ends_at"))
         return HilalMarketsEmailRenderer(self.settings).access_changed(
             first_name=str(payload.get("first_name") or "there"),
-            plan_name=str(payload.get("plan_name") or "HilalMarkets access"),
+            plan_name=str(payload.get("plan_name") or "Hilal Markets access"),
             duration_label=str(payload.get("duration_label") or "Not specified"),
             ends_at_label=_utc_label(ends_at) if ends_at else None,
         )

@@ -629,13 +629,13 @@ def _capability_mechanic(
     if switched_off:
         reason = "This rule is paused right now. Everything else still works."
     elif not spec.executable:
-        reason = "HilalMarkets can read this rule but cannot run it yet."
+        reason = "Hilal Markets can read this rule but cannot run it yet."
     elif spec.availability != "available":
         reason = "This rule is not switched on for your account yet."
     elif missing_providers:
         feeds = ", ".join(sorted(missing_providers))
         reason = (
-            f"This rule needs market data HilalMarkets does not receive yet ({feeds}). "
+            f"This rule needs market data Hilal Markets does not receive yet ({feeds}). "
             "You can still set it up; it cannot be approved for monitoring until the "
             "data feed is connected."
         )
@@ -817,13 +817,13 @@ def find_mechanic(
 
 
 #: The screened-universe choices, in the platform's own vocabulary. The Builder never
-#: invents a fourth one, and never assigns a Sharia status: choosing a scope selects a
+#: invents a fourth one, and never assigns a Shariah status: choosing a scope selects a
 #: governed list, it does not create one.
 UNIVERSE_CHOICES: tuple[BuilderChoice, ...] = (
     BuilderChoice(
         "eligible_market",
         "Every eligible coin",
-        "All spot coins that pass the Sharia screening you choose below.",
+        "All spot coins that pass the Shariah screening you choose below.",
     ),
     BuilderChoice(
         "approved_watchlist",

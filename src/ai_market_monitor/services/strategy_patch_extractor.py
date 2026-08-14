@@ -1204,7 +1204,7 @@ def _extraction_context(draft: StrategyDraftV2) -> dict[str, Any]:
     }
 
 
-_PATCH_PROMPT = """You extract exactly one patch for HilalMarkets StrategyDraftV2.
+_PATCH_PROMPT = """You extract exactly one patch for Hilal Markets StrategyDraftV2.
 Use only the current user turn and the supplied canonical draft. Never reconstruct the
 whole strategy from conversation memory. Every added or replaced condition must quote
 an exact source_fragment from the current turn and use the supplied source_turn_id.

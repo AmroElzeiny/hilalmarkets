@@ -320,7 +320,7 @@ class CapabilityResolver:
             question = (
                 f"What do you mean by '{unknown_terms[0]}' in this setup?"
                 if unknown_terms
-                else f"How should HilalMarkets measure '{fragment.strip()}'?"
+                else f"How should Hilal Markets measure '{fragment.strip()}'?"
             )
             return FragmentResolution(
                 fragment=fragment,

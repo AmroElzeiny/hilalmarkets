@@ -4,7 +4,7 @@
  * target rectangle, so the target itself is never covered, blurred, cloned or moved —
  * it keeps its own stacking context, its own position and its own interactivity.
  *
- * Every colour comes from the HilalMarkets tokens in hilalmarkets-brand.css. Nothing
+ * Every colour comes from the Hilal Markets tokens in hilalmarkets-brand.css. Nothing
  * here introduces a second palette.
  */
 

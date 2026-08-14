@@ -18,7 +18,7 @@ is not a Shariah refusal, not a compiler error and not a provider outage. Each o
 those has its own meaning, and borrowing one of them to explain a gap in the product
 teaches the customer something false about the part that borrowed it.
 
-*The four non-negotiable statements are absolute.* HilalMarkets does not execute
+*The four non-negotiable statements are absolute.* Hilal Markets does not execute
 trades, is not a broker, gives no buy or sell recommendations, and provides no
 financial advice. They hold in every stage, on every surface, in every language.
 """
