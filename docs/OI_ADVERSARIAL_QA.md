@@ -204,6 +204,47 @@ have.
 becomes a real test when a person reads it and decides, and that decision is recorded as
 theirs.
 
+### The true baseline, recorded once so nobody re-derives it
+
+The OI-4 brief expected **18 known browser failures**. There were none. Commit `e7aa9e16`
+— *"Take the browser suite from eighteen failures to none"* — landed before `211aecc5`,
+so the number was already out of date when the phase started.
+
+Two captures were taken, as the method requires, and a third and fourth after the fixes:
+
+| Capture | Tests | Failures | Skips |
+|---|---|---|---|
+| OI-4 run 1 | 99 | 1 (flaky) | 2 |
+| OI-4 run 2 | 99 | 0 | 2 |
+| Closeout run 1 | 117 | 0 | 2 |
+| Closeout run 2 | 117 | 0 | 2 |
+
+**The stable baseline set is empty.** The single failure in the first capture was
+`test_setup_observability_desktop_mobile_and_visual_qa`, which passed 3/3 in isolation —
+flaky, not baseline. Its cause is now fixed: it sampled whether card images had finished
+loading at one instant instead of waiting for them, so a busy machine could measure the
+page a moment before it became correct. The count rose from 99 to 117 because this
+phase's own browser attacks joined the suite.
+
+### The promotion that happened, and who decided it
+
+On **14 August 2026** the operator directed that every OI-4 finding become a permanent
+test named to its finding id. That decision is theirs, recorded here, and it is the only
+reason these tests exist in the authoritative suite:
+
+| Test file | Covers |
+|---|---|
+| `tests/unit/test_invariant_oi4_regressions.py` | OI4-001 to OI4-007 |
+| `tests/evaluator/test_integration.py` (`test_oi4_008_*`) | OI4-008 |
+
+The evidence recorded with the decision: **60 of the 88 promoted tests fail at
+`211aecc5`** and all 88 pass after the fixes. The 28 that pass at `211aecc5` are the
+over-refusal guards — they were always meant to pass, and they are there so a future fix
+cannot buy an under-refusal cure with an over-refusal disease.
+
+`RegressionCandidate.promote()` still raises. The harness did not promote these; a person
+did, and then wrote them.
+
 ### The known-violation ledger
 
 `tests/oi/adversarial_known_violations.json` records the invariant violations found at

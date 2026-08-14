@@ -1,11 +1,29 @@
 # HilalMarkets
 
 HilalMarkets is a screened-market intelligence and monitoring platform for crypto spot
-traders. Users describe a Watch Plan, approve its structured interpretation, preview it against
+traders. Users describe a Watchlist, approve its structured interpretation, preview it against
 recent market data, and receive evidence-backed in-app or Telegram alerts during private beta.
 Version one never places trades.
 
-The Watch Plan builder is AI Setup Chat. Every ordinary free-text message goes to one bounded
+### One name per thing
+
+The customer-facing name is **Watchlist**. "Watch Plan" is its old name and must not
+appear anywhere a customer can read: `core/copy_rules.py` lists it in
+`FORBIDDEN_PRODUCT_PHRASES`, and `scripts/check_release_invariants.py` fails the build
+if it comes back in a template, in site content, in the plan catalog, in a degradation
+banner or in the public assistant's answers.
+
+This document is not customer copy and the lint does not scan it — but it used the
+retired name throughout, which taught every new contributor the wrong word before they
+read a line of code. It says Watchlist now.
+
+**Internal names are deliberately left alone.** Database columns, enum members, model
+and class names, API field names and migration history keep whatever they are called.
+Renaming them would rewrite migration history and change a stored contract to fix a
+wording problem that only exists in prose. The rule is per surface: customer surfaces
+and documentation say Watchlist; code says whatever it already says.
+
+The Watchlist builder is AI Setup Chat. Every ordinary free-text message goes to one bounded
 **Setup Agent** first: it reads the whole turn, splits it into segments — a greeting, an
 instruction, a correction and a question can arrive together — and calls exactly one
 state-changing server tool, `apply_setup_turn`. That tool is the only executable authority. It
@@ -44,6 +62,16 @@ can never author a rule. Grounding is typed, not substring: `1` cannot match `15
 `20`, `5m` cannot ground `5%`, `at least` grounds `gte`, and `open to close` grounds
 `open_to_close_percentage` through the same readers the compiler uses.
 
+Until August 2026 the paragraph above was a claim about the agent and not about the
+deterministic readers underneath it, and those readers did not hold it: a question's
+values were read straight onto the draft, so *asking* what 15m meant moved a live
+monitor onto 15m. Segment authorization now decides it — `turn_fragments.is_interrogative`
+reads the grammar of a segment, not its punctuation, and a segment that asks contributes
+no state. The worked example above is exercised as a test, by name, in
+`tests/unit/test_invariant_oi4_regressions.py::test_oi4_001_the_readme_worked_example_holds`.
+A refusal is read by one authority too, `engine/rejection.py`, in English, Arabic,
+Egyptian Arabic and Arabizi: "don't use 15m" never sets 15m, in any of them.
+
 Every gate — semantic validation, compilation, Sharia policy, screened universe, provider
 availability, approval eligibility and the final chat status — runs inside the deterministic
 execution phase, before the reply is written. The evidence for any "I changed X" claim comes from
@@ -62,7 +90,7 @@ authority all remain in application services. The model receives no approval, ac
 SQL, filesystem or trade tool of any kind.
 
 HilalMarkets also has a fail-closed Sharia-first market layer. Screened Market, one-time Scanner runs,
-persistent Watch Plans, workers, opportunity evidence, and alerts share one versioned methodology
+persistent Watchlists, workers, opportunity evidence, and alerts share one versioned methodology
 and universe resolver. Bounded authority adapters retain explicit asset-level results from SC
 Malaysia, Shariah Review Bureau, and Fasset, verify canonical identity, build factual evidence dossiers, and create
 administrator review cases. `All` is a deduplicated customer view over active published source
@@ -100,7 +128,7 @@ The landing/contact and analytics implementation is documented in
 The landing-page product assistant is a separate public, non-executing boundary. It generates
 multi-turn answers only from server-owned product knowledge and bounded read-only tools. Anonymous
 visitors cannot inspect accounts; a signed-in user may read only their own account, Telegram,
-Watch Plan, alert, entitlement, usage, Screened Watchlist, and published Passport state. Unknown
+Watchlist, alert, entitlement, usage, Screened Watchlist, and published Passport state. Unknown
 questions remain in chat unless the visitor explicitly chooses **No. Submit a support form** or
 asks to contact the team. Every completed answer has one session-bound, idempotent feedback record;
 the model can make a handoff available but cannot open the form. The inquiry commits exactly one
