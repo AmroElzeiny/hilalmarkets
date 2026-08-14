@@ -1,6 +1,6 @@
-# HilalMarkets Architecture
+# Hilal Markets Architecture
 
-Date: 2026-07-17
+Date: 2026-08-14 (layer map re-checked against the real module tree)
 
 ## Repository evolution
 
@@ -69,7 +69,9 @@ templates without replacing persisted models or approval boundaries.
 | Telegram | `telegram/` | Async command/callback application service and alert rendering |
 | WhatsApp | `whatsapp/` | Signed Meta webhooks, verified opt-in linking, interactive navigation, template/session delivery, and status reconciliation |
 | Workers | `worker.py` | Idempotent scan scheduling, scan execution, expiry, delivery and health jobs |
-| Web | `Hilal-Markets-Website/`, `templates/hilal/`, `static/hilalmarkets*` | Supplied React landing/contact, shared dashboard/public shells, production read models, guided Watch Plan UI, consent, and accessibility behavior |
+| Observability | `observability/` | The one place the product decides what is measured, what is promised, and what wakes somebody up: metric registry, service-level objectives, alert rules and their delivery, durable measurements, the deduplicated issue queue, and customer-facing degradation banners. Startup refuses to boot on an objective nothing emits, or an alert routed through the subsystem it watches. |
+| Launch exposure | `core/launch_stage.py` | The four stages, the exposure table that says what each one shows, and the legal moves between them. Menus, sitemap, schema.org offers and the public assistant all read it; none of them decides for itself. |
+| Web | `Hilal-Markets-Website/`, `templates/hilal/`, `static/hilalmarkets*` | Supplied React landing/contact, shared dashboard/public shells, production read models, guided Watchlist Builder UI, consent, and accessibility behavior |
 | Reliability | `services/reliability.py` | Market-data health, incidents, delivery failure state, metrics |
 | Admin | `api/routers/admin.py`, `services/admin_dashboard.py` | RBAC dashboard APIs and audited admin actions |
 | Public product assistant | `api/routers/public_chat.py`, `services/public_chat.py` | Grounded public answers, consented inquiry intake, bounded email outbox and feedback |
@@ -433,10 +435,18 @@ Scheduled scan evaluation remains deterministic and LLM-free.
 
 `agent_runs` and `agent_tool_calls` store redacted decisions, results, evidence, timings, usage,
 budgets, clause-coverage counts, and optional comparison evidence, never hidden reasoning or
-credentials. The controlled-beta release profile uses live execution for 100% of authenticated
-users and rejects shadow mode at deployed startup. `AI_AGENT_CONTROL_ENABLED=false` is the emergency
-kill switch. System Brain exposes live tool, grounding, compilation, approval, correction,
-capability, support, latency, and cost metrics. See
+credentials.
+
+> Corrected on 14 August 2026. This paragraph said the release profile "uses live execution for
+> 100% of authenticated users" and that `AI_AGENT_CONTROL_ENABLED=false` is "the emergency kill
+> switch". Neither is true at HEAD. The coordinator is off in production
+> (`.env.production.example`, `scripts/check_release_invariants.py`), authenticated Setup Chat never
+> routes to it (`services/ai_setup_chat.py:1313` returns from the launch service first), and the
+> switches that do stop Setup Chat are `SETUP_CHAT_EMERGENCY_DISABLED` and the per-surface
+> `SETUP_*_ENABLED` settings. See `docs/OPERATIONS.md`, "Stopping Setup Chat".
+
+System Brain exposes live tool, grounding, compilation, approval, correction, capability, support,
+latency, and cost metrics. The retired coordinator's catalog is kept for history in
 `docs/BOUNDED_AGENT_CONTROL.md`.
 
 ### Certified Capability Extensions

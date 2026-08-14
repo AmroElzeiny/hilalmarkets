@@ -1,5 +1,10 @@
 # TraceEdge Current Rating
 
+> **ARCHIVAL — 27 June 2026.** "TraceEdge" is an earlier name for this product; the product is
+> called **Hilal Markets**. The rating below describes the product as it stood in June 2026 and is
+> not a current assessment. For the current one, see
+> `docs/RELEASE_READINESS_REPORT.md` (14 August 2026). Kept for history; nothing below is edited.
+
 Date: 2026-06-27
 
 Current honest product rating: **6.6/10**

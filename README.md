@@ -81,9 +81,24 @@ every turn that changes nothing; only a material edit invalidates it.
 **`AI_AGENT_CONTROL_ENABLED` is not a Setup Chat switch.** Bounded Agent Control was a general
 multi-tool coordinator; it has no authority over authenticated Setup Chat and none of the
 `AI_AGENT_*` bounds govern that traffic — the `SETUP_AGENT_*` settings do. It defaults to false, and
-turning it off is not a Setup Chat rollback. There is no Setup Chat feature flag: the agent path is
-the only writable route, so a rollback means rolling back the deployment. Its document is retained
-for history only: [docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
+turning it off is not a Setup Chat rollback. Its document is retained for history only:
+[docs/BOUNDED_AGENT_CONTROL.md](docs/BOUNDED_AGENT_CONTROL.md).
+
+**There are switches, one per surface.** Until August 2026 this paragraph went on to say "there is
+no Setup Chat feature flag… a rollback means rolling back the deployment". That was true when it
+was written and false by the time it was read: `SETUP_CHAT_EMERGENCY_DISABLED` stops every new turn,
+and `SETUP_FREE_TEXT_ENABLED`, `SETUP_PLANNER_ENABLED`, `SETUP_COMPOSER_ENABLED`,
+`SETUP_BUILDER_ENABLED`, `SETUP_SCANNER_ENABLED` and `SETUP_MONITOR_ENABLED` each stop one part
+without taking the rest with it. An operator who believed this document would have redeployed
+during an incident when one variable and a restart would have done. The full table, with what keeps
+working under each, is in [docs/OPERATIONS.md](docs/OPERATIONS.md) under "Stopping Setup Chat".
+
+**Authoring never depends on the assistant.** The guided Builder is a deterministic second writer:
+`POST /api/v1/dashboard/setup-chat/sessions/{id}/builder-actions` makes zero model calls and goes
+through the same mutation authority, screening, provider and approval gates the assistant does, from
+server-drawn fields (`engine/builder_operations.py`). Every launch-supported Watchlist can be
+created, edited, reviewed and approved with every AI part switched off. AI availability is a
+convenience, not a product dependency.
 
 Registry, compiler, provider, scanner, ownership, entitlement, hash, approval and activation
 authority all remain in application services. The model receives no approval, activation, network,
@@ -136,9 +151,11 @@ customer and one office email outbox row before returning, supports token-bound 
 and never exposes Setup Chat mutation tools. A bounded read-only index may retrieve Markdown, CSV,
 JSON, and text from the project `Notion/` export as conversational context. Notion content cannot by
 itself prove a current product fact or authorize a product-state claim.
-The current private-beta correction status, including verification blockers and required staging
-evidence, is recorded in
-[docs/PRIVATE_BETA_READINESS_REPORT.md](docs/PRIVATE_BETA_READINESS_REPORT.md).
+The current release-readiness status, the contradiction register and the twenty invariants are
+recorded in [docs/RELEASE_READINESS_REPORT.md](docs/RELEASE_READINESS_REPORT.md).
+[docs/PRIVATE_BETA_READINESS_REPORT.md](docs/PRIVATE_BETA_READINESS_REPORT.md) is the earlier
+(17 July 2026) report and is **archival**: its verdict still stands, but the environment failures it
+records were fixed and its migration counts are out of date.
 
 During the controlled beta, an explicitly confirmed candle-computable mechanic that is not in the
 registry can be prepared as a user-scoped, versioned mechanic through a bounded JSON expression

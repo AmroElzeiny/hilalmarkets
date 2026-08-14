@@ -17,7 +17,7 @@ of that constrain the work:
 
 | What | Where |
 |---|---|
-| Brand rules — colors, type, tone, voice | `Hilal_Markets_Brand_Rules.md` (project root) |
+| Brand rules — colors, type, tone, voice | `brand guide.md` (project root) — the master. `Hilal-Markets-Website/src/imports/Hilal_Markets_Brand_Rules.md` is a copy; the root file wins. |
 | Business goals, audience, positioning, Sharia governance, roadmap | `Notion/HilalMarkets_Notion_Workspace/` (numbered folders `00_`–`10_`) |
 | Landing page — the visual source of truth | `Hilal-Markets-Website/src/` |
 | Dashboard — the authenticated source of truth | `src/ai_market_monitor/templates/`, `src/ai_market_monitor/static/` |
@@ -25,7 +25,12 @@ of that constrain the work:
 **Read the brand rules and the relevant Notion folder before any UI, copy, color, or
 product-decision work.** Colors, structure, text, UX and UI come **from the existing
 landing page and dashboard** — match what is already shipped rather than inventing a
-new visual language. If something is missing there, follow `Hilal_Markets_Brand_Rules.md`.
+new visual language. If something is missing there, follow `brand guide.md`.
+
+Three of its rules are enforced by `core/copy_rules.py`, not left to review: the name in
+prose is **Hilal Markets** (section 4), technical usage says **Shariah** (section 16), and
+the forbidden claims list is section 17. Identifiers are exempt by construction — the
+patterns only match the word standing alone in prose.
 
 ## Fix the defect class, not the reported instance
 

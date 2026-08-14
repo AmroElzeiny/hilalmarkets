@@ -1,5 +1,10 @@
 # Deploy TraceEdge Live On One VPS
 
+> **ARCHIVAL.** "TraceEdge" is an earlier name for this product; the product is called
+> **Hilal Markets**. Superseded by `docs/PRODUCTION_DEPLOYMENT.md` and `docs/LAUNCH_CHECKLIST.md`.
+> Do not follow this document for a deployment: the hostnames, image names and environment
+> variables in it are not the ones the product ships. Kept for history; nothing below is edited.
+
 This guide deploys the existing TraceEdge FastAPI/Celery/PostgreSQL/Redis stack to one VPS with
 Docker Compose, Caddy, and Cloudflare DNS/proxy.
 

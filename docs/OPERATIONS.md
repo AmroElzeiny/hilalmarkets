@@ -58,9 +58,20 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `AI_SETUP_COMPLEX_CONDITION_THRESHOLD` | Condition-count threshold for complex routing. Default: `4`. |
 | `AI_SETUP_REPEATED_CORRECTION_THRESHOLD` | Correction count that escalates interpretation capacity. Default: `2`. |
 | `AI_SETUP_LOW_CAPABILITY_CONFIDENCE` | Resolver-confidence threshold for complex routing. Default: `0.72`. |
-| `AI_AGENT_CONTROL_ENABLED` | Bounded Setup Chat coordinator kill switch. Default: `false`. |
-| `AI_AGENT_SHADOW_MODE` | Records proposed agent tool selection but executes no agent tools. Default: `false`. |
-| `AI_AGENT_ROLLOUT_PERCENT` | Live authenticated-user percentage. Application default: `0`; controlled beta requires `100`. |
+| `AI_AGENT_CONTROL_ENABLED` | **Not a Setup Chat switch.** Bounded Agent Control is a retired general coordinator with no authority over authenticated Setup Chat. Must stay `false`. See "Stopping Setup Chat" below. |
+| `AI_AGENT_SHADOW_MODE` | Belongs to the same retired coordinator. Default: `false`. |
+| `AI_AGENT_ROLLOUT_PERCENT` | Belongs to the same retired coordinator. Default and production value: `0`. |
+| `SETUP_CHAT_EMERGENCY_DISABLED` | **The Setup Chat kill switch.** `true` stops every new turn behind the AI-unavailable banner. Default: `false`. |
+| `SETUP_FREE_TEXT_ENABLED` | Free-text messages in Setup Chat. `false` closes the composer and leaves the guided Builder. Default: `true`. |
+| `SETUP_PLANNER_ENABLED` | The model call that reads a sentence into operations. Default: `true`. |
+| `SETUP_COMPOSER_ENABLED` | The model call that writes the reply. `false` builds replies from the deterministic summary of what changed. Default: `true`. |
+| `SETUP_BUILDER_ENABLED` | The guided Builder. Turning this off *and* the AI off leaves no way to author a Watchlist. Default: `true`. |
+| `SETUP_SCANNER_ENABLED` / `SETUP_MONITOR_ENABLED` | Running a Scanner sweep, and creating/running Monitors, from a reviewed draft. Default: `true`. |
+| `SETUP_CHAT_PRIVATE_BETA_USER_IDS` | Non-empty limits Setup Chat to exactly those user UUIDs. Empty keeps normal entitlement-controlled availability. |
+| `SETUP_CHAT_RECOVERY_DISABLED` | Stops the crash-recovery worker. Left `false`: without it, a crashed turn holds its session and the user cannot send anything. |
+| `SETUP_TURN_DEADLINE_SECONDS` | Whole-turn budget from the authenticated request boundary. Default: `45`. |
+| `AI_BUDGET_PER_TURN_MAX_USD` etc. | Spending ceilings. A call whose cost cannot be estimated is refused rather than guessed at. |
+| `AUTH_TEST_FIXED_CODE` | Test-only. Deployed startup **refuses to boot** if it is set: with a value, every sign-in code and every System Brain second factor becomes it. |
 | `AI_AGENT_MAX_STEPS` | Maximum Responses loop steps per turn. Default: `4`. |
 | `AI_AGENT_MAX_TOOL_CALLS_PER_TURN` | Maximum validated function calls per turn. Default: `4`. |
 | `AI_AGENT_MAX_REPEATED_CALLS` | Retry allowance for retryable unavailable/validation results. Default: `1`. |
@@ -139,9 +150,17 @@ answer-feedback API is session-bound and accepts one idempotent choice per answe
 
 The controlled private beta is invite-only and free. Production examples intentionally enforce BTC,
 ETH and SOL on Binance spot, one approved methodology, in-app and Telegram delivery, paid checkout
-off, WhatsApp off, Discord retired, certified user-scoped OHLCV extensions on, and the Bounded Agent
-live for every authenticated beta user. Deployed startup and release invariants require shadow mode
-off and rollout at 100 percent. Live OpenAI/Binance/SMTP proof remains a separate staging gate.
+off, WhatsApp off, Discord retired, and certified user-scoped OHLCV extensions on.
+
+> Corrected on 14 August 2026. This paragraph said the Bounded Agent was "live for every
+> authenticated beta user" and that startup and the release invariants "require shadow mode off and
+> rollout at 100 percent". Both are false at HEAD and were the opposite of what the product ships:
+> `scripts/check_release_invariants.py` requires `AI_AGENT_CONTROL_ENABLED=false`,
+> `AI_AGENT_SHADOW_MODE=false` and `AI_AGENT_ROLLOUT_PERCENT=0`, and `.env.production.example`
+> carries exactly those. Authenticated Setup Chat is served by the Setup Agent, whose bounds are the
+> `SETUP_AGENT_*` and `SETUP_*` settings.
+
+Live OpenAI/Binance/SMTP proof remains a separate staging gate.
 
 ## Database Migration
 
@@ -198,27 +217,52 @@ python -m mypy src/ai_market_monitor
 python -m pytest
 ```
 
-### Bounded-agent rollout
+### Stopping Setup Chat
 
-The controlled-beta release profile is:
+> Rewritten on 14 August 2026. This section previously gave `AI_AGENT_CONTROL_ENABLED=false` as the
+> Setup Chat rollback. It is not one. `AISetupChatService.handle_message` hands every authenticated
+> turn to `SetupChatLaunchService` and returns
+> (`src/ai_market_monitor/services/ai_setup_chat.py:1313`); the branch that reads
+> `AI_AGENT_CONTROL_ENABLED` sits below that return and can only be reached through
+> `SETUP_CHAT_LEGACY_TEST_COMPAT_ENABLED`, which deployed startup refuses
+> (`src/ai_market_monitor/core/config.py:733`). An operator following the old instruction during an
+> incident would have changed a variable, restarted, and watched Setup Chat carry on unchanged.
+
+The release profile is:
 
 ```dotenv
-AI_AGENT_CONTROL_ENABLED=true
+AI_AGENT_CONTROL_ENABLED=false
 AI_AGENT_SHADOW_MODE=false
-AI_AGENT_ROLLOUT_PERCENT=100
+AI_AGENT_ROLLOUT_PERCENT=0
 CAPABILITY_EXTENSION_ENABLED=true
 CAPABILITY_EXTENSION_PREFLIGHT_EXCHANGE=binance
 PUBLIC_CHAT_ENABLED=true
 PUBLIC_CHAT_AI_ENABLED=true
 ```
 
+**What actually stops Setup Chat**, narrowest action first. Each takes effect on API restart.
+
+| Symptom | Set | What keeps working |
+|---|---|---|
+| Replies are wrong or unsafe | `SETUP_COMPOSER_ENABLED=false` | Everything. Replies become the deterministic summary of what really changed. |
+| The planner misreads sentences | `SETUP_PLANNER_ENABLED=false` | The guided Builder, Scanner, Monitors, every approved Watchlist. |
+| Free text must stop entirely | `SETUP_FREE_TEXT_ENABLED=false` | The guided Builder. A person can still author and approve a complete Watchlist. |
+| Turns are failing mid-way | `SETUP_CHAT_EMERGENCY_DISABLED=true` | Every approved Watchlist keeps evaluating and keeps alerting. Nothing saved is changed or lost. |
+| One capability is misbehaving | `BUILDER_CAPABILITIES_DISABLED=<key>` | Everything else. The capability is still shown, with a reason. |
+| Only some accounts should have it | `SETUP_CHAT_PRIVATE_BETA_USER_IDS=<uuids>` | Everyone on the list. |
+
+There is **no** switch that removes the writable path while leaving free text on: the Setup Agent is
+the only writer for free text, so stopping it means stopping free text. Rolling the deployment back
+is still available and is the only way to change the agent's behaviour rather than its availability.
+
+To restore, set the switch back and restart. No schema rollback is needed for any of them.
+
 Before opening access, verify zero forbidden executions and unsupported-condition leakage, inspect
 fallbacks and clause gaps, and complete the live staging matrix in
 `docs/CONTROLLED_BETA_AI_IMPLEMENTATION_REPORT.md`. System Brain is the operational evidence view;
 committed reports are not runtime proof.
 
-To roll back, set `AI_AGENT_CONTROL_ENABLED=false` and restart the API. No schema rollback is needed.
-The full catalog, policy, limits, and safe tool-addition checklist are documented in
+The retired coordinator's catalog, policy and limits are kept for history only in
 `docs/BOUNDED_AGENT_CONTROL.md`.
 
 ## Production Deployment
@@ -322,21 +366,42 @@ signup, and the rejection looks like an ordinary delivery failure. Whatever else
 knows about a signup — when it happened, which page it came from, first-touch attribution — stays
 in `waitlist_signups` and is not sent.
 
-> **The receiver currently deployed does not match `waitlist_webhook.gs` in this repository.**
-> The deployed script authorises on `secret` and reads the six fields above. The script file here
-> still authorises on `webhook_secret` and requires `event_id` and `submitted_at`. Deploying the
-> file as it stands would reject every signup. Reconcile the two before touching either side.
+**Both halves of this contract now live in the repository and agree.** Until 14 August 2026 they
+did not: `waitlist_webhook.gs` authorised on `webhook_secret` and required `event_id` and
+`submitted_at`, none of which the server sends. Deploying that file would have answered
+`unauthorized` to every signup, and the rejection would have looked like an ordinary delivery
+failure in the retry log. The file now reads `secret` and the six fields above, and
+`tests/unit/test_invariant_phase6_launch_audit.py` fails if the two sides drift apart again.
 
-Because the deployed receiver is not sent a delivery id, it cannot recognise a retry by that id. A
-delivery that timed out after the sheet had already written the row can produce a second row for
-the same person. `waitlist_signups` stays correct either way; the duplicate, if it appears, is in
-the sheet only.
+> **BLOCKING EXTERNAL DEPENDENCY — the deployed Web App must be redeployed from this file.**
+> Nothing in this repository can change what is running in Google Apps Script. Until the steps
+> below are carried out, the sheet is served by whatever was pasted into it previously, and this
+> repository cannot tell you which version that is.
+>
+> 1. Open the Apps Script project bound to the waitlist spreadsheet.
+> 2. Replace the entire contents of `Code.gs` with `scripts/google_apps_script/waitlist_webhook.gs`
+>    from this commit. Do not merge by hand; replace the file.
+> 3. Confirm Script Properties `WAITLIST_WEBHOOK_SECRET` and `WAITLIST_SPREADSHEET_ID` are set, and
+>    that the secret is byte-identical to `WAITLIST_GOOGLE_SHEETS_WEBHOOK_SECRET` in the deployment.
+> 4. **Deploy → Manage deployments → edit the existing deployment → New version.** Creating a new
+>    deployment instead issues a new `/exec` URL and the server keeps posting to the old one.
+> 5. Execute as **Me**, access **Anyone**. Keep the `/exec` URL unchanged.
+> 6. Verify before trusting it: submit one signup on the public site, confirm a row appears with the
+>    correct email and country, then submit the same address again and confirm **no second row**.
+> 7. The first request after the upgrade rewrites the worksheet into the layout below, carrying
+>    every existing row across. Take a copy of the sheet before step 6.
 
-The receiver in `waitlist_webhook.gs` serializes writes with a script lock and keeps the visible
-worksheet business-facing: Email Address, Joined At (UTC), Country, Signup Source, Campaign,
-Status, and Notes. Status is an editable controlled list and Notes is free text for the beta team.
-Retry deduplication uses a final system column that Apps Script hides automatically. The first
-request after upgrading the script migrates rows written by the earlier technical layout. The
+Duplicates are prevented by email address, not by a delivery id. The server sends no delivery id, so
+a retry cannot be recognised by one; the receiver checks the email column before appending instead,
+which is the right key for a waitlist — one person, one row.
+
+`Joined At (UTC)` is the moment the script received the signup, not the moment the person submitted
+it. The server does not send its own timestamp. The authoritative submission time stays in
+`waitlist_signups`, which is the source of truth for everything the sheet does not carry.
+
+The receiver serializes writes with a script lock and keeps the visible worksheet business-facing:
+Email Address, Joined At (UTC), Country, Signup Source, Status, and Notes. Status is an editable
+controlled list and Notes is free text for the beta team; neither is overwritten by a delivery. The
 endpoint, secret, and delivery metadata never enter HTML, browser JavaScript, analytics, or public
 form responses.
 

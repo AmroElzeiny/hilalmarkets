@@ -1,5 +1,10 @@
 # TraceEdge Live Deployment Preparation Report
 
+> **ARCHIVAL — 6 July 2026.** "TraceEdge" is an earlier name for this product; the product is
+> called **Hilal Markets**. Superseded by `docs/PRODUCTION_DEPLOYMENT.md` and
+> `docs/LAUNCH_CHECKLIST.md`. Do not follow this document for a deployment. Kept for history;
+> nothing below is edited.
+
 Date: 2026-07-06
 
 ## Scope

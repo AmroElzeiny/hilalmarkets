@@ -1,8 +1,15 @@
 # Hilal Markets brand rules
 
+> **THIS IS A COPY, NOT THE MASTER.** The master is `brand guide.md` at the repository root.
+> Two documents both calling themselves "the master reference" is how they drift, and they had:
+> the master was corrected on 12 August 2026 to say the typeface is **Geometria** — the font the
+> product actually ships, declared in `Hilal-Markets-Website/src/index.css` with real `@font-face`
+> sources and present in the built bundle — while this copy went on saying "Geometrica", a font
+> that does not exist here. Corrected on 14 August 2026. When the two disagree, the root file wins.
+
 Version 1.0 — 17 July 2026
 
-This document is the master reference for the Hilal Markets brand. It defines the principles that should guide the website, product interface, presentations, social content, illustrations, motion and future marketing materials.
+This document is a working copy of the master reference for the Hilal Markets brand. It defines the principles that should guide the website, product interface, presentations, social content, illustrations, motion and future marketing materials.
 
 ## 1. Brand definition
 
@@ -218,7 +225,7 @@ Never communicate a Shariah or monitoring status through colour alone. Always pa
 
 ### Headings
 
-- Typeface: **Geometrica**.
+- Typeface: **Geometria**.
 - Weight: **Medium**.
 - Use sentence case.
 - Keep headings concise.

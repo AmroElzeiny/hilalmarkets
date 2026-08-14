@@ -1,9 +1,45 @@
 # Private-Beta Launch Checklist
 
-Last corrected: 2026-07-17
+Last corrected: 2026-08-14
 
 This checklist separates repository implementation from CI, staging, production configuration,
 and owner/governance approval. A checked code path is not evidence that an external system works.
+
+## Run the repository checks first
+
+Everything below assumes these have been run and their output read. They need nothing but a
+checkout, Python 3.12 and network access to PyPI. Copy them exactly.
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+Copy-Item .env.example .env
+
+# Static checks. All three must print zero problems.
+.venv\Scripts\python.exe -m ruff check src tests
+.venv\Scripts\python.exe -m mypy src/ai_market_monitor
+.venv\Scripts\python.exe scripts\check_release_invariants.py
+
+# Migrations. `alembic` reads DATABASE_URL, so point it somewhere disposable first.
+$env:DATABASE_URL = "sqlite+aiosqlite:///./launch-check.db"
+.venv\Scripts\python.exe -m alembic heads          # must print exactly one head
+.venv\Scripts\python.exe -m alembic upgrade head
+.venv\Scripts\python.exe -m alembic check          # must say: No new upgrade operations detected
+
+# The suite. Expect roughly 45 minutes on a laptop.
+.venv\Scripts\python.exe -m pytest -q -p no:randomly
+```
+
+Two things that will otherwise cost an hour:
+
+- **`pytest-timeout` is not installed.** Do not pass `--timeout`; the run fails to start.
+- **Browser tests need Chromium**, installed with `.venv\Scripts\python.exe -m playwright install
+  chromium`. Without it those tests **error**, and an error is not a failure — do not read a
+  Chromium-less run as a red suite.
+
+`docker compose up --build` needs a running Docker daemon; the container-scan gate cannot be run
+without one.
 
 Status vocabulary:
 
@@ -34,8 +70,11 @@ Status vocabulary:
 | Resolved transitive dependency lock | PARTIAL | CI PENDING | N/A | Generate and review a Python 3.12 lock artifact |
 | Generated/runtime artifacts absent from Git index | IMPLEMENTED | CI PENDING | N/A | N/A |
 | Initial beta profile is BTC/ETH/SOL, Binance spot, invite-only/free | IMPLEMENTED | CI PENDING | STAGING PENDING | OWNER REQUIRED |
-| Bounded Agent is shadow-only with a zero-percent live cohort | IMPLEMENTED | CI PENDING | STAGING PENDING | OWNER REQUIRED |
-| Billing, WhatsApp, and capability extensions are disabled | IMPLEMENTED | CI PENDING | STAGING PENDING | OWNER REQUIRED |
+| Retired Bounded Agent coordinator is off entirely (`AI_AGENT_CONTROL_ENABLED=false`, rollout `0`) | IMPLEMENTED | CI PENDING | STAGING PENDING | OWNER REQUIRED |
+| Setup Chat can be stopped without a redeploy (`SETUP_CHAT_EMERGENCY_DISABLED`, per-surface switches) | IMPLEMENTED | CI PENDING | STAGING PENDING | Rehearse one switch on staging |
+| A Watchlist can be authored and approved with every AI part off (guided Builder) | IMPLEMENTED | CI PENDING | STAGING PENDING | Browser drill with the assistant disabled |
+| Billing and WhatsApp are disabled | IMPLEMENTED | CI PENDING | STAGING PENDING | OWNER REQUIRED |
+| Certified user-scoped capability extensions are **enabled** (`CAPABILITY_EXTENSION_ENABLED=true`) | IMPLEMENTED | CI PENDING | STAGING PENDING | OWNER REQUIRED |
 | Active Discord product/API/worker/UI surfaces are removed | IMPLEMENTED | CI PENDING | STAGING PENDING | Historical data inventory before physical DB removal |
 | Public product chatbot is grounded, rate-limited, and non-executing | IMPLEMENTED | CI PENDING | STAGING PENDING | Privacy and owner content review |
 | Public inquiry outbox sends one customer and one office event | IMPLEMENTED | CI PENDING | STAGING PENDING | Controlled SMTP delivery proof |
@@ -51,8 +90,8 @@ Status vocabulary:
 | Exact canonical asset and exchange market mapping | IMPLEMENTED | CI PENDING | STAGING PENDING | Delisting/migration/quote-change drill |
 | Passport use coverage is asset-specific and reviewer-approved | IMPLEMENTED | CI PENDING | STAGING PENDING | Qualified reviewer inspection |
 | Historical alert opens the frozen Passport version | IMPLEMENTED | CI PENDING | STAGING PENDING | Historical alert browser drill |
-| Watch Plan and My Screened Watchlist terminology is distinct | IMPLEMENTED | CI PENDING | STAGING PENDING | Ten-user comprehension study |
-| Saved-asset removal lists affected non-archived Watch Plans first | IMPLEMENTED | CI PENDING | STAGING PENDING | Mobile/desktop browser QA |
+| Watchlist and My Screened Watchlist terminology is distinct | IMPLEMENTED | CI PENDING | STAGING PENDING | Ten-user comprehension study |
+| Saved-asset removal lists affected non-archived Watchlists first | IMPLEMENTED | CI PENDING | STAGING PENDING | Mobile/desktop browser QA |
 | Check the Market Now and worker use shared compiler/resolver | IMPLEMENTED | CI PENDING | STAGING PENDING | Frozen-candle parity test expansion |
 | Opportunity cards use stored condition evidence | IMPLEMENTED | CI PENDING | STAGING PENDING | Corrected-candle and missing-evidence drill |
 | Opportunity Journey state transitions are durable/idempotent | PARTIAL | CI PENDING | STAGING PENDING | Seven-day duplicate/restart soak |

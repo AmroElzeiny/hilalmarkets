@@ -1,4 +1,18 @@
-# HilalMarkets Private-Beta Readiness Report
+# Hilal Markets Private-Beta Readiness Report
+
+> **ARCHIVAL — 17 July 2026. Superseded by `docs/RELEASE_READINESS_REPORT.md` (14 August 2026).**
+>
+> Kept as the record of what was true in July. Its **verdict still stands** — the product is not
+> ready for external private beta — but three things in it are no longer accurate at HEAD, and it
+> was linked from README as the *current* status until 14 August 2026:
+>
+> | It says | True at HEAD |
+> |---|---|
+> | The virtual environment cannot run; only Python 3.11 is present | `.venv` runs Python 3.12.0. Ruff, MyPy, Alembic and pytest all execute. |
+> | 33 migration revisions, head `1acbd2e3f405` | 57 revisions, one head `9d21c4e75f80` |
+> | `AI_AGENT_CONTROL_ENABLED=true` … "remains the immediate kill switch" (section 9) | It is `false` in production and has no authority over Setup Chat at all. See `docs/OPERATIONS.md`, "Stopping Setup Chat". |
+>
+> Nothing below has been edited. Read it as history.
 
 Date: 2026-07-17
 
