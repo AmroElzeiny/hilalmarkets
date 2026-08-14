@@ -8,6 +8,7 @@ from ai_market_monitor.api.route_security import (
     audit_versioned_api_routes,
     iter_versioned_api_routes,
 )
+from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.copy_rules import customer_copy_sources, scan_customer_copy
 from ai_market_monitor.core.launch_stage import LaunchStage, resolve_launch_stage
 from ai_market_monitor.core.plans import (
@@ -63,22 +64,32 @@ ACTIVE_DISCORD_SCAN_ROOTS = (
 ACTIVE_DISCORD_SUFFIXES = {".py", ".html", ".js", ".css"}
 
 
-#: Keys that must exist in BOTH environment examples.
+#: Settings that are deliberately absent from the environment examples.
 #:
-#: A key added to one file only is a key an operator discovers is missing during a
-#: deployment, which is the worst moment to learn what it does.
-REQUIRED_KEY_PARITY = (
-    "LAUNCH_STAGE",
-    "PUBLIC_WAITLIST_MODE",
-    "OBSERVABILITY_WINDOW_SECONDS",
-    "OBSERVABILITY_FLUSH_INTERVAL_SECONDS",
-    "OBSERVABILITY_ROLLUP_AFTER_HOURS",
-    "OBSERVABILITY_RETENTION_HOURS",
-    "OPERATIONAL_ALERT_TELEGRAM_CHAT_ID",
-    "OPERATIONAL_ALERT_EMAIL",
-    "OPERATIONAL_ALERT_REPEAT_MINUTES",
-    "OPERATIONAL_ALERT_MAX_ATTEMPTS",
-)
+#: One entry, and it is not an operator setting: ``email_test_outbox`` is a list the
+#: test suite reads messages back out of, declared on ``Settings`` so a fake adapter has
+#: somewhere to put them. There is no value an operator could write.
+NON_ENVIRONMENT_SETTINGS = frozenset({"EMAIL_TEST_OUTBOX"})
+
+
+def required_environment_keys() -> frozenset[str]:
+    """Every key both examples must carry, read from ``Settings`` itself.
+
+    This used to be a hand-written tuple of ten names. A hand-written list of what must
+    be documented documents whatever somebody remembered to add to it: at the time this
+    was replaced, **41 settings existed in neither example**, and the check passed.
+    Among them were every Setup Chat surface switch — the ones an operator reaches for
+    during an incident — every AI spending ceiling, and ``AUTH_TEST_FIXED_CODE``.
+
+    Deriving it from the model means a setting cannot be added to the product without
+    also being added to both files, which is the property the check was always supposed
+    to have.
+    """
+
+    names: set[str] = set()
+    for name, field in Settings.model_fields.items():
+        names.add((field.alias or name).upper())
+    return frozenset(names) - NON_ENVIRONMENT_SETTINGS
 
 
 def _example_values(path: Path) -> dict[str, str]:
@@ -216,13 +227,19 @@ def main() -> int:
                 "product is not open yet"
             )
 
-    # -- Every new key exists in both examples ----------------------------
+    # -- Every setting exists in both examples ----------------------------
     development = _example_values(ROOT / ".env.example")
-    for key in REQUIRED_KEY_PARITY:
+    for key in sorted(required_environment_keys()):
         if key not in development:
             failures.append(f".env.example is missing {key}")
         if key not in production:
             failures.append(f".env.production.example is missing {key}")
+    # Drift the other way is just as bad: a key documented in one file and not the
+    # other is a key an operator finds missing during a deployment.
+    for key in sorted(set(development) - set(production)):
+        failures.append(f".env.production.example is missing {key}, which .env.example has")
+    for key in sorted(set(production) - set(development)):
+        failures.append(f".env.example is missing {key}, which .env.production.example has")
 
     # -- The operational-truth layer is coherent ---------------------------
     missing_metrics = undeclared_metric_names()
