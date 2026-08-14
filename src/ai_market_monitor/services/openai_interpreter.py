@@ -33,6 +33,27 @@ class OpenAIInterpretationError(ValueError):
         self.output_excerpt = output_excerpt
 
 
+class CapabilityGuardUnavailable(OpenAIInterpretationError):
+    """No capability candidate was found, so the model cannot be constrained.
+
+    The strict schema pins ``capability_key`` to an enum of the capabilities the
+    resolver actually matched. When the resolver matches nothing there is no enum
+    to pin it to, and the schema used to be sent **without** the enum — which
+    turns the one guard against an invented capability into no guard at all,
+    exactly when the product understood the request least.
+
+    An empty resolution is a refusal, not a licence. The turn stops here and the
+    trader is asked what they meant.
+    """
+
+    def __init__(self, questions: tuple[str, ...]) -> None:
+        super().__init__(
+            "Capability resolution matched nothing, so the strategy schema cannot "
+            "constrain the model to registered capabilities."
+        )
+        self.questions = questions
+
+
 class OpenAIResponsesInterpretationClient:
     def __init__(
         self,
@@ -55,6 +76,16 @@ class OpenAIResponsesInterpretationClient:
             if item.get("capability_key")
         ]
         candidate_keys = list(dict.fromkeys([*resolution.candidate_keys, *binding_keys]))
+        if not candidate_keys:
+            # Refuse before spending a paid call on a request the schema cannot
+            # constrain. The resolver already wrote the question to ask.
+            raise CapabilityGuardUnavailable(
+                tuple(
+                    fragment.clarification_question
+                    for fragment in resolution.fragments
+                    if fragment.clarification_question
+                )
+            )
         route = select_setup_model(
             self.settings,
             current_message=guided_setup.setup_text or "",
@@ -230,6 +261,37 @@ class OpenAIStrategyInterpreter:
                     "openai_usage": openai_usage,
                 },
             )
+        except CapabilityGuardUnavailable as exc:
+            # Not a provider failure and not a compiler failure: the product did
+            # not recognise the wording. It says so and asks, rather than letting
+            # an unconstrained model name a capability that does not exist.
+            fallback = await self.fallback.interpret(guided_setup)
+            questions = exc.questions or (
+                f"How should HilalMarkets measure '{(guided_setup.setup_text or '').strip()}'?",
+            )
+            return fallback.model_copy(
+                update={
+                    "interpreter": f"{fallback.interpreter}:capability_guard",
+                    "ambiguities": [
+                        *fallback.ambiguities,
+                        *(
+                            InterpretationIssue(
+                                code="capability_resolution_empty",
+                                field="setup_text",
+                                message=question,
+                                blocking=True,
+                                source_fragment=guided_setup.setup_text,
+                            )
+                            for question in questions
+                        ),
+                    ],
+                    "raw_metadata": {
+                        **(fallback.raw_metadata or {}),
+                        "capability_guard": "refused_unconstrained_schema",
+                        "fallback_used": True,
+                    },
+                }
+            )
         except (httpx.HTTPError, ValueError, KeyError, TypeError, ValidationError) as exc:
             fallback = await self.fallback.interpret(guided_setup)
             output_excerpt = getattr(exc, "output_excerpt", None)
@@ -374,10 +436,19 @@ def _instructions() -> str:
     )
 
 
-def _strategy_draft_schema(candidate_keys: list[str] | None = None) -> dict[str, Any]:
-    capability_key_schema: dict[str, Any] = {"type": "string"}
-    if candidate_keys:
-        capability_key_schema["enum"] = sorted(set(candidate_keys))
+def _strategy_draft_schema(candidate_keys: list[str]) -> dict[str, Any]:
+    """Build the strict draft schema. The capability enum is never optional.
+
+    Refusing to build a schema without it is what makes the guard unskippable:
+    there is no argument to this function that produces a ``capability_key`` the
+    model may fill in freely.
+    """
+    if not candidate_keys:
+        raise CapabilityGuardUnavailable(())
+    capability_key_schema: dict[str, Any] = {
+        "type": "string",
+        "enum": sorted(set(candidate_keys)),
+    }
     condition = {
         "type": "object",
         "additionalProperties": False,

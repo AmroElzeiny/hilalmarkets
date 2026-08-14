@@ -11,6 +11,7 @@ from ai_market_monitor.engine.capability_compatibility import (
     CapabilityCompatibility,
     compatibility_by_key,
 )
+from ai_market_monitor.engine.comparators import fold_comparisons_to_english
 from ai_market_monitor.engine.prompt_aliases import normalized_phrases
 from ai_market_monitor.engine.prompt_audit import split_prompt_fragments
 from ai_market_monitor.engine.turn_fragments import classify_fragment
@@ -704,7 +705,17 @@ def _validate_parameter(name: str, value: Any, schema: dict[str, Any]) -> None:
 
 
 def _normalize(value: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9%]+", " ", value.casefold())).strip()
+    """Reduce a sentence to the ASCII tokens capability scoring compares.
+
+    Comparison wording is folded to English first. Without that, this function
+    deleted every Arabic character before scoring, so an Arabic request arrived
+    as a few Latin scraps, matched no capability, and the resolver returned an
+    empty candidate list — which the model's schema guard then read as "no
+    constraint" and dropped. The same fold runs over the capability aliases, so
+    both sides of every comparison are normalised the same way.
+    """
+    folded = fold_comparisons_to_english(value)
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9%]+", " ", folded.casefold())).strip()
 
 
 def _semantic_fragment(value: str) -> str:

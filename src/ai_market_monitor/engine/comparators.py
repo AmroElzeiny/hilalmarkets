@@ -210,6 +210,99 @@ def comparator_terms() -> tuple[str, ...]:
     return tuple(term for term, _comparator in OPERATOR_TERMS)
 
 
+#: The plain English wording for each comparator, used when a phrase written in
+#: another language has to be folded into wording an English-only reader can see.
+ENGLISH_COMPARATOR_TERM: dict[Comparator, str] = {
+    Comparator.GREATER_THAN: "above",
+    Comparator.GREATER_THAN_OR_EQUAL: "at least",
+    Comparator.LESS_THAN: "below",
+    Comparator.LESS_THAN_OR_EQUAL: "at most",
+    Comparator.EQUAL: "equal to",
+    Comparator.CROSSES_ABOVE: "crosses above",
+    Comparator.CROSSES_BELOW: "crosses below",
+    Comparator.IS_TRUE: "is true",
+    Comparator.IS_FALSE: "is false",
+}
+
+#: Arabizi comparison wording that carries no digit, so the digit test below cannot
+#: recognise it. Kept short and explicit; a test asserts the whole non-English block
+#: of :data:`OPERATOR_TERMS` is covered, so a new entry cannot slip through silently.
+_ARABIZI_WITHOUT_DIGITS: frozenset[str] = frozenset({"akbar men", "aw aktar"})
+
+
+def needs_english_fold(term: str) -> bool:
+    """True when a comparison phrase is invisible to an English-only reader.
+
+    Two shapes qualify. Arabic script is deleted outright by any normaliser that
+    keeps only ASCII letters. Arabizi survives that normaliser but means nothing
+    to an English vocabulary, because its digits are letters (``ta7t`` is
+    ``below``).
+    """
+    return (
+        not term.isascii()
+        or any(character.isdigit() for character in term)
+        or term in _ARABIZI_WITHOUT_DIGITS
+    )
+
+
+_FOLDABLE_TERMS: tuple[tuple[str, str], ...] = tuple(
+    (term, ENGLISH_COMPARATOR_TERM[comparator])
+    for term, comparator in OPERATOR_TERMS
+    if needs_english_fold(term)
+)
+
+_FOLD_RE = re.compile(
+    "|".join(
+        f"(?P<g{index}>{re.escape(term)})"
+        for index, (term, _english) in enumerate(
+            sorted(_FOLDABLE_TERMS, key=lambda item: -len(item[0]))
+        )
+    ),
+    re.IGNORECASE,
+)
+_FOLD_REPLACEMENTS: dict[str, str] = {
+    f"g{index}": english
+    for index, (_term, english) in enumerate(
+        sorted(_FOLDABLE_TERMS, key=lambda item: -len(item[0]))
+    )
+}
+
+
+def fold_comparisons_to_english(text: str) -> str:
+    """Rewrite Arabic and Arabizi comparison wording as its English equivalent.
+
+    Capability resolution scores a sentence against English capability aliases
+    using a normaliser that keeps only ASCII letters and digits. An Arabic
+    sentence therefore arrived at the scorer as a handful of Latin scraps — the
+    words carrying the comparison had already been deleted — so nothing matched
+    and the resolver returned no candidates at all. Folding the comparison
+    wording first is what lets the same sentence resolve to the same capability
+    in every language the product accepts.
+
+    Only comparison wording is folded. Nothing here decides a threshold, a
+    direction or a capability; it changes the spelling of an operator and
+    nothing else.
+    """
+    if not text:
+        return text
+    # Nothing foldable can be present in plain ASCII letters, because every foldable
+    # entry is either Arabic script or Arabizi, and Arabizi spells its missing sounds
+    # with digits. Checking that first matters more than it looks: capability
+    # resolution normalises every alias of every registered capability each time a
+    # resolver is built, so running the full alternation over thousands of English
+    # phrases put a tenth of a second on every construction.
+    if text.isascii() and not any(character.isdigit() for character in text):
+        lowered = text.casefold()
+        if not any(term in lowered for term in _ARABIZI_WITHOUT_DIGITS):
+            return text
+
+    def _replace(match: re.Match[str]) -> str:
+        group = match.lastgroup or ""
+        return f" {_FOLD_REPLACEMENTS.get(group, match.group(0))} "
+
+    return _FOLD_RE.sub(_replace, text)
+
+
 #: Every symbolic comparison, longest token first so ``>=`` is never read as the
 #: ``>`` inside it. A bare ``=`` is last and deliberately narrow: it must be
 #: surrounded by whitespace and followed by a number, so ``rsi=30`` in a key/value
