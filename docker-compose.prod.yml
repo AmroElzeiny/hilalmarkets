@@ -21,6 +21,11 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      # HTTP/3 runs over QUIC, which is UDP. Caddy listens for it and advertises it in
+      # every response, but without this line the packets never reach the container, so
+      # each browser tries QUIC, waits for a reply that cannot arrive, and falls back to
+      # TCP. Publishing the port is what makes the advertisement true.
+      - "443:443/udp"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
