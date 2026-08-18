@@ -538,6 +538,22 @@ class RedisCircuitStateStore(CircuitStateStore):
         self._cooldown_seconds = cooldown_seconds
         self._unavailable_until = 0.0
 
+    async def aclose(self) -> None:
+        """Release the Redis connection this store holds. Never raises.
+
+        The client and its connection pool bind to the event loop that opened them, so a
+        caller discarding this store between loops must close it here or leak a socket per
+        loop. A failure to close is not worth surfacing: the store is being thrown away.
+        """
+
+        close = getattr(self._client, "aclose", None) or getattr(self._client, "close", None)
+        if close is None:
+            return
+        try:
+            await close()
+        except Exception:  # noqa: BLE001 - discarding a client must not raise
+            logger.warning("circuit_store_close_failed")
+
     def key_for(self, provider: str) -> str:
         # Hashed so a provider name that happens to contain a colon, a space or a URL
         # cannot reshape the key space.

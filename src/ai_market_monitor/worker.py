@@ -242,10 +242,24 @@ async def _run_with_worker_cleanup(coro) -> dict:
     try:
         return await coro
     finally:
-        # Celery prefork workers call these async tasks through short-lived
-        # event loops. asyncpg connections are bound to the loop that created
-        # them, so pooled connections must not survive into the next task loop.
+        # Celery prefork workers call these async tasks through short-lived event loops.
+        # Anything bound to the loop that created it must not survive into the next task.
+        #
+        # This block used to release the database engine alone. The outbound HTTP side has
+        # exactly the same loop affinity — the shared client pool, the circuit breaker's
+        # lock, and the module lock guarding both — and was left behind, so a worker
+        # process served one task and then failed every later one with "Event loop is
+        # closed". Telegram polling surfaced it first only because it runs every five
+        # seconds; scheduled scans reach the market-data and OpenAI providers through the
+        # same pool and were failing identically.
+        #
+        # Both are released here, by module rather than by import, so a task that never
+        # touched one does not pay to load it.
         import sys
+
+        provider_module = sys.modules.get("ai_market_monitor.services.provider_runtime")
+        if provider_module is not None:
+            await provider_module.release_provider_runtime_for_loop()
 
         database_module = sys.modules.get("ai_market_monitor.core.database")
         if database_module is not None:

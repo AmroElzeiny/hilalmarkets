@@ -131,6 +131,47 @@ async def shutdown_provider_runtime() -> None:
     _auth_alerted_at.clear()
 
 
+async def release_provider_runtime_for_loop() -> None:
+    """Drop every loop-bound object so the next event loop builds its own.
+
+    Celery's prefork worker runs each task inside its own ``asyncio.run``. The pool's
+    ``AsyncClient`` objects, the breaker's lock and Redis client, and this module's own
+    ``_lock`` all bind to the loop that first uses them. Surviving into the next task
+    means every later call raises "Event loop is closed" or "bound to a different event
+    loop" — one working task per worker process, then nothing. Telegram polling showed it
+    first only because it runs every five seconds; the scanner's market-data and OpenAI
+    calls go through the same door and fail the same way.
+
+    ``shutdown_provider_runtime`` cannot serve here, and replacing it would be wrong: it
+    takes ``_lock`` to be safe against concurrent callers, and ``_lock`` is the very object
+    that is stale. This path therefore takes no lock. That is correct rather than lax — a
+    prefork worker runs one task at a time, and the loop this runs in is being destroyed.
+
+    ``_auth_alerted_at`` is deliberately left alone. It is a plain dict, not bound to any
+    loop, and clearing it every task would turn a fifteen-minute alert cooldown into an
+    operator message per call — the exact noise that cooldown exists to prevent.
+    """
+
+    global _pool, _breaker, _lock
+    pool, _pool = _pool, None
+    breaker, _breaker = _breaker, None
+    _lock = asyncio.Lock()
+
+    if pool is not None:
+        try:
+            await pool.aclose()
+        except Exception:  # noqa: BLE001 - a dying loop must never fail the task
+            logger.warning("provider_pool_release_failed")
+
+    store = getattr(breaker, "_store", None)
+    store_close = getattr(store, "aclose", None)
+    if store_close is not None:
+        try:
+            await store_close()
+        except Exception:  # noqa: BLE001 - same
+            logger.warning("provider_breaker_release_failed")
+
+
 def _auth_alert(settings: Settings) -> Callable[[str, str, int | None], Awaitable[None]]:
     """Tell an operator that a credential was refused, at most once per cooldown."""
 
