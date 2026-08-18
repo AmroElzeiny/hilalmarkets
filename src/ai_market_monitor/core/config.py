@@ -804,6 +804,24 @@ class Settings(BaseSettings):
     preview_candle_limit: int = Field(default=300, ge=100, le=1000)
     default_near_miss_threshold: int = Field(default=70, ge=1, le=100)
     default_alert_cooldown_seconds: int = Field(default=900, ge=0, le=86400)
+    # --- How long finished scan history is kept ---------------------------------
+    # Scan rows are the fastest-growing thing this product writes: one job per monitor
+    # per interval, and one result per symbol x timeframe x direction inside each job.
+    # Nothing removed them, so the table only ever grew, and the storage a new customer
+    # needs was being spent on evidence of scans nobody can act on any more.
+    #
+    # Deleting a job takes its results and evaluation cycles with it through the existing
+    # CASCADE, and leaves incident records and capability-extension rows intact through
+    # their SET NULL. That is why retention is expressed on the job alone.
+    scan_history_retention_days: int = Field(default=30, ge=1, le=3650)
+    # A queued job whose dispatch message is gone can never run: nothing re-sends it, and
+    # `recover_stale_or_retryable` only rescues queued rows that carry a retry time. Past
+    # this age it is abandoned, not pending, and saying so is what lets retention reach it.
+    # Must stay far above the claim timeout so a job in flight is never mistaken for one.
+    scan_job_abandoned_after_hours: int = Field(default=24, ge=1, le=720)
+    # An upper bound on rows removed per run, so a first run against years of history is a
+    # series of short transactions rather than one long lock on a live table.
+    scan_history_purge_batch: int = Field(default=5000, ge=100, le=100000)
     observability_detail_retention_days: int = Field(default=14, ge=1, le=365)
     observability_lifecycle_retention_days: int = Field(default=730, ge=30, le=3650)
     observability_aggregate_window_days: int = Field(default=30, ge=1, le=365)
@@ -818,6 +836,26 @@ class Settings(BaseSettings):
         if len(value.get_secret_value()) < 32:
             raise ValueError("APP_SECRET_KEY must contain at least 32 characters")
         return value
+
+    @model_validator(mode="after")
+    def validate_scan_retention_bounds(self) -> "Settings":
+        """Refuse a pair of windows that would expire work still legitimately in flight.
+
+        The two settings are independent knobs with overlapping ranges: the claim timeout
+        may be set as high as a day, and the abandonment window as low as an hour. Nothing
+        in either range is wrong on its own, and the wrong combination fails silently and
+        invisibly — scans that a worker is still allowed to be holding get marked failed,
+        then deleted by the purge, and the monitor simply produces less than it should.
+        Checking the relationship is the only place that combination can be caught.
+        """
+
+        if self.scan_job_abandoned_after_hours * 3600 <= self.scan_job_claim_timeout_seconds:
+            raise ValueError(
+                "SCAN_JOB_ABANDONED_AFTER_HOURS must be longer than "
+                "SCAN_JOB_CLAIM_TIMEOUT_SECONDS, otherwise scan cleanup would expire "
+                "jobs a worker is still permitted to be running"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_capability_extension_bounds(self) -> "Settings":

@@ -28,6 +28,13 @@ app.conf.update(
     enable_utc=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    # structlog writes to stdout, and Celery captures stdout into its own logger. That
+    # capture defaults to WARNING, so every *successful* provider call was arriving in the
+    # log stamped as a warning while its own payload said `"level": "info"`. Two costs: a
+    # real warning became impossible to pick out, and `--loglevel=WARNING` — the obvious
+    # way to quieten a busy scanner — would have hidden nothing at all. INFO here lets the
+    # severity the application chose survive the trip.
+    worker_redirect_stdouts_level="INFO",
     beat_schedule={
         "evaluate-due-trial-cycles-every-hour": {
             "task": "ai_market_monitor.evaluate_due_trial_cycles",
@@ -89,6 +96,13 @@ app.conf.update(
         "recover-stale-scan-jobs-every-five-minutes": {
             "task": "ai_market_monitor.recover_stale_scan_jobs",
             "schedule": 5 * 60,
+        },
+        # Runs whether or not scanning is enabled. History left behind by a monitor that
+        # has since been paused still occupies the disk a working monitor needs, and a
+        # deployment with scanning switched off is exactly where it would pile up unseen.
+        "cleanup-scan-history-nightly": {
+            "task": "ai_market_monitor.cleanup_scan_history",
+            "schedule": 24 * 60 * 60,
         },
         "expire-setup-instances-every-minute": {
             "task": "ai_market_monitor.expire_setup_instances",
@@ -440,6 +454,11 @@ def evaluate_strategy_health() -> dict:
 @app.task(name="ai_market_monitor.aggregate_setup_observability")
 def aggregate_setup_observability() -> dict:
     return _run_async_task(_aggregate_setup_observability())
+
+
+@app.task(name="ai_market_monitor.cleanup_scan_history")
+def cleanup_scan_history() -> dict:
+    return _run_async_task(_cleanup_scan_history())
 
 
 @app.task(name="ai_market_monitor.cleanup_setup_observability")
@@ -1702,6 +1721,25 @@ async def _aggregate_setup_observability() -> dict:
             await service.aggregate_version(strategy, version)
         await session.commit()
         return {"aggregated_versions": len(rows)}
+
+
+async def _cleanup_scan_history() -> dict:
+    """Delete scan history the product no longer needs.
+
+    Deliberately not gated on ``scanning_enabled``. Every other scan task returns early
+    when scanning is off, because there is no work to schedule or run. Cleanup is the
+    opposite case: with scanning off, nothing is trimming a table that is already full,
+    and the operator most likely to run out of disk is the one who paused everything and
+    stopped looking.
+    """
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.scan_retention import ScanRetentionService
+
+    async with SessionFactory() as session:
+        result = await ScanRetentionService(session, settings).run()
+        await session.commit()
+    return result
 
 
 async def _cleanup_setup_observability() -> dict:

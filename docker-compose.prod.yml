@@ -1,5 +1,16 @@
-x-tracedge-env: &tracedge_env
+﻿x-tracedge-env: &tracedge_env
   - ${TRACEDGE_ENV_FILE:-.env.production}
+
+# Docker's json-file driver never rotates on its own: a container's log grows until the
+# disk is full. The scanner writes a line per provider call, so a busy day across an
+# approved universe is the workload most able to fill it, and a full disk stops
+# PostgreSQL writing - which turns a logging default into an outage. Every service caps
+# and rotates, so the worst case is bounded at max-size x max-file per container.
+x-logging: &default_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
 
 # Public analytics identifiers are pinned here so a stale secret file cannot
 # re-enable the retired direct-GA integration in a production container.
@@ -13,6 +24,7 @@ x-public-analytics-env: &public_analytics_env
 
 services:
   caddy:
+    logging: *default_logging
     image: caddy:2.8-alpine
     restart: unless-stopped
     depends_on:
@@ -32,6 +44,7 @@ services:
       - caddy_config:/config
 
   api:
+    logging: *default_logging
     build: .
     restart: unless-stopped
     env_file: *tracedge_env
@@ -64,6 +77,7 @@ services:
       - exports_data:/app/exports
 
   worker:
+    logging: *default_logging
     build: .
     restart: unless-stopped
     env_file: *tracedge_env
@@ -80,6 +94,7 @@ services:
       - exports_data:/app/exports
 
   scheduler:
+    logging: *default_logging
     build: .
     restart: unless-stopped
     env_file: *tracedge_env
@@ -96,6 +111,7 @@ services:
       - exports_data:/app/exports
 
   db:
+    logging: *default_logging
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -111,6 +127,7 @@ services:
       retries: 10
 
   redis:
+    logging: *default_logging
     image: redis:7-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
