@@ -132,7 +132,7 @@ class AlertEmailRenderer:
             text_body=text_body,
             html_body=self.frame.shell(
                 title=presentation.title,
-                eyebrow=kind.label,
+                eyebrow=kind.category,
                 preheader=_first_sentence(presentation.body),
                 content_html=content,
                 footer_reason=(
@@ -206,7 +206,7 @@ class AlertEmailRenderer:
             text_body=text_body,
             html_body=self.frame.shell(
                 title=f"{presentation.symbol}: {kind.label.lower()}",
-                eyebrow=kind.label,
+                eyebrow=kind.category,
                 preheader=kind.meaning,
                 content_html=content,
                 footer_reason=(

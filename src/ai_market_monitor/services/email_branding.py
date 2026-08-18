@@ -14,9 +14,11 @@ clients really support:
 * **No web font may be required.** Geometria and Onest are named first and fall back to
   the system stack, so the words are readable even when neither loads — which is most of
   the time.
-* **It has to read with images switched off.** Nothing here is an image. Status is a
-  coloured band *plus* a word *plus* a plain-text mark, so switching images off, or
-  being unable to see the colour, costs nothing.
+* **It has to read with images switched off.** The header logo is the only picture in
+  the whole design, and it carries ``alt="Hilal Markets"`` styled to look like the
+  wordmark, so a blocked image still shows the brand name. Nothing else is an image:
+  status is a coloured band *plus* a word *plus* a plain-text mark, so switching images
+  off, or being unable to see the colour, costs nothing.
 * **Dark mode must not eat the text.** Every cell paints its own background *and* its
   own colour, so a client that recolours the page cannot leave dark text on dark.
 * **A phone is the common case.** One column, 16px body text, and a button tall enough
@@ -63,6 +65,11 @@ HAIRLINE_STRONG = "#d0d6de"
 APPLE = "#cbfa4d"
 APPLE_SOFT = "#f1fadf"
 APPLE_DEEP = "#55712a"
+#: One step up from the header's near-black, for the chip that names the kind of message.
+#: Apple green measures 8.8:1 on it, so the words in the chip are readable; the chip
+#: itself is only just lighter than the header, which is what makes it read as a label
+#: rather than as a second block of colour.
+INK_RAISED = "#3a3e47"
 
 #: Status colours. Each is paired with a tinted background and a plain-text mark, never
 #: used alone. `brand guide.md` section 10: brand colour and product status stay
@@ -84,6 +91,46 @@ BODY_FONT = "Onest, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
 _P = f"margin:0 0 16px;color:{COPY};font-size:16px;line-height:1.7"
 _SMALL = f"margin:0;color:{COPY};font-size:13px;line-height:1.65"
 
+# ── The logo in the header ───────────────────────────────────────────────────
+#
+# The white Hilal Markets logo, the same mark the website and the dashboard show. It is
+# a PNG because no mail client draws an SVG, and it is *built from* the site's own
+# `hilal-markets-logo.svg` by `scripts/build_email_logo.py` rather than redrawn, so the
+# two can never end up being different logos.
+#
+# It is served from the public site, like every button in every email already is. If a
+# reader blocks pictures — which is the normal setting in Outlook — the `alt` text is
+# styled to look like the wordmark, so the header still says Hilal Markets in white.
+
+EMAIL_LOGO_PATH = "/static/email/hilal-markets-logo-white.png"
+EMAIL_LOGO_WIDTH = 178
+EMAIL_LOGO_HEIGHT = 28
+
+#: What kind of message this is, for the chip in the top-right of the header.
+#:
+#: An email whose body is written somewhere else arrives through ``send_transactional``,
+#: which knows only its ``purpose``. One table here turns that into words a reader
+#: understands, so those emails say what they are in the same place as every other one.
+#: A purpose that is not listed simply gets no chip — never an invented label.
+MESSAGE_KIND_BY_PURPOSE: dict[str, str] = {
+    "account_access_changed": "Your account",
+    "account_notice": "Your account",
+    "alert": "Market alert",
+    "connection_test": "Test message",
+    "operational_alert": "Platform notice",
+    "payment_success": "Billing",
+    "public_contact_office": "Contact form",
+    "public_inquiry_customer": "Support",
+    "public_inquiry_office": "Support",
+    "support_ticket": "Support ticket",
+}
+
+
+def message_kind_label(purpose: str | None) -> str | None:
+    """The words the header chip shows for a delivery purpose, or nothing."""
+
+    return MESSAGE_KIND_BY_PURPOSE.get((purpose or "").strip())
+
 
 def _e(value: Any) -> str:
     """Escape anything on its way into the markup. Every value passes through this."""
@@ -100,6 +147,16 @@ def _attr(value: Any) -> str:
 
 def paragraph(text: str) -> str:
     return f'<p style="{_P}">{_e(text)}</p>'
+
+
+def greeting_line(text: str) -> str:
+    """The line that opens a message written to one person, by name.
+
+    Three templates wrote this bold paragraph out by hand. One owner, because that is
+    exactly how the receipt ended up a slightly different shade of the same thing.
+    """
+
+    return f'<p style="{_P}"><strong style="color:{INK}">{_e(text)}</strong></p>'
 
 
 def lead(text: str) -> str:
@@ -287,6 +344,27 @@ def plain_text_block(text: str) -> str:
     )
 
 
+def link_row(links: Sequence[EmailLink]) -> str:
+    """The smaller places to go, under the one clear action.
+
+    A second and third button competes with the first one; a bare line of addresses is
+    unreadable. So the extra destinations are named links on one line, and they wrap on
+    a phone instead of pushing the card sideways.
+    """
+
+    if not links:
+        return ""
+    separator = f'<span style="color:{HAIRLINE_STRONG}">&nbsp;&nbsp;•&nbsp;&nbsp;</span>'
+    rendered = separator.join(
+        f'<a href="{_attr(link.url)}" style="color:{APPLE_DEEP};font-weight:700;'
+        f'text-decoration:none;white-space:nowrap">{_e(link.label)}</a>'
+        for link in links
+    )
+    return (
+        f'<p style="margin:0 0 4px;font-size:14px;line-height:2">{rendered}</p>'
+    )
+
+
 def note(text: str) -> str:
     """A quiet line under the main content. Still 13px and still 7.5:1 on white."""
 
@@ -314,6 +392,7 @@ class HilalMarketsEmailRenderer:
         subject: str,
         html_body: str,
         preheader: str | None = None,
+        eyebrow: str | None = None,
     ) -> str:
         if EMAIL_SHELL_MARKER in html_body:
             return html_body
@@ -321,6 +400,48 @@ class HilalMarketsEmailRenderer:
             title=subject,
             preheader=preheader or subject,
             content_html=html_body,
+            eyebrow=eyebrow,
+        )
+
+    def logo(self) -> str:
+        """The white wordmark, and what a reader sees when pictures are blocked.
+
+        The `alt` text is styled, not left bare. Outlook blocks pictures by default, and
+        an unstyled `alt` in a near-black header is near-black text on near-black — the
+        header would look empty. Styled, a blocked picture still reads "Hilal Markets"
+        in white, in the brand's own display face.
+        """
+
+        base_url = str(self.settings.public_base_url).rstrip("/")
+        return (
+            f'<img src="{_attr(base_url + EMAIL_LOGO_PATH)}" alt="Hilal Markets" '
+            f'width="{EMAIL_LOGO_WIDTH}" height="{EMAIL_LOGO_HEIGHT}" '
+            f'style="display:block;width:{EMAIL_LOGO_WIDTH}px;'
+            f'height:{EMAIL_LOGO_HEIGHT}px;border:0;outline:none;text-decoration:none;'
+            f'color:{SURFACE};font-family:{DISPLAY_FONT};font-size:19px;font-weight:700;'
+            f'letter-spacing:-.02em;line-height:{EMAIL_LOGO_HEIGHT}px">'
+        )
+
+    def kind_chip(self, label: str) -> str:
+        """What kind of message this is, in the top-right of the header.
+
+        It replaces a decorative shape that sat there and meant nothing. A reader with
+        nine Hilal Markets emails in an inbox can now tell a sign-in code from a market
+        alert from a receipt before reading a single word of the message.
+
+        A table rather than a styled `span`, because the Outlook desktop clients render
+        with Word and ignore padding on inline elements — the words would touch the edge
+        of the chip. Word also ignores the rounded corner, which costs nothing: the chip
+        is then a square tag, and still a tag.
+        """
+
+        return (
+            '<table role="presentation" cellspacing="0" cellpadding="0" '
+            'style="border-collapse:separate"><tr>'
+            f'<td style="padding:7px 14px;border-radius:999px;background:{INK_RAISED};'
+            f'color:{APPLE};font-family:{BODY_FONT};font-size:12px;font-weight:700;'
+            f'letter-spacing:.04em;line-height:1;white-space:nowrap">{_e(label)}</td>'
+            "</tr></table>"
         )
 
     def shell(
@@ -334,8 +455,9 @@ class HilalMarketsEmailRenderer:
     ) -> str:
         """The frame every email shares.
 
-        `eyebrow` names what kind of message this is above the title, so somebody can
-        tell a market alert from an account notice before reading a word of the body.
+        `eyebrow` names what kind of message this is. It is shown as a chip in the
+        top-right of the header, opposite the logo, so somebody can tell a market alert
+        from an account notice before reading a word of the body.
 
         `footer_reason` says *why this arrived and how to stop it*. It is part of the
         frame rather than left to each template, because an email that does not say why
@@ -349,12 +471,7 @@ class HilalMarketsEmailRenderer:
             "You are receiving this because you have a Hilal Markets account. "
             "You can change which messages you receive in your dashboard."
         )
-        eyebrow_html = (
-            f'<div style="margin:0 0 10px;color:{APPLE};font-family:{BODY_FONT};'
-            f'font-size:12px;font-weight:500;letter-spacing:.06em">{_e(eyebrow)}</div>'
-            if eyebrow
-            else ""
-        )
+        chip_html = self.kind_chip(eyebrow) if eyebrow else "&nbsp;"
         return (
             "<!doctype html>"
             f'<html lang="en" {EMAIL_SHELL_MARKER}><head>'
@@ -376,21 +493,19 @@ class HilalMarketsEmailRenderer:
             f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" '
             f'style="width:100%;max-width:600px;border-collapse:separate;overflow:hidden;'
             f'border:1px solid {HAIRLINE};border-radius:24px;background:{SURFACE}">'
-            # Header. The one chamfered accent in the whole email lives on the seal
-            # beside the wordmark — `brand guide.md` section 6: at most one clearly
-            # visible chamfer per composition.
-            f'<tr><td style="padding:26px 30px 28px;background:{INK};color:{SURFACE}">'
-            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>'
-            f'<td style="background:{INK}">'
-            f'<div style="color:{SURFACE};font-family:{DISPLAY_FONT};font-size:18px;'
-            'font-weight:700;letter-spacing:-.02em;line-height:1.2">hilal markets</div>'
-            f'<div style="margin-top:5px;color:#cdd2d8;font-size:12px;line-height:1.5">'
-            "Evidence-led crypto monitoring</div></td>"
-            f'<td align="right" style="background:{INK}">'
-            f'<span style="display:inline-block;width:26px;height:26px;background:{APPLE};'
-            'clip-path:polygon(0 0,74% 0,100% 26%,100% 100%,26% 100%,0 74%)"></span>'
-            "</td></tr></table>"
-            f'<div style="margin-top:26px">{eyebrow_html}'
+            # Header: the logo on the left, what kind of message this is on the right.
+            #
+            # Both halves are things a reader uses. What used to sit here was the name
+            # typed out as text, a strapline nobody needed twice, and a green shape that
+            # meant nothing — decoration in the most valuable space in the message.
+            f'<tr><td style="padding:24px 30px 30px;background:{INK};color:{SURFACE}">'
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" '
+            'style="border-collapse:collapse"><tr>'
+            f'<td valign="middle" style="background:{INK};line-height:0">{self.logo()}</td>'
+            f'<td align="right" valign="middle" style="background:{INK};'
+            f'padding-left:12px">{chip_html}</td>'
+            "</tr></table>"
+            f'<div style="margin-top:26px">'
             f'<h1 style="margin:0;color:{SURFACE};font-family:{DISPLAY_FONT};'
             f'font-size:27px;font-weight:500;line-height:1.2">{_e(title)}</h1></div>'
             "</td></tr>"
@@ -403,7 +518,14 @@ class HilalMarketsEmailRenderer:
             "rulings. Nothing in this email is financial advice.<br>"
             f'<a href="{_attr(base_url)}" style="color:{APPLE_DEEP};font-weight:700;'
             f'text-decoration:none">{_e(legal_name)}</a>'
-            "</td></tr></table></td></tr></table></body></html>"
+            # Who sent this, and from where. The receipt used to be the only email that
+            # said it, because it had a frame of its own; now every email does.
+            + (
+                f"<br>{_e(self.settings.site_company_address)}"
+                if self.settings.site_company_address
+                else ""
+            )
+            + "</td></tr></table></td></tr></table></body></html>"
         )
 
     # ── Templates ────────────────────────────────────────────────────────────
@@ -422,11 +544,13 @@ class HilalMarketsEmailRenderer:
         opening this is mid-sign-in with the code already half-typed.
         """
 
+        # The second word of each pair is the header chip: the *kind* of message, in two
+        # or three words, never a sentence and never a repeat of the title beside it.
         titles = {
             "login": ("Your sign-in code", "Sign in"),
             "password_reset": ("Reset your password", "Password reset"),
-            "signup": ("Confirm your email", "Create your account"),
-            "system_brain": ("Your administrator code", "Protected sign-in"),
+            "signup": ("Confirm your email", "New account"),
+            "system_brain": ("Your administrator code", "Administrator"),
         }
         leads = {
             "login": "Use this code to finish signing in.",
@@ -537,7 +661,7 @@ class HilalMarketsEmailRenderer:
             for index, (name, detail) in enumerate(steps, 1)
         )
         content = (
-            f'<p style="{_P}"><strong style="color:{INK}">{_e(greeting)}</strong></p>'
+            greeting_line(greeting)
             + lead("Your account is ready. Here is what to do first.")
             + f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" '
             f'style="margin:0 0 22px;border-collapse:collapse">{rows}</table>'
@@ -651,7 +775,7 @@ class HilalMarketsEmailRenderer:
         )
         dashboard_url = f"{str(self.settings.public_base_url).rstrip('/')}/dashboard"
         content = (
-            f'<p style="{_P}"><strong style="color:{INK}">{_e(greeting)}</strong></p>'
+            greeting_line(greeting)
             + lead("Your access has been updated by our team. The change is active now.")
             + fact_table(rows)
             + paragraph(expiry_line)

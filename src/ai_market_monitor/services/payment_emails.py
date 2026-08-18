@@ -23,6 +23,17 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import IdentityProvider
 from ai_market_monitor.services.billing import billing_provider_capabilities
+from ai_market_monitor.services.email_branding import (
+    EmailLink,
+    HilalMarketsEmailRenderer,
+    button,
+    fact_table,
+    greeting_line,
+    lead,
+    link_row,
+    message_kind_label,
+    note,
+)
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
 
 TEMPLATE_DIRECTORY = Path(__file__).resolve().parents[1] / "templates" / "email"
@@ -40,6 +51,18 @@ class RenderedPaymentEmail:
 
 
 class PaymentEmailRenderer:
+    """The receipt, built from the same blocks as every other Hilal Markets email.
+
+    It used to carry a frame of its own: its own header, its own footer, its own colours
+    and its own font stack, written out inside ``payment_success.html``. That is the
+    failure this codebase keeps repeating — the same decision made twice, in two places,
+    drifting apart. The receipt's own header had already stopped matching the rest, and
+    its type stack asked for Arial where the shared one asks for Onest first.
+
+    So the HTML template is gone and the words are laid out with the shared blocks. The
+    plain-text template stays: plain text has nothing to drift about.
+    """
+
     def __init__(self, settings: Settings):
         self.settings = settings
 
@@ -58,39 +81,106 @@ class PaymentEmailRenderer:
         plan_limits: dict[str, Any],
     ) -> RenderedPaymentEmail:
         base_url = str(self.settings.public_base_url).rstrip("/")
+        # Every value the message shows, worked out once. The HTML and the plain-text
+        # part are then two views of the same facts rather than two calculations of them.
+        display_name = first_name or "there"
+        amount_label = f"{amount:.2f}" if amount is not None else None
+        renewal_label = (
+            _utc_label(period_end_date)
+            if period_end_date and renews_automatically
+            else None
+        )
+        access_until_label = (
+            _utc_label(period_end_date)
+            if period_end_date and not renews_automatically
+            else None
+        )
+        limits = _main_limits(plan_limits)
+        dashboard_url = f"{base_url}/dashboard"
+        create_watch_plan_url = f"{base_url}/dashboard/strategies/new"
+        billing_url = f"{base_url}/dashboard/billing"
+        support_url = f"{base_url}/dashboard/support"
+        terms_url = f"{base_url}/terms"
+        risk_url = f"{base_url}/risk-disclosure"
         context = {
-            "first_name": first_name or "there",
+            "first_name": display_name,
             "plan_name": plan_name,
             "billing_frequency": billing_frequency,
-            "amount": f"{amount:.2f}" if amount is not None else None,
+            "amount": amount_label,
             "currency": currency.upper(),
             "payment_date": _utc_label(payment_date),
-            "renewal_date": (
-                _utc_label(period_end_date)
-                if period_end_date and renews_automatically
-                else None
-            ),
-            "access_until": (
-                _utc_label(period_end_date)
-                if period_end_date and not renews_automatically
-                else None
-            ),
+            "renewal_date": renewal_label,
+            "access_until": access_until_label,
             "renews_automatically": renews_automatically,
             "receipt_url": receipt_url,
-            "limits": _main_limits(plan_limits),
-            "dashboard_url": f"{base_url}/dashboard",
-            "create_watch_plan_url": f"{base_url}/dashboard/strategies/new",
-            "billing_url": f"{base_url}/dashboard/billing",
-            "support_url": f"{base_url}/dashboard/support",
-            "terms_url": f"{base_url}/terms",
-            "risk_url": f"{base_url}/risk-disclosure",
+            "limits": limits,
+            "dashboard_url": dashboard_url,
+            "create_watch_plan_url": create_watch_plan_url,
+            "billing_url": billing_url,
+            "support_url": support_url,
+            "terms_url": terms_url,
+            "risk_url": risk_url,
             "legal_name": self.settings.site_legal_name or "Hilal Markets",
             "company_address": self.settings.site_company_address,
         }
+
+        rows: list[tuple[str, str | EmailLink]] = [
+            ("Plan", plan_name),
+            ("Billing", billing_frequency.title()),
+        ]
+        if amount_label:
+            rows.append(("Amount", f"{amount_label} {currency.upper()}"))
+        rows.append(("Paid", _utc_label(payment_date)))
+        if renewal_label:
+            rows.append(("Next automatic renewal", renewal_label))
+        elif access_until_label:
+            rows.append(("Access through", access_until_label))
+        if receipt_url:
+            rows.append(("Receipt", EmailLink("Open receipt or invoice", receipt_url)))
+
+        limit_rows: list[tuple[str, str | EmailLink]] = [
+            (limit["label"], limit["value"]) for limit in limits
+        ]
+        # Word for word what the receipt already said. The frame changed; the promise
+        # made to somebody who has just paid did not.
+        renewal_sentence = (
+            "Your plan renews automatically under the agreement shown at checkout."
+            if renews_automatically
+            else "This payment provides 30-day access and does not renew automatically."
+        )
+        content = (
+            greeting_line(f"Assalamu Alaikum {display_name},")
+            + lead(
+                f"Your payment has been verified and your {plan_name} access is ready. "
+                "Thank you for trusting Hilal Markets to help you monitor with clarity."
+            )
+            + fact_table(rows)
+            + fact_table(limit_rows, title="Main plan limits")
+            + button("Open Hilal Markets", dashboard_url)
+            + link_row(
+                [
+                    EmailLink("Create a Watchlist", create_watch_plan_url),
+                    EmailLink("Manage billing", billing_url),
+                    EmailLink("Support", support_url),
+                    EmailLink("Terms", terms_url),
+                    EmailLink("Risk Disclosure", risk_url),
+                ]
+            )
+            + note(renewal_sentence)
+        )
         return RenderedPaymentEmail(
             subject=f"Your Hilal Markets {plan_name} plan is active",
             text_body=TEMPLATES.get_template("payment_success.txt").render(**context).strip(),
-            html_body=TEMPLATES.get_template("payment_success.html").render(**context),
+            html_body=HilalMarketsEmailRenderer(self.settings).shell(
+                title=f"Your {plan_name} plan is active",
+                eyebrow=message_kind_label("payment_success"),
+                preheader=f"Payment confirmed. Your {plan_name} plan is active.",
+                content_html=content,
+                footer_reason=(
+                    "You are receiving this because a payment on your Hilal Markets "
+                    f"account was confirmed. {renewal_sentence}"
+                ),
+            ),
         )
 
 

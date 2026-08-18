@@ -185,4 +185,10 @@ async def test_one_time_and_transactional_emails_share_hilalmarkets_brand_shell(
         assert 'data-hm-email-shell="true"' in html_body
         assert "#2b2e35" in html_body
         assert "#cbfa4d" in html_body
-        assert "hilal markets" in html_body
+        # The brand is the logo now, not the name typed out under it. The `alt` is what
+        # a reader sees when the picture is blocked, so it is the thing to check.
+        assert 'alt="Hilal Markets"' in html_body
+        assert "/static/email/hilal-markets-logo-white.png" in html_body
+        # And each one says what kind of message it is, in the header corner.
+        assert "New account" in settings.email_test_outbox[0]["html_body"]
+        assert "Your account" in settings.email_test_outbox[1]["html_body"]

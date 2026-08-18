@@ -564,12 +564,19 @@ class MessageKind:
 
     ``icon`` names an icon in the shared set, so the page and the email agree about
     which picture means which kind.
+
+    ``category`` is the wider family this message belongs to — the two or three words a
+    header chip shows so somebody can sort an inbox at a glance. It is deliberately not
+    the label: the label says what happened to one coin ("Nearly there"), and printing
+    that in the header as well as in the title and in the status band says the same
+    short sentence three times in one screen.
     """
 
     label: str
     meaning: str
     semantic_status: str
     icon: str
+    category: str = "Notice"
 
 
 #: Every kind of message, keyed by the stored `AlertType` value.
@@ -582,42 +589,49 @@ _MESSAGE_KINDS: dict[str, MessageKind] = {
         "A coin you are watching was reviewed again and its screening status moved.",
         "warning",
         "compliance",
+        "Screening",
     ),
     "confirmed": MessageKind(
         "Everything you asked for happened",
         "Every condition on one of your lists became true for a coin.",
         "success",
         "check",
+        "Market alert",
     ),
     "near_miss": MessageKind(
         "Nearly there",
         "A coin came close to everything on your list, but one part was still missing.",
         "warning",
         "spark",
+        "Market alert",
     ),
     "forming": MessageKind(
         "Something started forming",
         "Part of what you asked for became true for a coin.",
         "information",
         "clock",
+        "Market alert",
     ),
     "lifecycle": MessageKind(
         "Something changed",
         "An opportunity you were already watching moved to a different stage.",
         "information",
         "history",
+        "Market alert",
     ),
     "failure": MessageKind(
         "A check could not run",
         "We could not read the market numbers one of your lists needed.",
         "warning",
         "alert",
+        "Market alert",
     ),
     "trial": MessageKind(
         "About your account",
         "Something changed about your plan or your access.",
         "information",
         "user",
+        "Your account",
     ),
 }
 

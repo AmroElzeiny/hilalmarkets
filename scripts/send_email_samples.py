@@ -38,7 +38,11 @@ from ai_market_monitor.services.alert_presentation import (
     AlertConditionPresentation,
     AlertPresentation,
 )
-from ai_market_monitor.services.email_branding import HilalMarketsEmailRenderer
+from ai_market_monitor.services.email_branding import (
+    HilalMarketsEmailRenderer,
+    message_kind_label,
+    plain_text_block,
+)
 from ai_market_monitor.services.email_delivery import AuthEmailService
 from ai_market_monitor.services.payment_emails import PaymentEmailRenderer
 
@@ -78,6 +82,10 @@ class Sample:
     text_body: str
     html_body: str
     purpose: str
+    #: The header chip, for a sample whose body arrives without a frame. The product
+    #: gives those one from their delivery purpose, so a preview without it would show
+    #: a header the real email does not have.
+    eyebrow: str | None = None
 
 
 # ── The sample data every alert is built from ────────────────────────────────
@@ -476,18 +484,20 @@ def _support_samples() -> list[Sample]:
     inquiry.reference = reference  # type: ignore[attr-defined]
 
     samples: list[Sample] = []
-    for recipient_kind, key, what, when in (
+    for recipient_kind, key, what, when, purpose in (
         (
             "customer",
             "support-automatic-reply",
             "Automated support — the reply the person gets",
             "Sent the moment somebody asks for help, before a person has answered.",
+            "public_inquiry_customer",
         ),
         (
             "office",
             "support-office-copy",
             "Automated support — the copy the office gets",
             "Sent to the office at the same time, with everything needed to answer.",
+            "public_inquiry_office",
         ),
     ):
         subject, text, html_body = PublicChatService._render_email(
@@ -504,6 +514,7 @@ def _support_samples() -> list[Sample]:
                 text_body=text,
                 html_body=html_body,
                 purpose=f"sample_{key.replace('-', '_')}",
+                eyebrow=message_kind_label(purpose),
             )
         )
 
@@ -528,6 +539,7 @@ def _support_samples() -> list[Sample]:
             text_body=text,
             html_body=html_body,
             purpose="sample_contact_form",
+            eyebrow=message_kind_label("public_contact_office"),
         )
     )
     return samples
@@ -536,11 +548,11 @@ def _support_samples() -> list[Sample]:
 def _operations_sample(settings: Settings) -> Sample:
     """The page an operator gets when something in the platform stops working.
 
-    Deliberately plain text inside a <pre>. It is read on a phone in the middle of the
-    night and there is nothing about it to style.
+    Deliberately plain: it is read on a phone in the middle of the night and there is
+    nothing about it to style. Plain still means the product's own type, so it uses the
+    shared block rather than a `<pre>` of its own — a `<pre>` is a typeface decision,
+    and this file is not allowed to make one.
     """
-
-    from html import escape
 
     subject = "Hilal Markets alert: market data adapter is failing"
     body = (
@@ -563,7 +575,8 @@ def _operations_sample(settings: Settings) -> Sample:
             HilalMarketsEmailRenderer(settings).ensure_shell(
                 subject=subject,
                 preheader="A component of the platform needs attention.",
-                html_body=f"<pre>{escape(body)}</pre>",
+                html_body=plain_text_block(body),
+                eyebrow=message_kind_label("operational_alert"),
             )
         ),
         purpose="sample_operations_alert",
@@ -574,8 +587,6 @@ def _support_ticket_sample(settings: Settings) -> Sample:
     """The ticket the office receives when somebody reports a problem from the app."""
 
     import json
-
-    from ai_market_monitor.services.email_delivery import _escape_email_text
 
     ticket_id = UUID("00000000-0000-0000-0000-000000007c41")
     user_id = UUID("00000000-0000-0000-0000-00000000c0de")
@@ -600,14 +611,14 @@ def _support_ticket_sample(settings: Settings) -> Sample:
         when_it_is_sent="Sent when somebody reports a problem from inside the app.",
         subject=email_subject,
         text_body=body,
+        # The same block the real sender uses. This sample used to wrap the text in a
+        # `div` of its own, so the preview and the delivered ticket were two different
+        # layouts of the same words.
         html_body=HilalMarketsEmailRenderer(settings).ensure_shell(
             subject=email_subject,
             preheader=f"Support ticket {ticket_id} was created.",
-            html_body=(
-                '<div style="color:#50555e;font-size:14px;line-height:1.7;'
-                'white-space:pre-wrap">'
-                f"{_escape_email_text(body)}</div>"
-            ),
+            html_body=plain_text_block(body),
+            eyebrow=message_kind_label("support_ticket"),
         ),
         purpose="sample_support_ticket",
     )
@@ -635,6 +646,7 @@ def every_sample(settings: Settings) -> list[Sample]:
             html_body=frame.ensure_shell(
                 subject=sample.subject,
                 html_body=sample.html_body,
+                eyebrow=sample.eyebrow,
             ),
             purpose=sample.purpose,
         )

@@ -9,6 +9,7 @@ from uuid import UUID
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.services.email_branding import (
     HilalMarketsEmailRenderer,
+    message_kind_label,
     plain_text_block,
 )
 
@@ -124,6 +125,7 @@ class AuthEmailService:
         html_body = HilalMarketsEmailRenderer(self.settings).ensure_shell(
             subject=email_subject,
             preheader=f"Support ticket {ticket_id} was created.",
+            eyebrow=message_kind_label("support_ticket"),
             # The third of three places that laid out an already-written message by
             # hand. They disagreed about the typeface and the size; now they cannot.
             html_body=plain_text_block(body),
@@ -181,9 +183,13 @@ class AuthEmailService:
         reply_to: str | None = None,
         bcc: list[str] | None = None,
     ) -> str:
+        # A caller that already built the frame keeps its own chip. One that handed over
+        # a bare body gets the chip its purpose names, so no email arrives without
+        # saying what kind of message it is.
         html_body = HilalMarketsEmailRenderer(self.settings).ensure_shell(
             subject=subject,
             html_body=html_body,
+            eyebrow=message_kind_label(purpose),
         )
         message_id = make_msgid(
             idstring=idempotency_key[:48],
