@@ -275,7 +275,7 @@ async def _signup(test_context: dict, email: str) -> None:
 
 async def test_a_healthy_dashboard_renders_no_banner(test_context: dict) -> None:
     await _signup(test_context, "phase5-clean@example.com")
-    page = await test_context["client"].get("/dashboard")
+    page = await test_context["client"].get("/home")
     assert page.status_code == 200
     assert "data-status-banner" not in page.text
 
@@ -287,7 +287,7 @@ async def test_the_dashboard_renders_the_banner_with_both_halves(
 
     await _signup(test_context, "phase5-banner@example.com")
     page = await test_context["client"].get(
-        "/dashboard?force_status_banner=ai_unavailable"
+        "/home?force_status_banner=ai_unavailable"
     )
     assert page.status_code == 200
     assert 'data-status-banner="ai_unavailable"' in page.text

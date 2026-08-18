@@ -177,8 +177,33 @@
     apply(value);
   }
 
+  /* How much room the banner is taking, published for the page to keep clear.
+   *
+   * The banner is fixed to the bottom of the window and nothing reserved space for it,
+   * so on every page it covered the last part of the content until somebody answered
+   * it — on the dashboard home that was the whole "no alert proof yet" panel, and on a
+   * phone it was most of a screen. A page cannot know the height in a stylesheet
+   * because the text wraps differently at every width, so it is measured and published
+   * here, where the banner is shown and hidden.
+   */
+  function publishBannerHeight() {
+    const banner = elements().banner;
+    const showing = Boolean(banner && banner.classList.contains("is-visible"));
+    const height = showing ? Math.ceil(banner.getBoundingClientRect().height) : 0;
+    document.documentElement.style.setProperty(
+      "--hm-cookie-banner-height",
+      height ? `${height}px` : "0px",
+    );
+  }
+
+  function showBanner() {
+    elements().banner?.classList.add("is-visible");
+    publishBannerHeight();
+  }
+
   function hideBanner() {
     elements().banner?.classList.remove("is-visible");
+    publishBannerHeight();
   }
 
   function showModal() {
@@ -208,40 +233,71 @@
     hideModal();
   }
 
+  /* Every consent control, listened for on the document rather than collected once.
+   *
+   * This used to be five `querySelectorAll` loops inside `DOMContentLoaded`, attaching a
+   * handler to each control that existed **at that moment**. It worked, and it worked by
+   * luck: half of this site is drawn by React, from a deferred module script, and the
+   * footer only happens to exist by the time DOMContentLoaded fires because deferred
+   * modules run just before it. Nothing in this codebase asks for that ordering, nothing
+   * documents it, and nothing would report it if it changed — a control that is on the
+   * page and attached to nothing throws no error and logs nothing. It would simply stop
+   * responding, and the first person to find out would be a customer.
+   *
+   * One listener on the document removes the dependency entirely. A control drawn by
+   * React, by a later script, or by a page that has not been written yet is answered the
+   * same way as one that was in the original HTML, because the click is read where it
+   * lands rather than where the element was when the page loaded.
+   */
+  function onDocumentClick(event) {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+
+    const opener = target.closest("[data-cookie-customize], [data-cookie-settings]");
+    if (opener) {
+      // The footer control is a real link with a real address, so the default has to be
+      // stopped when the panel opens in place. Without a script it follows that address
+      // instead, which lands on the Cookie Policy with `settings=1` and opens the same
+      // panel from the branch at the bottom of this file.
+      event.preventDefault();
+      showModal();
+      return;
+    }
+    if (target.closest("[data-cookie-essential]")) {
+      saveAndClose(defaults);
+      return;
+    }
+    if (target.closest("[data-cookie-accept-analytics]")) {
+      saveAndClose({ ...defaults, analytics: true });
+      return;
+    }
+    if (target.closest("[data-cookie-close]")) {
+      hideModal();
+      return;
+    }
+    if (target.closest("[data-cookie-save]")) {
+      const view = elements();
+      saveAndClose({
+        essential: true,
+        analytics: Boolean(view.analytics?.checked),
+        functional: Boolean(view.functional?.checked),
+        marketing: Boolean(view.marketing?.checked),
+      });
+      return;
+    }
+    // A click on the panel's own backdrop, and not on the panel, means "outside".
+    if (target === elements().modal) hideModal();
+  }
+
+  document.addEventListener("click", onDocumentClick);
+
   document.addEventListener("DOMContentLoaded", () => {
     const current = read();
     if (current) apply(current);
-    else elements().banner?.classList.add("is-visible");
+    else showBanner();
+    // The banner rewraps as the window changes, so what it covers changes with it.
+    window.addEventListener("resize", publishBannerHeight, { passive: true });
 
-    document.querySelectorAll("[data-cookie-essential]").forEach((button) => {
-      button.addEventListener("click", () => saveAndClose(defaults));
-    });
-    document.querySelectorAll("[data-cookie-accept-analytics]").forEach((button) => {
-      button.addEventListener("click", () => saveAndClose({ ...defaults, analytics: true }));
-    });
-    document.querySelectorAll("[data-cookie-customize], [data-cookie-settings]").forEach((button) => {
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        showModal();
-      });
-    });
-    document.querySelectorAll("[data-cookie-close]").forEach((button) => {
-      button.addEventListener("click", hideModal);
-    });
-    document.querySelectorAll("[data-cookie-save]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const view = elements();
-        saveAndClose({
-          essential: true,
-          analytics: Boolean(view.analytics?.checked),
-          functional: Boolean(view.functional?.checked),
-          marketing: Boolean(view.marketing?.checked),
-        });
-      });
-    });
-    elements().modal?.addEventListener("click", (event) => {
-      if (event.target === elements().modal) hideModal();
-    });
     if (new URLSearchParams(window.location.search).get("settings") === "1") {
       showModal();
     }

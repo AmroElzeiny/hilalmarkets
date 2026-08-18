@@ -29,12 +29,21 @@
   <meta name="description" content="Hilal Markets - Shariah-screened crypto spot intelligence and guided monitoring.">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260805-y5-5">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260805-y5-5">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260818-live-4">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260818-live-4">
   {% block page_styles %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260805-y5-5">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260805-y5-5">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260805-y5-5">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260818-live-4">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260818-live-4">
+  {#- The shell — the side menu and the topbar — after the sheet it replaces, because it
+      is the one owner of both and nothing above may still be describing them. -#}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260818-live-4">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260818-live-4">
+  {#- A page whose styles must win over the shared dashboard sheets loads them here.
+      `page_styles` above is deliberately kept before them for pages that only add. -#}
+  {% block page_styles_late %}{% endblock %}
+  {% if hilal_chat|default(false) and settings.hilal_chat_enabled %}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260818-live-4">
+  {% endif %}
 </head>
 {#- The page guide's identity is decided on the server, not parsed from the URL. Where one
     route owns two workflows, the mode is part of the key so the right guide is loaded. -#}
@@ -44,7 +53,7 @@
     never open. One route, two workflows, and two files that each named them
     differently. -#}
 {%- set guide_page_key = {
-  'home': 'dashboard-home',
+  'main': 'dashboard-today',
   'screened_market': 'screened-market',
   'asset_passport': 'asset-passport',
   'watchlists': 'watch-plans',
@@ -82,17 +91,32 @@
       </div>
     </main>
   </div>
-  {% include "hilal/dashboard/partials/passport_quick_view.html" %}
+  {#- Which Passport popup this page carries is decided on the server, like the page
+      guide above it. Two dialogs answering to the same hooks would both open. -#}
+  {% set quick_view_variant = passport_quick_view_variant|default('live') %}
+  {% if quick_view_variant == 'live' %}{% include "hilal/dashboard/partials/passport_quick_view.html" %}
+  {% elif quick_view_variant == 'test' %}{% include "hilal/dashboard_test/partials/passport_quick_view.html" %}{% endif %}
+  {#- Hilal, the dashboard assistant. Only where the route asked for it, and only when
+      it is switched on. It is not the public site's support assistant and never
+      appears beside it. -#}
+  {% set hilal_chat_on = hilal_chat|default(false) and settings.hilal_chat_enabled %}
+  {% if hilal_chat_on %}{% include "hilal/dashboard_test/partials/hilal_chat.html" %}{% endif %}
   {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
   {% include "hilal/partials/cookie_banner.html" %}
   <div class="dash-toast" id="dash-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260805-y5-5"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260805-y5-5"></script>
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260805-y5-5"></script>
-  <script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260805-y5-5"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260805-y5-5"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260805-y5-5" defer></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260805-y5-5" defer></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260818-live-4"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260818-live-4"></script>
+  {#- The side menu and the topbar. One owner for their state: `hilalmarkets.js` and
+      `dashboard.js` each used to run their own copy of the minimize logic against the
+      same class, from two different stored values. -#}
+  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260818-live-4"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260818-live-4"></script>
+  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260818-live-4"></script>
+  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260818-live-4"></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260818-live-4"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260818-live-4" defer></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260818-live-4" defer></script>
+  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260818-live-4"></script>{% endif %}
   <script>
     (() => {
       const pageStatus = document.querySelector("[data-page-status]");

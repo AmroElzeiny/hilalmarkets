@@ -255,3 +255,56 @@ def test_ai_operands_are_rebuilt_from_capability_key():
     assert rule.left.field == "close"
     assert rule.right.name == "ema"
     assert rule.right.parameters["period"] == 50
+
+
+def test_every_builder_template_is_a_complete_condition():
+    """condition_template() must never hand back an is_true rule with no operand.
+
+    `default_comparator` defaults to "is_true" registry-wide; a capability that
+    measures a number (a volume filter, an ATR stop, a percent threshold, ...) was
+    never required to override it, because nothing read the field for that kind of
+    capability until this template builder existed. The stale default used to leave
+    `comparator="is_true"` and `right=None` on the template -- a rule with nowhere to
+    put the number a trader would need to supply. Checked over the whole registry,
+    not a hand-picked sample, so a newly registered capability that forgets to declare
+    its own supported_comparators is caught here too.
+    """
+
+    for capability in all_capabilities():
+        template = condition_template(capability)
+        comparator = template["comparator"]
+        assert comparator in {*capability.supported_comparators, capability.default_comparator} or (
+            capability.default_comparator == "is_true" and comparator == "is_false"
+        ), capability.key
+        if comparator in {"is_true", "is_false"}:
+            assert template["right"] is None, capability.key
+        else:
+            assert template["right"] is not None, capability.key
+            assert template["right"]["kind"] == "constant" or "name" in template["right"], (
+                capability.key
+            )
+        # Every template is a real ConditionRule, not just a plausible-looking dict.
+        ConditionRule.model_validate(template)
+
+
+def test_numeric_capability_missing_a_registry_comparator_still_accepts_a_threshold():
+    """The exact reachable failure: a real caller supplying a threshold got refused.
+
+    min_quote_volume_24h never overrode default_comparator/default_threshold because
+    nothing needed a real value from either field until validate_selection actually
+    tried to place a threshold into the template's right-hand operand. Before the
+    fix, that operand was never built (see test above), so this raised
+    "does not accept a numeric threshold" for a plainly numeric capability.
+    """
+
+    rule = CapabilityResolver().validate_selection(
+        capability_key="min_quote_volume_24h",
+        parameters={"threshold": 5_000_000},
+        timeframe="15m",
+        required=True,
+        source_fragment="minimum 24h quote volume of 5,000,000",
+        comparator="gte",
+    )
+    assert rule.comparator.value == "gte"
+    assert rule.right is not None
+    assert rule.right.value == 5_000_000

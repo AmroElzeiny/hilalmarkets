@@ -107,14 +107,14 @@ async def test_observability_api_filter_investigation_and_user_isolation(test_co
     assert missing.status_code == 404
 
     filtered_page = await test_context["client"].get(
-        f"/dashboard/opportunities?monitor={strategy_id}"
+        f"/dashboard/lifecycles?monitor={strategy_id}"
     )
     assert filtered_page.status_code == 200
     assert "SOL Volume Watch" in filtered_page.text
     assert "data-lifecycle-investigate" in filtered_page.text
     assert "Strategy version" not in filtered_page.text
 
-    empty_page = await test_context["client"].get(f"/dashboard/opportunities?monitor={empty_id}")
+    empty_page = await test_context["client"].get(f"/dashboard/lifecycles?monitor={empty_id}")
     assert "No lifecycle records found for this Watchlist." in empty_page.text
 
 
@@ -147,6 +147,6 @@ async def test_successful_delivery_hides_why_no_alert_action(test_context):
             )
         )
         await session.commit()
-    page = await test_context["client"].get("/dashboard/opportunities")
+    page = await test_context["client"].get("/dashboard/lifecycles")
     assert page.status_code == 200
     assert "data-lifecycle-investigate" not in page.text

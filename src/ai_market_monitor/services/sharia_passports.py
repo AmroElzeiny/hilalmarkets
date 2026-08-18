@@ -6,7 +6,9 @@ from uuid import UUID
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.dashboard_paths import LIFECYCLES_PATH
 from ai_market_monitor.db.models import (
     AIAnalysisSnapshot,
     Alert,
@@ -794,7 +796,7 @@ class ShariaPassportReadService:
                 reference_id=row.id,
                 label=f"{row.symbol} · {row.state.value.replace('_', ' ').title()}",
                 event_time=row.last_evaluated_at,
-                url=f"/dashboard/opportunities?setup={row.id}",
+                url=f"{LIFECYCLES_PATH}?setup={row.id}",
                 strategy_version_id=row.strategy_version_id,
             )
             for row in opportunities
@@ -808,13 +810,20 @@ class ShariaPassportReadService:
         markets: list[ExchangeMarket],
     ) -> PassportIdentity:
         if asset is None:
+            # No stored record, so no stored picture — but the catalogue is still
+            # addressable by ticker, and a Passport whose mapping is historical should
+            # not also lose its logo. The templates used to cover this by building the
+            # address themselves; it is answered here now, by the owner.
+            historical = asset_logo(base.assessment.canonical_asset)
             return PassportIdentity(
                 name=base.assessment.asset_name or base.assessment.canonical_asset,
                 symbol=base.assessment.canonical_asset,
                 identity_state="historical_mapping_unavailable",
+                logo_module_url=historical.module_url,
             )
         evidence = dict(asset.mapping_evidence or {})
         aliases = [str(value) for value in evidence.get("aliases", []) if value]
+        logo = asset_logo(asset.symbol, asset.provider_ids)
         return PassportIdentity(
             canonical_asset_id=asset.id,
             name=asset.name,
@@ -826,14 +835,8 @@ class ShariaPassportReadService:
             official_website=asset.official_website,
             official_documentation=asset.official_documentation,
             provider_ids=dict(asset.provider_ids or {}),
-            logo_module_url=(
-                "https://cdn.jsdelivr.net/npm/@web3icons/core@4.0.53/"
-                f"dist/svgs/tokens/branded/{asset.symbol.upper()}.svg.js"
-            ),
-            logo_url=(
-                str((asset.provider_ids or {}).get("logo_url") or "").strip()
-                or None
-            ),
+            logo_module_url=logo.module_url,
+            logo_url=logo.image_url,
             exchange_markets=[
                 PassportExchangeMarket(
                     exchange=row.exchange,

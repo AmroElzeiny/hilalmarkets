@@ -1,0 +1,286 @@
+{% extends "hilal/base_dashboard.html" %}
+{% block page_styles_late %}
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260818-live-4">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-watch-test.css') }}?v=20260818-live-4">
+{% endblock %}
+{% block content %}
+
+{#- The monitors a person watches with.
+
+    Everything on this page answers one of three questions, in this order, because that
+    is the order somebody actually asks them:
+
+      1. Is anything wrong?      -> the banner, and only when something is
+      2. What am I watching?     -> one card per monitor, readable aloud
+      3. What do I do next?      -> one clear action per card, in reach
+
+    The live page opened with four counters, three of which read zero, and none of
+    which answered any of the three. They are gone. What replaced them is a single
+    line that says what is true right now, and it only appears when it has something
+    to say. -#}
+
+<div class="hm-t hm-w" data-watchlists-root
+     data-opportunities-path="{{ opportunities_path }}"
+     data-count-all="{{ watchlists_counts.all }}">
+
+  {#- The way to make a monitor is not drawn here any more. It is a topbar action, so it
+      sits in the same place, at the same size, on every page that offers one — and it is
+      there even when this page is empty, which is exactly when it was missing before. -#}
+  <header class="t-head" data-hm-part="The page heading">
+    <div class="t-head-copy">
+      <p class="t-eyebrow"><span data-icon="radar" data-icon-class="icon-sm"></span>Watching for you</p>
+      <h1>Monitors</h1>
+      <p class="t-lede">A monitor checks the market for you and tells you when what you asked for happens.</p>
+    </div>
+  </header>
+
+  {%- if watchlists %}
+
+  {#- Said once, in a sentence, only when there is something to say. -#}
+  {% if watchlists_counts.attention %}
+  <div class="t-banner w-banner" data-tone="warning" role="status">
+    <span data-icon="alert" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      <strong>{{ watchlists_counts.attention }} {{ 'monitor needs' if watchlists_counts.attention == 1 else 'monitors need' }} a look</strong>
+      <p>Something they rely on is not arriving. Each one says what, on its card below.</p>
+    </div>
+    <button class="t-action w-jump" type="button" data-w-jump>
+      <span data-icon="eye" data-icon-class="icon-sm"></span>Show me
+    </button>
+  </div>
+  {% endif %}
+
+  {#- The filter. Buttons rather than a dropdown: there are four, they each carry a
+      real number, and a person can see all of them at once. Each one is a real
+      pressed-state toggle a screen reader can read. -#}
+  <div class="w-bar" data-hm-part="The filters and the search box">
+    <div class="w-filters" role="group" aria-label="Show which monitors">
+      {% for key, label, glyph in [
+        ('all', 'All', 'list'),
+        ('watching', 'Watching', 'radar'),
+        ('paused', 'Paused', 'pause'),
+        ('unfinished', 'Not finished', 'edit')
+      ] %}
+      {%- set count = watchlists_counts[key] -%}
+      <button class="w-filter" type="button" data-w-filter="{{ key }}"
+              aria-pressed="{{ 'true' if key == 'all' else 'false' }}"
+              {{ 'disabled' if not count and key != 'all' }}>
+        <span data-icon="{{ glyph }}" data-icon-class="icon-sm"></span>
+        <span class="w-filter-label">{{ label }}</span>
+        <span class="w-filter-count">{{ count }}</span>
+      </button>
+      {% endfor %}
+    </div>
+
+    <label class="t-search w-search">
+      <span data-icon="search" data-icon-class="icon"></span>
+      <span class="sr-only">Search your monitors by name</span>
+      <input type="search" placeholder="Search your monitors" data-w-search autocomplete="off">
+    </label>
+  </div>
+
+  <p class="w-said sr-only" data-w-said role="status" aria-live="polite"></p>
+
+  <ul class="w-grid" data-w-grid data-hm-part="Your monitors">
+    {% for item in watchlists %}
+    <li class="w-card" data-w-card
+        data-status="{{ item.status_tone }}"
+        data-bucket="{{ 'paused' if item.is_paused else 'watching' if item.status == 'Watching' else 'unfinished' }}"
+        data-attention="{{ 'true' if item.working.tone in ['warning', 'danger'] else 'false' }}"
+        data-name="{{ item.name|lower }}">
+
+      <div class="w-card-head">
+        <span class="w-mark" data-tone="{{ item.status_tone }}" aria-hidden="true">
+          <span data-icon="radar" data-icon-class="icon"></span>
+        </span>
+        <div class="w-title">
+          <h2>{{ item.name }}</h2>
+          <p class="w-status">
+            <span data-icon="{{ 'check' if item.status == 'Watching' else 'pause' if item.is_paused else 'edit' }}" data-icon-class="icon-sm"></span>
+            <strong>{{ item.status }}</strong>
+            <span>{{ item.status_detail }}</span>
+          </p>
+        </div>
+      </div>
+
+      {% if item.description %}<p class="w-note">{{ item.description }}</p>{% endif %}
+
+      {#- Three facts, each one a whole short sentence. Not a table of labels and
+          numbers a person has to join up themselves. -#}
+      <dl class="w-facts">
+        <div class="w-fact">
+          <dt><span data-icon="coins" data-icon-class="icon-sm"></span>Coins</dt>
+          <dd>
+            {%- if item.watching_count -%}
+              <strong>{{ item.watching_count }}</strong> {{ 'coin' if item.watching_count == 1 else 'coins' }}
+            {%- else -%}
+              <span class="w-none">None yet</span>
+            {%- endif -%}
+          </dd>
+        </div>
+        <div class="w-fact">
+          <dt><span data-icon="shield_check" data-icon-class="icon-sm"></span>Screened by</dt>
+          <dd>{{ item.standard or 'Not chosen yet' }}</dd>
+        </div>
+        <div class="w-fact">
+          <dt><span data-icon="clock" data-icon-class="icon-sm"></span>Last looked</dt>
+          {#- Said the way a person says it. The exact instant is kept in the title, for
+              anybody who needs it, rather than shown to everybody who does not. -#}
+          <dd{% if item.last_checked_exact %} title="{{ item.last_checked_exact|short_dt(user.timezone) }}"{% endif %}>
+            {%- if item.last_checked_exact -%}{{ item.last_checked }}{%- else -%}<span class="w-none">Not yet</span>{%- endif -%}
+          </dd>
+        </div>
+      </dl>
+
+      {#- "Is it working?" — with the honest third answer the live page could not give.
+          It showed a health score out of 100 for a monitor that had never run. -#}
+      <p class="w-working" data-tone="{{ item.working.tone }}">
+        <span data-icon="{{ 'check' if item.working.tone == 'success' else 'clock' if item.working.tone == 'neutral' else 'alert' }}" data-icon-class="icon-sm"></span>
+        <strong>{{ item.working.label }}</strong>
+        <span>{{ item.working.detail }}</span>
+      </p>
+
+      {% if item.holding_back %}
+      <button class="w-holding" type="button"
+              data-w-holding
+              data-name="{{ item.holding_back.name }}"
+              data-share="{{ item.holding_back.share }}">
+        <span data-icon="filter" data-icon-class="icon-sm"></span>
+        <span class="w-holding-copy">
+          <strong>Usually waiting on:</strong> {{ item.holding_back.name }}
+        </span>
+        <span class="w-holding-more" aria-hidden="true">What does this mean?</span>
+      </button>
+      {% endif %}
+
+      <div class="w-actions">
+        <a class="t-action is-primary" href="{{ item.opportunities_url }}">
+          <span data-icon="activity" data-icon-class="icon-sm"></span>See what it found
+        </a>
+        <a class="t-action" href="{{ item.edit_url }}">
+          <span data-icon="settings" data-icon-class="icon-sm"></span>Change it
+        </a>
+
+        {#- Pause and put away both open a question first. The live page used the
+            browser's own confirm box for archiving — unstyled, unbranded, and not
+            something a screen reader announces as a choice. -#}
+        <button class="t-action is-quiet" type="button"
+                data-w-ask="{{ 'resume' if item.is_paused else 'pause' }}"
+                data-name="{{ item.name }}"
+                data-action="/dashboard/monitors/{{ item.id }}/{{ 'resume' if item.is_paused else 'pause' }}">
+          <span data-icon="{{ 'play' if item.is_paused else 'pause' }}" data-icon-class="icon-sm"></span>{{ 'Start again' if item.is_paused else 'Pause' }}
+        </button>
+        <button class="t-action is-quiet" type="button"
+                data-w-ask="archive"
+                data-name="{{ item.name }}"
+                data-action="/dashboard/monitors/{{ item.id }}/delete">
+          <span data-icon="archive" data-icon-class="icon-sm"></span>Put away
+        </button>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+
+  {#- Shown when a search or a filter leaves nothing. Its own state, with its own way
+      out — never an empty page that looks broken. -#}
+  <div class="w-nothing" data-w-nothing hidden>
+    <span class="w-nothing-mark" aria-hidden="true"><span data-icon="search" data-icon-class="icon"></span></span>
+    <h2>No monitor matches that</h2>
+    <p data-w-nothing-text>Try another word, or show all of them again.</p>
+    <button class="t-action is-primary" type="button" data-w-reset>
+      <span data-icon="undo" data-icon-class="icon-sm"></span>Show all
+    </button>
+  </div>
+
+  {%- else -%}
+
+  {#- Nothing yet. Says what a monitor is, shows the two ways to make one, and asks
+      for nothing else. -#}
+  <section class="w-first" data-hm-part="Making your first monitor">
+    <span class="w-first-mark" aria-hidden="true"><span data-icon="radar" data-icon-class="icon"></span></span>
+    <h2>Nothing is being watched yet</h2>
+    <p>Tell Hilal Markets what to look out for, and it checks the market for you and says when it happens. You pick everything; nothing is decided for you.</p>
+    <div class="w-first-ways">
+      <a class="w-way" href="{{ new_watchlist_path }}">
+        <span class="w-way-mark" aria-hidden="true"><span data-icon="chat" data-icon-class="icon"></span></span>
+        <strong>Answer a few questions</strong>
+        <span>The assistant walks you through it, one step at a time.</span>
+        <span class="w-way-go" aria-hidden="true"><span data-icon="arrow" data-icon-class="icon-sm"></span></span>
+      </a>
+      <a class="w-way" href="{{ monitor_path }}">
+        <span class="w-way-mark" aria-hidden="true"><span data-icon="branch" data-icon-class="icon"></span></span>
+        <strong>Draw it on the canvas</strong>
+        <span>Drag cards onto a board and join them up. Nothing is saved until you say so.</span>
+        <span class="w-way-go" aria-hidden="true"><span data-icon="arrow" data-icon-class="icon-sm"></span></span>
+      </a>
+    </div>
+    <a class="w-first-browse" href="{{ market_path }}">
+      <span data-icon="coins" data-icon-class="icon-sm"></span>Or look at which coins passed screening first
+    </a>
+  </section>
+
+  {%- endif %}
+</div>
+
+{#- Asked before pausing or putting a monitor away. One dialog, three wordings, because
+    the question is the same shape every time and three dialogs would be three places
+    to fix the same bug. -#}
+<dialog class="t-dialog w-ask" data-w-dialog aria-labelledby="w-ask-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <h2 id="w-ask-title" data-w-ask-title>Pause this monitor?</h2>
+        <p data-w-ask-body>It stops checking the market. Everything it has found is kept.</p>
+      </div>
+      <button class="t-close" type="button" data-w-ask-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <form class="t-dialog-body" method="post" data-w-ask-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <p class="w-ask-name" data-w-ask-name></p>
+      <footer class="t-dialog-foot">
+        <button class="t-action" type="button" data-w-ask-cancel>Keep it as it is</button>
+        <button class="t-action is-primary" type="submit" data-w-ask-go>
+          <span data-icon="check" data-icon-class="icon-sm"></span><span data-w-ask-go-label>Pause it</span>
+        </button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+
+{#- What "usually waiting on" means, explained where it is asked about rather than in a
+    paragraph nobody reads at the top of the page. -#}
+<dialog class="t-dialog w-explain" data-w-explain aria-labelledby="w-explain-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <span class="t-eyebrow"><span data-icon="filter" data-icon-class="icon-sm"></span>What is holding it back</span>
+        <h2 id="w-explain-title" data-w-explain-title>Usually waiting on</h2>
+      </div>
+      <button class="t-close" type="button" data-w-explain-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <div class="t-dialog-body">
+      <p class="w-explain-lede">Your monitor has several things that all have to be true before it tells you anything. This is the one that is true least often.</p>
+      <div class="w-explain-meter">
+        <div class="w-explain-track"><span class="w-explain-fill" data-w-explain-fill></span></div>
+        <p><strong data-w-explain-share>0%</strong> of the times this monitor looked, this was the thing still missing.</p>
+      </div>
+      <p class="w-explain-note">
+        <span data-icon="info" data-icon-class="icon-sm"></span>
+        This is not advice. It only says which of <em>your own</em> conditions is met least often.
+      </p>
+      <footer class="t-dialog-foot">
+        <button class="t-action" type="button" data-w-explain-cancel>Close</button>
+        <a class="t-action is-primary" data-w-explain-edit href="#">
+          <span data-icon="settings" data-icon-class="icon-sm"></span>Change this monitor
+        </a>
+      </footer>
+    </div>
+  </div>
+</dialog>
+
+{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-watchlists-test.js') }}?v=20260818-live-4"></script>{% endblock %}

@@ -23,7 +23,16 @@
   const SCROLL_REST_TIMEOUT_MS = 700;
   const READY_TIMEOUT_MS = 1200;
   //: The only page a guide may open by itself, and only for a genuinely new account.
-  const HOME_PAGE_KEY = "dashboard-home";
+  //: It follows the front page. When Home was removed and the front page took its place,
+  //: this had to move with it or the one guide that greets a new account would never run
+  //: again.
+  //:
+  //: The front page is called **Main** in the menu. This key still says "today", which is
+  //: what it was called when the guide was written, and it stays that way on purpose:
+  //: whether somebody has already seen a guide is stored under this exact string, so
+  //: renaming it would show the welcome guide a second time to everybody who has already
+  //: finished it. The same goes for the two step targets below.
+  const HOME_PAGE_KEY = "dashboard-today";
 
   // ---------------------------------------------------------------------------
   // Registry. Page key -> guide. `version` is part of the completion key, so a
@@ -31,26 +40,24 @@
   // ---------------------------------------------------------------------------
 
   const GUIDES = {
-    "dashboard-home": {
-      id: "dashboard-home",
-      version: 2,
+    // Main, the front page. It replaced the "dashboard-home" guide when Home was
+    // removed: the three steps that pointed at Home's own counters are gone with the
+    // page, and the two that point at the side menu stayed, because the menu did not go
+    // anywhere and those are the two entries a new account most needs to be shown.
+    "dashboard-today": {
+      id: "dashboard-today",
+      version: 1,
       steps: [
         {
-          target: "home-screened-scope",
-          title: "Your screened market",
-          body: "Every number here counts only assets that passed the published screening methodology. Open the market to see which ones and why.",
+          target: "today-now",
+          title: "What is happening now",
+          body: "One sentence about your own monitors, written fresh each time you arrive. It says what to look at, or that nothing needs you.",
           placement: "bottom",
         },
         {
-          target: "home-compliance-attention",
-          title: "Screening can change",
-          body: "An asset you already watch can stop being eligible. This shows when that happened so you can decide what to do about it.",
-          placement: "bottom",
-        },
-        {
-          target: "home-create-watchlist",
-          title: "Build a Watchlist",
-          body: "Describe the market behaviour you want followed. Hilal Markets turns it into exact rules you review before anything runs.",
+          target: "today-standing",
+          title: "Four numbers, four questions",
+          body: "Each one answers a single question and opens the page behind it. Press the small mark on a number to read what it counts.",
           placement: "bottom",
         },
         // The last three point at the side menu. The engine opens the menu for a target
@@ -62,9 +69,9 @@
           placement: "right",
         },
         {
-          target: "nav-trading-assistant",
-          title: "One check, right now",
-          body: "Ask for a single market check in your own words. It runs once and stops, unlike a Watchlist that keeps watching.",
+          target: "nav-create-monitor",
+          title: "Where you build one",
+          body: "Drag cards onto a board and join them up. Nothing is saved, and nothing is watched, until you say so.",
           placement: "right",
         },
         {
@@ -93,9 +100,11 @@
           placement: "bottom",
         },
         {
+          // Named for what the button says. The page it points at calls this Favorites;
+          // a guide that calls the same control something else is worse than no guide.
           target: "market-saved-assets",
-          title: "My Screened Watchlist",
-          body: "Assets you save for reference. Saving one does not monitor it and does not override the current screening result.",
+          title: "Favorites",
+          body: "Coins you keep for reference. Keeping one does not monitor it and does not change the screening result shown for it.",
           placement: "bottom",
         },
       ],
@@ -207,17 +216,20 @@
       version: 1,
       steps: [
         {
-          target: "integrations-telegram-connect",
-          title: "Alerts on Telegram",
-          body: "Connect Telegram to receive alerts outside the dashboard. The link is per account and can be removed at any time.",
+          // The list, not one button inside it. The page draws one card per way of being
+          // told, from a loop, so a marker on the Telegram button would be a marker
+          // inside a repeating block — it can never be unique, and
+          // `test_markers_are_never_placed_inside_a_repeating_block` says so.
+          target: "integrations-channels",
+          title: "Where we can reach you",
+          body: "One card for each way of being told. Connect Telegram here to hear about a setup outside the dashboard; the link is per account and can be removed at any time.",
           placement: "bottom",
         },
-        {
-          target: "integrations-plan-locked-channel",
-          title: "Some channels need a plan",
-          body: "A delivery channel your plan does not include stays locked here. Your rules still run; only this way of reaching you is unavailable.",
-          placement: "top",
-        },
+        // There used to be a second step here, "Some channels need a plan". The page it
+        // pointed at is gone, and the page that replaced it prints the reason a channel
+        // is locked, and what would unlock it, on the channel itself — in words, in
+        // place, every time. A bubble repeating that from the corner of the screen is a
+        // second copy of an answer that is already in front of the person reading it.
       ],
     },
 

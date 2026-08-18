@@ -46,6 +46,20 @@ class Comparator(StrEnum):
     IS_FALSE = "is_false"
 
 
+#: The comparisons that take no right-hand side, and the ones that need a number.
+#:
+#: Declared beside the enum because that is the only place with no import cycle in
+#: either direction, so every module can share these two groups instead of writing
+#: ``{"is_true", "is_false"}`` again. Six modules held their own copy, and one of them
+#: disagreeing is how a yes/no rule was compiled as ``>= 0``: true for everything.
+UNARY_COMPARATORS: frozenset[str] = frozenset(
+    {Comparator.IS_TRUE.value, Comparator.IS_FALSE.value}
+)
+MEASURED_COMPARATORS: tuple[str, ...] = tuple(
+    item.value for item in Comparator if item.value not in UNARY_COMPARATORS
+)
+
+
 class StrategyDirection(StrEnum):
     LONG = "long"
     SHORT = "short"
@@ -590,7 +604,7 @@ class StrategyDefinition(BaseModel):
                 "parameters": raw.get("parameters", {}),
             }
             right_operand = raw.get("right")
-            if right_operand is None and comparator not in {"is_true", "is_false"}:
+            if right_operand is None and comparator not in UNARY_COMPARATORS:
                 right_operand = {"kind": "constant", "value": threshold}
             children.append(
                 {

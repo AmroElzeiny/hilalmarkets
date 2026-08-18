@@ -33,7 +33,7 @@ from functools import lru_cache
 from typing import Any, Literal
 
 from ai_market_monitor.engine.capabilities import CapabilitySpec, all_capabilities
-from ai_market_monitor.schemas.strategy import Comparator
+from ai_market_monitor.schemas.strategy import UNARY_COMPARATORS, Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
     FormulaKind,
@@ -105,6 +105,12 @@ class BuilderMechanic:
     #: offering a rule that would compile and then never evaluate.
     provider_requirements_met: bool = True
     examples: tuple[str, ...] = field(default_factory=tuple)
+    #: The words a trader would use for this, in their own language — "bb squeeze",
+    #: "quote volume", "rsi above". They come from the capability registry, which is
+    #: the same list the interpreter matches a written sentence against, so searching
+    #: the Builder's own list finds a rule by exactly the words that would have found
+    #: it in a sentence. Never shown; only searched.
+    search_words: tuple[str, ...] = field(default_factory=tuple)
     #: Which of the fields above belong to the capability's own registry schema. The
     #: comparison, the side and the candle size live on the rule itself, not inside the
     #: capability, and putting them in its parameter bag is refused as an invented
@@ -679,17 +685,26 @@ def _capability_mechanic(
     # Some capabilities declare their own `threshold` in the registry schema. Adding a
     # second field with the same name put two boxes on the form for one value, and
     # whichever the person filled in last silently won.
+    measures_a_number = bool(set(spec.supported_comparators) - UNARY_COMPARATORS)
     comparison_fields: list[BuilderParameter] = [
         BuilderParameter(
             name="comparator",
             label="Compare how",
             kind="choice",
             required=True,
-            help="How the measured number is compared with yours.",
+            help=(
+                "How the measured number is compared with yours."
+                if measures_a_number
+                else "Whether this has to happen, or has to not happen."
+            ),
             choices=operators,
         )
     ]
-    if not any(item.name == "threshold" for item in registry_fields):
+    # A yes/no rule has nothing to compare against, so it gets no box to type one in.
+    # The registry could not tell the two apart until it settled the comparison and the
+    # allowed list together, so every rule was offered a "Value" field — including the
+    # 377 that answer yes or no, where anything typed into it could never be used.
+    if measures_a_number and not any(item.name == "threshold" for item in registry_fields):
         comparison_fields.append(
             BuilderParameter(
                 name="threshold",
@@ -734,6 +749,7 @@ def _capability_mechanic(
         beginner_friendly=bool(spec.beginner_friendly),
         provider_requirements_met=providers_met,
         examples=tuple(spec.examples[:2]),
+        search_words=tuple(spec.aliases),
         registry_parameter_names=frozenset(item.name for item in registry_fields),
     )
 

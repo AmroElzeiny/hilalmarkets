@@ -1,0 +1,1277 @@
+/* The visual canvas at /dashboard/monitor.
+ *
+ * Loaded after hm-dashboard-test.css and built on its tokens. Nothing new is
+ * invented here: no colour that is not already in hilalmarkets-brand.css, no second
+ * type family, no spacing step outside --t-1 … --t-7, no radius outside --t-r-*.
+ * The few --m-* values below are *measurements of this board* — how wide a card is,
+ * how far apart two columns sit — not a second design scale.
+ *
+ * `brand guide.md`:
+ *   §9  predominantly white, apple green as one accent, blue only for connectors
+ *       and small details — which is exactly what a wire between two cards is;
+ *   §12 hierarchy from spacing and type before decoration, light borders,
+ *       minimal shadow;
+ *   §15 motion explains a relationship or a change, and never loops for decoration.
+ */
+
+body.hilal-dashboard .hm-m {
+  --m-node-w: 264px;
+  --m-col: 336px;
+  --m-row: 124px;
+  --m-port: 13px;
+  --m-board-h: clamp(440px, 60vh, 700px);
+  --m-inspector-w: 340px;
+}
+
+/* ── Page head ─────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-m .m-head { align-items: flex-start; }
+
+body.hilal-dashboard .hm-m .m-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  padding: var(--t-2) var(--t-4);
+  border: 1px solid var(--t-line-strong);
+  background: var(--t-surface);
+  color: var(--t-copy);
+  font-size: .8rem;
+  font-weight: 500;
+  transition: border-color var(--t-base) var(--t-ease), color var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-saved[data-state="saved"] {
+  border-color: var(--t-accent-pale);
+  color: var(--t-accent-text);
+}
+
+body.hilal-dashboard .hm-m .m-saved .icon-sm { color: inherit; }
+
+body.hilal-dashboard .hm-m .m-universe-banner { align-items: flex-start; }
+
+/* ── The stage: toolbar, board, inspector and readout as one surface ───────── */
+
+body.hilal-dashboard .hm-m .m-stage {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-xl);
+  background: var(--t-surface);
+  box-shadow: var(--hm-shadow-sm);
+}
+
+/* Full screen. A fixed overlay rather than the Fullscreen API: it behaves the same in
+   every browser, keeps Escape meaning one thing, and cannot fail to be granted.
+
+   150 puts the board above the shell — the top bar sits at 50 and the side menu above
+   the page — and deliberately below the three things a person must still be able to
+   see and answer: web notices (190), the toast (200) and the cookie banner (220). A
+   canvas that covered a consent question would be hiding a choice, not filling a
+   screen. */
+body.hilal-dashboard .hm-m .m-stage[data-mode="full"] {
+  position: fixed;
+  z-index: 150;
+  inset: 0;
+  border-radius: 0;
+  border-width: 0;
+  box-shadow: none;
+}
+
+body.hilal-dashboard.m-locked { overflow: hidden; }
+
+body.hilal-dashboard .hm-m .m-stage[data-mode="full"] .m-board { height: auto; flex: 1; }
+
+/* ── Toolbar ───────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-m .m-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-3);
+  padding: var(--t-3) var(--t-4);
+  border-bottom: 1px solid var(--t-line);
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard .hm-m .m-bar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+}
+
+body.hilal-dashboard .hm-m .m-bar-end { margin-inline-start: auto; }
+
+body.hilal-dashboard .hm-m .m-bar .t-action { flex: 0 0 auto; }
+
+body.hilal-dashboard .hm-m .m-bar .t-icon-btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+body.hilal-dashboard .hm-m .m-zoom-value {
+  min-width: 62px;
+  min-height: 40px;
+  padding: 0 var(--t-2);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--t-copy);
+  cursor: pointer;
+  font: inherit;
+  font-size: .8rem;
+  transition: background var(--t-base) var(--t-ease), color var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-zoom-value:hover { background: var(--t-surface); color: var(--t-ink); }
+
+/* ── Board and world ───────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-m .m-work {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+body.hilal-dashboard .hm-m .m-board {
+  position: relative;
+  overflow: hidden;
+  flex: 1;
+  height: var(--m-board-h);
+  /* The dot grid moves and scales with the board, so panning and zooming feel like
+     moving over one surface rather than sliding cards on a static backdrop. */
+  background-color: var(--t-canvas);
+  background-image: radial-gradient(circle at 1px 1px, var(--t-line-strong) 1px, transparent 0);
+  background-position: var(--m-grid-x, 0) var(--m-grid-y, 0);
+  background-size: var(--m-grid, 24px) var(--m-grid, 24px);
+  cursor: grab;
+  touch-action: none;
+  /* Dragging a card or the board itself would otherwise sweep a text selection across
+     every card it passed, leaving the whole board highlighted. The full wording of any
+     card is in its settings panel, which is selectable. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.hilal-dashboard .hm-m .m-board[data-panning="true"] { cursor: grabbing; }
+body.hilal-dashboard .hm-m .m-board:focus-visible { outline-offset: -3px; }
+
+body.hilal-dashboard .hm-m .m-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  translate: var(--m-x, 0) var(--m-y, 0);
+  scale: var(--m-scale, 1);
+}
+
+/* The wires draw underneath the cards and never take a click: a line lying across a
+   card must not stop the card being picked up, and dropping a wire relies on reading
+   what is under the pointer.
+
+   `max-width: none` is the load-bearing line. hilalmarkets.css sets
+   `img, svg { max-width: 100% }` for the whole product, and the world this layer sits
+   in has no width of its own — every card in it is positioned absolutely. So 100% of
+   the parent was 0, the drawing surface was clamped to zero width, and every
+   connector was clipped out of existence: the paths were in the document, correctly
+   placed, correctly coloured, and painted nowhere. The board looked like loose cards
+   with no lines at all. */
+body.hilal-dashboard .hm-m .m-wires {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  width: 4000px;
+  max-width: none;
+  height: 4000px;
+  /* An <svg> with no fill declared computes to pure black, which is not a colour this
+     brand has. Nothing visibly filled here — every wire is a stroked path — so it was
+     invisible, but the page still reported a colour that does not exist in the palette,
+     and the whole-dashboard brand check reads computed values rather than what is
+     drawn. Declared rather than left to the default. */
+  fill: none;
+  pointer-events: none;
+}
+
+/* A wire is the one thing on this board that carries meaning without any words: it
+   says which card feeds which. It was drawn in --t-line-strong, which measures about
+   1.3:1 against the board behind it — a hairline nobody could see, so the board read
+   as loose cards with no relationship at all. --t-copy clears 3:1, which is what a
+   graphic that carries meaning needs. */
+body.hilal-dashboard .hm-m .m-wire {
+  fill: none;
+  stroke: var(--t-copy);
+  stroke-width: 2;
+  stroke-linecap: round;
+  marker-end: url("#m-arrow");
+  transition: stroke var(--t-fast) var(--t-ease), stroke-width var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-arrow-head { fill: var(--t-copy); }
+body.hilal-dashboard .hm-m .m-arrow-head.is-lit { fill: var(--hm-blue); }
+
+/* Blue is reserved by the brand for connectors and small details. It appears here
+   only on the path a person is actually pointing at, which is the one moment the
+   line has something to say. */
+body.hilal-dashboard .hm-m .m-wire[data-lit="true"] {
+  stroke: var(--hm-blue);
+  stroke-width: 3;
+  marker-end: url("#m-arrow-lit");
+}
+
+body.hilal-dashboard .hm-m .m-wire[data-optional="true"] { stroke-dasharray: 5 5; }
+
+/* The wire that is currently being carried. It stays on the board, faded, so a person
+   can see where the line came *from* while they decide where it goes — removing it
+   would make the card look as though it had already been cut. */
+body.hilal-dashboard .hm-m .m-wire[data-carried="true"] {
+  opacity: .25;
+  stroke-dasharray: 4 7;
+  marker-end: none;
+}
+
+/* An invisible, much wider copy of every wire, purely to catch the pointer. The line a
+   person sees is 2px, and 2px is not something anybody can reliably point at. */
+body.hilal-dashboard .hm-m .m-wire-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 20;
+  stroke-linecap: round;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+/* While a line is being dragged the hit copies stand down, so the board underneath is
+   read as empty space — which is what "let go here to cancel" depends on. */
+body.hilal-dashboard .hm-m .m-board[data-linking="true"] .m-wire-hit { pointer-events: none; }
+
+body.hilal-dashboard .hm-m .m-wire-draft {
+  fill: none;
+  stroke: var(--hm-blue);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-dasharray: 7 6;
+  transition: stroke var(--t-fast) var(--t-ease);
+}
+
+/* The draft line says what letting go would do. Solid blue over a card that would take
+   it; muted and finely broken over empty board, where letting go cancels. */
+body.hilal-dashboard .hm-m .m-wire-draft[data-mode="join"] {
+  stroke-dasharray: none;
+  stroke-width: 3;
+}
+
+body.hilal-dashboard .hm-m .m-wire-draft[data-mode="cut"] {
+  stroke: var(--t-muted);
+  stroke-dasharray: 2 8;
+}
+
+/* ── Cancelling one connection ─────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-m .m-cuts {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* Sits on the middle of the line it cancels. Offered only for the line being pointed
+   at or the one into the selected card: a button in the middle of every wire would
+   turn a readable picture into a row of buttons. */
+body.hilal-dashboard .hm-m .m-cut {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-surface);
+  box-shadow: var(--hm-shadow-sm);
+  color: var(--t-copy);
+  opacity: 0;
+  transition:
+    opacity var(--t-fast) var(--t-ease),
+    scale var(--t-fast) var(--t-ease),
+    border-color var(--t-fast) var(--t-ease),
+    background var(--t-fast) var(--t-ease),
+    color var(--t-fast) var(--t-ease);
+  translate: calc(var(--m-nx) - 14px) calc(var(--m-ny) - 14px);
+  scale: .7;
+  pointer-events: none;
+}
+
+body.hilal-dashboard .hm-m .m-cut[data-shown="true"] {
+  opacity: 1;
+  scale: 1;
+  pointer-events: auto;
+}
+
+body.hilal-dashboard .hm-m .m-cut:hover,
+body.hilal-dashboard .hm-m .m-cut:focus-visible {
+  border-color: var(--hm-danger);
+  background: var(--hm-danger-bg);
+  color: var(--hm-danger);
+  scale: 1.12;
+}
+
+/* The visible circle is 28px; the thing a finger has to hit is 44. WCAG 2.2 SC 2.5.8
+   asks for 24, and a target that sits on top of a draggable board wants more. */
+body.hilal-dashboard .hm-m .m-cut::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  translate: -50% -50%;
+}
+
+/* ── The shelf: cards whose connection was cancelled ───────────────────────── */
+
+body.hilal-dashboard .hm-m .m-aside { position: absolute; top: 0; left: 0; }
+
+body.hilal-dashboard .hm-m .m-shelf {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  gap: var(--t-2);
+  align-items: center;
+  padding: var(--t-1) var(--t-3);
+  border: 1px dashed var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-quiet);
+  color: var(--t-muted);
+  font-size: .8125rem;
+  white-space: nowrap;
+  translate: var(--m-nx) var(--m-ny);
+}
+
+/* A set-aside card is not broken and not being watched. Dashed says "not joined";
+   the muted face says "not active"; the pill inside it says so in words. */
+body.hilal-dashboard .hm-m .m-node[data-aside="true"] {
+  border-style: dashed;
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard .hm-m .m-node[data-aside="true"] .m-chip { opacity: .65; }
+
+/* ── Cards ─────────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-m .m-nodes { position: absolute; top: 0; left: 0; }
+
+body.hilal-dashboard .hm-m .m-node {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  width: var(--m-node-w);
+  /* Two columns, not three. Giving the buttons a column of their own left barely a
+     hundred pixels for the words, and every card title broke into three lines. They
+     now share the bottom row with the labels, which is where secondary things belong. */
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--t-2) var(--t-3);
+  padding: var(--t-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  box-shadow: var(--hm-shadow-xs);
+  translate: var(--m-nx, 0) var(--m-ny, 0);
+  transition:
+    translate var(--t-base) var(--t-ease),
+    box-shadow var(--t-base) var(--t-ease),
+    border-color var(--t-base) var(--t-ease),
+    transform var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-node:hover {
+  border-color: var(--t-line-strong);
+  box-shadow: var(--hm-shadow-sm);
+  transform: translateY(-2px);
+}
+
+body.hilal-dashboard .hm-m .m-node:focus-visible { outline-offset: 4px; }
+
+body.hilal-dashboard .hm-m .m-node[aria-selected="true"] {
+  border-color: var(--t-ink);
+  box-shadow: var(--hm-shadow-sm), 0 0 0 3px var(--t-accent-pale);
+}
+
+body.hilal-dashboard .hm-m .m-node.is-dragging {
+  z-index: 3;
+  box-shadow: var(--hm-shadow-md);
+  cursor: grabbing;
+  transition: box-shadow var(--t-fast) var(--t-ease);
+  transform: scale(1.02);
+}
+
+/* A card that cannot run yet is still shown, with the reason. Never hidden, and
+   never quietly replaced by something the platform can run instead. */
+body.hilal-dashboard .hm-m .m-node[data-blocked="true"] {
+  border-color: var(--hm-danger-line);
+  background: var(--hm-danger-bg);
+}
+
+body.hilal-dashboard .hm-m .m-node[data-incomplete="true"] { border-color: var(--hm-warning); }
+
+body.hilal-dashboard .hm-m .m-chip {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--t-r-sm);
+  background: var(--t-quiet);
+  color: var(--t-copy);
+  grid-row: span 2;
+}
+
+body.hilal-dashboard .hm-m .m-chip .icon { width: 18px; height: 18px; }
+body.hilal-dashboard .hm-m .m-node[data-kind="universe"] .m-chip { background: var(--t-accent-pale); color: var(--t-accent-text); }
+body.hilal-dashboard .hm-m .m-node[data-kind="group"] .m-chip { background: var(--hm-neutral-bg); color: var(--t-ink); }
+body.hilal-dashboard .hm-m .m-node[data-kind="alert"] .m-chip { background: var(--hm-info-bg); color: var(--hm-info); }
+
+body.hilal-dashboard .hm-m .m-node-copy { min-width: 0; }
+
+body.hilal-dashboard .hm-m .m-node-kind {
+  display: block;
+  color: var(--t-copy);
+  font-size: .7rem;
+  font-weight: 500;
+  letter-spacing: .04em;
+}
+
+body.hilal-dashboard .hm-m .m-node-title {
+  display: block;
+  color: var(--t-ink-strong);
+  font-family: var(--hm-font-display);
+  font-size: .95rem;
+  font-weight: 500;
+  letter-spacing: -.01em;
+  line-height: 1.3;
+}
+
+/* One sentence. Never two, and never a paragraph: the card has to be readable at a
+   glance from across the board, and the long form lives in the settings panel.
+   Four lines, because the longest sentence the server ships needs four and cutting it
+   at three left a card ending in half a word. */
+body.hilal-dashboard .hm-m .m-node-line {
+  margin-top: var(--t-1);
+  overflow: hidden;
+  color: var(--t-copy);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  font-size: .82rem;
+  line-height: 1.45;
+}
+
+body.hilal-dashboard .hm-m .m-node-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-2);
+  grid-column: 2 / -1;
+}
+
+body.hilal-dashboard .hm-m .m-node-tags {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: var(--t-1);
+}
+
+/* A card is read at a distance and often at less than full size, so its labels are a
+   step smaller than the ones in the page's own body. */
+body.hilal-dashboard .hm-m .m-node-tags .t-pill { padding: 4px 8px; font-size: .68rem; }
+
+body.hilal-dashboard .hm-m .m-node-acts {
+  display: flex;
+  flex: none;
+  gap: var(--t-1);
+  margin-inline-start: auto;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--t-ease);
+}
+
+/* The actions are always in the accessibility tree and always focusable; only their
+   paint is held back until the card is wanted, so the board stays calm. */
+body.hilal-dashboard .hm-m .m-node:hover .m-node-acts,
+body.hilal-dashboard .hm-m .m-node:focus-within .m-node-acts,
+body.hilal-dashboard .hm-m .m-node[aria-selected="true"] .m-node-acts { opacity: 1; }
+
+body.hilal-dashboard .hm-m .m-node-act {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--t-copy);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease), border-color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-node-act .icon-sm { width: 15px; height: 15px; }
+body.hilal-dashboard .hm-m .m-node-act:hover { border-color: var(--t-line-strong); background: var(--t-quiet); color: var(--t-ink); }
+body.hilal-dashboard .hm-m .m-node-act[data-danger="true"]:hover { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); color: var(--hm-danger); }
+
+/* A hint that the whole card can be picked up, not a control of its own — the card
+   itself is the drag surface, and every meaning-carrying action has a real button. */
+body.hilal-dashboard .hm-m .m-grip {
+  position: absolute;
+  top: var(--t-2);
+  inset-inline-start: 50%;
+  display: grid;
+  width: 30px;
+  height: 14px;
+  place-items: center;
+  color: var(--t-line-strong);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+  transition: opacity var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-node:hover .m-grip,
+body.hilal-dashboard .hm-m .m-node:focus-within .m-grip { opacity: 1; }
+body.hilal-dashboard .hm-m .m-grip .icon-sm { width: 16px; height: 12px; }
+
+/* ── Ports: where a wire starts and ends ───────────────────────────────────── */
+
+/* The handle a wire is dragged from.
+   The box is deliberately far bigger than the dot inside it: the dot has to stay
+   small so the board stays calm, and the thing a finger or a mouse has to hit has to
+   stay large. It was a 13px dot with a 13px target, in a grey nobody could see, which
+   is why the wires "could not be dragged" — there was nothing findable to take hold
+   of. WCAG 2.2 SC 2.5.8 asks for 24px; this is 30. */
+body.hilal-dashboard .hm-m .m-port {
+  position: absolute;
+  top: 50%;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  background: none;
+  cursor: crosshair;
+  transform: translateY(-50%);
+}
+
+body.hilal-dashboard .hm-m .m-port::before {
+  content: "";
+  width: var(--m-port);
+  height: var(--m-port);
+  border: 2px solid var(--t-copy);
+  border-radius: 999px;
+  background: var(--t-surface);
+  transition:
+    background var(--t-fast) var(--t-ease),
+    border-color var(--t-fast) var(--t-ease),
+    scale var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-port-in { inset-inline-start: -15px; }
+body.hilal-dashboard .hm-m .m-port-out { inset-inline-end: -15px; }
+
+body.hilal-dashboard .hm-m .m-port:hover::before,
+body.hilal-dashboard .hm-m .m-port:focus-visible::before {
+  border-color: var(--hm-blue);
+  background: var(--hm-blue);
+  scale: 1.5;
+}
+
+/* While a wire is out, every handle stays lit so the next one is easy to aim at. */
+body.hilal-dashboard .hm-m .m-node[data-droppable="true"] .m-port::before {
+  border-color: var(--hm-blue);
+}
+
+/* A card that can take the wire being dragged says so, rather than leaving a person
+   to drop and find out. */
+body.hilal-dashboard .hm-m .m-node[data-droppable="true"] {
+  border-color: var(--hm-blue);
+  box-shadow: 0 0 0 3px var(--hm-info-bg);
+}
+
+body.hilal-dashboard .hm-m .m-node[data-droppable="false"] { opacity: .5; }
+
+/* ── The invitation card, shown while the board is empty ───────────────────── */
+
+body.hilal-dashboard .hm-m .m-invite {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  width: var(--m-node-w);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--t-3);
+  padding: var(--t-5) var(--t-4);
+  border: 1.5px dashed var(--t-line-strong);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  translate: var(--m-nx, 0) var(--m-ny, 0);
+  transition: border-color var(--t-base) var(--t-ease), translate var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-invite:hover { border-color: var(--t-ink); }
+body.hilal-dashboard .hm-m .m-invite h3 { font-family: var(--hm-font-display); font-size: .95rem; }
+body.hilal-dashboard .hm-m .m-invite p { font-size: .82rem; }
+body.hilal-dashboard .hm-m .m-invite .t-action { flex: 0 0 auto; align-self: stretch; }
+
+body.hilal-dashboard .hm-m .m-starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-2);
+  padding-top: var(--t-1);
+}
+
+body.hilal-dashboard .hm-m .m-starter {
+  min-height: 34px;
+  padding: 0 var(--t-3);
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-quiet);
+  color: var(--t-copy);
+  cursor: pointer;
+  font: inherit;
+  font-size: .78rem;
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease), transform var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-starter:hover {
+  border-color: var(--t-ink);
+  background: var(--t-surface);
+  color: var(--t-ink);
+  transform: translateY(-1px);
+}
+
+/* ── Loading, coaching and failure inside the board ────────────────────────── */
+
+body.hilal-dashboard .hm-m .m-load,
+body.hilal-dashboard .hm-m .m-load-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(420px, calc(100% - var(--t-6)));
+  transform: translate(-50%, -50%);
+}
+
+body.hilal-dashboard .hm-m .m-load {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--t-3);
+  padding: var(--t-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  color: var(--t-copy);
+  font-size: .85rem;
+}
+
+body.hilal-dashboard .hm-m .m-load-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--t-accent-text);
+  /* The only repeating movement on the page, and it repeats because the wait itself
+     repeats. It is removed the moment the catalogue arrives. */
+  animation: m-breathe 1.6s var(--t-ease) infinite;
+}
+
+@keyframes m-breathe {
+  0%, 100% { opacity: .35; scale: .7; }
+  50% { opacity: 1; scale: 1; }
+}
+
+/* A message laid over the board, not a surface on it. Left solid it covered a strip
+   across the bottom of the canvas: a card could not be dropped there, the board could
+   not be panned from there, and a wire let go over it read as "over something" rather
+   than over empty space. The one thing inside it that *is* a control takes the pointer
+   back for itself. */
+body.hilal-dashboard .hm-m .m-coach {
+  position: absolute;
+  bottom: var(--t-4);
+  left: 50%;
+  z-index: 4;
+  pointer-events: none;
+  display: flex;
+  max-width: min(520px, calc(100% - var(--t-6)));
+  align-items: center;
+  gap: var(--t-2);
+  padding: var(--t-2) var(--t-4);
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-surface);
+  box-shadow: var(--hm-shadow-sm);
+  color: var(--t-copy);
+  font-size: .8rem;
+  transform: translateX(-50%);
+}
+
+body.hilal-dashboard .hm-m .m-coach .t-action {
+  flex: 0 0 auto;
+  min-height: 30px;
+  font-size: .78rem;
+  pointer-events: auto;
+}
+
+/* ── Inspector ─────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-m .m-inspector {
+  display: flex;
+  overflow: hidden auto;
+  width: var(--m-inspector-w);
+  flex: 0 0 var(--m-inspector-w);
+  flex-direction: column;
+  border-inline-start: 1px solid var(--t-line);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-m .m-inspector-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--t-3);
+  padding: var(--t-4);
+  border-bottom: 1px solid var(--t-line);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-m .m-inspector-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  color: var(--t-copy);
+  font-size: .78rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-m .m-inspector-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-5);
+  padding: var(--t-4);
+}
+
+/* The sentence the person is editing, held at the top of the panel so the effect of
+   every change is visible in the same glance as the control that made it. */
+body.hilal-dashboard .hm-m .m-echo {
+  padding: var(--t-3) var(--t-4);
+  border: 1px solid var(--t-accent-pale);
+  border-radius: var(--t-r-sm);
+  background: var(--t-accent-soft);
+  color: var(--t-ink);
+  font-size: .88rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .hm-m .m-echo small {
+  display: block;
+  margin-bottom: var(--t-1);
+  color: var(--t-accent-text);
+  font-size: .7rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-m .m-field { display: flex; flex-direction: column; gap: var(--t-2); }
+
+body.hilal-dashboard .hm-m .m-field > .m-field-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--t-2);
+  color: var(--t-ink);
+  font-size: .85rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-m .m-field-need {
+  color: var(--t-copy);
+  font-size: .72rem;
+  font-weight: 400;
+}
+
+body.hilal-dashboard .hm-m .m-field-help { color: var(--t-copy); font-size: .78rem; line-height: 1.5; }
+
+body.hilal-dashboard .hm-m .m-choices { display: flex; flex-wrap: wrap; gap: var(--t-2); }
+
+body.hilal-dashboard .hm-m .m-choice {
+  min-height: 40px;
+  padding: 0 var(--t-4);
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-surface);
+  color: var(--t-copy);
+  cursor: pointer;
+  font: inherit;
+  font-size: .82rem;
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease), transform var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-choice:hover { border-color: var(--t-ink); color: var(--t-ink); transform: translateY(-1px); }
+
+body.hilal-dashboard .hm-m .m-choice[aria-pressed="true"] {
+  border-color: var(--t-ink);
+  background: var(--t-ink);
+  color: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-m .m-number {
+  display: flex;
+  align-items: center;
+  gap: var(--t-2);
+  padding-inline-end: var(--t-3);
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-surface);
+  transition: border-color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-number:focus-within { border-color: var(--t-ink); }
+
+body.hilal-dashboard .hm-m .m-number input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--t-4);
+  border: 0;
+  background: transparent;
+  color: var(--t-ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+body.hilal-dashboard .hm-m .m-number input:focus { outline: none; }
+body.hilal-dashboard .hm-m .m-number-unit { flex: none; color: var(--t-copy); font-size: .8rem; }
+
+body.hilal-dashboard .hm-m .m-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--t-4);
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-surface);
+  color: var(--t-ink);
+  font: inherit;
+  font-size: .85rem;
+}
+
+body.hilal-dashboard .hm-m .m-text {
+  width: 100%;
+  min-height: 44px;
+  padding: var(--t-2) var(--t-4);
+  border: 1px solid var(--t-line-strong);
+  border-radius: var(--t-r-sm);
+  background: var(--t-surface);
+  color: var(--t-ink);
+  font: inherit;
+  font-size: .85rem;
+}
+
+body.hilal-dashboard .hm-m .m-field-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-2);
+  color: var(--hm-warning);
+  font-size: .78rem;
+  line-height: 1.45;
+}
+
+body.hilal-dashboard .hm-m .m-field-warn .icon-sm { flex: none; margin-top: 2px; }
+
+body.hilal-dashboard .hm-m .m-inspector-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-2);
+  padding-top: var(--t-3);
+  border-top: 1px solid var(--t-line);
+}
+
+/* ── Checks and readout ────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-m .m-checks {
+  max-height: 210px;
+  overflow: auto;
+  border-top: 1px solid var(--t-line);
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard .hm-m .m-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-2);
+  margin: 0;
+  padding: var(--t-4);
+  list-style: none;
+}
+
+body.hilal-dashboard .hm-m .m-check {
+  display: flex;
+  align-items: center;
+  gap: var(--t-3);
+  padding: var(--t-3) var(--t-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-sm);
+  background: var(--t-surface);
+  font-size: .85rem;
+}
+
+body.hilal-dashboard .hm-m .m-check .icon-sm { flex: none; }
+body.hilal-dashboard .hm-m .m-check[data-tone="pass"] .icon-sm { color: var(--t-accent-text); }
+body.hilal-dashboard .hm-m .m-check[data-tone="warn"] { border-color: var(--hm-warning); }
+body.hilal-dashboard .hm-m .m-check[data-tone="warn"] .icon-sm { color: var(--hm-warning); }
+body.hilal-dashboard .hm-m .m-check[data-tone="stop"] { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); }
+body.hilal-dashboard .hm-m .m-check[data-tone="stop"] .icon-sm { color: var(--hm-danger); }
+body.hilal-dashboard .hm-m .m-check-text { flex: 1; min-width: 0; }
+body.hilal-dashboard .hm-m .m-check .t-action { flex: 0 0 auto; min-height: 34px; font-size: .78rem; }
+
+body.hilal-dashboard .hm-m .m-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-3) var(--t-4);
+  padding: var(--t-3) var(--t-4);
+  border-top: 1px solid var(--t-line);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-m .m-sentence {
+  flex: 1 1 320px;
+  min-width: 0;
+  color: var(--t-ink);
+  font-size: .9rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .hm-m .m-sentence-label {
+  display: block;
+  color: var(--t-copy);
+  font-size: .7rem;
+  font-weight: 500;
+  letter-spacing: .04em;
+}
+
+body.hilal-dashboard .hm-m .m-readout-end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-3);
+  margin-inline-start: auto;
+}
+
+body.hilal-dashboard .hm-m .m-meter { display: inline-flex; align-items: center; gap: var(--t-2); }
+
+body.hilal-dashboard .hm-m .m-meter-track {
+  display: block;
+  overflow: hidden;
+  width: 84px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--hm-neutral-bg);
+}
+
+body.hilal-dashboard .hm-m .m-meter-fill {
+  display: block;
+  width: var(--m-ready, 0%);
+  height: 100%;
+  border-radius: 999px;
+  background: var(--t-muted);
+  transition: width var(--t-base) var(--t-ease), background var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-meter[data-tone="ready"] .m-meter-fill { background: var(--t-accent-text); }
+body.hilal-dashboard .hm-m .m-meter[data-tone="near"] .m-meter-fill { background: var(--hm-warning); }
+body.hilal-dashboard .hm-m .m-meter-text { color: var(--t-copy); font-size: .78rem; font-weight: 500; }
+body.hilal-dashboard .hm-m .m-readout .t-action { flex: 0 0 auto; }
+
+/* ── What happens next ─────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-m .m-next {
+  display: grid;
+  gap: var(--t-3);
+  margin: 0;
+  padding: 0;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  list-style: none;
+}
+
+body.hilal-dashboard .hm-m .m-next-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-2);
+  padding: var(--t-4) var(--t-5);
+}
+
+body.hilal-dashboard .hm-m .m-next-card strong { color: var(--t-ink-strong); font-size: .92rem; font-weight: 500; }
+body.hilal-dashboard .hm-m .m-next-card p { font-size: .84rem; }
+body.hilal-dashboard .hm-m .m-next-card a { color: var(--t-accent-text); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+
+body.hilal-dashboard .hm-m .m-next-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: var(--t-r-sm);
+  background: var(--t-quiet);
+  color: var(--t-copy);
+}
+
+/* ── Condition library ─────────────────────────────────────────────────────── */
+
+body.hilal-dashboard dialog.m-library { width: min(1040px, calc(100vw - 32px)); }
+
+body.hilal-dashboard dialog.m-library .m-lib-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 6px var(--t-5);
+}
+
+/* The magnifier sits in the row, before the box. It was written as an absolutely
+   placed decoration over the input, but the selector reached for `.icon` as a direct
+   child and the icon set puts the drawing one level deeper, so that rule never
+   applied and the icon has always been laid out here in the flow. Written as what it
+   actually is, with the gap it needs. */
+body.hilal-dashboard dialog.m-library .m-lib-search > [data-icon] {
+  display: inline-flex;
+  flex: none;
+  margin-inline-end: 6px;
+  color: var(--hm-copy);
+  pointer-events: none;
+}
+
+body.hilal-dashboard dialog.m-library .m-lib-search > [data-icon] .icon { width: 18px; height: 18px; }
+
+body.hilal-dashboard dialog.m-library .m-lib-search input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--t-5);
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: 999px;
+  background: var(--hm-surface-soft);
+  color: var(--hm-ink);
+  font: inherit;
+  transition: border-color var(--t-base) var(--t-ease), background var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard dialog.m-library .m-lib-search input:focus { border-color: var(--hm-ink); background: var(--hm-surface); }
+
+/* The browser draws its own clear button inside a search box, which sat on top of the
+   page's and read as a doubled cross. The page's own has a label and a focus ring. */
+body.hilal-dashboard dialog.m-library .m-lib-search input::-webkit-search-cancel-button { display: none; }
+body.hilal-dashboard dialog.m-library .m-lib-search .t-icon-btn { position: absolute; inset-inline-end: calc(var(--t-5) + 6px); }
+
+body.hilal-dashboard dialog.m-library .m-lib-body {
+  display: grid;
+  min-height: 0;
+  gap: var(--t-4);
+  grid-template-columns: 190px minmax(0, 1fr) 260px;
+}
+
+body.hilal-dashboard dialog.m-library .m-lib-rail {
+  display: flex;
+  overflow: auto;
+  max-height: 46vh;
+  flex-direction: column;
+  gap: 2px;
+}
+
+body.hilal-dashboard dialog.m-library .m-lib-cat {
+  display: flex;
+  align-items: center;
+  gap: var(--t-2);
+  min-height: 40px;
+  padding: 0 var(--t-3);
+  border: 0;
+  border-radius: var(--t-r-sm);
+  background: transparent;
+  color: var(--hm-copy);
+  cursor: pointer;
+  font: inherit;
+  font-size: .82rem;
+  text-align: start;
+  transition: background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard dialog.m-library .m-lib-cat:hover { background: var(--hm-surface-soft); color: var(--hm-ink); }
+body.hilal-dashboard dialog.m-library .m-lib-cat[aria-pressed="true"] { background: var(--hm-ink); color: var(--hm-surface); }
+body.hilal-dashboard dialog.m-library .m-lib-cat .icon-sm { flex: none; }
+body.hilal-dashboard dialog.m-library .m-lib-cat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.hilal-dashboard dialog.m-library .m-lib-cat-count { flex: none; font-size: .72rem; font-variant-numeric: tabular-nums; opacity: .75; }
+
+body.hilal-dashboard dialog.m-library .m-lib-results { display: flex; min-width: 0; flex-direction: column; gap: var(--t-2); }
+body.hilal-dashboard dialog.m-library .m-lib-count { color: var(--hm-copy); font-size: .78rem; }
+
+body.hilal-dashboard dialog.m-library .m-lib-list {
+  display: flex;
+  overflow: auto;
+  max-height: 42vh;
+  flex-direction: column;
+  gap: var(--t-2);
+  margin: 0;
+  padding: 2px;
+  list-style: none;
+}
+
+body.hilal-dashboard dialog.m-library .m-lib-item {
+  display: grid;
+  width: 100%;
+  gap: 2px var(--t-3);
+  padding: var(--t-3) var(--t-4);
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--t-r-sm);
+  background: var(--hm-surface);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  grid-template-columns: auto 1fr auto;
+  text-align: start;
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease), transform var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard dialog.m-library .m-lib-item:hover { border-color: var(--hm-ink); transform: translateY(-1px); }
+
+body.hilal-dashboard dialog.m-library .m-lib-item[aria-selected="true"] {
+  border-color: var(--hm-ink);
+  background: var(--hm-apple-soft);
+}
+
+body.hilal-dashboard dialog.m-library .m-lib-item .m-chip { width: 30px; height: 30px; grid-row: span 2; }
+body.hilal-dashboard dialog.m-library .m-lib-item .m-chip .icon { width: 16px; height: 16px; }
+body.hilal-dashboard dialog.m-library .m-lib-name { color: var(--hm-ink-strong); font-size: .88rem; font-weight: 500; }
+body.hilal-dashboard dialog.m-library .m-lib-why { grid-column: 2; color: var(--hm-copy); font-size: .8rem; line-height: 1.45; }
+
+body.hilal-dashboard dialog.m-library .m-lib-detail {
+  display: flex;
+  overflow: auto;
+  max-height: 46vh;
+  flex-direction: column;
+  gap: var(--t-3);
+  padding: var(--t-4);
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--t-r-md);
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard dialog.m-library .m-lib-detail h3 { font-family: var(--hm-font-display); font-size: .95rem; }
+body.hilal-dashboard dialog.m-library .m-lib-detail p { font-size: .84rem; }
+
+body.hilal-dashboard dialog.m-library .m-lib-example {
+  padding: var(--t-3);
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--t-r-sm);
+  background: var(--hm-surface);
+  color: var(--hm-copy);
+  font-size: .82rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard dialog.m-library .m-lib-detail-empty { color: var(--hm-copy); font-size: .84rem; }
+body.hilal-dashboard dialog.m-library .m-lib-more { flex: 0 0 auto; align-self: flex-start; }
+
+/* ── Shortcuts ─────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard dialog.m-shortcuts { width: min(560px, calc(100vw - 32px)); }
+
+body.hilal-dashboard dialog.m-shortcuts .m-keys { display: flex; flex-direction: column; gap: var(--t-2); margin: 0; }
+
+body.hilal-dashboard dialog.m-shortcuts .m-keys > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--t-4);
+  padding: var(--t-2) 0;
+  border-bottom: 1px solid var(--hm-hairline);
+}
+
+body.hilal-dashboard dialog.m-shortcuts .m-keys > div:last-child { border-bottom: 0; }
+body.hilal-dashboard dialog.m-shortcuts .m-keys dt { display: flex; flex: none; gap: var(--t-1); align-items: center; margin: 0; }
+body.hilal-dashboard dialog.m-shortcuts .m-keys dd { margin: 0; color: var(--hm-copy); font-size: .85rem; text-align: end; }
+
+/* The gesture list. Its terms are words rather than keys, so they need the weight a
+   <kbd> was giving the ones above, and room to wrap on a narrow dialog. */
+body.hilal-dashboard dialog.m-shortcuts .m-keys-heading {
+  margin: var(--t-5) 0 var(--t-2);
+  font-size: .9rem;
+}
+
+body.hilal-dashboard dialog.m-shortcuts [data-gestures] dt {
+  max-width: 46%;
+  color: var(--hm-ink-strong);
+  font-size: .85rem;
+  font-weight: 600;
+}
+
+body.hilal-dashboard dialog.m-shortcuts kbd {
+  min-width: 26px;
+  padding: 3px 7px;
+  border: 1px solid var(--hm-hairline-strong);
+  border-bottom-width: 2px;
+  border-radius: 7px;
+  background: var(--hm-surface-soft);
+  color: var(--hm-ink);
+  font-family: var(--hm-font-ui);
+  font-size: .74rem;
+  text-align: center;
+}
+
+/* ── Narrower screens ──────────────────────────────────────────────────────── */
+
+@media (max-width: 1080px) {
+  body.hilal-dashboard dialog.m-library .m-lib-body { grid-template-columns: 168px minmax(0, 1fr); }
+  body.hilal-dashboard dialog.m-library .m-lib-detail { display: none; }
+}
+
+@media (max-width: 900px) {
+  body.hilal-dashboard .hm-m { --m-board-h: clamp(380px, 56vh, 560px); }
+
+  /* The settings panel becomes a sheet over the board rather than a column beside
+     it: at this width a 340px column leaves the board too narrow to read. */
+  body.hilal-dashboard .hm-m .m-work { position: relative; }
+
+  body.hilal-dashboard .hm-m .m-inspector {
+    position: absolute;
+    z-index: 5;
+    inset: auto 0 0;
+    width: auto;
+    max-height: 72%;
+    flex: none;
+    border-top: 1px solid var(--t-line);
+    border-inline-start: 0;
+    border-radius: var(--t-r-lg) var(--t-r-lg) 0 0;
+    box-shadow: var(--hm-shadow-md);
+  }
+
+  /* The toolbar wraps rather than dropping controls. Hiding the zoom group took
+     "fit everything on screen" away on exactly the screens that need it most. */
+  body.hilal-dashboard .hm-m .m-bar { gap: var(--t-2); padding: var(--t-2) var(--t-3); }
+  body.hilal-dashboard .hm-m .m-bar-end { margin-inline-start: 0; }
+}
+
+@media (max-width: 620px) {
+  body.hilal-dashboard dialog.m-library .m-lib-body { grid-template-columns: minmax(0, 1fr); }
+  body.hilal-dashboard dialog.m-library .m-lib-rail { max-height: none; flex-direction: row; overflow-x: auto; padding-bottom: var(--t-1); }
+  body.hilal-dashboard dialog.m-library .m-lib-cat { flex: 0 0 auto; }
+  body.hilal-dashboard .hm-m .m-readout-end { margin-inline-start: 0; }
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────────── */
+
+/* hilalmarkets-brand.css already shortens every transition and animation to nothing.
+   What it cannot do is remove a movement whose *only* purpose is decoration, so the
+   two that would still read as motion are stopped outright here. */
+@media (prefers-reduced-motion: reduce) {
+  body.hilal-dashboard .hm-m .m-load-dot { animation: none; opacity: 1; scale: 1; }
+  body.hilal-dashboard .hm-m .m-node:hover,
+  body.hilal-dashboard .hm-m .m-starter:hover,
+  body.hilal-dashboard .hm-m .m-choice:hover,
+  body.hilal-dashboard dialog.m-library .m-lib-item:hover { transform: none; }
+}

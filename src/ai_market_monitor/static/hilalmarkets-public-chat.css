@@ -22,7 +22,11 @@
 }
 .public-chat-launcher.was-opened{animation:none}
 .public-chat-launcher:hover{transform:translateY(-3px);background:var(--hm-chat-apple-soft);box-shadow:0 24px 54px -20px rgba(43,46,53,.78)}
-.public-chat-launcher:focus-visible{outline:3px solid var(--hm-chat-ink);outline-offset:4px}
+/* The product's one focus indicator, not a fourth one of this widget's own. The
+   launcher sits on an apple-green circle, so the halo would vanish against it; the
+   surface behind the ring keeps it readable while the ring itself stays the same
+   near-black every other control on the site draws. */
+.public-chat-launcher:focus-visible{outline:var(--hm-focus-ring)!important;outline-offset:4px;box-shadow:0 0 0 7px #fff!important}
 .public-chat-launcher::after{
   position:absolute;right:calc(100% + 10px);top:50%;padding:8px 11px;border-radius:10px;
   background:var(--hm-chat-ink);color:#fff;content:attr(data-tooltip);font:500 .74rem/1 'Onest',sans-serif;
@@ -32,8 +36,16 @@
 .public-chat-launcher:hover::after,.public-chat-launcher:focus-visible::after{opacity:1;transform:translate(0,-50%)}
 .public-chat-launcher>*{pointer-events:none}
 .public-chat-launcher-icon,.public-chat-brand-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:50%}
-.public-chat-launcher-icon{background:rgba(43,46,53,.08)}
-.public-chat-launcher .icon{width:20px;height:20px}
+/* The star sits straight on the green circle, with no grey disc behind it.
+   A second circle inside the first one was a ring around a mark that was already the
+   only thing in the button, and the dashboard's assistant never had one — so the same
+   helper wore two different faces. The star is the face now, on both. */
+/* Both assistants draw the star at 48 per cent of their button, so the public site and
+   the dashboard show one mark at one size rather than two that happen to be close.
+   56px x 0.48 here, 60px x 0.48 in hm-hilal-chat.css. `place-items:center` above and on
+   the button itself puts it in the middle on both axes; the star is drawn in the middle
+   of its own 24-unit box as well, which was measured rather than assumed. */
+.public-chat-launcher .icon{width:27px;height:27px}
 
 .public-chat-backdrop{position:fixed;inset:0;z-index:445;background:rgba(43,46,53,.3);opacity:0;backdrop-filter:blur(2px);transition:opacity 190ms ease}
 .public-chat-backdrop.is-open{opacity:1}
@@ -60,7 +72,10 @@
 .public-chat-brand p{margin:0;color:#c7ced4;font-size:.75rem;line-height:1.35}
 .public-chat-close{display:grid;place-items:center;width:40px;height:40px;flex:0 0 auto;border:1px solid rgba(255,255,255,.12);border-radius:50%;background:rgba(255,255,255,.08);color:#fff;cursor:pointer;transition:background 180ms ease,transform 180ms ease}
 .public-chat-close:hover{background:rgba(255,255,255,.16);transform:rotate(4deg)}
-.public-chat-close:focus-visible,.public-chat-head-action:focus-visible{outline:2px solid var(--hm-chat-apple);outline-offset:2px}
+/* These two sit on the dark chat header, so the rings are the other way round from the
+   rest of the product: apple green against near-black. The dark halo behind it is what
+   keeps the indicator visible if this button is ever placed on a light surface. */
+.public-chat-close:focus-visible,.public-chat-head-action:focus-visible{outline:3px solid var(--hm-chat-apple);outline-offset:2px;box-shadow:0 0 0 6px var(--hm-chat-ink)}
 
 .public-chat-connectivity{position:absolute;z-index:3;top:78px;left:14px;right:14px;padding:10px 12px;border:1px solid #dbc67d;border-radius:12px;background:#fff8dc;color:#5d4b19;box-shadow:0 14px 30px -24px rgba(43,46,53,.6);font-size:.75rem;font-weight:600;text-align:center}
 .public-chat-body{min-height:0;overflow:hidden}

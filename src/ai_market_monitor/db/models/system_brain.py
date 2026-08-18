@@ -456,3 +456,37 @@ class RepositoryEvidenceIndex(UUIDPrimaryKeyMixin, Base):
         String(32), default="internal", nullable=False
     )
     indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+class ReviewActionBatch(UUIDPrimaryKeyMixin, Base):
+    """One quick decision taken over several cases at once, and the way back from it.
+
+    The Cases page lets a reviewer select several cases and record one decision on all of
+    them. That is a real convenience and also a real way to make a mistake on ten cases
+    instead of one, so every batch writes down what each case looked like **before** it
+    was touched. Undo reads that, and only that.
+
+    Undo is not a delete. Nothing here removes a recorded decision: the earlier decision
+    stays in the review history for ever, and undoing writes a further recorded action
+    that puts the case back where it was. A governance trail that could be erased would
+    not be a governance trail.
+    """
+
+    __tablename__ = "review_action_batches"
+    __table_args__ = (
+        Index("ix_review_batch_actor_created", "actor_user_id", "created_at"),
+    )
+
+    actor_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    #: ``approve`` or ``reject``. The two quick decisions the page offers.
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    #: One entry per selected case: its id, what happened, and the state it came from.
+    #: The state is what Undo restores; without it an undo would have to guess.
+    items: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    applied_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    undone_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    undo_reason: Mapped[str | None] = mapped_column(Text)

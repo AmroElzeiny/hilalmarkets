@@ -1,9 +1,10 @@
 {% from "hilal/macros/status_badge.html" import sharia_status %}
+{% from "hilal/macros/coin_logo.html" import coin_logo_block %}
 {% macro opportunity_card(item, detail_href, watch_href=None, compact=False) -%}
 {% set asset_symbol = (item.asset or item.symbol).partition('/')[0]|upper %}
 <article class="opportunity-card{% if compact %} is-compact{% endif %}" data-status="{{ item.status_badge }}" data-opportunity-card>
   <div class="opportunity-title">
-    <div class="coin"><div class="coin-logo" data-asset-logo-module="https://cdn.jsdelivr.net/npm/@web3icons/core@4.0.53/dist/svgs/tokens/branded/{{ asset_symbol }}.svg.js" data-asset-logo-symbol="{{ asset_symbol }}">{{ asset_symbol[:3] }}</div><div><h3>{{ item.symbol }}</h3><small>{{ item.name }} | Spot</small></div></div>
+    <div class="coin">{{ coin_logo_block(asset_symbol, image_url=item.logo_url, decorative=true) }}<div><h3>{{ item.symbol }}</h3><small>{{ item.name }} | Spot</small></div></div>
     {{ sharia_status(item.status_label, item.status_badge) }}
   </div>
   <div class="opportunity-context"><span>{{ item.methodology_name }} v{{ item.methodology_version }}</span><span>Reviewed {{ item.reviewed_at.strftime('%d %b %Y') }}</span></div>

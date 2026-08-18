@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from playwright.sync_api import Page, expect
@@ -168,7 +169,7 @@ def test_sharia_governance_workspace_visual_qa(
 
     page.goto(f"{base_url}/dashboard/system-brain", wait_until="networkidle")
     expect(page.get_by_role("heading", name="System Brain", exact=True)).to_be_visible()
-    expect(page.get_by_role("heading", name="Needs Attention")).to_be_visible()
+    expect(page.get_by_role("heading", name="Needs attention")).to_be_visible()
     expect(page.get_by_text("SC-BTC-TEST")).to_be_visible()
     expect(page.locator("pre")).to_have_count(0)
     assert "Onest" in page.locator("body").evaluate(
@@ -204,11 +205,13 @@ def test_sharia_governance_workspace_visual_qa(
         f"{base_url}/dashboard/system-brain/cases/{case_id}",
         wait_until="networkidle",
     )
-    expect(page.get_by_text("Why this case exists")).to_be_visible()
-    expect(page.get_by_role("heading", name="Verify each factual suggestion")).to_be_visible()
+    # The review page was rewritten to carry the facts and the controls, and none of the
+    # sentences that explained what a panel was for. These are what a reviewer now sees.
+    expect(page.get_by_text("AI suggestions by field")).to_be_visible()
     expect(page.get_by_role("button", name="Approve", exact=True)).to_be_visible()
-    expect(page.get_by_role("button", name="Approve with qualification")).to_be_visible()
-    expect(page.get_by_label("Decision rationale")).to_be_visible()
+    expect(page.get_by_role("button", name="Approve with note")).to_be_visible()
+    expect(page.get_by_role("button", name="Mark all as passed")).to_be_visible()
+    expect(page.get_by_label("Your reason")).to_be_visible()
     page.screenshot(path=str(output / "review-case-tablet-900.png"), full_page=True)
 
     page.set_viewport_size({"width": 390, "height": 844})
@@ -223,9 +226,18 @@ def test_sharia_governance_workspace_visual_qa(
     assert animation_duration in {"0s", "1e-05s"}
     page.emulate_media(reduced_motion="no-preference")
     page.set_viewport_size({"width": 900, "height": 1000})
-    page.get_by_text("Use-specific scope decisions", exact=True).click()
-    for select_box in page.locator('select[name="criterion_outcome"]').all():
-        select_box.select_option("pass")
+
+    # "Mark all as passed" is the one-click path a reviewer takes when every condition is
+    # met. It must select `pass` on every condition — and only where the methodology
+    # allows it — and it must never submit anything by itself.
+    page.get_by_role("button", name="Mark all as passed").click()
+    outcomes = page.locator('select[name="criterion_outcome"]')
+    assert outcomes.count() > 0
+    for index in range(outcomes.count()):
+        assert outcomes.nth(index).input_value() == "pass"
+    expect(page).to_have_url(re.compile(r"/dashboard/system-brain/cases/[0-9a-f-]+$"))
+
+    page.get_by_text("Use rules", exact=True).click()
     for explanation in page.locator('textarea[name="criterion_reason"]').all():
         explanation.fill("The retained evidence was reviewed for this required criterion.")
     use_statuses = {
@@ -238,20 +250,20 @@ def test_sharia_governance_workspace_visual_qa(
         fieldset.select_option(use_statuses.get(key, "not_covered"))
     for explanation in page.locator('textarea[name="use_reason"]').all():
         explanation.fill("This use was explicitly reviewed against the retained evidence.")
-    page.get_by_label("Decision rationale").fill(
+    page.get_by_label("Your reason").fill(
         "The retained source, identity mapping, dossier, and criteria were reviewed."
     )
     page.once("dialog", lambda dialog: dialog.accept())
     page.get_by_role("button", name="Approve", exact=True).click()
     page.wait_for_url("**/dashboard/system-brain/cases/**?success=**")
-    expect(page.get_by_role("button", name="Review publication impact")).to_be_visible()
-    page.get_by_role("button", name="Review publication impact").click()
+    expect(page.get_by_role("button", name="Publish…")).to_be_visible()
+    page.get_by_role("button", name="Publish…").click()
     publication = page.locator("[data-publication-dialog]")
     expect(publication).to_be_visible()
-    publication.get_by_label("Publication reason").fill(
+    publication.get_by_label("Why publish").fill(
         "Publish the separately approved immutable Passport for customer evidence."
     )
-    publication.get_by_role("button", name="Publish approved version").click()
+    publication.get_by_role("button", name="Publish", exact=True).click()
     page.wait_for_url("**/dashboard/system-brain/cases/**?success=**")
     expect(page.locator(".brain-terminal strong")).to_have_text("Published")
     page.screenshot(path=str(output / "review-case-published-tablet-900.png"), full_page=True)

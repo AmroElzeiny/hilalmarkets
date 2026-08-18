@@ -6,5 +6,10 @@
      turned on.
 
      Set `cta_label` before including it to change the wording used outside waitlist
-     mode; the waitlist wording is fixed so the same words appear everywhere. -#}
-{% if waitlist_mode %}<a class="btn btn-primary" href="{{ waitlist_url }}">Join the waitlist</a>{% else %}<a class="btn btn-primary" href="{{ url_for('signup_page') }}">{{ cta_label | default('Start free', true) }}</a>{% endif %}
+     mode; the waitlist wording is fixed so the same words appear everywhere.
+
+     `signup_url` rather than `url_for`, because this button leaves the marketing site
+     for the product. When the product has a hostname of its own the address is absolute
+     and lands on it; when it does not, it is the same plain path `url_for` produced. See
+     `app_link` in `api/routers/public.py`. -#}
+{% if waitlist_mode %}<a class="btn btn-primary" href="{{ waitlist_url }}">Join the waitlist</a>{% else %}<a class="btn btn-primary" href="{{ signup_url }}">{{ cta_label | default('Start free', true) }}</a>{% endif %}

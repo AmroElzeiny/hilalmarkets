@@ -6,16 +6,40 @@
   <meta name="robots" content="noindex,nofollow">
   <title>System Brain | Hilal Markets</title>
   <link rel="icon" type="image/png" href="/static/favicon-dark.png">
-  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260805-y5-5">
-  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260805-y5-5">
-  <link rel="stylesheet" href="/static/system-brain.css?v=20260805-y5-5">
+  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260818-live-4">
+  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260818-live-4">
+  <link rel="stylesheet" href="/static/system-brain.css?v=20260818-live-4">
   <script src="/static/hilalmarkets-icons.js" defer></script>
-  <script src="/static/chat-message-renderer.js?v=20260805-y5-5" defer></script>
-  <script src="/static/system-brain.js?v=20260805-y5-5" defer></script>
+  <script src="/static/chat-message-renderer.js?v=20260818-live-4" defer></script>
+  <script src="/static/system-brain.js?v=20260818-live-4" defer></script>
 </head>
-<body data-system-brain-csrf="{{ csrf_token }}">
+<body data-system-brain-csrf="{{ csrf_token }}" data-brain-section="{{ section }}">
   <a class="brain-skip" href="#admin-content">Skip to admin content</a>
-  <aside class="brain-sidebar" aria-label="System Brain navigation">
+
+  {# The depth behind the page. Three flat layers on different planes, turned slowly by
+     one transform — quiet, low contrast, and stopped completely for anyone who asks for
+     reduced motion. The ring is the brand frame from the guide, at a large scale and
+     kept in the background rather than made into an illustration. #}
+  <div class="brain-orbit" aria-hidden="true">
+    <span class="brain-orbit-field"></span>
+    <span class="brain-orbit-ring"></span>
+    <span class="brain-orbit-ring brain-orbit-ring-far"></span>
+    <span class="brain-orbit-dust"></span>
+  </div>
+
+  <header class="brain-mobilebar">
+    <button type="button" class="brain-menu-toggle" data-brain-menu-toggle aria-expanded="false" aria-controls="brain-nav" aria-label="Open menu">
+      <i data-icon="menu"></i>
+    </button>
+    <a class="brain-mobilebar-brand" href="/dashboard/system-brain">
+      <img src="/static/hilal-markets-symbol.svg" alt="Hilal Markets">
+      <strong>System Brain</strong>
+    </a>
+    <a class="brain-icon-button" href="/dashboard" aria-label="Back to dashboard"><i data-icon="logout"></i></a>
+  </header>
+  <div class="brain-scrim" data-brain-scrim hidden></div>
+
+  <aside class="brain-sidebar" id="brain-nav" aria-label="System Brain navigation">
     <a class="brain-brand" href="/dashboard/system-brain" aria-label="Hilal Markets System Brain">
       <span class="brain-brand-logo"><img src="/static/hilal-markets-logo.svg" alt=""></span>
       <span><strong>hilal markets</strong><small>System Brain</small></span>
@@ -23,6 +47,7 @@
     <nav>
       <a class="{{ 'active' if section == 'overview' else '' }}" href="/dashboard/system-brain"><i data-icon="bell"></i><span>Inbox</span></a>
       <a class="{{ 'active' if section in ['cases','initial-reviews','change-reviews','user-reports','review-detail'] else '' }}" href="/dashboard/system-brain/cases"><i data-icon="compliance"></i><span>Cases</span></a>
+      <a class="{{ 'active' if section == 'stats' else '' }}" href="/dashboard/system-brain/stats"><i data-icon="chart"></i><span>Stats</span></a>
       <a class="{{ 'active' if section == 'operations' else '' }}" href="/dashboard/system-brain/operations"><i data-icon="activity"></i><span>Operations</span></a>
       <a class="{{ 'active' if section == 'governance' else '' }}" href="/dashboard/system-brain/governance"><i data-icon="methodology"></i><span>Governance</span></a>
       <a class="{{ 'active' if section == 'users' else '' }}" href="/dashboard/system-brain/users"><i data-icon="user"></i><span>Users</span></a>
@@ -30,7 +55,7 @@
     </nav>
     <div class="brain-sidebar-foot">
       <span class="brain-admin-dot" aria-hidden="true"></span>
-      <div><strong>Authenticated admin</strong><small>{{ admin_email }}</small></div>
+      <div><strong>Signed in</strong><small>{{ admin_email }}</small></div>
       <a href="/dashboard" aria-label="Return to dashboard"><i data-icon="logout"></i></a>
     </div>
   </aside>
@@ -38,18 +63,18 @@
   <main id="admin-content" class="brain-main">
     <header class="brain-topbar">
       <div>
-        <p class="brain-kicker">Evidence-led administration</p>
         <h1>
           {% if section == 'overview' %}System Brain
           {% elif section == 'review-detail' %}Review case
-          {% elif section == 'users' %}User control
+          {% elif section == 'users' %}Users
+          {% elif section == 'stats' %}Stats
           {% elif section in ['initial-reviews','change-reviews','user-reports'] %}Cases
           {% else %}{{ section.replace('-', ' ').title() }}{% endif %}
         </h1>
       </div>
       <div class="brain-top-actions">
-        <span class="brain-guard"><i data-icon="shield"></i> Human authority</span>
-        <a class="brain-icon-button" href="{{ request.url.path }}" aria-label="Refresh current data"><i data-icon="activity"></i></a>
+        <span class="brain-guard"><i data-icon="shield"></i> You decide</span>
+        <a class="brain-icon-button" href="{{ request.url.path }}" aria-label="Refresh"><i data-icon="refresh"></i></a>
       </div>
     </header>
 
@@ -61,16 +86,15 @@
     <section class="brain-section brain-reveal brain-overview-status">
       <article class="brain-status-header {{ overview.overall_status }}">
         <div>
-          <p class="brain-kicker">Current operational state</p>
           <h2>{{ overview.status_message }}</h2>
           <div class="brain-status-facts">
-            <span>Official source check: {{ overview.last_official_source_check.strftime('%d %b %Y, %H:%M UTC') if overview.last_official_source_check else 'No successful check recorded' }}</span>
-            <span>Review pipeline: {{ overview.last_review_pipeline_run.strftime('%d %b %Y, %H:%M UTC') if overview.last_review_pipeline_run else 'No successful run recorded' }}</span>
+            <span><i data-icon="clock"></i> Source check {{ overview.last_official_source_check.strftime('%d %b, %H:%M UTC') if overview.last_official_source_check else '— none yet' }}</span>
+            <span><i data-icon="workflow"></i> Pipeline {{ overview.last_review_pipeline_run.strftime('%d %b, %H:%M UTC') if overview.last_review_pipeline_run else '— none yet' }}</span>
           </div>
         </div>
         <form method="post" action="/dashboard/system-brain/authority-sources/import">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button class="brain-action-button" type="submit"><i data-icon="scan"></i>Check official source</button>
+          <button class="brain-action-button" type="submit"><i data-icon="scan"></i>Check sources</button>
         </form>
       </article>
       <div class="brain-action-metrics">
@@ -85,21 +109,21 @@
     <section class="brain-section brain-overview-grid brain-reveal">
       <article class="brain-panel brain-attention-panel">
         <div class="brain-section-head">
-          <div><p class="brain-kicker">Next actions</p><h2>Needs Attention</h2><p>Cases are ranked by urgency, SLA, and age.</p></div>
-          <a class="brain-link" href="/dashboard/system-brain/cases">Open registry <i data-icon="arrow"></i></a>
+          <div><h2>Needs attention</h2></div>
+          <a class="brain-link" href="/dashboard/system-brain/cases">All cases <i data-icon="arrow"></i></a>
         </div>
         {% set data = {'recent_cases': overview.needs_attention} %}
         {% include 'system_brain_case_table.html' %}
       </article>
       <aside class="brain-panel brain-health-panel">
-        <div class="brain-panel-title"><i data-icon="activity"></i><div><p class="brain-kicker">Secondary health</p><h3>Services</h3></div></div>
+        <div class="brain-panel-title"><i data-icon="activity"></i><div><h3>Services</h3></div></div>
         <div class="brain-health-list">
           {% for row in overview.health %}
           <div>
             <span class="brain-health-dot {{ row.status }}" aria-hidden="true"></span>
             <strong>{{ row.label }}</strong>
             <span class="brain-status {{ row.status }}">{{ row.status }}</span>
-            <small>{{ row.last_success.strftime('%d %b %H:%M UTC') if row.last_success else 'No successful telemetry' }} · {{ row.active_failures }} active failures</small>
+            <small>{{ row.last_success.strftime('%d %b %H:%M UTC') if row.last_success else 'No signal' }} · {{ row.active_failures }} failing</small>
           </div>
           {% endfor %}
         </div>
@@ -108,69 +132,185 @@
 
     <section class="brain-section brain-reveal brain-workspace" data-system-brain-workspace data-testid="system-brain-workspace">
       <aside class="brain-panel brain-agent-sidebar" aria-label="System Brain conversations">
-        <div class="brain-panel-title"><i data-icon="spark"></i><div><p class="brain-kicker">Persistent analysis</p><h3>Agent conversations</h3></div></div>
-        <button class="brain-action-button" type="button" data-brain-new-conversation><i data-icon="plus"></i>New conversation</button>
-        <label class="brain-compact-field"><span>Search</span><input type="search" maxlength="160" data-brain-agent-search placeholder="Conversation title"></label>
+        <div class="brain-panel-title"><i data-icon="spark"></i><div><h3>Your chats</h3></div></div>
+        <button class="brain-action-button" type="button" data-brain-new-conversation><i data-icon="plus"></i>New chat</button>
+        <label class="brain-compact-field"><span>Search</span><input type="search" maxlength="160" data-brain-agent-search placeholder="Chat title"></label>
         <div class="brain-agent-conversation-list" data-brain-agent-conversations role="list"></div>
       </aside>
 
       <article class="brain-panel brain-assistant" data-system-brain-assistant data-testid="system-brain-assistant">
         <div class="brain-assistant-head">
           <span class="brain-metric-icon"><i data-icon="spark"></i></span>
-          <div><p class="brain-kicker">Evidence-led operational agent</p><h2 data-brain-agent-title>Ask System Brain</h2><p>Inspects only the evidence it needs through bounded, audited tools. Consequential changes remain inactive until you confirm the exact proposal.</p></div>
+          <div><h2 data-brain-agent-title>Ask System Brain</h2><p>It reads only the evidence it needs, and every change waits for you to confirm it.</p></div>
           <div class="brain-agent-heading-actions">
             <span class="brain-status {{ 'success' if assistant_enabled else 'warning' }}">{{ (assistant_model ~ ' · ' ~ assistant_reasoning_effort) if assistant_enabled else 'Disabled' }}</span>
             <button type="button" class="brain-secondary-button" data-brain-rename-conversation>Rename</button>
             <button type="button" class="brain-secondary-button" data-brain-archive-conversation>Archive</button>
           </div>
         </div>
-        <div class="brain-agent-progress" data-brain-agent-progress hidden role="status">Selecting authorized evidence tools…</div>
+        <div class="brain-agent-progress" data-brain-agent-progress hidden role="status">Choosing evidence tools…</div>
         <div class="brain-assistant-messages" data-brain-assistant-messages aria-live="polite">
-          <div class="brain-assistant-message assistant"><p>Ask about customer experience, quality, revenue, support, governance, operations, or engineering evidence.</p></div>
+          <div class="brain-assistant-message assistant"><p>Ask about customers, quality, money, support, governance, operations or the code.</p></div>
         </div>
         <form class="brain-assistant-form" data-brain-assistant-form>
-          <label for="brain-assistant-input">Question or analysis request</label>
-          <textarea id="brain-assistant-input" maxlength="4000" required placeholder="For example: Where are trial users dropping out, and what evidence supports the highest-value experiment?" {{ 'disabled' if not assistant_enabled else '' }}></textarea>
+          <label for="brain-assistant-input">Your question</label>
+          <textarea id="brain-assistant-input" maxlength="4000" required placeholder="For example: where do trial users stop, and what proves it?" {{ 'disabled' if not assistant_enabled else '' }}></textarea>
           <button type="submit" class="brain-action-button" {{ 'disabled' if not assistant_enabled else '' }}><span>Ask</span><i data-icon="arrow"></i></button>
           <button type="button" class="brain-secondary-button" data-brain-cancel-turn hidden>Cancel</button>
         </form>
       </article>
 
       <aside class="brain-panel brain-evidence-drawer" aria-label="Evidence and actions">
-        <div class="brain-panel-title"><i data-icon="search"></i><div><p class="brain-kicker">Inspectable proof</p><h3>Evidence &amp; actions</h3></div></div>
-        <div data-brain-evidence><p class="brain-muted">Tool calls and evidence references appear here, separate from customer-visible content.</p></div>
+        <div class="brain-panel-title"><i data-icon="search"></i><div><h3>Evidence</h3></div></div>
+        <div data-brain-evidence><p class="brain-muted">What the assistant looked at appears here.</p></div>
         <div data-brain-action-proposals></div>
         <div class="brain-saved-insights">
-          <h4>Saved insights &amp; internal artifacts</h4>
-          <div data-brain-artifacts><p class="brain-muted">No saved artifacts in this conversation.</p></div>
+          <h4>Saved notes</h4>
+          <div data-brain-artifacts><p class="brain-muted">Nothing saved in this chat.</p></div>
         </div>
       </aside>
 
       <article class="brain-panel brain-customer-explorer" data-customer-conversation-explorer>
-        <div class="brain-section-head"><div><p class="brain-kicker">Privileged customer-content view</p><h2>Customer conversation explorer</h2><p>Exact retained transcripts only. Every detail view is audited and secrets are redacted.</p></div><span class="brain-live-state" data-brain-live-state>Connecting live updates…</span></div>
+        <div class="brain-section-head">
+          <div>
+            <h2>Customer chat log</h2>
+            <p>Every conversation with the Support AI and with Hilal, exactly as it was kept. Opening one is recorded.</p>
+          </div>
+          <span class="brain-live-state" data-brain-live-state>Connecting…</span>
+        </div>
         <form class="brain-explorer-filters" data-brain-explorer-filters>
-          <label><span>Search</span><input type="search" name="search" maxlength="500" placeholder="Email, user ID, conversation ID, or permitted message text"></label>
-          <label><span>Source</span><select name="source"><option value="">All persisted sources</option><option value="authenticated_setup_chat">Setup Chat</option><option value="public_site_chat">Public Chat</option></select></label>
-          <label><span>Status</span><input name="lifecycle" maxlength="80" placeholder="Lifecycle or stage"></label>
-          <label><span>Identity</span><select name="identity"><option value="">All identities</option><option value="authenticated">Authenticated</option><option value="anonymous">Anonymous</option></select></label>
-          <label><span>Approval</span><select name="approval_state"><option value="">Any approval state</option><option value="approved">Approved</option><option value="unapproved">Unapproved</option></select></label>
-          <label class="brain-check"><input type="checkbox" name="error_only"><span>Errors only</span></label>
+          <label><span>Search</span><input type="search" name="search" maxlength="500" placeholder="Email, ID or message text"></label>
+          <label><span>Assistant</span><select name="source"><option value="">Both assistants</option><option value="public_site_chat">Support AI</option><option value="dashboard_hilal_agent">Hilal Agent</option></select></label>
+          <label><span>Stage</span><input name="lifecycle" maxlength="80" placeholder="Any stage"></label>
+          <label><span>Person</span><select name="identity"><option value="">Anyone</option><option value="authenticated">Signed in</option><option value="anonymous">Visitor</option></select></label>
+          <label class="brain-check"><input type="checkbox" name="error_only"><span>Problems only</span></label>
           <button type="submit" class="brain-action-button">Filter</button>
         </form>
         <div class="brain-explorer-grid">
           <div><div class="brain-conversation-results" data-brain-customer-conversations role="list"></div><button type="button" class="brain-secondary-button" data-brain-load-more hidden>Load more</button></div>
-          <section class="brain-conversation-detail" data-brain-conversation-detail aria-live="polite"><p>Select a conversation to inspect its retained messages.</p></section>
+          <section class="brain-conversation-detail" data-brain-conversation-detail aria-live="polite"><p>Pick a conversation to read it.</p></section>
         </div>
       </article>
+    </section>
+
+    {% elif section == 'stats' %}
+    <section class="brain-section brain-reveal brain-stats" data-testid="system-brain-stats">
+      {# Plain links, so every control works with no script and every state has an
+         address that can be shared or bookmarked. #}
+      <div class="brain-stats-controls">
+        <nav class="brain-segmented" aria-label="Time range">
+          {% for value, label in [(7,'7 days'),(30,'30 days'),(90,'90 days')] %}
+          <a class="{{ 'active' if stats.days == value else '' }}"
+             href="/dashboard/system-brain/stats?days={{ value }}&amp;scope={{ stats_scope }}{{ '&amp;tag=' ~ stats.tag if stats.tag else '' }}">{{ label }}</a>
+          {% endfor %}
+        </nav>
+        <nav class="brain-segmented" aria-label="Which pages">
+          {% for value, label in [('landing','Landing page'),('site','Whole site')] %}
+          <a class="{{ 'active' if stats_scope == value else '' }}"
+             href="/dashboard/system-brain/stats?days={{ stats.days }}&amp;scope={{ value }}{{ '&amp;tag=' ~ stats.tag if stats.tag else '' }}">{{ label }}</a>
+          {% endfor %}
+        </nav>
+        <span class="brain-stats-window">{{ stats.tag_label }} · {{ stats.since.strftime('%d %b') }} — {{ stats.until.strftime('%d %b %Y') }}</span>
+      </div>
+
+      {% if not measurement_enabled %}
+      <div class="brain-flash error" role="alert"><i data-icon="alert"></i><span>Counting is switched off. Set SITE_VISIT_MEASUREMENT_ENABLED to true to start measuring again.</span></div>
+      {% elif not stats.measured %}
+      <div class="brain-flash" role="status"><i data-icon="info"></i><span>Nothing measured in this window yet. Numbers appear as people open the site.</span></div>
+      {% endif %}
+
+      <div class="brain-stat-tiles">
+        {% for tile in stats.tiles %}
+        <article class="brain-stat-tile" data-stat="{{ tile.key }}">
+          <span class="brain-stat-label">{{ tile.label }}</span>
+          <strong class="brain-stat-value" data-count-to="{{ tile.value }}" data-count-display="{{ tile.display }}">{{ tile.display }}</strong>
+          <span class="brain-stat-change {{ tile.change.direction }}">
+            <i data-icon="{{ 'trend_up' if tile.change.direction == 'up' else 'trend_down' if tile.change.direction == 'down' else 'trend_flat' }}"></i>
+            {% if tile.change.percent is none %}no earlier figure{% else %}{{ tile.change.percent }}% vs before{% endif %}
+          </span>
+          <small>{{ tile.hint }}</small>
+        </article>
+        {% endfor %}
+      </div>
+
+      <nav class="brain-tag-bar" aria-label="Stat tags">
+        <a class="brain-tag {{ '' if stats.tag else 'active' }}" href="/dashboard/system-brain/stats?days={{ stats.days }}&amp;scope={{ stats_scope }}">Everything</a>
+        {% for group in stats.tag_groups %}
+        <span class="brain-tag-group-label">{{ group.group }}</span>
+        {% for item in group.tags %}
+        <a class="brain-tag {{ 'active' if stats.tag == item.key else '' }}{{ ' empty' if not item.count else '' }}"
+           href="/dashboard/system-brain/stats?days={{ stats.days }}&amp;scope={{ stats_scope }}&amp;tag={{ item.key }}">
+          {{ item.label }} <b>{{ item.count }}</b>
+        </a>
+        {% endfor %}
+        {% endfor %}
+      </nav>
+
+      <div class="brain-stats-grid">
+        <article class="brain-panel">
+          <div class="brain-panel-title"><i data-icon="workflow"></i><div><h3>What they did next</h3></div></div>
+          <ul class="brain-journey">
+            {% for step in stats.journey %}
+            <li>
+              <span>{{ step.label }}</span>
+              <span class="brain-journey-bar"><b style="--share: {{ step.share }}%"></b></span>
+              <strong>{{ step.count }}</strong><small>{{ step.share }}%</small>
+            </li>
+            {% endfor %}
+          </ul>
+          {% if stats.top_pages %}
+          <h4 class="brain-subhead">Pages they opened</h4>
+          <ul class="brain-plain-list">
+            {% for item in stats.top_pages %}<li><span>{{ item.path }}</span><b>{{ item.count }}</b></li>{% endfor %}
+          </ul>
+          {% endif %}
+        </article>
+
+        <article class="brain-panel">
+          <div class="brain-panel-title"><i data-icon="chart"></i><div><h3>People each day</h3></div></div>
+          <div class="brain-spark" role="img" aria-label="People per day over the selected range">
+            {% set peak = (stats.daily | map(attribute='viewers') | max) if stats.daily else 0 %}
+            {% for point in stats.daily %}
+            <span class="brain-spark-bar" style="--height: {{ (point.viewers * 100 / peak) if peak else 0 }}%" title="{{ point.day }}: {{ point.viewers }}"></span>
+            {% else %}
+            <p class="brain-empty">No day has been measured yet.</p>
+            {% endfor %}
+          </div>
+          <div class="brain-spark-axis">
+            <small>{{ stats.since.strftime('%d %b') }}</small>
+            <small>{{ stats.until.strftime('%d %b') }}</small>
+          </div>
+        </article>
+
+        <article class="brain-panel brain-live-visits">
+          <div class="brain-panel-title"><i data-icon="radar"></i><div><h3>Just now</h3></div></div>
+          <ul class="brain-visit-list">
+            {% for visit in recent_visits %}
+            <li>
+              <span class="brain-status {{ 'success' if visit.reading else 'neutral' }}">{{ 'reading' if visit.reading else visit.device }}</span>
+              <strong>{{ visit.path }}</strong>
+              <small>{{ visit.seconds }}s · {{ visit.device }} · {{ visit.source }} · then {{ visit.next_action }}</small>
+            </li>
+            {% else %}
+            <li class="brain-empty">No visit recorded yet.</li>
+            {% endfor %}
+          </ul>
+        </article>
+      </div>
+
+      <p class="brain-measure-note">
+        Counted by Hilal Markets itself, not by another company. Nothing is written to the
+        visitor's device and no address is kept: one person is recognised for one day
+        only, through a value that cannot be turned back into who they are.
+      </p>
     </section>
 
     {% elif section == 'users' %}
     <section class="brain-section brain-reveal brain-users">
       <div class="brain-section-head">
         <div>
-          <p class="brain-kicker">Account administration</p>
           <h2>Users</h2>
-          <p>Search profiles, block abusive access, release deleted emails, or apply a recorded access level.</p>
+          <p>Search people, block abuse, or give someone access.</p>
         </div>
         <span class="brain-status neutral">{{ total }} profile{{ '' if total == 1 else 's' }}</span>
       </div>
@@ -209,12 +349,12 @@
           </div>
 
           <div class="brain-user-access-summary">
-            <span><i data-icon="billing"></i>Current access</span>
+            <span><i data-icon="billing"></i>Access</span>
             <strong>{{ item.plan_label }}</strong>
             <small>
-              {% if item.access_ends_at %}Through {{ item.access_ends_at.strftime('%d %b %Y, %H:%M UTC') }}
+              {% if item.access_ends_at %}Until {{ item.access_ends_at.strftime('%d %b %Y, %H:%M UTC') }}
               {% elif item.plan_label == 'Lifetime partner' %}Lifetime
-              {% else %}No scheduled end date{% endif %}
+              {% else %}No end date{% endif %}
             </small>
           </div>
 
@@ -228,7 +368,7 @@
                 data-user-admin-form
                 data-access-form
                 data-confirm-title="Apply access change?"
-                data-confirm-body="The selected access becomes authoritative immediately. Existing executable access may be reduced, and the user will receive one email notice."
+                data-confirm-body="The new access starts at once. Access they have now may be reduced, and they get one email about it."
                 data-confirm-action="Apply access"
                 data-user-label="{{ item.display_name }}"
               >
@@ -251,7 +391,7 @@
                   </div>
                 </fieldset>
                 <label class="brain-months-field" data-months-field hidden>
-                  <span>Full-access duration</span>
+                  <span>How long</span>
                   <span class="brain-number-input"><input type="number" name="months" min="1" max="120" step="1" disabled><b>months</b></span>
                 </label>
                 <button class="brain-action-button" type="submit" data-plan-apply hidden disabled>Apply</button>
@@ -264,7 +404,7 @@
               action="/dashboard/system-brain/users/{{ item.id }}/ban"
               data-user-admin-form
               data-confirm-title="Ban this profile?"
-              data-confirm-body="The user will be signed out, active Watchlists will pause, and this email will be blocked from every future signup."
+              data-confirm-body="They are signed out, their Watchlists pause, and this email can never sign up again."
               data-confirm-action="Ban profile"
               data-confirm-tone="danger"
               data-user-label="{{ item.display_name }}"
@@ -282,7 +422,7 @@
               action="/dashboard/system-brain/users/{{ item.id }}/delete"
               data-user-admin-form
               data-confirm-title="Delete this profile?"
-              data-confirm-body="Personal identity fields will be anonymized and the email can sign up again. Immutable audit, evidence, alert, and transaction history remains retained."
+              data-confirm-body="Their personal details are removed and the email can sign up again. History kept for the record stays."
               data-confirm-action="Delete profile"
               data-confirm-tone="danger"
               data-user-label="{{ item.display_name }}"
@@ -295,14 +435,14 @@
             {% endif %}
           </div>
           {% else %}
-          <div class="brain-user-protected"><i data-icon="shield"></i><span>{{ 'Deleted profile retained for audit' if item.status == 'deleted' else 'Banned profile retained so future signups remain blocked' if item.status == 'banned' else 'Protected administrator profile' }}</span></div>
+          <div class="brain-user-protected"><i data-icon="shield"></i><span>{{ 'Deleted profile, kept for the record' if item.status == 'deleted' else 'Banned profile, kept so this email stays blocked' if item.status == 'banned' else 'Protected admin profile' }}</span></div>
           {% endif %}
         </article>
         {% else %}
         <div class="brain-empty brain-user-empty">
           <i data-icon="user"></i>
-          <strong>No users match these filters.</strong>
-          <span>Clear the filters or search with another name or email.</span>
+          <strong>Nobody matches these filters.</strong>
+          <span>Clear them, or search another name or email.</span>
         </div>
         {% endfor %}
       </div>
@@ -319,13 +459,12 @@
     <dialog class="brain-confirm-dialog" data-user-action-dialog aria-labelledby="user-action-title">
       <div class="brain-dialog-icon"><i data-icon="shield"></i></div>
       <div>
-        <p class="brain-kicker">Explicit confirmation</p>
         <h2 id="user-action-title" data-user-dialog-title>Confirm account action</h2>
         <p data-user-dialog-body></p>
         <div class="brain-dialog-target"><span>Profile</span><strong data-user-dialog-target></strong></div>
         <label>
-          <span>Reason for the audit trail</span>
-          <textarea data-user-dialog-reason maxlength="500" minlength="3" required placeholder="Explain why this account change is necessary."></textarea>
+          <span>Why? (kept for the record)</span>
+          <textarea data-user-dialog-reason maxlength="500" minlength="3" required placeholder="Say why this change is needed."></textarea>
           <small data-user-dialog-error aria-live="polite"></small>
         </label>
         <div class="brain-dialog-actions">
@@ -336,25 +475,85 @@
     </dialog>
 
     {% elif section in ['cases','initial-reviews','change-reviews','user-reports'] %}
-    <section class="brain-section brain-reveal">
-      <div class="brain-section-head">
-        <div><p class="brain-kicker">One case registry</p><h2>Cases</h2><p>Search every review state and use focused views instead of separate queues.</p></div>
-      </div>
+    <section class="brain-section brain-reveal" data-testid="system-brain-cases">
       <nav class="brain-saved-views" aria-label="Saved case views">
-        {% for value, label in [('mine','Needs my review'),('urgent','Urgent'),('evidence_missing','Evidence missing'),('evidence_changed','Evidence changed'),('safety_hold','Safety hold'),('failed_processing','Failed processing'),('unassigned','Unassigned')] %}
+        {% for value, label in [('mine','Mine'),('urgent','Urgent'),('evidence_missing','Evidence missing'),('evidence_changed','Evidence changed'),('safety_hold','Safety hold'),('failed_processing','Failed'),('unassigned','Unassigned')] %}
         <a class="{{ 'active' if review_view == value else '' }}" href="/dashboard/system-brain/cases?view={{ value }}">{{ label }}</a>
         {% endfor %}
         <a href="/dashboard/system-brain/cases">Clear</a>
       </nav>
-      <form class="brain-case-filters" method="get">
-        <label>Search<input class="brain-search" name="asset" value="{{ review_asset }}" placeholder="Asset, case, source, methodology, reviewer, or version"></label>
-        <label>Review type<select name="kind"><option value="">All types</option>{% for value in ['initial_asset_review','material_source_change','evidence_refresh','source_identity_conflict','methodology_change','user_factual_report'] %}<option value="{{ value }}" {{ 'selected' if review_kind == value else '' }}>{{ value.replace('_',' ').title() }}</option>{% endfor %}</select></label>
-        <label>State<select name="state"><option value="">All states</option>{% for value in ['draft','researching','ready_for_review','needs_evidence','approved','rejected','stored','published','superseded','safety_hold','research_failed'] %}<option value="{{ value }}" {{ 'selected' if review_state == value else '' }}>{{ value.replace('_',' ').title() }}</option>{% endfor %}</select></label>
-        <label>Priority<select name="priority"><option value="">All priorities</option>{% for value in ['low','normal','high','urgent'] %}<option value="{{ value }}" {{ 'selected' if review_priority == value else '' }}>{{ value.title() }}</option>{% endfor %}</select></label>
-        <label>SLA<select name="deadline"><option value="">Any deadline</option><option value="overdue" {{ 'selected' if review_deadline == 'overdue' else '' }}>Overdue</option><option value="due_soon" {{ 'selected' if review_deadline == 'due_soon' else '' }}>Due in 24 hours</option></select></label>
-        <button class="brain-action-button" type="submit"><i data-icon="search"></i>Filter</button>
+      <details class="brain-filter-drawer" {{ 'open' if review_asset or review_kind or review_state or review_priority or review_deadline else '' }}>
+        <summary><i data-icon="filter"></i> Filters</summary>
+        <form class="brain-case-filters" method="get">
+          <label>Search<input class="brain-search" name="asset" value="{{ review_asset }}" placeholder="Asset, case, source or reviewer"></label>
+          <label>Type<select name="kind"><option value="">All</option>{% for value in ['initial_asset_review','material_source_change','evidence_refresh','source_identity_conflict','methodology_change','user_factual_report'] %}<option value="{{ value }}" {{ 'selected' if review_kind == value else '' }}>{{ value.replace('_',' ').title() }}</option>{% endfor %}</select></label>
+          <label>State<select name="state"><option value="">All</option>{% for value in ['draft','researching','ready_for_review','needs_evidence','approved','rejected','stored','published','superseded','safety_hold','research_failed'] %}<option value="{{ value }}" {{ 'selected' if review_state == value else '' }}>{{ value.replace('_',' ').title() }}</option>{% endfor %}</select></label>
+          <label>Priority<select name="priority"><option value="">All</option>{% for value in ['low','normal','high','urgent'] %}<option value="{{ value }}" {{ 'selected' if review_priority == value else '' }}>{{ value.title() }}</option>{% endfor %}</select></label>
+          <label>Due<select name="deadline"><option value="">Any</option><option value="overdue" {{ 'selected' if review_deadline == 'overdue' else '' }}>Overdue</option><option value="due_soon" {{ 'selected' if review_deadline == 'due_soon' else '' }}>Next 24 hours</option></select></label>
+          <button class="brain-action-button" type="submit"><i data-icon="search"></i>Apply</button>
+        </form>
+      </details>
+
+      {# Quick decision on several cases at once. Every selected case still goes through
+         the normal review path, with the reviewer's own sentence recorded on each one. A
+         case the methodology will not let through is refused and named, never quietly
+         skipped. #}
+      <form
+        id="bulk-decision-form"
+        class="brain-bulk-bar"
+        method="post"
+        action="/dashboard/system-brain/cases/bulk-decision?{{ request.url.query }}"
+        data-bulk-form
+        data-guarded-form
+        data-bulk-max="{{ bulk_max_batch_size }}"
+        hidden
+      >
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="brain-bulk-count">
+          <strong data-bulk-count>0</strong><span>selected</span>
+          {# Only ever filled in when the ceiling actually bit. A limit announced on a
+             selection that is nowhere near it is noise the reviewer learns to skip. #}
+          <small class="brain-bulk-limit" data-bulk-limit-note hidden></small>
+        </div>
+        <input
+          class="brain-bulk-reason"
+          name="reason"
+          minlength="10"
+          maxlength="2000"
+          required
+          placeholder="Why? One sentence, recorded on every case."
+        >
+        <div class="brain-bulk-actions">
+          <button
+            class="approve"
+            type="submit"
+            name="action"
+            value="approve"
+            data-confirm="Mark every condition as passed on the selected cases and approve them? Nothing is published yet."
+          ><i data-icon="check"></i>Approve</button>
+          <button
+            class="danger"
+            type="submit"
+            name="action"
+            value="reject"
+            data-confirm="Reject the selected cases and keep their evidence?"
+          ><i data-icon="close"></i>Reject</button>
+          <button class="brain-secondary-button" type="button" data-bulk-clear>Clear</button>
+        </div>
       </form>
+
+      {% if undo_batch %}
+      <form class="brain-undo-bar" method="post" action="/dashboard/system-brain/cases/bulk-decision/undo" data-guarded-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="batch_id" value="{{ undo_batch.id }}">
+        <input type="hidden" name="reason" value="Undo of a quick {{ undo_batch.action }} taken by mistake.">
+        <span><i data-icon="history"></i> Last action: <strong>{{ undo_batch.action }}</strong> on {{ undo_batch.applied_count }} case{{ '' if undo_batch.applied_count == 1 else 's' }}, {{ undo_batch.created_at.strftime('%d %b %H:%M UTC') }}</span>
+        <button class="brain-secondary-button" type="submit" data-confirm="Put those cases back where they were? The earlier decision stays in the history."><i data-icon="undo"></i>Undo</button>
+      </form>
+      {% endif %}
+
       {% set data = {'recent_cases': cases} %}
+      {% set select_mode = true %}
       {% include 'system_brain_case_table.html' %}
     </section>
 
@@ -363,21 +562,21 @@
 
     {% elif section == 'operations' %}
     <section class="brain-section brain-reveal">
-      <div class="brain-section-head"><div><p class="brain-kicker">Exceptions first</p><h2>Operations</h2><p>Healthy technical detail stays collapsed. Failures remain visible and actionable.</p></div></div>
+      <div class="brain-section-head"><div><h2>Operations</h2><p>Failures first. Everything healthy stays folded away.</p></div></div>
       <div class="brain-operation-grid">
-        <details class="brain-panel" open><summary><span><i data-icon="alert"></i> Active exceptions</span></summary>
-          <div class="brain-table-wrap"><table><thead><tr><th>Area</th><th>Time</th><th>Status</th><th>Result</th><th>Action</th></tr></thead><tbody>
+        <details class="brain-panel" open><summary><span><i data-icon="alert"></i> Problems now</span></summary>
+          <div class="brain-table-wrap"><table><thead><tr><th>Area</th><th>Time</th><th>Status</th><th>What happened</th><th>Do</th></tr></thead><tbody>
             {% set exceptions = namespace(count=0) %}
-            {% for item in runs if item.status == 'failed' %}{% set exceptions.count = exceptions.count + 1 %}<tr><td>{{ item.run_kind.replace('_',' ').title() }}</td><td>{{ (item.completed_at or item.created_at).strftime('%d %b %H:%M UTC') }}</td><td><span class="brain-status failed">Failed</span></td><td>{{ item.last_error_detail or 'No safe error detail retained.' }}</td><td><a href="/dashboard/system-brain/cases?view=failed_processing">Inspect cases</a></td></tr>{% endfor %}
-            {% for item in analyses if item.status in ['failed','invalid'] %}{% set exceptions.count = exceptions.count + 1 %}<tr><td>AI research</td><td>{{ item.created_at.strftime('%d %b %H:%M UTC') }}</td><td><span class="brain-status failed">{{ item.status }}</span></td><td>{{ item.error_detail or 'Validated output unavailable.' }}</td><td><span>No terminal action</span></td></tr>{% endfor %}
-            {% for item in deliveries if item.status in ['failed','retryable','permanent_failure'] %}{% set exceptions.count = exceptions.count + 1 %}<tr><td>Admin delivery</td><td>{{ item.created_at.strftime('%d %b %H:%M UTC') }}</td><td><span class="brain-status failed">{{ item.status }}</span></td><td>{{ item.last_error_detail or 'Delivery did not complete.' }}</td><td><form method="post" action="/dashboard/system-brain/notifications/{{ item.id }}/retry" data-guarded-form><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="reason" value="Manual retry from consolidated Operations"><button class="brain-row-action" type="submit">Retry</button></form></td></tr>{% endfor %}
-            {% if exceptions.count == 0 %}<tr><td colspan="5" class="brain-empty">No active operational exception is recorded.</td></tr>{% endif %}
+            {% for item in runs if item.status == 'failed' %}{% set exceptions.count = exceptions.count + 1 %}<tr><td>{{ item.run_kind.replace('_',' ').title() }}</td><td>{{ (item.completed_at or item.created_at).strftime('%d %b %H:%M UTC') }}</td><td><span class="brain-status failed">Failed</span></td><td>{{ item.last_error_detail or 'No safe detail kept.' }}</td><td><a href="/dashboard/system-brain/cases?view=failed_processing">Open cases</a></td></tr>{% endfor %}
+            {% for item in analyses if item.status in ['failed','invalid'] %}{% set exceptions.count = exceptions.count + 1 %}<tr><td>AI research</td><td>{{ item.created_at.strftime('%d %b %H:%M UTC') }}</td><td><span class="brain-status failed">{{ item.status }}</span></td><td>{{ item.error_detail or 'No checked output.' }}</td><td><span>Nothing to do here</span></td></tr>{% endfor %}
+            {% for item in deliveries if item.status in ['failed','retryable','permanent_failure'] %}{% set exceptions.count = exceptions.count + 1 %}<tr><td>Admin message</td><td>{{ item.created_at.strftime('%d %b %H:%M UTC') }}</td><td><span class="brain-status failed">{{ item.status }}</span></td><td>{{ item.last_error_detail or 'Did not arrive.' }}</td><td><form method="post" action="/dashboard/system-brain/notifications/{{ item.id }}/retry" data-guarded-form><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="reason" value="Manual retry from Operations"><button class="brain-row-action" type="submit">Retry</button></form></td></tr>{% endfor %}
+            {% if exceptions.count == 0 %}<tr><td colspan="5" class="brain-empty">Nothing is failing.</td></tr>{% endif %}
           </tbody></table></div>
         </details>
-        <details class="brain-panel"><summary><span><i data-icon="passport"></i> Official source registry</span><small>{{ sources|length }} sources</small></summary>
-          <div class="brain-table-wrap"><table><thead><tr><th>Asset</th><th>Category</th><th>Source</th><th>Verification</th></tr></thead><tbody>{% for item in sources %}<tr><td>{{ item.asset.symbol }}</td><td>{{ item.source.category.replace('_',' ').title() }}</td><td><a href="{{ item.source.source_url }}" target="_blank" rel="noopener">{{ item.source.title }}</a></td><td><span class="brain-status {{ item.source.verification_state }}">{{ item.source.verification_state }}</span></td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No source is registered.</td></tr>{% endfor %}</tbody></table></div>
+        <details class="brain-panel"><summary><span><i data-icon="passport"></i> Official sources</span><small>{{ sources|length }}</small></summary>
+          <div class="brain-table-wrap"><table><thead><tr><th>Asset</th><th>Category</th><th>Source</th><th>Checked</th></tr></thead><tbody>{% for item in sources %}<tr><td>{{ item.asset.symbol }}</td><td>{{ item.source.category.replace('_',' ').title() }}</td><td><a href="{{ item.source.source_url }}" target="_blank" rel="noopener">{{ item.source.title }}</a></td><td><span class="brain-status {{ item.source.verification_state }}">{{ item.source.verification_state }}</span></td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No source registered.</td></tr>{% endfor %}</tbody></table></div>
         </details>
-        <details class="brain-panel"><summary><span><i data-icon="activity"></i> Healthy and historical runs</span><small>{{ runs|length }} retained</small></summary>
+        <details class="brain-panel"><summary><span><i data-icon="activity"></i> Past runs</span><small>{{ runs|length }}</small></summary>
           <div class="brain-table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Last activity</th><th>Items</th></tr></thead><tbody>{% for item in runs %}<tr><td>{{ item.run_kind.replace('_',' ').title() }}</td><td><span class="brain-status {{ item.status }}">{{ item.status }}</span></td><td>{{ (item.completed_at or item.started_at or item.created_at).strftime('%d %b %H:%M UTC') }}</td><td>{{ item.items_succeeded }}/{{ item.items_attempted }}</td></tr>{% endfor %}</tbody></table></div>
         </details>
       </div>
@@ -385,22 +584,22 @@
 
     {% elif section == 'governance' %}
     <section class="brain-section brain-reveal">
-      <div class="brain-section-head"><div><p class="brain-kicker">Versioned policies</p><h2>Governance</h2><p>Methodology, evidence, AI, review, and publication boundaries remain explicit.</p></div></div>
+      <div class="brain-section-head"><div><h2>Governance</h2><p>The rules a review is measured against, and their versions.</p></div></div>
       <div class="brain-card-list">
         {% for item in methodologies %}
-        <article><span class="brain-metric-icon"><i data-icon="methodology"></i></span><div><h3>{{ item.name }}</h3><p>{{ item.code }} · Version {{ item.version }}</p><div class="brain-chip-row"><span class="brain-status {{ item.status.value if item.status.value is defined else item.status }}">{{ item.status.value if item.status.value is defined else item.status }}</span><span class="brain-status neutral">{{ item.rules_json.get('required_criteria', [])|length }} required criteria</span><span class="brain-status neutral">{{ item.rules_json.get('use_cases', [])|length }} use-specific policies</span></div></div></article>
-        {% else %}<p class="brain-empty">No methodology is configured. Publication cannot proceed.</p>{% endfor %}
+        <article><span class="brain-metric-icon"><i data-icon="methodology"></i></span><div><h3>{{ item.name }}</h3><p>{{ item.code }} · Version {{ item.version }}</p><div class="brain-chip-row"><span class="brain-status {{ item.status.value if item.status.value is defined else item.status }}">{{ item.status.value if item.status.value is defined else item.status }}</span><span class="brain-status neutral">{{ item.rules_json.get('required_criteria', [])|length }} conditions</span><span class="brain-status neutral">{{ item.rules_json.get('use_cases', [])|length }} use rules</span></div></div></article>
+        {% else %}<p class="brain-empty">No methodology is set up. Nothing can be published.</p>{% endfor %}
       </div>
-      <details class="brain-panel brain-progressive"><summary><span><i data-icon="passport"></i> Published and historical Passports</span><small>{{ published|length }} records</small></summary><div class="brain-card-list">{% for item in published %}<article><div class="brain-asset-mark">{{ item.asset.symbol[:3] }}</div><div><h3>{{ item.asset.name }} <small>{{ item.asset.symbol }}</small></h3><p>Publication version {{ item.publication.version }} · {{ item.publication.published_at.strftime('%d %b %Y') }}</p></div><a class="brain-link" href="/dashboard/sharia/assets/{{ item.asset.symbol }}">View Passport</a></article>{% endfor %}</div></details>
+      <details class="brain-panel brain-progressive"><summary><span><i data-icon="passport"></i> Published Passports</span><small>{{ published|length }}</small></summary><div class="brain-card-list">{% for item in published %}<article><div class="brain-asset-mark">{{ item.asset.symbol[:3] }}</div><div><h3>{{ item.asset.name }} <small>{{ item.asset.symbol }}</small></h3><p>Version {{ item.publication.version }} · {{ item.publication.published_at.strftime('%d %b %Y') }}</p></div><a class="brain-link" href="/dashboard/sharia/assets/{{ item.asset.symbol }}">Open</a></article>{% endfor %}</div></details>
     </section>
 
     {% elif section == 'audit-settings' %}
     <section class="brain-section brain-reveal">
-      <div class="brain-section-head"><div><p class="brain-kicker">Immutable accountability</p><h2>Audit &amp; Settings</h2><p>Permission, decision, publication, retry, and security events remain reconstructable.</p></div><div class="brain-import-actions"><a class="brain-action-button secondary" href="/dashboard/system-brain/audit-export?output=csv">Export CSV</a><a class="brain-action-button secondary" href="/dashboard/system-brain/audit-export?output=json">Export JSON</a></div></div>
-      <details class="brain-panel brain-progressive"><summary><span><i data-icon="user"></i> Governance role grants</span><small>{{ governance_grants|length }} records</small></summary><div class="brain-table-wrap"><table><thead><tr><th>Role</th><th>User</th><th>Effective</th><th>State</th></tr></thead><tbody>{% for item in governance_grants %}<tr><td>{{ item.role }}</td><td>{{ item.user_id }}</td><td>{{ item.effective_at.strftime('%d %b %Y, %H:%M UTC') }}</td><td><span class="brain-status {{ 'neutral' if item.revoked_at else 'success' }}">{{ 'Revoked' if item.revoked_at else 'Active' }}</span></td></tr>{% endfor %}</tbody></table></div></details>
+      <div class="brain-section-head"><div><h2>Audit &amp; Settings</h2><p>Every decision, permission and retry, kept for ever.</p></div><div class="brain-import-actions"><a class="brain-action-button secondary" href="/dashboard/system-brain/audit-export?output=csv">Export CSV</a><a class="brain-action-button secondary" href="/dashboard/system-brain/audit-export?output=json">Export JSON</a></div></div>
+      <details class="brain-panel brain-progressive"><summary><span><i data-icon="user"></i> Who can do what</span><small>{{ governance_grants|length }}</small></summary><div class="brain-table-wrap"><table><thead><tr><th>Role</th><th>User</th><th>From</th><th>State</th></tr></thead><tbody>{% for item in governance_grants %}<tr><td>{{ item.role }}</td><td>{{ item.user_id }}</td><td>{{ item.effective_at.strftime('%d %b %Y, %H:%M UTC') }}</td><td><span class="brain-status {{ 'neutral' if item.revoked_at else 'success' }}">{{ 'Revoked' if item.revoked_at else 'Active' }}</span></td></tr>{% endfor %}</tbody></table></div></details>
       <article class="brain-panel">
-        <div class="brain-section-head compact"><div><p class="brain-kicker">Append-only history</p><h3>Recent audit events</h3></div><input class="brain-search" data-filter-target="audit-table" placeholder="Filter action or target" aria-label="Filter audit history"></div>
-        <div class="brain-table-wrap"><table id="audit-table"><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Actor</th></tr></thead><tbody>{% for item in audits %}<tr><td>{{ item.created_at.strftime('%d %b %Y %H:%M:%S') }}</td><td><strong>{{ item.action.replace('sharia.','').replace('_',' ').replace('.',' ').title() }}</strong></td><td>{{ item.target_type.replace('_',' ').title() }}<small>{{ item.target_id }}</small></td><td>{{ item.actor_user_id or 'System worker' }}</td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No governance audit event is recorded.</td></tr>{% endfor %}</tbody></table></div>
+        <div class="brain-section-head compact"><div><h3>Recent events</h3></div><input class="brain-search" data-filter-target="audit-table" placeholder="Filter action or target" aria-label="Filter audit history"></div>
+        <div class="brain-table-wrap"><table id="audit-table"><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Who</th></tr></thead><tbody>{% for item in audits %}<tr><td>{{ item.created_at.strftime('%d %b %Y %H:%M:%S') }}</td><td><strong>{{ item.action.replace('sharia.','').replace('_',' ').replace('.',' ').title() }}</strong></td><td>{{ item.target_type.replace('_',' ').title() }}<small>{{ item.target_id }}</small></td><td>{{ item.actor_user_id or 'System worker' }}</td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No event recorded.</td></tr>{% endfor %}</tbody></table></div>
       </article>
     </section>
     {% endif %}

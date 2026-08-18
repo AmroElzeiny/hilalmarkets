@@ -47,57 +47,11 @@ body.hilal-dashboard :where(p, small) {
 
 body.hilal-dashboard [hidden] { display: none !important; }
 
-/* Shell */
-body.hilal-dashboard .app-shell {
-  min-height: 100vh;
-  display: grid;
-  grid-template-columns: var(--sidebar) minmax(0, 1fr);
-  gap: 16px;
-  padding: 16px;
-}
-
-body.hilal-dashboard .sidebar {
-  position: sticky;
-  top: 16px;
-  height: calc(100vh - 32px);
-  padding: 16px 12px 14px;
-  overflow: auto;
-  border: 1px solid var(--hm-hairline);
-  border-radius: var(--hm-radius-lg);
-  background: rgba(255, 255, 255, .96);
-  box-shadow: var(--hm-shadow-md);
-  scrollbar-width: none;
-}
-
-body.hilal-dashboard .sidebar::-webkit-scrollbar { display: none; }
-
-body.hilal-dashboard .sidebar-head {
-  min-height: 58px;
-  padding: 2px 7px 14px;
-  border-bottom: 1px solid var(--hm-hairline);
-}
-
-body.hilal-dashboard .dashboard-brand-logo {
-  display: block;
-  min-width: 0;
-  max-width: 197px;
-}
-
-body.hilal-dashboard .dashboard-logo-viewport {
-  display: block;
-  width: 197px;
-  height: 31px;
-  overflow: hidden;
-  transition: width var(--hm-motion);
-}
-
-body.hilal-dashboard .dashboard-logo-art,
-body.hilal-dashboard .logo .dashboard-logo-art {
-  display: block;
-  width: 197px;
-  max-width: none;
-  height: 31px;
-}
+/* The shell — the page grid, the side menu and the topbar — is not styled here any
+   more. It has one owner, `hm-shell.css`, which is loaded after this file. It used to be
+   described in three places at once: here, in `hilalmarkets.css`, and again in the
+   `.sidebar-collapsed` rules further down that file, each with its own idea of what the
+   minimized menu hides. */
 
 body.hilal-dashboard .logo {
   gap: 10px;
@@ -130,176 +84,10 @@ body.hilal-dashboard .logo small {
   text-transform: none;
 }
 
-body.hilal-dashboard .sidebar-collapse {
-  min-height: 40px;
-  margin: 12px 0 16px;
-  border-color: var(--hm-hairline);
-  border-radius: 12px;
-  background: var(--hm-surface-soft);
-  color: var(--hm-neutral);
-  font-weight: 550;
-  transition: color var(--hm-motion), background var(--hm-motion), transform var(--hm-motion);
-}
-
-body.hilal-dashboard .sidebar-collapse:hover {
-  background: var(--hm-apple-soft);
-  color: var(--hm-apple-deep);
-}
-
-body.hilal-dashboard .nav-group { margin-bottom: 17px; }
-
-body.hilal-dashboard .nav-label {
-  padding: 0 12px 7px;
-  color: var(--hm-muted);
-  font-size: .67rem;
-  font-weight: 600;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-body.hilal-dashboard .nav-item {
-  min-height: 44px;
-  margin: 3px 0;
-  padding: 0 12px;
-  border: 1px solid transparent;
-  border-radius: 13px;
-  color: var(--hm-copy);
-  font-size: .87rem;
-  font-weight: 520;
-  transition: color var(--hm-motion), background var(--hm-motion), border-color var(--hm-motion), transform var(--hm-motion);
-}
-
-body.hilal-dashboard .nav-item .icon { color: var(--hm-muted); }
-
-body.hilal-dashboard .nav-item:hover {
-  border-color: var(--hm-hairline);
-  background: var(--hm-surface-soft);
-  color: var(--hm-ink);
-  transform: translateX(2px);
-}
-
-body.hilal-dashboard .nav-item:hover .icon { color: var(--hm-apple-deep); }
-
-body.hilal-dashboard .nav-item.is-active {
-  border-color: var(--hm-ink);
-  background: var(--hm-ink);
-  color: var(--hm-surface);
-  box-shadow: 0 18px 38px -28px rgba(43, 46, 53, .85);
-}
-
-body.hilal-dashboard .nav-item.is-active::after {
-  position: absolute;
-  right: 10px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--hm-apple);
-  content: "";
-}
-
-body.hilal-dashboard .nav-item.is-active .icon { color: var(--hm-apple); }
-
-body.hilal-dashboard .sidebar-profile {
-  padding: 11px;
-  border-color: var(--hm-hairline);
-  border-radius: 16px;
-  background: var(--hm-surface-soft);
-}
-
-@media (min-width: 901px) {
-  body.dashboard-body.hilal-dashboard.sidebar-collapsed {
-    --sidebar: 76px;
-  }
-
-  body.hilal-dashboard.sidebar-collapsed .app-shell {
-    grid-template-columns: 76px minmax(0, 1fr);
-  }
-
-  body.hilal-dashboard.sidebar-collapsed .sidebar {
-    width: 76px;
-    padding-inline: 8px;
-    overflow-x: hidden;
-  }
-
-  body.hilal-dashboard.sidebar-collapsed .sidebar-head {
-    display: grid;
-    place-items: center;
-    padding-inline: 0;
-  }
-
-  body.hilal-dashboard.sidebar-collapsed .dashboard-brand-logo {
-    width: 31px;
-  }
-
-  body.hilal-dashboard.sidebar-collapsed .dashboard-logo-viewport {
-    width: 31px;
-  }
-
-  body.hilal-dashboard.sidebar-collapsed .sidebar-collapse {
-    width: 44px;
-    margin-inline: auto;
-    padding: 0;
-    justify-content: center;
-  }
-
-  body.hilal-dashboard.sidebar-collapsed .sidebar-collapse > span:last-child,
-  body.hilal-dashboard.sidebar-collapsed .nav-label,
-  body.hilal-dashboard.sidebar-collapsed .nav-item > span:last-child,
-  body.hilal-dashboard.sidebar-collapsed .sidebar-profile .meta,
-  body.hilal-dashboard.sidebar-collapsed .sidebar-profile form {
-    display: none;
-  }
-
-  body.hilal-dashboard.sidebar-collapsed .nav-item {
-    width: 44px;
-    padding: 0;
-    justify-content: center;
-    margin-inline: auto;
-  }
-
-  body.hilal-dashboard.sidebar-collapsed .nav-item.is-active::after {
-    right: 4px;
-    top: 4px;
-  }
-
-  body.hilal-dashboard.sidebar-collapsed .sidebar-profile {
-    width: 52px;
-    padding: 7px;
-    justify-content: center;
-  }
-}
-
 body.hilal-dashboard .avatar {
   border: 1px solid var(--hm-hairline);
   background: var(--hm-apple-soft);
   color: var(--hm-apple-deep);
-}
-
-body.hilal-dashboard .app-main { min-width: 0; }
-
-body.hilal-dashboard .topbar {
-  position: sticky;
-  top: 16px;
-  z-index: 50;
-  height: 70px;
-  margin-bottom: 16px;
-  padding: 0 18px;
-  border: 1px solid var(--hm-hairline);
-  border-radius: var(--hm-radius-md);
-  background: rgba(255, 255, 255, .92);
-  box-shadow: var(--hm-shadow-xs);
-  backdrop-filter: blur(18px);
-}
-
-body.hilal-dashboard .topbar-search { width: min(420px, 38vw); }
-body.hilal-dashboard .topbar-search .input { background: var(--hm-surface-soft); }
-body.hilal-dashboard .topbar-search .icon { color: var(--hm-muted); }
-
-body.hilal-dashboard .app-content {
-  width: 100%;
-  max-width: 1500px;
-  margin: auto;
-  padding: 10px 2px 34px;
 }
 
 /* Page identity */
@@ -871,7 +659,9 @@ body.hilal-dashboard .feed-item, body.hilal-dashboard .setting-row { border-colo
 body.hilal-dashboard .live-market-head {
   border-color: var(--hm-hairline);
   background: rgba(255, 255, 255, .96);
-  color: var(--hm-muted);
+  /* --hm-muted is 3.98:1 on white. Header text this small needs 4.5:1, so it uses
+     --hm-copy (7.5:1) here and in hilalmarkets.css, which sets the same rule. */
+  color: var(--hm-copy);
   font-weight: 600;
 }
 body.hilal-dashboard .passport-tabs {
@@ -886,7 +676,7 @@ body.hilal-dashboard .monitor-filter-menu {
   border-color: var(--hm-hairline);
   background: var(--hm-surface);
   box-shadow: var(--hm-shadow-popover);
-  animation: hm-popover-in var(--hm-motion) both;
+  animation: hm-popover-in var(--hm-motion) backwards;
 }
 
 body.hilal-dashboard .monitor-filter-menu a { color: var(--hm-copy); }
@@ -903,7 +693,7 @@ body.hilal-dashboard :where(.evidence-dialog, .saved-assets-dialog, .lifecycle-c
   backdrop-filter: blur(6px);
 }
 
-body.hilal-dashboard :where(.evidence-dialog-shell, .saved-assets-shell, .lifecycle-dialog-shell) { animation: hm-dialog-in 260ms cubic-bezier(.2, .75, .25, 1) both; }
+body.hilal-dashboard :where(.evidence-dialog-shell, .saved-assets-shell, .lifecycle-dialog-shell) { animation: hm-dialog-in 260ms cubic-bezier(.2, .75, .25, 1) backwards; }
 body.hilal-dashboard .evidence-summary-block { border-color: var(--hm-hairline); background: var(--hm-surface); }
 body.hilal-dashboard .evidence-summary-block.is-change { border-color: #fdf2df; background: var(--hm-warning-bg); }
 body.hilal-dashboard .evidence-fact-grid > div { background: var(--hm-surface-soft); }
@@ -1186,7 +976,7 @@ body.hilal-dashboard .notification-center-popover {
   border-color: var(--hm-hairline);
   background: var(--hm-surface);
   box-shadow: var(--hm-shadow-popover);
-  animation: hm-popover-in var(--hm-motion) both;
+  animation: hm-popover-in var(--hm-motion) backwards;
 }
 
 body.hilal-dashboard .notification-center-item:hover { background: var(--hm-apple-soft); }
@@ -1414,12 +1204,12 @@ body.hilal-dashboard .dash-empty {
 
 body.hilal-dashboard .summary-box:not([hidden]) {
   margin-top: 13px;
-  animation: hm-section-enter var(--hm-motion) both;
+  animation: hm-section-enter var(--hm-motion) backwards;
 }
 
 /* Intentional entrance hierarchy: content appears, data does not theatrically move. */
 body.hilal-dashboard .app-content > :not(.page-header):not(.guided-builder-heading):not([hidden]) {
-  animation: hm-section-enter 420ms cubic-bezier(.2, .75, .25, 1) both;
+  animation: hm-section-enter 420ms cubic-bezier(.2, .75, .25, 1) backwards;
 }
 
 body.hilal-dashboard .stat-grid > :nth-child(2),
@@ -1513,11 +1303,21 @@ body.hilal-dashboard .favorite-toggle {
   transition: background-color var(--hm-motion), border-color var(--hm-motion), transform var(--hm-motion);
 }
 
-body.hilal-dashboard .favorite-toggle:hover,
+body.hilal-dashboard .favorite-toggle:hover {
+  border-color: var(--hm-apple-deep);
+  background: var(--hm-apple-soft);
+  transform: translateY(-1px);
+}
+
+/* Hover and focus were one rule, and it removed the outline. A pointer user got a
+   colour change and a keyboard user got nothing at all, on the only control that
+   follows or unfollows a coin. They are two states and they are answered separately:
+   the tint is the hover, the shared ring is the focus. */
 body.hilal-dashboard .favorite-toggle:focus-visible {
   border-color: var(--hm-apple-deep);
   background: var(--hm-apple-soft);
-  outline: none;
+  outline: var(--hm-focus-ring);
+  box-shadow: var(--hm-focus-halo);
   transform: translateY(-1px);
 }
 
@@ -1544,10 +1344,6 @@ body.hilal-dashboard .market-filter-row {
 
 body.hilal-dashboard .opportunity-journey-progress {
   margin-bottom: 10px;
-}
-
-body.hilal-dashboard .sidebar-collapse [data-sidebar-collapse-icon] {
-  transform: none !important;
 }
 
 body.hilal-dashboard .market-filter-control {
@@ -1713,11 +1509,6 @@ body.hilal-dashboard .ui-icon {
   object-fit: contain;
 }
 
-body.hilal-dashboard .nav-item .ui-icon {
-  width: 19px;
-  height: 19px;
-}
-
 body.hilal-dashboard .service-icon-wide {
   width: 26px;
   filter: grayscale(1) contrast(1.3);
@@ -1737,8 +1528,9 @@ body.hilal-dashboard .choice-chip {
 }
 
 body.hilal-dashboard .choice-chip:has(input:focus-visible) {
-  outline: 3px solid rgba(203, 250, 77, .78);
+  outline: var(--hm-focus-ring);
   outline-offset: 3px;
+  box-shadow: var(--hm-focus-halo);
 }
 
 body.hilal-dashboard .schedule-choice-grid label > span {
@@ -1805,30 +1597,6 @@ body.hilal-dashboard .lifecycle-card > .progress {
   margin-top: 10px;
 }
 
-@media (max-width: 1100px) {
-  body.hilal-dashboard:not(.sidebar-collapsed) .sidebar .nav-item {
-    justify-content: flex-start;
-    padding-inline: 12px;
-    width: 100%;
-  }
-
-  body.hilal-dashboard:not(.sidebar-collapsed) .sidebar .nav-item > span:last-child {
-    display: inline !important;
-  }
-}
-
-@media (max-width: 900px) {
-  body.hilal-dashboard .sidebar.is-open .nav-item {
-    justify-content: flex-start;
-    padding-inline: 12px;
-    width: 100%;
-  }
-
-  body.hilal-dashboard .sidebar.is-open .nav-item > span:last-child {
-    display: inline !important;
-  }
-}
-
 body.hilal-dashboard .support-upload-control:hover {
   border-color: var(--hm-apple-deep);
   background: var(--hm-apple-soft);
@@ -1844,6 +1612,16 @@ body.hilal-dashboard .support-upload-control small {
   font-size: .72rem;
 }
 
+/* Every entrance below is written as a `from` state only, and every one of them is
+   run with `backwards` rather than `both`.
+
+   `both` keeps the animation applying its result forever after it has finished, and a
+   transform that is still being applied — even the identity one these settle on —
+   makes the element a containing block. Any `position: fixed` descendant then
+   measures itself against that element instead of the screen. The whole dashboard
+   sits inside `.app-content > *`, so with `both` no page inside the shell could ever
+   put anything full screen: it silently became the size of its own section. Naming it
+   here because the symptom appears far away from the cause. */
 @keyframes hm-section-enter {
   from { opacity: 0; transform: translateY(8px); }
 }
@@ -1857,42 +1635,22 @@ body.hilal-dashboard .support-upload-control small {
 }
 
 /* RTL and responsive product behavior */
-html[dir="rtl"] body.hilal-dashboard .nav-item:hover { transform: translateX(-2px); }
-html[dir="rtl"] body.hilal-dashboard .nav-item.is-active::after { right: auto; left: 10px; }
 html[dir="rtl"] body.hilal-dashboard .page-header::after,
 html[dir="rtl"] body.hilal-dashboard .guided-builder-heading::after,
 html[dir="rtl"] body.hilal-dashboard .dash-topbar::after { right: auto; left: -62px; }
 
 @media (max-width: 1100px) {
-  body.hilal-dashboard { --sidebar: 236px; }
   body.hilal-dashboard .page-header,
   body.hilal-dashboard .guided-builder-heading,
   body.hilal-dashboard .dash-topbar { padding: 24px; }
 }
 
 @media (max-width: 900px) {
-  body.hilal-dashboard .app-shell { display: block; padding: 10px; }
   body.hilal-dashboard .integrations-grid { grid-template-columns: minmax(0, 1fr); }
   body.hilal-dashboard .readiness-filters { grid-template-columns: minmax(0, 1fr); }
-  body.hilal-dashboard .sidebar {
-    position: fixed;
-    top: 10px;
-    bottom: 10px;
-    left: 10px;
-    width: min(310px, calc(100vw - 20px));
-    height: auto;
-    transform: translateX(calc(-100% - 18px));
-  }
-  body.hilal-dashboard .sidebar.is-open { transform: none; }
-  body.hilal-dashboard .topbar { top: 10px; }
-  html[dir="rtl"] body.hilal-dashboard .sidebar { right: 10px; left: auto; transform: translateX(calc(100% + 18px)); }
-  html[dir="rtl"] body.hilal-dashboard .sidebar.is-open { transform: none; }
 }
 
 @media (max-width: 700px) {
-  body.hilal-dashboard .app-shell { padding: 8px; }
-  body.hilal-dashboard .topbar { top: 8px; height: 62px; margin-bottom: 10px; padding: 0 10px; border-radius: 16px; }
-  body.hilal-dashboard .app-content { padding-bottom: 24px; }
   body.hilal-dashboard .page-header,
   body.hilal-dashboard .guided-builder-heading,
   body.hilal-dashboard .dash-topbar { min-height: 0; padding: 21px 18px; border-radius: 20px; }
@@ -1957,46 +1715,12 @@ html[dir="rtl"] body.hilal-dashboard .dash-topbar::after { right: auto; left: -6
   body.hilal-dashboard .passport-summary-actions .btn { width: 100%; }
 }
 
-/* Imported Lucide outline assets are used as masks so navigation state can
-   inherit the Hilal Markets palette without altering the source artwork. */
-body.hilal-dashboard .nav-icon {
-  --nav-icon-url: none;
-  display: block;
-  flex: 0 0 19px;
-  width: 19px;
-  height: 19px;
-  color: var(--hm-muted);
-  background-color: currentColor;
-  -webkit-mask-image: var(--nav-icon-url);
-  mask-image: var(--nav-icon-url);
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: contain;
-  mask-size: contain;
-  transition: color 180ms ease, transform 180ms ease;
-}
-
-body.hilal-dashboard .nav-icon-home { --nav-icon-url: url("/static/nav-home.svg"); }
-body.hilal-dashboard .nav-icon-market { --nav-icon-url: url("/static/nav-market.svg"); }
-body.hilal-dashboard .nav-icon-radar { --nav-icon-url: url("/static/nav-radar.svg"); }
-body.hilal-dashboard .nav-icon-scan { --nav-icon-url: url("/static/nav-scan.svg"); }
-body.hilal-dashboard .nav-icon-activity { --nav-icon-url: url("/static/nav-activity.svg"); }
-body.hilal-dashboard .nav-icon-bell { --nav-icon-url: url("/static/nav-bell.svg"); }
-body.hilal-dashboard .nav-icon-billing { --nav-icon-url: url("/static/nav-billing.svg"); }
-body.hilal-dashboard .nav-icon-settings { --nav-icon-url: url("/static/ui-settings.svg"); }
-body.hilal-dashboard .nav-icon-support { --nav-icon-url: url("/static/nav-support.svg"); }
-
-body.hilal-dashboard .nav-item:hover .nav-icon,
-body.hilal-dashboard .nav-item:focus-visible .nav-icon {
-  color: var(--hm-apple-deep);
-  transform: translateY(-1px);
-}
-
-body.hilal-dashboard .nav-item.is-active .nav-icon {
-  color: var(--hm-apple);
-}
+/* The side menu used to have an icon system of its own: eleven `.nav-icon-*` rules,
+   each masking a file that nothing else on the site referenced. Adding a menu entry
+   therefore meant adding an icon in two unrelated places, and getting it wrong drew an
+   empty square with nothing reporting it — which is exactly what happened when the
+   "Monitor" entry was added. The menu reads `hilalmarkets-icons.js` now, like every
+   other icon in the product, and the eleven files are gone. */
 
 /* Shared progressive-enhancement select. The native control remains the
    authoritative form value while this supplies the branded interaction. */
@@ -2075,13 +1799,20 @@ body.hilal-dashboard .hm-select-trigger:hover {
   transform: translateY(-1px);
 }
 
-body.hilal-dashboard .hm-select-trigger:focus-visible,
+/* Open and focused are two different things. Opening the menu tints the border; being
+   focused by the keyboard draws the shared ring. They used to be one rule that removed
+   the outline and replaced it with a 14%-opacity green glow — 1.1:1, invisible — so on
+   every dropdown in the dashboard the keyboard position could not be seen. */
 body.hilal-dashboard .hm-select-control.is-open .hm-select-trigger {
-  outline: none;
   border-color: var(--hm-apple-deep);
-  box-shadow:
-    0 0 0 3px rgba(85, 113, 42, .14),
-    var(--hm-shadow-sm);
+  box-shadow: var(--hm-shadow-sm);
+}
+
+body.hilal-dashboard .hm-select-trigger:focus-visible {
+  border-color: var(--hm-apple-deep);
+  outline: var(--hm-focus-ring);
+  outline-offset: 2px;
+  box-shadow: var(--hm-focus-halo);
 }
 
 body.hilal-dashboard .hm-select-trigger:focus-visible::before,
@@ -2394,8 +2125,9 @@ body.hilal-dashboard .dashboard-billing-toggle label:has(input:checked) {
 }
 
 body.hilal-dashboard .dashboard-billing-toggle label:has(input:focus-visible) {
-  outline: 3px solid var(--hm-apple-deep);
+  outline: var(--hm-focus-ring);
   outline-offset: 2px;
+  box-shadow: var(--hm-focus-halo);
 }
 
 body.hilal-dashboard .dashboard-billing-toggle label.is-unavailable {
@@ -2921,8 +2653,9 @@ body.hilal-dashboard :is(.billing-toggle, .billing-period-options) label.is-unav
 
 body.hilal-dashboard :is(.billing-period-options, .billing-method-options) input:focus-visible + span,
 body.hilal-dashboard .billing-profile-grid input:focus-visible {
-  outline: 3px solid rgba(85, 113, 42, .35);
+  outline: var(--hm-focus-ring);
   outline-offset: 2px;
+  box-shadow: var(--hm-focus-halo);
 }
 
 body.hilal-dashboard .billing-dialog-status {
@@ -3711,7 +3444,7 @@ body.hilal-dashboard .cookie-banner {
   background: var(--hm-surface);
   box-shadow: var(--hm-shadow-popover);
 }
-body.hilal-dashboard .cookie-banner.is-visible { display: block; animation: hm-dialog-in 220ms cubic-bezier(.2, .75, .25, 1) both; }
+body.hilal-dashboard .cookie-banner.is-visible { display: block; animation: hm-dialog-in 220ms cubic-bezier(.2, .75, .25, 1) backwards; }
 body.hilal-dashboard .cookie-banner-inner {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

@@ -116,6 +116,10 @@ def test_one_submission_can_report_at_most_one_conversion():
     The scope is the submission's own idempotency key - the same identifier that stops
     the server writing a second row - so the analytics count and the stored record can
     never disagree about how many people joined.
+
+    Only the module is checked here. Which page carries a form is the subject of the
+    test below, and pinning the landing page's own call in this one is what made both
+    tests fail together the day the form was removed.
     """
 
     analytics = _analytics()
@@ -129,19 +133,21 @@ def test_one_submission_can_report_at_most_one_conversion():
     assert "if (onceEvents.has(key)) return false" in once
     assert "if (!send()) return false" in once
 
-    app = APP.read_text(encoding="utf-8")
-    assert "trackWaitlistSuccess('landing_final', idempotencyKey.current)" in app
-    # The key is replaced only after the submission is finished, so the whole of one
-    # attempt shares one scope.
-    assert app.index("trackWaitlistSuccess(") < app.index("resetIdempotency()\n    } catch")
-
 
 def test_every_place_that_submits_the_waitlist_reports_the_confirmed_signup():
-    """Requirement: every entry point, not only the landing form that exists today.
+    """Requirement: every entry point, whichever pages have one.
 
     There is one signup flow - `submitWaitlist`. Any file that calls it is a waitlist
     entry point, and each one has to report success through the single owner. A second
     form added later fails this test until it does.
+
+    **There may be none.** The product has launched, so the landing page offers the
+    dashboard rather than a waitlist and nothing calls `submitWaitlist` today. The
+    submission path is kept because `PUBLIC_WAITLIST_MODE` can pull the site back to the
+    waitlist without a deploy, and the rule has to be waiting for it when it returns.
+    This test used to assert a caller existed, which turned "the waitlist was
+    deliberately removed" into a failure. What it guards is the shape of a caller, not
+    the presence of one.
     """
 
     callers = [
@@ -150,7 +156,6 @@ def test_every_place_that_submits_the_waitlist_reports_the_confirmed_signup():
         if path.name != "publicForms.ts"
         and "submitWaitlist(" in path.read_text(encoding="utf-8")
     ]
-    assert callers, "No waitlist entry point found; the flow was renamed or removed."
     for path in callers:
         source = path.read_text(encoding="utf-8")
         assert "trackWaitlistSuccess(" in source, path.name
@@ -159,6 +164,8 @@ def test_every_place_that_submits_the_waitlist_reports_the_confirmed_signup():
         assert source.index("if (result.created) {") < source.index(
             "trackWaitlistSuccess("
         ), path.name
+        # One scope per submission, so a retry cannot report a second signup.
+        assert "idempotencyKey" in source, path.name
 
 
 def test_the_bundle_a_visitor_downloads_carries_the_conversion_and_one_gtm_install():

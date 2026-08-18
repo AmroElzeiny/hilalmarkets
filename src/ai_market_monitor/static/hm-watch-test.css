@@ -1,0 +1,824 @@
+/* The Watchlists and Opportunities pages on the redesigned dashboard pages.
+ *
+ * One stylesheet for the two, because they are the same person's two questions about
+ * the same thing — what am I watching, and what did it find — and every pattern below
+ * is used by both. Two files would be two places for the same card to drift.
+ *
+ * Every colour, radius, shadow and step of spacing is a `--t-*` token declared once in
+ * hm-dashboard-test.css. Nothing here invents a scale and nothing writes a fallback.
+ *
+ * `brand guide.md` §9: apple green is one focal accent, not a decoration. On these
+ * pages it marks exactly two things — the one action a card is really for, and the
+ * "this is working" state. Everything that says "something is wrong" uses the warning
+ * and danger tokens, which are not green, so the two can never be confused by somebody
+ * who cannot separate them by colour at all.
+ */
+
+/* ── The bar of filters and the search ─────────────────────────────────────── */
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-2);
+}
+
+/* A filter is a real toggle, so a screen reader says "pressed". The count lives inside
+   the button because a number beside a word nobody can press is a number nobody can
+   act on. */
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-filter {
+  display: inline-flex;
+  min-height: 44px;
+  gap: var(--t-2);
+  align-items: center;
+  padding: 0 var(--t-4);
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-surface);
+  color: var(--t-copy);
+  cursor: pointer;
+  font: inherit;
+  font-size: .84rem;
+  transition:
+    border-color var(--t-fast) var(--t-ease),
+    background var(--t-fast) var(--t-ease),
+    color var(--t-fast) var(--t-ease),
+    transform var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-filter:hover:not([disabled]) {
+  border-color: var(--t-ink);
+  color: var(--t-ink-strong);
+  transform: translateY(-1px);
+}
+
+/* Selected is near-black, the way every other selected thing on this path is. */
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-filter[aria-pressed="true"] {
+  border-color: var(--t-ink-strong);
+  background: var(--t-ink-strong);
+  color: var(--t-surface);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-filter[disabled] {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-filter-count {
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--t-quiet);
+  color: var(--t-ink-strong);
+  font-size: .74rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-filter[aria-pressed="true"] .w-filter-count {
+  background: rgba(255, 255, 255, .18);
+  color: var(--t-surface);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-search {
+  min-width: min(320px, 100%);
+  flex: 0 1 320px;
+}
+
+/* ── The banner and its jump button ────────────────────────────────────────── */
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-banner { align-items: center; }
+
+/* Every button on these two pages is a real 44-pixel target.
+ *
+ * The shared button is 40 and carries `flex: 1`, which is right inside a row of equal
+ * actions and wrong everywhere else: in the page header and in the banner it stretched
+ * one primary action across four hundred pixels of empty space, which reads as a
+ * mistake rather than as emphasis. Written at the same weight as the shared rule, in a
+ * file that loads after it. */
+/* `.hm-t` is named as well as `.hm-w`, which both sit on the same element. Written at
+   equal weight to the shared rule this lost, silently, and only the two buttons that
+   also carried a rule of their own came out the right size — so half the page passed
+   and half did not, for a reason nothing on screen could show. */
+body.hilal-dashboard .hm-t:is(.hm-w, .hm-o) .t-action,
+body.hilal-dashboard dialog:is(.w-ask, .w-explain, .o-saw, .o-why, .o-chart) .t-action { min-height: 44px; }
+
+body.hilal-dashboard .hm-t:is(.hm-w, .hm-o) .w-jump,
+body.hilal-dashboard .hm-t:is(.hm-w, .hm-o) .w-new {
+  flex: 0 0 auto;
+  align-self: center;
+  margin-inline-start: auto;
+}
+
+/* ── One card ──────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-grid {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: var(--t-4);
+  /* `auto-fit`, not `auto-fill`. With one list on a wide screen, `auto-fill` kept an
+     empty second column and left the only card sitting at half width looking like
+     something had failed to load. */
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  list-style: none;
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-card {
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+  gap: var(--t-3);
+  padding: var(--t-5);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+  transition:
+    border-color var(--t-base) var(--t-ease),
+    box-shadow var(--t-base) var(--t-ease),
+    transform var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-card:hover {
+  border-color: var(--t-line-strong);
+  box-shadow: var(--hm-shadow-xs);
+  transform: translateY(-2px);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-card-head {
+  display: flex;
+  gap: var(--t-3);
+  align-items: flex-start;
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  place-items: center;
+  border-radius: var(--t-r-md);
+  background: var(--t-accent-pale);
+  color: var(--t-ink-strong);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-mark[data-tone="warning"] { background: var(--hm-warning-bg); color: var(--hm-warning); }
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-mark[data-tone="danger"] { background: var(--hm-danger-bg); color: var(--hm-danger); }
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-mark[data-tone="information"],
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-mark[data-tone="neutral"] { background: var(--t-quiet); color: var(--t-copy); }
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-title { min-width: 0; }
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-title h2 {
+  margin: 0;
+  color: var(--t-ink-strong);
+  font-size: 1.08rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+/* Status: an icon, the word, and the sentence that says what the word means. The
+   sentence is the part the live page never had. */
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-status {
+  display: flex;
+  flex-wrap: wrap;
+  margin: var(--t-1) 0 0;
+  gap: 0 6px;
+  align-items: center;
+  color: var(--t-copy);
+  font-size: .8rem;
+  line-height: 1.45;
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-status strong { color: var(--t-ink-strong); }
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-note {
+  margin: 0;
+  color: var(--t-copy);
+  font-size: .86rem;
+  line-height: 1.55;
+}
+
+/* ── Three facts ───────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-facts {
+  display: grid;
+  margin: 0;
+  gap: var(--t-2);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-fact {
+  padding: var(--t-3);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-fact dt {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--t-copy);
+  font-size: .72rem;
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-fact dd {
+  margin: 3px 0 0;
+  color: var(--t-ink-strong);
+  font-size: .88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-fact dd strong { font-size: 1.05rem; }
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-none { color: var(--t-copy); }
+
+/* ── Is it working ─────────────────────────────────────────────────────────── */
+
+/* No coloured bar on the starting edge of a status box.
+ *
+ * The box is already filled with its tone, and it already carries the tone's icon and
+ * the word for it — which is what `brand guide.md` §10 asks for, and it is what makes
+ * the state readable to somebody who cannot separate the colours. The bar was a third
+ * mark saying the same thing a third time, and it turned a calm panel into what reads
+ * as an error banner. Removed for the whole family on these pages — the working line,
+ * the opportunity state and the "why nobody was told" head — rather than only for the
+ * one tone that was pointed at, so one page never carries two visual languages. */
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-working {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  gap: 0 6px;
+  align-items: center;
+  padding: var(--t-2) var(--t-3);
+  border-radius: var(--t-r-sm);
+  background: var(--t-accent-soft);
+  color: var(--t-copy);
+  font-size: .82rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-working strong { color: var(--t-ink-strong); }
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-working[data-tone="warning"] {
+  background: var(--hm-warning-bg);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-working[data-tone="danger"] {
+  background: var(--hm-danger-bg);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-working[data-tone="neutral"] {
+  background: var(--t-quiet);
+}
+
+/* ── What is holding it back ───────────────────────────────────────────────── */
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-holding {
+  display: flex;
+  min-height: 44px;
+  gap: var(--t-2);
+  align-items: center;
+  padding: var(--t-2) var(--t-3);
+  border: 1px dashed var(--t-line-strong);
+  border-radius: var(--t-r-sm);
+  background: none;
+  color: var(--t-copy);
+  cursor: pointer;
+  font: inherit;
+  font-size: .8rem;
+  text-align: start;
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-holding:hover {
+  border-color: var(--t-ink);
+  border-style: solid;
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-holding-copy { min-width: 0; flex: 1 1 auto; }
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-holding-copy strong { color: var(--t-ink-strong); }
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-holding-more {
+  flex: none;
+  color: var(--t-copy);
+  font-size: .72rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ── The actions ───────────────────────────────────────────────────────────── */
+
+/* One button per line, always.
+ *
+ * These were a wrapping row. A row is fine only while the number of buttons is fixed,
+ * and here it is not: an Opportunity card carries between one and four buttons
+ * depending on what the platform actually knows about that coin, and a Watchlist card
+ * carries four. So the row wrapped differently on every card in the same grid, and the
+ * last button on a wrapped line stretched to fill the leftover space — two cards side
+ * by side, the same action, two different widths and two different places to look for
+ * it.
+ *
+ * A column has none of those failure modes. Every action is the same width, every card
+ * puts the same action in the same place, and adding a fifth button later makes the
+ * card taller instead of breaking its layout. It also gives every action a full-width
+ * hit area, which is the easier target on a phone.
+ */
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-actions {
+  display: grid;
+  margin-top: auto;
+  gap: var(--t-2);
+  padding-top: var(--t-1);
+}
+
+/* Full width, so the column reads as one column rather than as ragged text. The height
+   comes from the shared `.t-action`, which is 44px for the whole path. */
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-actions > .t-action {
+  flex: none;
+  width: 100%;
+}
+
+/* The ones that only look sit below the ones that change something. In a row they were
+   pushed apart with `margin-inline-start: auto`, which does nothing in a column; the
+   grouping is a slightly wider gap instead. Every button keeps the same pill, so the
+   column stays one column and no single action looks like a different kind of control. */
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-quiet { margin-inline-start: 0; color: var(--t-copy); }
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-quiet:first-of-type { margin-block-start: var(--t-1); }
+
+/* ── Nothing matched ───────────────────────────────────────────────────────── */
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-nothing,
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-first {
+  display: grid;
+  justify-items: center;
+  padding: var(--t-7) var(--t-5);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+  gap: var(--t-3);
+  text-align: center;
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-nothing-mark,
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-first-mark {
+  display: grid;
+  width: 60px;
+  height: 60px;
+  place-items: center;
+  border-radius: var(--t-r-lg);
+  background: var(--t-accent-pale);
+  color: var(--t-ink-strong);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-nothing h2,
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-first h2 { color: var(--t-ink-strong); }
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-nothing p,
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-first > p { max-width: 52ch; }
+
+/* ── The first list, and the "nothing found yet" way out ───────────────────── */
+
+/* Scoped to both pages, like the `.w-first` and `.w-nothing` rules above it.
+ *
+ * This whole block was scoped to `.hm-w` alone — the Watchlists page — while the
+ * Opportunities markup uses exactly the same class names for exactly the same panel.
+ * So a person who had made no Watchlist saw a designed empty state, and a person whose
+ * lists had not found anything yet saw the same words with no layout at all: the cards
+ * collapsed into a run of bare text with the arrows stacked underneath.
+ *
+ * It was invisible in review because both pages *have* the rules in the same file, and
+ * invisible in use because reaching it needs an account with lists that have found
+ * nothing — which is every new account, and no test opened it.
+ */
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-first-ways {
+  display: grid;
+  width: min(720px, 100%);
+  margin-top: var(--t-2);
+  gap: var(--t-3);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-way {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  padding: var(--t-4);
+  padding-inline-end: calc(var(--t-4) + 22px);
+  border: 1px solid var(--t-line-strong);
+  border-radius: var(--t-r-md);
+  color: inherit;
+  text-align: start;
+  text-decoration: none;
+  transition:
+    border-color var(--t-base) var(--t-ease),
+    box-shadow var(--t-base) var(--t-ease),
+    transform var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-way:hover {
+  border-color: var(--t-ink);
+  box-shadow: var(--hm-shadow-xs);
+  transform: translateY(-2px);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-way-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: var(--t-r-sm);
+  background: var(--t-quiet);
+  color: var(--t-ink-strong);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-way strong { color: var(--t-ink-strong); }
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-way span:not(.w-way-mark):not(.w-way-go) { color: var(--t-copy); font-size: .84rem; line-height: 1.5; }
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-way-go {
+  position: absolute;
+  top: var(--t-4);
+  right: var(--t-4);
+  color: var(--t-copy);
+  transition: transform var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-way:hover .w-way-go { transform: translateX(3px); }
+
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-first-browse {
+  display: inline-flex;
+  min-height: 44px;
+  gap: var(--t-2);
+  align-items: center;
+  color: var(--t-copy);
+  font-size: .84rem;
+}
+
+/* ── The two dialogs ───────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .w-ask .w-ask-name {
+  margin: 0 0 var(--t-4);
+  padding: var(--t-3);
+  border-inline-start: 3px solid var(--t-line-strong);
+  border-radius: var(--t-r-sm);
+  background: var(--t-quiet);
+  color: var(--t-ink-strong);
+  font-weight: 600;
+}
+
+body.hilal-dashboard .w-explain .w-explain-lede { margin: 0 0 var(--t-4); }
+
+body.hilal-dashboard .w-explain .w-explain-meter {
+  margin-bottom: var(--t-4);
+  padding: var(--t-4);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard .w-explain .w-explain-track {
+  overflow: hidden;
+  height: 10px;
+  margin-bottom: var(--t-3);
+  border-radius: 999px;
+  background: var(--t-line);
+}
+
+body.hilal-dashboard .w-explain .w-explain-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--hm-warning);
+  transition: width var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .w-explain .w-explain-meter p { margin: 0; font-size: .86rem; }
+body.hilal-dashboard .w-explain .w-explain-meter strong { color: var(--t-ink-strong); font-variant-numeric: tabular-nums; }
+
+body.hilal-dashboard .w-explain .w-explain-note {
+  display: flex;
+  gap: var(--t-2);
+  align-items: flex-start;
+  margin: 0 0 var(--t-4);
+  color: var(--t-copy);
+  font-size: .8rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .w-explain .w-explain-note em { font-style: normal; font-weight: 600; }
+
+/* ═══ Opportunities ══════════════════════════════════════════════════════════
+ *
+ * Everything below belongs to the Opportunities page and reuses the card, the filter,
+ * the rail and the empty states above rather than restating them. The one thing this
+ * page adds is a *reading*: what the market was doing when a check was made, and how
+ * much of a person's own list is true because of it.
+ */
+
+/* ── Choosing which list to look at ────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-o .o-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-3);
+  align-items: flex-end;
+  padding: var(--t-3) var(--t-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-o .o-pick-field {
+  display: flex;
+  min-width: min(340px, 100%);
+  flex: 1 1 340px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+body.hilal-dashboard .hm-o .o-pick-field > span {
+  color: var(--t-copy);
+  font-size: .78rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-o .o-pick select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--t-4);
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-quiet);
+  color: var(--t-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: .88rem;
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-o .o-pick select:hover { border-color: var(--t-ink); background: var(--t-surface); }
+body.hilal-dashboard .hm-t.hm-o .o-pick .t-action { flex: 0 0 auto; }
+
+/* ── The coin ──────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-o .o-coin {
+  display: grid;
+  overflow: hidden;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+  color: var(--t-ink-strong);
+  font-family: var(--hm-font-display);
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
+body.hilal-dashboard .hm-o .o-coin img,
+body.hilal-dashboard .hm-o .o-coin svg { width: 26px; height: 26px; }
+
+body.hilal-dashboard .hm-o .o-found-by {
+  display: flex;
+  flex-wrap: wrap;
+  margin: var(--t-1) 0 0;
+  gap: 0 6px;
+  align-items: center;
+  color: var(--t-copy);
+  font-size: .8rem;
+  line-height: 1.45;
+}
+
+body.hilal-dashboard .hm-o .o-found-by strong { color: var(--t-ink-strong); font-weight: 600; }
+
+/* ── The one status ────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-o .o-state {
+  margin: 0;
+  padding: var(--t-2) var(--t-3);
+  border-radius: var(--t-r-sm);
+  background: var(--t-accent-soft);
+}
+
+body.hilal-dashboard .hm-o .o-state[data-tone="warning"] { background: var(--hm-warning-bg); }
+body.hilal-dashboard .hm-o .o-state[data-tone="danger"] { background: var(--hm-danger-bg); }
+body.hilal-dashboard .hm-o .o-state[data-tone="information"],
+body.hilal-dashboard .hm-o .o-state[data-tone="neutral"] { background: var(--t-quiet); }
+
+/* ── How much of the list is true ──────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-o .o-progress { display: grid; gap: 6px; }
+
+body.hilal-dashboard .hm-o .o-progress-words {
+  color: var(--t-ink-strong);
+  font-size: .88rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-o .o-track {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--t-line);
+}
+
+/* The bar fills from nothing to the real count, once, so the movement *is* the
+   number. It is never the only place the number appears: the sentence above it says
+   the same thing in words, and the bar carries that sentence for a screen reader. */
+body.hilal-dashboard .hm-o .o-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--t-accent-text);
+  transition: width var(--t-base) var(--t-ease);
+}
+
+/* A card we could not check has no bar at all. An empty bar reads as "your rules
+   failed" when the truth is that nobody ever looked. */
+body.hilal-dashboard .hm-o .o-unchecked {
+  display: flex;
+  gap: var(--t-2);
+  align-items: flex-start;
+  margin: 0;
+  padding: var(--t-3);
+  border: 1px dashed var(--hm-warning);
+  border-radius: var(--t-r-sm);
+  background: var(--hm-warning-bg);
+  color: var(--t-copy);
+  font-size: .82rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .hm-o .o-unchecked .icon-sm { flex: none; color: var(--hm-warning); }
+
+/* ── What it is waiting for ────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-o .o-waiting {
+  display: grid;
+  gap: 4px;
+  padding: var(--t-3);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-sm);
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard .hm-o .o-waiting-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  align-items: center;
+  color: var(--t-ink-strong);
+  font-size: .84rem;
+}
+
+body.hilal-dashboard .hm-o .o-waiting-head strong { font-weight: 600; }
+body.hilal-dashboard .hm-o .o-waiting-why { color: var(--t-copy); font-size: .82rem; line-height: 1.55; }
+
+body.hilal-dashboard .hm-o .o-old {
+  display: flex;
+  gap: var(--t-2);
+  align-items: flex-start;
+  margin: 0;
+  color: var(--t-copy);
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .hm-o .o-facts { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+body.hilal-dashboard .hm-o .o-facts dd { font-size: .82rem; }
+
+/* ── Every reading, in the popup ───────────────────────────────────────────── */
+
+body.hilal-dashboard :is(.o-saw, .o-why) .o-checks {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: var(--t-2);
+  list-style: none;
+}
+
+body.hilal-dashboard :is(.o-saw, .o-why) .o-check {
+  display: flex;
+  gap: var(--t-3);
+  align-items: flex-start;
+  padding: var(--t-3);
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface);
+}
+
+body.hilal-dashboard :is(.o-saw, .o-why) .o-check-mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--hm-apple-pale);
+  color: var(--hm-success);
+}
+
+body.hilal-dashboard :is(.o-saw, .o-why) .o-check-mark[data-tone="warning"] { background: var(--hm-warning-bg); color: var(--hm-warning); }
+body.hilal-dashboard :is(.o-saw, .o-why) .o-check-mark[data-tone="information"],
+body.hilal-dashboard :is(.o-saw, .o-why) .o-check-mark[data-tone="neutral"] { background: var(--hm-neutral-bg); color: var(--hm-neutral); }
+
+body.hilal-dashboard :is(.o-saw, .o-why) .o-check-body { min-width: 0; display: grid; gap: 3px; }
+
+body.hilal-dashboard :is(.o-saw, .o-why) .o-check-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-2);
+  align-items: center;
+  color: var(--hm-ink);
+  font-size: .92rem;
+  overflow-wrap: anywhere;
+}
+
+body.hilal-dashboard :is(.o-saw, .o-why) .o-must {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--hm-neutral-bg);
+  color: var(--hm-neutral);
+  font-size: .68rem;
+  font-weight: 600;
+}
+
+body.hilal-dashboard :is(.o-saw, .o-why) .o-check-state { color: var(--hm-copy); font-size: .8rem; }
+
+body.hilal-dashboard :is(.o-saw, .o-why) .o-check-numbers {
+  color: var(--hm-copy);
+  font-size: .82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+body.hilal-dashboard :is(.o-saw, .o-why) .o-check-numbers strong { color: var(--hm-ink); }
+body.hilal-dashboard .o-saw .o-check-none { color: var(--hm-copy); font-size: .9rem; }
+
+/* ── Why nobody was told ───────────────────────────────────────────────────── */
+
+body.hilal-dashboard .o-why .o-why-head {
+  display: flex;
+  gap: var(--t-2);
+  align-items: center;
+  padding: var(--t-3);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-warning-bg);
+  color: var(--hm-ink);
+  font-size: .96rem;
+}
+
+body.hilal-dashboard .o-why .o-why-head[data-tone="success"] { background: var(--hm-apple-pale); }
+body.hilal-dashboard .o-why .o-why-head[data-tone="danger"] { background: var(--hm-danger-bg); }
+body.hilal-dashboard .o-why .o-why-head[data-tone="neutral"],
+body.hilal-dashboard .o-why .o-why-head[data-tone="information"] { background: var(--hm-surface-soft); }
+
+body.hilal-dashboard .o-why .o-why-do { color: var(--hm-ink); }
+body.hilal-dashboard .o-why .o-why-do strong { font-weight: 600; }
+
+/* ── The price picture ─────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .o-chart .o-chart-stage {
+  overflow: hidden;
+  min-height: 260px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard .o-chart .o-chart-note {
+  margin: 0;
+  color: var(--hm-copy);
+  font-size: .82rem;
+}
+
+/* ── Small screens ─────────────────────────────────────────────────────────── */
+
+@media (max-width: 560px) {
+  body.hilal-dashboard :is(.hm-w, .hm-o) .w-card { padding: var(--t-4); }
+  body.hilal-dashboard :is(.hm-w, .hm-o) .w-search { flex: 1 1 100%; }
+  /* The action column already stacks at every width, so the three rules that used to
+     unwrap the row here are gone rather than left behind saying nothing. */
+  body.hilal-dashboard .hm-t.hm-o .o-pick .t-action { flex: 1 1 100%; }
+}
+
+/* ── Less motion ───────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  body.hilal-dashboard :is(.hm-w, .hm-o) :where(.w-card, .w-filter, .w-way, .w-way-go, .o-fill, .o-pick select) {
+    transition: none;
+  }
+  body.hilal-dashboard :is(.hm-w, .hm-o) :where(.w-card, .w-filter, .w-way):hover { transform: none; }
+  body.hilal-dashboard :is(.hm-w, .hm-o) .w-way:hover .w-way-go { transform: none; }
+}

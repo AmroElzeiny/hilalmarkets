@@ -28,6 +28,8 @@ from playwright.sync_api import Page, expect, sync_playwright
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from ai_market_monitor.core.dashboard_paths import HOME_PATH, LEGACY_HOME_PATH
+
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 TEST_PASSWORD = "TraceEdge1!"
 BROWSER_DISCLAIMER_VERSION = "2026-06-01"
@@ -121,6 +123,9 @@ def _start_setup_model_stub() -> tuple[ThreadingHTTPServer, threading.Thread]:
             length = int(self.headers.get("Content-Length") or 0)
             request = json.loads(self.rfile.read(length) or b"{}")
             schema_name = request["text"]["format"]["name"]
+            if schema_name == "hilal_markets_dashboard_assistant_reply":
+                self._reply(_hilal_stub_answer(request))
+                return
             payload = json.loads(request["input"])
             if schema_name == "hilalmarkets_setup_turn_intent":
                 message = str(payload["current_user_turn"])
@@ -195,6 +200,9 @@ def _start_setup_model_stub() -> tuple[ThreadingHTTPServer, threading.Thread]:
                 output = SetupAgentReply(
                     message_without_question="I applied the verified draft update.",
                 ).model_dump_json()
+            self._reply(output)
+
+        def _reply(self, output: str) -> None:
             response = json.dumps(
                 {
                     "output": [
@@ -219,6 +227,60 @@ def _start_setup_model_stub() -> tuple[ThreadingHTTPServer, threading.Thread]:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread
+
+
+def _hilal_stub_answer(request: dict[str, Any]) -> str:
+    """A stand-in answer from Hilal, shaped exactly as the real one must be.
+
+    Hilal's request is a different shape from the setup planner's: its ``input`` is a
+    list of messages, not one JSON string. Reading it the planner's way crashed this
+    stub, so **every** Hilal turn that needed the model came back as a provider outage
+    — and the only turns that did not need the model were the refusals. The suite was
+    therefore testing refusals and nothing else, while looking like it tested both.
+
+    The answer built here is deliberately grounded in the evidence the application
+    actually supplied, so a test can tell a real answer apart from a canned one: it
+    names the page the person is on, which only the application knows.
+    """
+
+    from ai_market_monitor.schemas.hilal_chat import HilalChatReply
+
+    asked = ""
+    seen: dict[str, Any] = {}
+    for message in request.get("input") or []:
+        if not isinstance(message, dict):
+            continue
+        try:
+            content = json.loads(str(message.get("content") or "{}"))
+        except json.JSONDecodeError:
+            continue
+        asked = str(content.get("what_they_just_asked") or asked)
+        records = content.get("records_you_may_use") or {}
+        if isinstance(records, dict):
+            seen = records.get("what_they_can_see") or {}
+
+    board = seen.get("the_monitor_they_are_drawing") if isinstance(seen, dict) else None
+    where = (seen or {}).get("page") or "this page"
+    if board:
+        reply = (
+            f"You are on {where}, and I can see your board. "
+            "Tell me what you want to be warned about and I will show you which card "
+            "says it. This help is new, so please check the screen as we go."
+        )
+        mode = "GUIDE"
+    else:
+        reply = (
+            f"You are on {where}. Happy to help with anything we have on record here — "
+            f"you asked about {asked[:60] or 'something'}."
+        )
+        mode = "ANSWER"
+    return HilalChatReply(
+        mode=mode,
+        reply=reply,
+        language="English",
+        suggestions=["What is my board still missing?"],
+        grounded_in=[],
+    ).model_dump_json()
 
 
 def _terminate_server_process(process: subprocess.Popen[str]) -> None:
@@ -362,9 +424,69 @@ def browser_app(
         yield app
         return
 
+    yield from _run_browser_app(pytestconfig, repo_root, tmp_path_factory, slot="e2e")
+
+
+@pytest.fixture(scope="session")
+def paid_browser_app(
+    pytestconfig: pytest.Config,
+    repo_root: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> RunningApp:
+    """A second server, identical except that paid checkout is switched on.
+
+    The main browser server runs with `BILLING_ENABLED=false`, which is the honest
+    state of the product today — and it means no plan can be bought, so no test against
+    it can ever open the checkout popup. The paid flow is the most important thing on
+    the subscription page, and a flow nobody drives in a browser is a flow nobody has
+    checked.
+
+    `BILLING_PROVIDER=static` is the in-repository stand-in that every non-browser test
+    already uses; `_billing_selection_available` accepts it only when the app is not
+    deployed, so this can never make a real deployment sell anything.
+    """
+
+    if (
+        pytestconfig.getoption("--browser-base-url")
+        or os.environ.get("BROWSER_E2E_BASE_URL")
+    ):
+        pytest.skip("The paid checkout server is only started by the browser fixture.")
+    yield from _run_browser_app(
+        pytestconfig,
+        repo_root,
+        tmp_path_factory,
+        slot="paid",
+        extra_env={"BILLING_ENABLED": "true", "BILLING_PROVIDER": "static"},
+        report_as_main=False,
+    )
+
+
+def _run_browser_app(
+    pytestconfig: pytest.Config,
+    repo_root: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    *,
+    slot: str,
+    extra_env: dict[str, str] | None = None,
+    report_as_main: bool = True,
+) -> RunningApp:
+    """Start one isolated HilalMarkets server for the browser suite.
+
+    One place that knows how to start the app. `slot` keeps each server's database and
+    log apart, so two of them can run side by side without one migrating over the
+    other's rows.
+    """
+
     artifacts_dir = repo_root / "test-results" / "browser"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    database_path = artifacts_dir / "browser-e2e.sqlite"
+    # The slot keeps two servers *in one run* apart. The process id keeps two runs
+    # apart, which the slot alone did not: running two browser files at the same time —
+    # one file per terminal is how this suite is usually driven — had both of them
+    # delete and re-migrate `browser-e2e.sqlite` underneath each other, and write into
+    # one log. Whichever run started first then failed in ways that had nothing to do
+    # with the code under test, and the failures moved around between attempts.
+    run = f"{slot}-{os.getpid()}"
+    database_path = artifacts_dir / f"browser-{run}.sqlite"
     if database_path.exists():
         database_path.unlink()
     port = _free_port()
@@ -401,7 +523,17 @@ def browser_app(
             "AUTH_TEST_FIXED_CODE": "123456",
             "API_RATE_LIMITS": json.dumps(
                 {
-                    "authentication": {"limit": 200, "window_seconds": 900},
+                    # Nearly every browser test signs a new person up, and a signup is
+                    # two calls against this limit. The suite is 197 tests, so a whole
+                    # run needs roughly four hundred of them inside a fifteen-minute
+                    # window — and at two hundred it ran out partway through. What a
+                    # person then saw was a signup page that never navigated, in a test
+                    # about something else entirely, so the product looked broken and
+                    # the suite could only be run a file at a time.
+                    #
+                    # Nothing here is testing the limit itself. The one test that cares
+                    # about a refused request stubs the answer in the browser.
+                    "authentication": {"limit": 2000, "window_seconds": 900},
                     "ai_chat": {"limit": 100, "window_seconds": 60},
                     "market_check": {"limit": 100, "window_seconds": 60},
                     "checkout": {"limit": 50, "window_seconds": 300},
@@ -412,13 +544,34 @@ def browser_app(
                     "whatsapp_test": {"limit": 50, "window_seconds": 300},
                     "public_chat": {"limit": 100, "window_seconds": 60},
                     "public_inquiry": {"limit": 50, "window_seconds": 3600},
+                    # Every anonymous request in this suite comes from 127.0.0.1, so
+                    # the whole run shares one identity at this layer. Left at its real
+                    # value of five an hour, the fifth contact form submission anywhere
+                    # in the suite would refuse the sixth, in a test about something
+                    # else.
+                    "public_waitlist": {"limit": 200, "window_seconds": 3600},
+                    "public_contact": {"limit": 200, "window_seconds": 3600},
+                    # Every public page in the suite reports its own visit, several
+                    # times, so this ceiling has to clear a whole run rather than a page.
+                    "site_analytics": {"limit": 5000, "window_seconds": 60},
                     "admin_mutation": {"limit": 100, "window_seconds": 60},
                 },
                 separators=(",", ":"),
             ),
+            # The support quota, for the same reason and with one deliberate exception.
+            #
+            # "Two per device" is one device for the entire suite here, so it is raised
+            # out of the way. "Two per email" is left at its real value, because every
+            # test uses a fresh address — so the rule is still exercised end to end by
+            # the test that sends three messages from one address, and no other test
+            # can be refused by it.
+            "SUPPORT_INTAKE_MAX_PER_EMAIL": "2",
+            "SUPPORT_INTAKE_MAX_PER_CLIENT": "100",
+            "SUPPORT_INTAKE_MAX_PER_HOUR": "500",
             "LOG_LEVEL": "WARNING",
         }
     )
+    env.update(extra_env or {})
     env["PYTHONPATH"] = _with_pythonpath(repo_root)
     migration = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
@@ -456,7 +609,7 @@ def browser_app(
         "--port",
         str(port),
     ]
-    server_log_path = artifacts_dir / "browser-e2e-server.log"
+    server_log_path = artifacts_dir / f"browser-{run}-server.log"
     server_log = server_log_path.open("w", encoding="utf-8")
     process = subprocess.Popen(
         command,
@@ -474,7 +627,10 @@ def browser_app(
             database_url=database_url,
             command=" ".join(command),
         )
-        pytestconfig._traceedge_e2e = app.__dict__
+        # Only the main server describes the run in the report. A second server started
+        # for one flow must not overwrite the base URL every other result refers to.
+        if report_as_main:
+            pytestconfig._traceedge_e2e = app.__dict__
         yield app
     finally:
         _terminate_server_process(process)
@@ -487,6 +643,11 @@ def browser_app(
 @pytest.fixture
 def base_url(browser_app: RunningApp) -> str:
     return browser_app.base_url
+
+
+@pytest.fixture
+def paid_base_url(paid_browser_app: RunningApp) -> str:
+    return paid_browser_app.base_url
 
 
 @pytest.fixture
@@ -619,7 +780,9 @@ def assert_hilal_brand_palette(page: Page) -> None:
         "91,98,107",
         "99,113,108",
         "108,39,31",
-        "122,128,137",
+        # --hm-muted. Was 122,128,137 (#7a8089), which measured 3.98:1 on white and
+        # failed WCAG AA everywhere it carried text. See hilalmarkets-brand.css.
+        "99,105,111",
         "123,164,40",
         "138,99,22",
         "141,48,41",
@@ -740,6 +903,61 @@ def assert_no_horizontal_overflow(page: Page) -> None:
     assert overflow == [], f"Visible elements overflow the viewport: {overflow}"
 
 
+#: Measures rendered colour pairs the way WCAG defines contrast.
+#:
+#: The page is asked for the colours it is really painting, so a check cannot pass
+#: because a token holds the right value and a later stylesheet overrode it. Each pair
+#: is `(selector, "color" | "background")`; the colour behind it is the first opaque
+#: background above it, because a transparent panel shows whatever is under it.
+_CONTRAST = """(pairs) => {
+    const channel = (value) => {
+        const part = value / 255;
+        return part <= 0.03928 ? part / 12.92 : Math.pow((part + 0.055) / 1.055, 2.4);
+    };
+    const luminance = (colour) => {
+        const [r, g, b] = colour.match(/[\\d.]+/g).map(Number);
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    };
+    const opaque = (element) => {
+        for (let node = element; node; node = node.parentElement) {
+            const colour = getComputedStyle(node).backgroundColor;
+            const parts = colour.match(/[\\d.]+/g) || [];
+            if (parts.length < 4 || Number(parts[3]) > 0.99) return colour;
+        }
+        return 'rgb(255, 255, 255)';
+    };
+    return pairs.flatMap(([selector, property]) =>
+        [...document.querySelectorAll(selector)].slice(0, 4).map((element) => {
+            const front = property === 'background'
+                ? getComputedStyle(element).backgroundColor
+                : getComputedStyle(element).color;
+            const behind = opaque(element.parentElement || element);
+            const a = luminance(front);
+            const b = luminance(behind);
+            return {
+                selector,
+                front,
+                behind,
+                ratio: Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100,
+            };
+        }));
+}"""
+
+
+def assert_contrast(page: Page, pairs: list[list[str]], *, at_least: float) -> None:
+    """Fail when anything in `pairs` is fainter than WCAG allows.
+
+    4.5 for normal text, 3 for a graphic that carries meaning. Written here rather than
+    per page: two copies of a contrast formula is two chances to measure it differently
+    and both report a pass.
+    """
+
+    measured = page.evaluate(_CONTRAST, pairs)
+    assert measured, f"nothing matched {pairs}"
+    faint = [item for item in measured if item["ratio"] < at_least]
+    assert faint == [], f"under {at_least}:1 — {faint}"
+
+
 def unique_email(prefix: str) -> str:
     return f"{prefix}+{uuid4().hex[:10]}@example.com"
 
@@ -756,7 +974,17 @@ def signup(page: Page, base_url: str, email: str | None = None) -> str:
     page.wait_for_url(re.compile(r".*/signup/verify(\?.*)?$"), timeout=20_000)
     page.locator("input[name='code']").fill("123456")
     page.get_by_role("button", name=re.compile("Verify and create account", re.I)).click()
-    page.wait_for_url(re.compile(r".*/dashboard(\?.*)?$"), timeout=20_000)
+    # Signing up lands on `/dashboard`, which is the old front page's address and sends a
+    # browser on to Home. Every address in that chain is accepted, and the chain is
+    # **read from the product** rather than written out here — this pattern used to spell
+    # `main` by hand, so renaming the front page to `/home` broke every browser test that
+    # signs in, in two files at once, with an error that pointed at the menu rather than
+    # at this line.
+    landings = "|".join(
+        part.lstrip("/")
+        for part in ("/dashboard", HOME_PATH, LEGACY_HOME_PATH)
+    )
+    page.wait_for_url(re.compile(rf".*/({landings})(\?.*)?$"), timeout=20_000)
     page.get_by_test_id("dashboard-root").wait_for(state="attached", timeout=10_000)
     assert_no_raw_traceback(page)
     return email
@@ -1642,11 +1870,21 @@ def _allowed_console_error(message: str, deliberate: Sequence[str] = ()) -> bool
 
 
 def _critical_failed_response(base_url: str, response: Any) -> bool:
+    """A server error from one of our own servers, on one of our own API routes.
+
+    Scoped to a local host rather than to one exact base URL. A test may drive a second
+    HilalMarkets server started by this file — the paid-checkout one — and a 500 from
+    that server is exactly as much a bug as a 500 from the first.
+    """
+
     if response.status < 500:
         return False
-    base_host = urlparse(base_url).netloc
     parsed = urlparse(response.url)
-    return parsed.netloc == base_host and "/api/" in parsed.path
+    if "/api/" not in parsed.path:
+        return False
+    if parsed.netloc == urlparse(base_url).netloc:
+        return True
+    return parsed.hostname in LOCAL_HOSTS
 
 
 def _format_runtime_errors(runtime_errors: dict[str, list[str]]) -> str:

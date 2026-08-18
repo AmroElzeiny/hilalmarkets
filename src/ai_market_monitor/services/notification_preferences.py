@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.db.models import Alert, AlertDelivery, DashboardPreference
 from ai_market_monitor.db.models.enums import AlertType, DeliveryChannel
+from ai_market_monitor.services.email_delivery import email_delivery_available
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,16 +37,60 @@ class NotificationPreference:
     exclusion_alerts: bool = True
 
 
+def symbol_is_muted(symbol: str, muted: set[str] | None) -> bool:
+    """Did this person ask not to hear about this market?
+
+    A recorded market symbol is a pair — ``BTC/USDT``. A person silencing something
+    means the coin: they do not want to hear about Bitcoin, on any pair. So a stored
+    ``BTC`` silences ``BTC/USDT`` and ``BTC/USDC`` alike, while a stored ``BTC/USDT``
+    still silences only that one pair.
+
+    One owner for the comparison, because the moment a second place answers "is this
+    coin silenced?" the two will disagree about whether the quote currency counts.
+    """
+
+    if not symbol or not muted:
+        return False
+    normalized = symbol.strip().upper().replace("-", "/")
+    if not normalized:
+        return False
+    return normalized in muted or normalized.partition("/")[0] in muted
+
+
+def offered_channels(settings: Settings) -> set[DeliveryChannel]:
+    """Every way this platform can actually deliver an alert right now.
+
+    One owner for the answer. ``DeliveryChannel`` still carries ``discord`` because
+    historical alert and delivery rows point at it (see
+    `docs/RETIRED_DISCORD_COMPATIBILITY.md`), so "every value of the enum" is not the
+    same question as "every channel we offer" — and anything that treats them as the
+    same offers a retired channel to a customer.
+
+    That is exactly what happened: the canvas built its own list from the alert schema's
+    accepted values and offered Discord as a way to be told about a monitor. Two places
+    answering one question, and one of them wrong. Both import this now.
+
+    Email is offered only when a sender is really configured. The same rule as WhatsApp,
+    for the same reason: a channel a person can switch on but that nothing delivers is
+    worse than a channel that is honestly missing, because the silence looks like "there
+    was nothing to tell you".
+    """
+
+    channels = {DeliveryChannel.TELEGRAM, DeliveryChannel.WEB}
+    if settings.whatsapp_enabled:
+        channels.add(DeliveryChannel.WHATSAPP)
+    if email_delivery_available(settings):
+        channels.add(DeliveryChannel.EMAIL)
+    return channels
+
+
 class NotificationPreferenceService:
     def __init__(self, session: AsyncSession, settings: Settings | None = None):
         self.session = session
         self.settings = settings or get_settings()
 
     def _supported_channels(self) -> set[DeliveryChannel]:
-        channels = {DeliveryChannel.TELEGRAM, DeliveryChannel.WEB}
-        if self.settings.whatsapp_enabled:
-            channels.add(DeliveryChannel.WHATSAPP)
-        return channels
+        return offered_channels(self.settings)
 
     async def current(self, user_id: UUID) -> NotificationPreference:
         row = await self.session.scalar(
@@ -78,7 +123,13 @@ class NotificationPreferenceService:
             alert_days=set(map(str, data.get("alert_days", ["Every Day"]))),
             alert_hours=set(map(str, data.get("alert_hours", []))),
             providers=set(map(str.lower, data.get("providers", ["binance", "bybit"]))),
-            muted_symbols=set(map(str.upper, data.get("muted_symbols", []))),
+            # Read into the one shape `symbol_is_muted` compares against, so a record
+            # written before that shape existed still silences what it was meant to.
+            muted_symbols={
+                str(value).strip().upper().replace("-", "/")
+                for value in data.get("muted_symbols", [])
+                if str(value).strip()
+            },
             muted_strategy_ids=set(map(str, data.get("muted_strategy_ids", []))),
             muted_strategy_until={
                 str(key): str(value)
@@ -142,7 +193,7 @@ class NotificationPreferenceService:
         if alert.alert_type == AlertType.LIFECYCLE and not preference.lifecycle_enabled:
             return set()
         symbol = str(proof.get("symbol") or "").upper()
-        if symbol and symbol in (preference.muted_symbols or set()):
+        if symbol_is_muted(symbol, preference.muted_symbols):
             return set()
         if alert.strategy_version_id is not None and str(alert.strategy_version_id) in (
             preference.muted_strategy_ids or set()

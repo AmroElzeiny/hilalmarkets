@@ -363,3 +363,45 @@ body.hilal-auth-page {
 @keyframes hm-auth-rise {
   from { opacity: 0; transform: translateY(8px); }
 }
+
+/* The legal row under the auth form. Quiet on purpose: it has to be reachable and
+   readable, and it must not compete with the one thing this page is for. */
+.auth-legal {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 18px;
+  width: 100%;
+  max-width: 420px;
+  margin: 22px auto 0;
+}
+
+.auth-legal a,
+.auth-legal button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #5c646e;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 450;
+  cursor: pointer;
+  transition: color .18s ease;
+}
+
+.auth-legal a:hover,
+.auth-legal button:hover {
+  color: #2b2e35;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-legal a,
+  .auth-legal button {
+    transition-duration: .01ms;
+  }
+}

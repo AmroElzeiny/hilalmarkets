@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from ai_market_monitor.core.asset_logos import asset_logo_module_url
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models.enums import ShariaAssetStatus, ShariaMethodologyStatus
 from ai_market_monitor.schemas.sharia import (
@@ -105,8 +106,12 @@ async def test_live_market_cache_coalesces_requests_and_returns_stale_last_good_
 
 
 def test_logo_catalog_path_rejects_unsafe_asset_names():
-    assert LiveMarketQuoteService._logo_module_url("BTC") is not None
-    assert LiveMarketQuoteService._logo_module_url("BTC/../../secret") is None
+    """This service used to carry its own copy of the check, and its own idea of which
+    pictures a coin has — the catalogue only. Both now come from `core.asset_logos`, so
+    the rejection is tested where it lives and every reader gets the same answer."""
+
+    assert asset_logo_module_url("BTC") is not None
+    assert asset_logo_module_url("BTC/../../secret") is None
 
 
 async def test_screened_snapshot_omits_assets_absent_from_selected_exchange():

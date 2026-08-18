@@ -599,21 +599,26 @@
     return escapeHtml(JSON.stringify(operand?.parameters || {}, null, 0));
   }
 
+  // These labels are written straight into an <h3> on the builder canvas, so they were
+  // ALL CAPS headings — which `brand guide.md` section 11 rules out, and which section
+  // 11 only permits for established technical notation such as BTC-USDT or API. A
+  // boolean operator on a page built for beginners is not that. The words are unchanged;
+  // only their case is. Held to it by `test_invariant_sentence_case_headings.py`.
   function operatorLabel(operator) {
     return {
-      and: "ALL OF",
-      or: "ANY OF",
-      not: "NOT",
-      sequence: "SEQUENCE",
-      within_last: "WITHIN LAST",
-      persisted_for: "PERSISTED FOR",
-      count_of: "COUNT OF",
-      cooldown_condition: "COOLDOWN",
-      first_time_true: "FIRST TIME TRUE",
-      changed_state: "CHANGED STATE",
-      cross_with_confirmation: "CROSS + CONFIRM",
-      conditional_branch: "IF / OTHERWISE",
-    }[operator || "and"] || "ALL OF";
+      and: "All of",
+      or: "Any of",
+      not: "Not",
+      sequence: "Sequence",
+      within_last: "Within last",
+      persisted_for: "Persisted for",
+      count_of: "Count of",
+      cooldown_condition: "Cooldown",
+      first_time_true: "First time true",
+      changed_state: "Changed state",
+      cross_with_confirmation: "Cross + confirm",
+      conditional_branch: "If / otherwise",
+    }[operator || "and"] || "All of";
   }
 
   function comparatorLabel(comparator) {
@@ -4567,7 +4572,10 @@
       drawCandles(canvas, safeArray(payload.items));
     } catch (error) {
       const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#7a8089";
+      // --hm-copy. This is the sentence that tells somebody the chart could not load,
+      // so it is the one thing on the canvas that must be readable; the old value was
+      // the muted grey, which measured 3.98:1 on white.
+      ctx.fillStyle = "#50555e";
       ctx.font = "14px Onest, ui-sans-serif, system-ui, sans-serif";
       ctx.fillText(error.message, 20, 40);
     }
@@ -6916,61 +6924,13 @@
     window.setInterval(poll, 15000);
   }
 
-  function initSidebar() {
-    const storageKey = "amm-sidebar-collapsed";
-    const scrollKey = "amm-sidebar-scroll-top";
-    const mobile = window.matchMedia("(max-width: 900px)");
-    const nav = document.querySelector(".dash-nav");
-
-    if (nav) {
-      const storedScroll = Number(window.localStorage.getItem(scrollKey) || 0);
-      if (Number.isFinite(storedScroll) && storedScroll > 0) {
-        window.requestAnimationFrame(() => {
-          nav.scrollTop = storedScroll;
-        });
-      }
-      nav.addEventListener("scroll", () => {
-        window.localStorage.setItem(scrollKey, String(nav.scrollTop));
-      }, { passive: true });
-    }
-
-    function setCollapsed(collapsed, persist = true) {
-      root.classList.toggle("sidebar-collapsed", collapsed);
-      root.classList.toggle("sidebar-open", !collapsed);
-      document.querySelector("[data-sidebar-toggle]")?.setAttribute(
-        "aria-expanded",
-        String(!collapsed),
-      );
-      if (persist) window.localStorage.setItem(storageKey, String(collapsed));
-    }
-
-    const stored = window.localStorage.getItem(storageKey);
-    setCollapsed(mobile.matches ? true : stored === "true", false);
-    mobile.addEventListener("change", (event) => {
-      if (event.matches) {
-        setCollapsed(true, false);
-      } else {
-        setCollapsed(window.localStorage.getItem(storageKey) === "true", false);
-      }
-    });
-    document.querySelector("[data-sidebar-toggle]")?.addEventListener("click", () => {
-      setCollapsed(!root.classList.contains("sidebar-collapsed"));
-    });
-    document.querySelector("[data-sidebar-close]")?.addEventListener("click", () => {
-      setCollapsed(true);
-    });
-    document.querySelectorAll(".dash-nav a").forEach((link) => {
-      link.addEventListener("click", () => {
-        if (nav) window.localStorage.setItem(scrollKey, String(nav.scrollTop));
-        if (mobile.matches) setCollapsed(true);
-      });
-    });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !root.classList.contains("sidebar-collapsed")) {
-        setCollapsed(true);
-      }
-    });
-  }
+  // `initSidebar` used to live here. It was the second of three controllers for one side
+  // menu: it wrote the same `sidebar-collapsed` class on `<body>` that `hilalmarkets.js`
+  // wrote, but read a different stored value (`amm-sidebar-collapsed`), and it pointed at
+  // `[data-sidebar-toggle]` and `.dash-nav`, neither of which any shipped template has
+  // carried for a long time. So it did nothing a person asked for and one thing nobody
+  // asked for: on every page load it re-decided whether the menu was minimized, from a
+  // key the button never wrote. The menu has one owner now, `hm-shell.js`.
 
   // Every dashboard feature used to start inside one handler, one after another. A single
   // failure in any of them stopped the whole list, so an unrelated bug silently disabled
@@ -6990,7 +6950,6 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     const features = {
-      initSidebar,
       initVisualBuilder,
       initScanNow,
       initExports,

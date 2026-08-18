@@ -1,0 +1,221 @@
+{% extends "hilal/base_dashboard.html" %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260818-live-4">{% endblock %}
+{% block content %}
+
+<div
+  class="hm-t"
+  data-market-root
+  data-endpoint="/api/v1/sharia/market-quotes"
+  data-base-path="{{ market_base_path }}"
+  data-methodology-id="{{ selected_methodology_id }}"
+  data-exchange="{{ selected_exchange }}"
+  data-quote="{{ selected_quote_asset }}"
+  data-favorite-assets='{{ favorite_assets | tojson }}'
+  data-favorite-watchlist-id="{{ favorite_watchlist_id or '' }}"
+>
+
+  {#- `data-hm-part` names the parts of this page in the page's own words. Hilal is
+      told which one is in front of the person, so "what is this?" can be answered
+      about the thing they are actually looking at. The page names them because the
+      page is what they are: nothing else should be guessing at a name for them. -#}
+  <header class="t-head" data-hm-part="The page heading">
+    <div class="t-head-copy">
+      <p class="t-eyebrow"><span data-icon="shield_check" data-icon-class="icon-sm"></span>Shariah screened</p>
+      {#- "Halal Assets" is the product's own name for this feature, used by the side
+          menu, the plans table and the chat. Sentence-casing it only here would make
+          the page disagree with the menu that led to it. -#}
+      <h1>Halal Assets</h1>
+    </div>
+
+    <div class="t-live t-chamfer" data-live-pill data-state="loading">
+      <span class="t-live-dot" aria-hidden="true"></span>
+      <span class="t-live-text">
+        <strong data-live-label>Connecting</strong>
+        <small data-live-detail>Waiting for the first checked snapshot</small>
+      </span>
+      <button class="t-icon-btn" type="button" data-live-toggle aria-pressed="false">
+        <span data-icon="pause" data-icon-class="icon-sm"></span>
+        <span class="sr-only" data-live-toggle-label>Pause live price updates</span>
+      </button>
+    </div>
+  </header>
+
+  {% if market_data_warning %}
+  <div class="t-banner" data-tone="info" role="status">
+    <span data-icon="info" data-icon-class="icon"></span>
+    <div class="t-banner-body"><strong>About this list</strong><p>{{ market_data_warning }}</p></div>
+  </div>
+  {% endif %}
+
+  {#- The four tiles are this page's filter. They double as its summary, so the counts
+      a person reads are the same numbers the filter acts on.
+
+      Tiles 2 and 3 split tile 1 exactly. The market only ever lists coins that passed,
+      so a "needs review" tile here could only ever read zero — the real difference
+      worth surfacing is whether a condition is attached to the pass. -#}
+  <div class="t-tiles" role="group" aria-label="Filter the list"
+       data-hm-part="The four counters that filter the list">
+    <button class="t-tile" type="button" data-filter="all" aria-pressed="true">
+      <span class="t-tile-top"><span data-icon="coins" data-icon-class="icon-sm"></span>All screened</span>
+      <span class="t-tile-value t-figure" data-count="all">0</span>
+      <span class="t-tile-note">Coins with a published review</span>
+      <span class="t-tile-bar" aria-hidden="true"></span>
+    </button>
+    <button class="t-tile" type="button" data-filter="clean" aria-pressed="false">
+      <span class="t-tile-top"><span data-icon="shield_check" data-icon-class="icon-sm"></span>No conditions</span>
+      <span class="t-tile-value t-figure" data-count="clean">0</span>
+      <span class="t-tile-note">Passed with nothing attached</span>
+      <span class="t-tile-bar" aria-hidden="true"></span>
+    </button>
+    <button class="t-tile" type="button" data-filter="conditional" aria-pressed="false">
+      <span class="t-tile-top"><span data-icon="alert" data-icon-class="icon-sm"></span>With a condition</span>
+      <span class="t-tile-value t-figure" data-count="conditional">0</span>
+      <span class="t-tile-note">Passed, but read the condition first</span>
+      <span class="t-tile-bar" aria-hidden="true"></span>
+    </button>
+    <button class="t-tile" type="button" data-filter="following" aria-pressed="false">
+      <span class="t-tile-top"><span data-icon="heart" data-icon-class="icon-sm"></span>You follow</span>
+      <span class="t-tile-value t-figure" data-count="following">{{ favorite_assets|length }}</span>
+      <span class="t-tile-note">You get told when the status changes</span>
+      <span class="t-tile-bar" aria-hidden="true"></span>
+    </button>
+  </div>
+
+  <div class="t-controls" data-hm-part="The search box and the exchange and standard pickers">
+    <div class="t-search">
+      <span data-icon="search" data-icon-class="icon"></span>
+      <label class="sr-only" for="t-market-search">Search by coin name or symbol</label>
+      <input id="t-market-search" type="search" placeholder="Search BTC, Ethereum, SOL..." value="{{ market_search }}" data-search autocomplete="off">
+    </div>
+
+    <div class="t-segment" role="radiogroup" aria-label="Exchange">
+      <button type="button" role="radio" data-exchange="binance" aria-checked="{{ 'true' if selected_exchange == 'binance' else 'false' }}">
+        <img src="{{ url_for('static', path='/brand-binance.svg') }}" alt="">Binance
+      </button>
+      <button type="button" role="radio" data-exchange="bybit" aria-checked="{{ 'true' if selected_exchange == 'bybit' else 'false' }}">
+        <img src="{{ url_for('static', path='/brand-bybit.svg') }}" alt="">Bybit
+      </button>
+    </div>
+
+    <form class="t-field" method="get" action="{{ market_base_path }}" data-standard-form data-hm-guide-target="market-methodology-selector">
+      <label for="t-market-standard"><span data-icon="scale" data-icon-class="icon-sm" aria-hidden="true"></span>Shariah standard</label>
+      <select id="t-market-standard" class="select" name="methodology_id" data-standard>
+        {% for method in methodologies %}<option value="{{ method.id }}" {{ 'selected' if selected_methodology_id == method.id else '' }}>{{ method.name }}</option>{% endfor %}
+      </select>
+      <input type="hidden" name="exchange" value="{{ selected_exchange }}">
+      <noscript><button class="t-action" type="submit">Apply</button></noscript>
+    </form>
+
+    <div class="t-segment" role="radiogroup" aria-label="How to show the list">
+      <button type="button" role="radio" data-view="cards" aria-checked="true">
+        <span data-icon="grid" data-icon-class="icon-sm"></span>Cards
+      </button>
+      <button type="button" role="radio" data-view="table" aria-checked="false">
+        <span data-icon="rows" data-icon-class="icon-sm"></span>Table
+      </button>
+    </div>
+
+    <button class="t-action" type="button" data-open-favorites style="flex: 0 0 auto;" data-hm-guide-target="market-saved-assets">
+      <span data-icon="heart" data-icon-class="icon-sm"></span>
+      Favorites
+      <span class="t-pill" data-tone="neutral" data-favorite-count {{ 'hidden' if not favorite_assets else '' }}>{{ favorite_assets|length }}</span>
+    </button>
+
+    <p class="t-control-note" data-result-note aria-live="polite" data-hm-guide-target="market-live-status">Loading the list...</p>
+  </div>
+
+  <div class="t-banner" data-tone="error" data-quote-error hidden role="alert">
+    <span data-icon="alert" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      <strong>Prices could not be read</strong>
+      <p data-quote-error-message>No price was guessed. The Shariah review shown for each coin is unaffected.</p>
+      <button class="t-action" type="button" data-quote-retry><span data-icon="refresh" data-icon-class="icon-sm"></span>Try again</button>
+    </div>
+  </div>
+
+  <div class="t-skeleton-grid" data-skeletons aria-hidden="true">
+    {% for _ in range(8) %}<div class="t-skeleton"></div>{% endfor %}
+  </div>
+
+  <section class="t-grid" data-cards hidden aria-label="Screened coins"
+           data-hm-part="The list of screened coins"></section>
+
+  <div class="t-table-wrap" data-table-wrap hidden
+       data-hm-part="The list of screened coins, as a table">
+    <table class="t-table">
+      <caption class="sr-only">Screened coins with live spot prices</caption>
+      <thead>
+        <tr>
+          <th scope="col"><button type="button" data-sort="symbol">Coin <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
+          <th scope="col">Shariah status</th>
+          <th scope="col"><button type="button" data-sort="price">Price <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
+          <th scope="col"><button type="button" data-sort="change">24h change <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
+          <th scope="col"><button type="button" data-sort="volume">24h volume <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
+          <th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody data-table-body></tbody>
+    </table>
+  </div>
+
+  <div class="t-state" data-empty hidden>
+    <div class="t-state-icon"><span data-icon="search" data-icon-class="icon"></span></div>
+    <h2>Nothing matches this search</h2>
+    <p data-empty-message>Try a shorter search, pick the other exchange, or go back to all screened coins.</p>
+    <button class="t-action is-primary" type="button" data-clear-filters style="flex:0 0 auto;"><span data-icon="refresh" data-icon-class="icon-sm"></span>Show all screened coins</button>
+  </div>
+
+  {#- An empty list has two different reasons, and they are not the same fact.
+
+      No standard in force at all is a governance state: nothing has been published to
+      screen against. A standard that *is* in force with no coin under it yet is a
+      screening result: the review has run and nothing has passed. Saying either one in
+      the other's words tells somebody the product is broken when it is working, or the
+      reverse.
+
+      Neither is ever a price problem — that is the banner at the top of the page, and
+      `test_market_page_banner_matches_the_real_cause` keeps the three apart.
+
+      The second case had no words at all: the page showed the standard's name, an empty
+      table and nothing else, so a person met a blank screen with no way to tell whether
+      it was working. -#}
+  {% if not selected_methodology_id %}
+  <div class="t-state" data-no-standard>
+    <div class="t-state-icon"><span data-icon="passport" data-icon-class="icon"></span></div>
+    <h2>No screening standard is active</h2>
+    <p>Coins appear here only after a Shariah standard and its evidence-backed Passports are published. Nothing is shown from an unfinished review.</p>
+  </div>
+  {% elif not (screened.items if screened is defined else []) %}
+  <div class="t-state" data-nothing-passed>
+    <div class="t-state-icon"><span data-icon="passport" data-icon-class="icon"></span></div>
+    <h2>No coin has passed this standard yet</h2>
+    <p>The standard is published and in force. No coin has an evidence-backed Passport under it yet, so there is nothing to list. Nothing is hidden here, and nothing is shown from an unfinished review.</p>
+  </div>
+  {% endif %}
+
+  {#- Live prices need JavaScript. The screening results do not, and they are the part
+      a person actually came for, so they render server-side either way. -#}
+  <noscript>
+    <div class="t-table-wrap" data-noscript-results>
+      <table class="t-table">
+        <caption class="sr-only">Screened coins. Live prices need JavaScript; the review results below do not.</caption>
+        <thead><tr><th scope="col">Coin</th><th scope="col">Shariah status</th><th scope="col">Reviewed</th><th scope="col"><span class="sr-only">Evidence</span></th></tr></thead>
+        <tbody>
+          {% for item in (screened.items if screened is defined else []) %}
+          <tr>
+            <td><strong>{{ item.canonical_asset }}</strong> {{ item.asset_name or '' }}</td>
+            <td>{{ item.status_label }}</td>
+            <td>{{ item.reviewed_at|short_dt(user.timezone) if item.reviewed_at else 'Not recorded' }}</td>
+            <td><a href="{{ market_base_path }}/{{ item.canonical_asset|lower }}">Open the Passport</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </noscript>
+</div>
+
+{% include "hilal/dashboard_test/partials/favorites_dialog.html" %}
+{% endblock %}
+
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20260818-live-4"></script>{% endblock %}

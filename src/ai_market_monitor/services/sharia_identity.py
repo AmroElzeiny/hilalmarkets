@@ -250,6 +250,7 @@ class CanonicalAssetMappingService:
         *,
         actor_user_id=None,
         verified_exchange_symbols: set[str] | None = None,
+        fetched_exchanges: set[str] | None = None,
     ) -> CanonicalAsset:
         problems = self._validate(external, candidate, verified_exchange_symbols)
         if problems:
@@ -339,6 +340,11 @@ class CanonicalAssetMappingService:
             (market.exchange.casefold(), market.market_symbol.upper())
             for market in candidate.exchange_markets
         }
+        fetched_exchanges_cf = (
+            {exchange.casefold() for exchange in fetched_exchanges}
+            if fetched_exchanges is not None
+            else None
+        )
         existing_asset_markets = list(
             (
                 await self.session.scalars(
@@ -351,8 +357,14 @@ class CanonicalAssetMappingService:
             ).all()
         )
         for existing_asset_market in existing_asset_markets:
+            exchange_cf = existing_asset_market.exchange.casefold()
+            # A caller that tells us which exchanges it actually re-fetched this run
+            # (e.g. worker.py after a partial provider outage) means "no data" for the
+            # rest is a missed check, not a confirmed delisting — leave those alone.
+            if fetched_exchanges_cf is not None and exchange_cf not in fetched_exchanges_cf:
+                continue
             if (
-                existing_asset_market.exchange.casefold(),
+                exchange_cf,
                 existing_asset_market.market_symbol.upper(),
             ) not in desired_markets:
                 existing_asset_market.is_active = False

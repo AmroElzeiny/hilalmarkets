@@ -164,6 +164,8 @@ class Workspace:
             cwd=str(self.path),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=check,
             timeout=600,
         )
@@ -202,8 +204,17 @@ class Workspace:
 
 
 def _run(arguments: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    # encoding/errors forced explicitly: the OS locale codepage (text=True's default) is
+    # not guaranteed to represent the Arabic, Egyptian Arabic and Arabizi text this
+    # repository's own commits and diffs carry. See Workspace.git for the same reasoning.
     return subprocess.run(
-        ["git", *arguments], cwd=str(cwd), capture_output=True, text=True, timeout=600
+        ["git", *arguments],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=600,
     )
 
 

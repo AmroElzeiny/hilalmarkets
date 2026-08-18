@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from ai_market_monitor.engine.capability_contract import derive_provider_requirements
+from ai_market_monitor.schemas.strategy import UNARY_COMPARATORS
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
     ApprovalBindingV2,
@@ -373,7 +374,7 @@ def validate_draft_semantics(draft: StrategyDraftV2) -> list[str]:
             errors.append(f"incomplete_condition:{node.node_id}")
         if (
             node.operator is not None
-            and node.operator.value not in {"is_true", "is_false"}
+            and node.operator.value not in UNARY_COMPARATORS
             and node.threshold is None
             and len(node.operands) < 2
         ):

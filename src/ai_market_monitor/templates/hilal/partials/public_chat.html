@@ -61,14 +61,15 @@
       <div class="public-chat-starters" data-public-chat-starters aria-label="Suggested questions">
         <button type="button" class="chip" data-public-chat-question="What does Hilal Markets do?">What does it do?</button>
         <button type="button" class="chip" data-public-chat-question="How does Shariah screening work?">How screening works</button>
-        <button type="button" class="chip" data-public-chat-question="Which markets are available in private beta?">Private-beta markets</button>
-        {# While the product is invite-only, "Pricing" would invite a question with no
-           answer. The suggestion offered instead is the one thing a visitor can act
-           on today. #}
+        <button type="button" class="chip" data-public-chat-question="Which markets are supported?">Supported markets</button>
+        {# Before the product opened, "Pricing" invited a question with no answer, so the
+           suggestion was about getting access instead. Both chips said "private beta" —
+           including the one shown *after* launch, which asked what the private beta
+           cost. Each branch now asks the question that is true for its own stage. #}
         {% if waitlist_mode %}
         <button type="button" class="chip" data-public-chat-question="How do I get access to Hilal Markets?">Getting access</button>
         {% else %}
-        <button type="button" class="chip" data-public-chat-question="How much does the private beta cost?">Pricing</button>
+        <button type="button" class="chip" data-public-chat-question="How much does Hilal Markets cost?">Pricing</button>
         {% endif %}
       </div>
 

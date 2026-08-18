@@ -23,14 +23,12 @@ if (root) {
   let favoriteWatchlistId = root.dataset.favoriteWatchlistId || "";
   const rows = new Map();
   const latestItems = new Map();
-  const logoUrls = new Map();
   let controller = null;
   let timer = null;
   let refreshAfter = 1000;
   let firstSnapshot = true;
   let currentMethodology = null;
 
-  const logoPrefix = "https://cdn.jsdelivr.net/npm/@web3icons/core@4.0.53/";
   const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
   function formatPrice(value) {
@@ -112,43 +110,8 @@ if (root) {
     return String(item.status_label || fallback).replace(/^eligible\b/i, "Halal");
   }
 
-  async function importLogo(item) {
-    if (!item.logo_module_url || !item.logo_module_url.startsWith(logoPrefix)) return null;
-    if (logoUrls.has(item.canonical_asset)) return logoUrls.get(item.canonical_asset);
-    const candidates = [item.logo_module_url];
-    const withoutMultiplier = item.canonical_asset.replace(/^(?:1000|10000|1M)(?=[A-Z])/, "");
-    if (withoutMultiplier !== item.canonical_asset) {
-      candidates.push(item.logo_module_url.replace(`/${item.canonical_asset}.svg.js`, `/${withoutMultiplier}.svg.js`));
-    }
-    for (const url of candidates) {
-      try {
-        const module = await import(url);
-        if (typeof module.default !== "string" || !module.default.trim().startsWith("<svg")) continue;
-        const objectUrl = URL.createObjectURL(new Blob([module.default], { type: "image/svg+xml" }));
-        logoUrls.set(item.canonical_asset, objectUrl);
-        return objectUrl;
-      } catch (_error) {
-        // A branded fallback remains visible when the catalog has no exact ticker match.
-      }
-    }
-    logoUrls.set(item.canonical_asset, null);
-    return null;
-  }
-
-  async function loadLogo(container, item) {
-    if (!container || container.dataset.logoLoaded === "true") return;
-    container.dataset.logoLoaded = "true";
-    const directLogo = typeof item.logo_url === "string"
-      && item.logo_url.startsWith("https://")
-      ? item.logo_url
-      : null;
-    const src = directLogo || await importLogo(item);
-    if (!src) return;
-    const image = document.createElement("img");
-    image.src = src;
-    image.alt = `${item.canonical_asset} logo`;
-    image.decoding = "async";
-    container.replaceChildren(image);
+  function loadLogo(container, item) {
+    window.HilalAssetLogos?.load(container, item.logo_module_url, item.canonical_asset, item.logo_url);
   }
 
   const logoObserver = "IntersectionObserver" in window

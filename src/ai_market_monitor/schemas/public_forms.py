@@ -89,3 +89,8 @@ class ContactSubmissionRequest(StrictPublicFormModel):
 class ContactSubmissionResponse(StrictPublicFormModel):
     status: Literal["sent", "queued"]
     message: str
+    #: How many more messages this person may send inside the window. Returned so the
+    #: page can say "one message left" instead of letting somebody write a second one
+    #: and only then discover it will be refused.
+    remaining_messages: int = Field(default=0, ge=0)
+    window_hours: float = Field(default=1, gt=0)

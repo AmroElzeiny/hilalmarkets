@@ -1,5 +1,6 @@
 import logging
 import time
+from typing import TYPE_CHECKING
 
 from celery import Celery
 from celery.signals import task_postrun
@@ -7,6 +8,9 @@ from celery.signals import task_postrun
 from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.core.logging import configure_logging
 from ai_market_monitor.core.startup import validate_runtime_configuration
+
+if TYPE_CHECKING:
+    from ai_market_monitor.services.interfaces import MarketDataProvider
 
 #: When this process last wrote its measurements down. Throttles the per-task flush.
 _LAST_METRIC_FLUSH: float = 0.0
@@ -49,6 +53,13 @@ app.conf.update(
         },
         "retry-telegram-deliveries-every-minute": {
             "task": "ai_market_monitor.retry_telegram_deliveries",
+            "schedule": 60,
+        },
+        # The same minute as Telegram. Email is a delivery channel of equal standing, so
+        # it is not allowed to run slower — a person who chose email would otherwise
+        # hear about a setup later than one who chose Telegram, for no stated reason.
+        "retry-email-deliveries-every-minute": {
+            "task": "ai_market_monitor.retry_email_deliveries",
             "schedule": 60,
         },
         "process-pending-whatsapp-webhooks": {
@@ -316,6 +327,11 @@ def retry_telegram_deliveries() -> dict:
     return _run_async_task(_retry_telegram_deliveries())
 
 
+@app.task(name="ai_market_monitor.retry_email_deliveries")
+def retry_email_deliveries() -> dict:
+    return _run_async_task(_retry_email_deliveries())
+
+
 @app.task(name="ai_market_monitor.poll_telegram_updates")
 def poll_telegram_updates() -> dict:
     return _run_async_task(_poll_telegram_updates())
@@ -554,6 +570,27 @@ async def _retry_telegram_deliveries() -> dict:
             settings,
             TelegramHttpAdapter(settings),
         ).process_due()
+        await session.commit()
+        return {"processed": len(processed)}
+
+
+async def _retry_email_deliveries() -> dict:
+    """Send the alert emails that are waiting, and retry the ones that failed.
+
+    The same shape as the Telegram retry above, on purpose: email is a real delivery
+    channel with the same retry rules and the same failure codes, not a side path that
+    quietly behaves differently when something goes wrong.
+    """
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.alert_emails import EmailAlertDeliveryService
+    from ai_market_monitor.services.email_delivery import email_delivery_available
+
+    if not email_delivery_available(settings):
+        return {"processed": 0, "disabled": True, "reason": "email_sender_not_configured"}
+
+    async with SessionFactory() as session:
+        processed = await EmailAlertDeliveryService(session, settings).process_due()
         await session.commit()
         return {"processed": len(processed)}
 
@@ -919,6 +956,34 @@ async def _send_compliance_digests() -> dict:
         return result
 
 
+async def _fetch_exchange_symbols(
+    provider: "MarketDataProvider",
+    exchange_names: tuple[str, ...],
+) -> dict[str, set[str]]:
+    """Fetch each exchange's USDT symbol list independently.
+
+    A failed fetch for one exchange is not evidence that exchange has no
+    listings — it means this run has no fresh data for it. Leaving the key out
+    (rather than storing an empty set) lets the other exchange's fetch and the
+    rest of the caller's work continue, and keeps map_candidate() from reading
+    "couldn't check" as "confirmed delisted".
+    """
+    exchange_symbols: dict[str, set[str]] = {}
+    for exchange_name in exchange_names:
+        try:
+            exchange_symbols[exchange_name] = {
+                symbol.upper()
+                for symbol in await provider.list_symbols(exchange_name, ["USDT"])
+            }
+        except Exception:
+            logger.exception(
+                "Could not fetch the %s symbol list; leaving its stored "
+                "market-availability flags unchanged this run",
+                exchange_name,
+            )
+    return exchange_symbols
+
+
 async def _process_sharia_authority_imports() -> dict:
     import asyncio
     from dataclasses import asdict
@@ -970,15 +1035,7 @@ async def _process_sharia_authority_imports() -> dict:
     package_enrichment = await _process_package_enrichment_queue()
     provider = CcxtMarketDataProvider(settings)
     try:
-        exchange_symbols: dict[str, set[str]] = {}
-        for exchange_name in ("binance", "bybit"):
-            exchange_symbols[exchange_name] = {
-                symbol.upper()
-                for symbol in await provider.list_symbols(
-                    exchange_name,
-                    ["USDT"],
-                )
-            }
+        exchange_symbols = await _fetch_exchange_symbols(provider, ("binance", "bybit"))
         imports: dict[str, dict] = {}
         for source_name, importer_type in (
             ("sc_malaysia", SCMalaysiaImporter),
@@ -1051,6 +1108,7 @@ async def _process_sharia_authority_imports() -> dict:
                         await CanonicalAssetMappingService(session).map_candidate(
                             external,
                             candidate,
+                            fetched_exchanges=set(exchange_symbols.keys()),
                         )
                     await session.commit()
                     mapped += 1

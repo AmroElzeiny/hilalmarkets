@@ -39,6 +39,15 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
+        // The animation library the product already vendors, imported rather than
+        // copied. `static/vendor/motion.min.js` is the jsDelivr single-file ESM build
+        // of Motion 11.18.2 with no external imports, so the bundler can read it
+        // straight from where it already lives. A second copy under this project would
+        // be a second version to keep in step with the dashboard's.
+        motion: path.resolve(
+          __dirname,
+          '../src/ai_market_monitor/static/vendor/motion.min.js',
+        ),
       },
     },
     server: {

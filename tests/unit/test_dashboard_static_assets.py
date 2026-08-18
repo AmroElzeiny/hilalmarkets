@@ -18,8 +18,8 @@ APPROVED_BRAND_HEX = {
     "#55712a",
     "#5b626b",
     "#63716c",
+    "#63696f",
     "#6c271f",
-    "#7a8089",
     "#7ba428",
     "#8a6316",
     "#8d3029",
@@ -133,26 +133,28 @@ def test_hilalmarkets_dashboard_interaction_system_is_present():
         "src/ai_market_monitor/templates/hilal/base_dashboard.html"
     ).read_text()
     settings = Path(
-        "src/ai_market_monitor/templates/hilal/dashboard/settings.html"
-    ).read_text()
+        "src/ai_market_monitor/templates/hilal/dashboard_test/settings.html"
+    ).read_text(encoding="utf-8")
     support = Path(
-        "src/ai_market_monitor/templates/hilal/dashboard/support.html"
-    ).read_text()
+        "src/ai_market_monitor/templates/hilal/dashboard_test/support.html"
+    ).read_text(encoding="utf-8")
     script = Path("src/ai_market_monitor/static/dashboard.js").read_text()
     styles = Path("src/ai_market_monitor/static/hilalmarkets.css").read_text()
     builder_styles = Path(
         "src/ai_market_monitor/static/hilalmarkets-builder.css"
     ).read_text()
 
-    assert "Market Assistant" in template
+    assert "Market assistant" in template
     assert "Advanced Controls" not in template
     assert "data-ai-setup-chat" in template
     assert "creation-card-top" in template
     assert "builder-header-status" in template
     assert "builder-bottom-bar" not in template
     assert 'name="theme"' not in template
-    assert "data-settings-save" in settings
-    assert 'name="screenshots"' in support
+    # Settings saves as you go, so the thing to check is that it says so, not that it has
+    # a Save button. Help still takes pictures with the message.
+    assert "data-g-saved" in settings
+    assert "data-h-files" in support
     assert "api.iconify.design" not in template
     assert "strategy-board-dialog" in template
     assert "data-open-strategy-board" in template
@@ -210,7 +212,11 @@ def test_hilalmarkets_core_styles_include_focus_and_reduced_motion_guards():
 
     assert ":focus-visible" in stylesheet
     assert "prefers-reduced-motion:reduce" in stylesheet
-    assert "outline:3px solid" in stylesheet
+    # The ring is a token now, not a colour written here. It used to be a see-through
+    # teal that measured about 1.4:1 against the pages that load this file. Whether the
+    # value itself is visible is checked by `test_invariant_focus_visibility.py`.
+    assert "outline:var(--hm-focus-ring)" in stylesheet
+    assert "box-shadow:var(--hm-focus-halo)" in stylesheet
 
 
 def test_authenticated_dashboard_has_no_legacy_blue_theme():
@@ -236,24 +242,43 @@ def test_hilalmarkets_runtime_icons_do_not_require_remote_iconify():
     assert "window.icon" in sources[1]
 
 
-def test_notification_integrations_show_plan_gated_whatsapp_without_discord():
-    template = Path(
-        "src/ai_market_monitor/templates/hilal/dashboard/integrations.html"
-    ).read_text()
+def test_notification_channels_are_decided_once_and_a_locked_one_says_why():
+    """Which channels exist is a server decision, and it is made in one place.
+
+    The older Notifications page listed its channels in its own markup and the older
+    Settings page listed them again in its own, so switching one on in the environment
+    meant editing two templates and nothing said when they disagreed. Both pages are gone.
+    Their replacements loop over what the router hands them, and the router asks
+    `offered_channels`, which is the single owner of "can we really deliver this".
+    """
+
+    connections = Path(
+        "src/ai_market_monitor/templates/hilal/dashboard_test/connections.html"
+    ).read_text(encoding="utf-8")
     settings = Path(
-        "src/ai_market_monitor/templates/hilal/dashboard/settings.html"
-    ).read_text()
+        "src/ai_market_monitor/templates/hilal/dashboard_test/settings.html"
+    ).read_text(encoding="utf-8")
+    router = Path(
+        "src/ai_market_monitor/api/routers/dashboard_test.py"
+    ).read_text(encoding="utf-8")
     script = Path("src/ai_market_monitor/static/dashboard.js").read_text()
-    assert 'data-testid="telegram-integration-card"' in template
-    assert 'data-testid="whatsapp-integration-card"' in template
-    assert "In-app" in template
-    assert "WhatsApp" in template
-    assert "is-plan-locked" in template
-    assert "Discord" not in template
-    assert 'value="telegram"' in settings
-    assert 'value="whatsapp"' in settings
-    assert 'value="bybit"' in settings
-    assert 'value="discord"' not in settings
+
+    # Both pages draw a list they were given.
+    assert "for channel in channels" in connections or "channel.label" in connections
+    assert "for channel in alert_channels" in settings
+
+    # And neither one names a channel of its own.
+    for typed in ('value="telegram"', 'value="whatsapp"', 'value="discord"'):
+        assert typed not in settings, typed
+    assert "Discord" not in connections
+    assert "Discord" not in settings
+
+    # A channel that is off says why, and what would turn it on.
+    assert "channel.unavailable_reason" in connections
+    assert "channel.unavailable_fix" in connections
+
+    # One owner for "can we deliver this at all".
+    assert "offered_channels" in router
     assert "return channelActive(payload?.telegram);" in script
 
 
@@ -318,6 +343,22 @@ def test_final_authenticated_styles_use_only_approved_brand_hex_colors():
         Path("src/ai_market_monitor/static/hilalmarkets-brand.css"),
         Path("src/ai_market_monitor/static/hilalmarkets-dashboard-v2.css"),
         Path("src/ai_market_monitor/static/system-brain.css"),
+        # `/main`. A new page is exactly where a new colour gets invented, so the sheet
+        # that designs it is held to the same palette as the ones it sits on top of.
+        Path("src/ai_market_monitor/static/hm-main.css"),
+        # The side menu and the topbar. They are on every signed-in page, so a colour
+        # invented here would be invented on all of them at once.
+        Path("src/ai_market_monitor/static/hm-shell.css"),
+        # Every page the side menu opens. These were not checked at all, and the menu
+        # used to open the older copy of five of them — so nothing walked the redesigned
+        # pages and two off-palette colours sat on Connections unnoticed. Now that the
+        # menu really leads here, the palette is checked here too.
+        Path("src/ai_market_monitor/static/hm-dashboard-test.css"),
+        Path("src/ai_market_monitor/static/hm-connections-test.css"),
+        Path("src/ai_market_monitor/static/hm-watch-test.css"),
+        Path("src/ai_market_monitor/static/hm-monitor-test.css"),
+        Path("src/ai_market_monitor/static/hm-account-test.css"),
+        Path("src/ai_market_monitor/static/hm-hilal-chat.css"),
     )
     unexpected: dict[str, list[str]] = {}
     for path in files:
@@ -383,23 +424,45 @@ def test_every_dashboard_template_inherits_the_single_brand_shell():
     }
 
 
-def test_official_mark_and_complete_outline_icon_catalog_are_used():
-    logo = Path("src/ai_market_monitor/static/hilalmarkets-logo-mark.svg").read_text(
-        encoding="utf-8"
-    )
-    icons = Path("src/ai_market_monitor/static/hilalmarkets-icons.js").read_text(
-        encoding="utf-8"
-    )
+def test_the_small_mark_is_a_piece_of_the_real_logo_and_not_a_drawing_of_it():
+    """Wherever the product needs the symbol alone, it uses the real one.
+
+    There used to be a hand-drawn `hilalmarkets-logo-mark.svg`: a dark rounded square
+    with a cut corner and two green circles. It was not the brand's symbol, nothing kept
+    it in step with the real logo, and it was on six surfaces — the minimized side menu,
+    the public header and footer, the admin sign-in, a public dashboard page, and the
+    `logo` a search engine reads out of the site's structured data.
+
+    `hilal-markets-symbol.svg` is not a redrawing. Every path in it appears **byte for
+    byte** inside `hilal-markets-logo.svg`, which is what makes drift impossible: change
+    the logo and this fails until the symbol is taken from it again.
+    """
+
+    static = Path("src/ai_market_monitor/static")
+    symbol = (static / "hilal-markets-symbol.svg").read_text(encoding="utf-8")
+    wordmark = (static / "hilal-markets-logo.svg").read_text(encoding="utf-8")
+
+    paths = re.findall(r'<path d="([^"]+)"', symbol)
+    assert len(paths) >= 4, "the symbol lost its shape"
+    for one in paths:
+        assert one in wordmark, "this path is not in the logo; the symbol was redrawn"
+
+    # The brand's ink, and no invented accent. The mark it replaced painted itself apple
+    # green, which section 9 keeps for a single focal element and not for a logo.
+    assert "#2B2E35" in symbol
+    assert "#CBFA4D" not in symbol
+    assert "#0F5C4D" not in symbol
+
+    # The hand-drawn one is gone from disk, not merely unreferenced.
+    assert not (static / "hilalmarkets-logo-mark.svg").exists()
+
+    icons = (static / "hilalmarkets-icons.js").read_text(encoding="utf-8")
     templates = "\n".join(
         path.read_text(encoding="utf-8")
         for path in Path("src/ai_market_monitor/templates").rglob("*.html")
     )
     requested_icons = set(re.findall(r'data-icon="([a-z0-9_-]+)"', templates))
     available_icons = set(re.findall(r"^\s*([a-z0-9_]+):", icons, re.MULTILINE))
-
-    assert "#CBFA4D" in logo
-    assert "#2B2E35" in logo
-    assert "#0F5C4D" not in logo
     assert requested_icons <= available_icons
     assert "api.iconify.design" not in icons
     assert 'stroke-width="1.75"' in icons

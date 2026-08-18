@@ -6,8 +6,26 @@ from typing import Any
 from ai_market_monitor.engine.candle_patterns import pattern_names
 from ai_market_monitor.engine.context_conditions import TIME_CONDITION_NAMES
 from ai_market_monitor.engine.price_action import PRICE_ACTION_NAMES
+from ai_market_monitor.schemas.strategy import (
+    MEASURED_COMPARATORS,
+    UNARY_COMPARATORS,
+    Comparator,
+)
 
 CapabilityCategory = str
+
+#: "The author of this capability did not say."
+#:
+#: `default_comparator` used to *default* to "is_true", which made a deliberate yes/no
+#: declaration impossible to tell from one nobody had thought about. Both readings
+#: existed in the registry — 143 capabilities meant it and the rest had simply
+#: inherited it — and every consumer had to guess which. This is the marker that ends
+#: the guessing: only a capability that actually writes `default_comparator=` has said
+#: anything, and only that one is treated as having said it.
+_NOT_DECLARED: Any = object()
+
+#: Operand kinds that answer yes or no rather than producing a number to compare.
+_BOOLEAN_OPERAND_KINDS: frozenset[str] = frozenset({"price_action", "candle_pattern"})
 
 PRIMARY_BUILDER_CATEGORIES: tuple[str, ...] = (
     "price",
@@ -72,6 +90,12 @@ class CapabilitySpec:
     operand_kind: str | None = None
     operand_name: str | None = None
     default_parameters: dict[str, Any] = field(default_factory=dict)
+    #: How this is compared, and every comparison it allows. `_cap` is the only place
+    #: that builds a CapabilitySpec and it always settles both together, so these
+    #: defaults are never the ones that ship. They are written as a *consistent* pair
+    #: anyway: the previous pair said "is_true" here and listed only numeric
+    #: comparisons below, which is the exact contradiction that let a yes/no rule be
+    #: rewritten as ">= 0". A type should not be able to hold that by default.
     default_comparator: str = "is_true"
     default_threshold: Any = True
     parameters: tuple[CapabilityParameter, ...] = ()
@@ -93,15 +117,8 @@ class CapabilitySpec:
         "1d",
     )
     outputs: tuple[str, ...] = ("value",)
-    supported_comparators: tuple[str, ...] = (
-        "gt",
-        "gte",
-        "lt",
-        "lte",
-        "eq",
-        "crosses_above",
-        "crosses_below",
-    )
+    #: Consistent with `default_comparator` above, and always replaced by `_cap`.
+    supported_comparators: tuple[str, ...] = ("is_false", "is_true")
     visual_card_sentence: str | None = None
     risk_notes: str = ""
     evaluator_function: str | None = None
@@ -356,8 +373,8 @@ def _cap(
     operand_kind: str | None = None,
     operand_name: str | None = None,
     default_parameters: dict[str, Any] | None = None,
-    default_comparator: str = "is_true",
-    default_threshold: Any = True,
+    default_comparator: Any = _NOT_DECLARED,
+    default_threshold: Any = _NOT_DECLARED,
     required_data: tuple[str, ...] = ("ohlcv",),
     light_mode: bool = True,
     free_plan: bool = True,
@@ -384,15 +401,7 @@ def _cap(
         "1d",
     ),
     outputs: tuple[str, ...] = ("value",),
-    supported_comparators: tuple[str, ...] = (
-        "gt",
-        "gte",
-        "lt",
-        "lte",
-        "eq",
-        "crosses_above",
-        "crosses_below",
-    ),
+    supported_comparators: tuple[str, ...] | None = None,
     visual_card_sentence: str | None = None,
     risk_notes: str = "",
     evaluator_function: str | None = None,
@@ -419,6 +428,16 @@ def _cap(
     resource_cost: str | None = None,
 ) -> CapabilitySpec:
     searchable_text = " ".join((key, label, category, description, *aliases, *examples))
+    resolved_comparator, supported_comparators = _resolve_comparison(
+        key=key,
+        declared_comparator=default_comparator,
+        declared_supported=supported_comparators,
+        operand_kind=operand_kind,
+    )
+    default_threshold = _resolve_threshold(
+        declared=default_threshold,
+        comparator=resolved_comparator,
+    )
     return CapabilitySpec(
         key=key,
         label=label,
@@ -429,7 +448,7 @@ def _cap(
         operand_kind=operand_kind,
         operand_name=operand_name,
         default_parameters=default_parameters or {},
-        default_comparator=default_comparator,
+        default_comparator=resolved_comparator,
         default_threshold=default_threshold,
         required_data=required_data,
         light_mode=light_mode,
@@ -475,6 +494,106 @@ def _cap(
         proof_template=(proof_template or visual_card_sentence or description),
         resource_cost=(resource_cost or _resource_cost(warmup_candles, provider_required)),
     )
+
+
+def _resolve_comparison(
+    *,
+    key: str,
+    declared_comparator: Any,
+    declared_supported: tuple[str, ...] | None,
+    operand_kind: str | None,
+) -> tuple[str, tuple[str, ...]]:
+    """Settle, once, which comparisons a capability accepts and which it starts on.
+
+    These two facts describe the same thing, and until now they were declared
+    separately and were free to disagree. 149 capabilities did disagree: they said
+    "my comparison is `is_true`" while their list of allowed comparisons held only
+    numeric ones. Nothing raised — the template builder quietly resolved the
+    contradiction by rewriting `is_true` into `>= 0`, which is true of every number
+    there is, so a yes/no rule became a rule that matches everything.
+
+    Deciding both here means the contradiction cannot be written down any more.
+
+    The order of preference is deliberate:
+
+    1. What the author explicitly wrote wins, and if the two explicit statements
+       disagree that is an error in the registry, raised at import.
+    2. A capability that declared only its comparison gets the list that fits it.
+    3. A capability that declared neither is read from its operand kind, which is the
+       rule this file already used and the only signal available for it.
+    """
+
+    declared = declared_comparator is not _NOT_DECLARED
+    comparator = str(declared_comparator) if declared else None
+
+    if declared_supported is not None:
+        supported = tuple(declared_supported)
+        if comparator is not None and comparator not in supported:
+            raise ValueError(
+                f"capability {key!r} declares default_comparator={comparator!r} but does "
+                f"not list it in supported_comparators={supported!r}. One of the two is "
+                "wrong; the registry will not choose between them."
+            )
+        if comparator is None:
+            comparator = _natural_comparator(supported)
+        return comparator, supported
+
+    if comparator is not None:
+        supported = (
+            tuple(sorted(UNARY_COMPARATORS))
+            if comparator in UNARY_COMPARATORS
+            else MEASURED_COMPARATORS
+        )
+        return comparator, supported
+
+    if operand_kind in _BOOLEAN_OPERAND_KINDS:
+        # A pattern match is a yes/no answer, so "greater than" has no meaning for it.
+        return Comparator.IS_TRUE.value, tuple(sorted(UNARY_COMPARATORS))
+    if operand_kind == "indicator":
+        # An indicator produces a number, and a number is compared against one.
+        return Comparator.GREATER_THAN_OR_EQUAL.value, MEASURED_COMPARATORS
+
+    # Everything else has to say. A metric read from a provider or from the risk
+    # context can be either a flag or a measurement, and there is no property of the
+    # capability that says which — the old code answered "yes/no" for all of them by
+    # accident, through a parameter default, and a later reader turned that answer
+    # into ">= 0". Refusing here costs one line in the registry and makes the mistake
+    # impossible to repeat silently.
+    raise ValueError(
+        f"capability {key!r} (operand_kind={operand_kind!r}) does not say how it is "
+        "compared. Add default_comparator='is_true' if it answers yes or no, or a "
+        "measured comparison such as 'gte' if it produces a number to compare."
+    )
+
+
+def _natural_comparator(supported: tuple[str, ...]) -> str:
+    """The comparison a capability starts on, given only the list it allows."""
+
+    if not supported:
+        raise ValueError("a capability must allow at least one comparison")
+    for preferred in (Comparator.IS_TRUE.value, Comparator.GREATER_THAN_OR_EQUAL.value):
+        if preferred in supported:
+            return preferred
+    return supported[0]
+
+
+def _resolve_threshold(*, declared: Any, comparator: str) -> Any:
+    """The level a capability starts on, or nothing when a level makes no sense.
+
+    A yes/no comparison takes no right-hand side at all, so its level is irrelevant.
+    A measured comparison needs a real number; the bare ``True`` that used to be the
+    registry-wide default is not one, and writing it into a rule produced a comparison
+    against a boolean. Undeclared stays undeclared, so a reader can offer an empty box
+    rather than a number nobody chose.
+    """
+
+    if comparator in UNARY_COMPARATORS:
+        return True
+    if declared is _NOT_DECLARED:
+        return None
+    if isinstance(declared, bool):
+        return None
+    return declared
 
 
 def _builder_category(capability: CapabilitySpec) -> str:
@@ -961,6 +1080,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         aliases=("atr stop", "average true range stop"),
         operand_kind="risk_metric",
         operand_name="atr_stop",
+        # "can be placed" — this answers yes or no. It does not produce a number.
+        default_comparator="is_true",
     ),
     # Volume and liquidity
     _cap(
@@ -1075,6 +1196,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         aliases=("24h volume", "minimum quote volume", "avoid low liquidity"),
         operand_kind="market_metric",
         operand_name="quote_volume_24h",
+        # "must meet a minimum" — a traded volume compared against a number.
+        default_comparator="gte",
         required_data=("ticker",),
     ),
     _cap(
@@ -1086,6 +1209,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         aliases=("average candle volume",),
         operand_kind="market_metric",
         operand_name="average_volume",
+        # "must meet minimum" — a measured volume against a number.
+        default_comparator="gte",
     ),
     # Price action
     _cap(
@@ -1767,6 +1892,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         aliases=("fib extension", "fibonacci extension"),
         operand_kind="risk_metric",
         operand_name="fibonacci_extension_targets",
+        # "Checks whether ... aligns" — a yes or no answer, per its own guidance below.
+        default_comparator="is_true",
         guidance="Checks whether the configured first target aligns with a common extension.",
     ),
     _cap(
@@ -1979,6 +2106,9 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         aliases=("ny session", "london session", "midnight"),
         operand_kind="market_metric",
         operand_name="time_window",
+        # `evaluate_time_condition` returns a bool for "time_window": the candle is
+        # either inside the window or it is not.
+        default_comparator="is_true",
         required_data=("candle_timestamp",),
     ),
     _cap(
@@ -1990,6 +2120,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         aliases=("killzone", "ny killzone", "london killzone"),
         operand_kind="market_metric",
         operand_name="time_window",
+        # Same operand as the window above, so the same yes/no answer.
+        default_comparator="is_true",
         required_data=("candle_timestamp",),
     ),
     _cap(
@@ -2011,6 +2143,10 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         operand_kind="price_action",
         operand_name="percent_change_up",
         default_parameters={"direction": "up", "threshold_percent": 5, "lookback": 1},
+        # Unlike the rest of this file's price_action capabilities, this one measures
+        # a percentage, not a pattern match, so it keeps the numeric comparator set
+        # that _cap() otherwise stops defaulting to for operand_kind="price_action".
+        supported_comparators=("gt", "gte", "lt", "lte", "eq"),
         parameters=(
             CapabilityParameter("direction", "choice", "up", options=("up", "down")),
             CapabilityParameter("threshold_percent", "number", 5),
@@ -2069,6 +2205,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "market_filter",
         "Exclude stablecoin base assets.",
         aliases=("exclude stables", "stablecoin exclusion"),
+        # An exclusion is a flag: this coin either is a stablecoin or it is not.
+        default_comparator="is_true",
         required_data=("market_metadata",),
     ),
     _cap(
@@ -2078,6 +2216,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "market_filter",
         "Exclude leveraged tokens.",
         aliases=("no leveraged tokens", "3l", "3s"),
+        # An exclusion flag, like the stablecoin one above.
+        default_comparator="is_true",
         required_data=("market_metadata",),
     ),
     _cap(
@@ -2087,6 +2227,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "market_filter",
         "Maximum spread in basis points.",
         aliases=("max spread", "spread bps"),
+        # "Maximum" — a measured spread that must stay at or under a number.
+        default_comparator="lte",
         required_data=("ticker", "order_book"),
     ),
     _cap(
@@ -2096,6 +2238,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "market_filter",
         "Minimum market listing age.",
         aliases=("listing age", "new listing"),
+        # "Minimum" — a measured age that must reach a number.
+        default_comparator="gte",
         required_data=("market_metadata",),
     ),
     _cap(
@@ -2112,6 +2256,10 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
             "context_category": "cross_market",
             "threshold": 0.7,
         },
+        # It carries its own threshold of 0.7, so it measures a correlation and
+        # compares it. It is the one filter in this group that is not a flag.
+        default_comparator="gte",
+        default_threshold=0.7,
         guidance="Uses aligned closed-candle returns against BTC.",
     ),
     _cap(
@@ -2127,6 +2275,9 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
             "provider": "cross_market",
             "context_category": "cross_market",
         },
+        # A gate, not a measurement: BTC is in the trend the scan wants, or it is not.
+        # Its provider siblings (`btc_usdt_trend_filter`) already say the same.
+        default_comparator="is_true",
         guidance="Uses BTC benchmark candles from the selected exchange.",
     ),
     _cap(
@@ -2142,6 +2293,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
             "provider": "cross_market",
             "context_category": "cross_market",
         },
+        # A gate, like the BTC one above.
+        default_comparator="is_true",
         guidance="Uses ETH benchmark candles from the selected exchange.",
     ),
     _cap(
@@ -2157,6 +2310,9 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
             "provider": "token_categories",
             "context_category": "token_categories",
         },
+        # The evaluator sets this from the coin's category as a bool: the coin is
+        # either outside the meme categories or it is not.
+        default_comparator="is_true",
         required_data=("token_categories",),
         provider_required="token_categories",
         guidance="Uses configured token-category metadata; missing categories stay explicit.",

@@ -5,6 +5,7 @@ from pathlib import Path
 from time import perf_counter
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from ai_market_monitor.api.request_guards import apply_request_guards
@@ -14,13 +15,17 @@ from ai_market_monitor.api.routers import (
     billing_router,
     dashboard_api_router,
     dashboard_router,
+    dashboard_test_router,
+    hilal_chat_router,
     investigations_router,
+    main_dashboard_router,
     on_demand_router,
     onboarding_router,
     public_chat_router,
     public_forms_router,
     public_router,
     sharia_router,
+    site_analytics_router,
     status_router,
     system_brain_router,
     telegram_router,
@@ -107,6 +112,17 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     if static_directory.is_dir():
         application.mount("/static", StaticFiles(directory=static_directory), name="static")
 
+    # The Builder's own contract — every mechanic, every parameter, every option the
+    # server permits — is 2 MB of JSON, and it was being sent uncompressed on every
+    # visit to a page that draws a rule. It compresses to about 64 KB, because the
+    # payload is mostly the same option lists repeated 512 times.
+    #
+    # Applied to the whole application rather than one route: the same is true of the
+    # dashboard's HTML, its stylesheets and its scripts. Starlette leaves
+    # `text/event-stream` alone by default, so the System Brain's live stream is
+    # unaffected, and a client that does not offer gzip still receives plain bytes.
+    application.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+
     @application.middleware("http")
     async def add_process_time_header(request: Request, call_next):
         # The one place an HTTP request is measured. The timing was already here for
@@ -140,9 +156,13 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     application.include_router(public_router)
     application.include_router(public_chat_router, prefix="/api/v1")
     application.include_router(public_forms_router, prefix="/api/v1")
+    application.include_router(site_analytics_router, prefix="/api/v1")
     application.include_router(dashboard_router)
+    application.include_router(dashboard_test_router)
+    application.include_router(main_dashboard_router)
     application.include_router(activity_router, prefix="/api/v1")
     application.include_router(dashboard_api_router, prefix="/api/v1")
+    application.include_router(hilal_chat_router, prefix="/api/v1")
     application.include_router(onboarding_router, prefix="/api/v1")
     application.include_router(on_demand_router, prefix="/api/v1")
     application.include_router(investigations_router, prefix="/api/v1")

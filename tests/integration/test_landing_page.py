@@ -21,10 +21,11 @@ async def test_landing_page_serves_supplied_react_design_without_legacy_shell(
 
     source = LANDING_SOURCE.read_text(encoding="utf-8")
     assert "A better way for Muslim crypto traders" in source
-    assert 'analyticsName="waitlist"' in source
-    assert "<Waitlist />" in source
-    assert "<Pricing />" not in source
-    assert "Join the waitlist" in source
+    # The product has launched: the plans stand where the waitlist form stood.
+    assert 'analyticsName="pricing"' in source
+    assert "<Pricing />" in source
+    assert "<Waitlist />" not in source
+    assert "Join the waitlist" not in source
     for forbidden in ("guaranteed profits", "guaranteed returns", "fake win rate"):
         assert forbidden not in source.casefold()
 
@@ -38,7 +39,13 @@ async def test_landing_page_does_not_lead_with_notification_channels(test_contex
 
 
 async def test_landing_page_links_to_primary_start_paths(test_context):
-    """The landing page has exactly one destination: the waitlist form on itself."""
+    """The landing page has one destination, and the server owns its address.
+
+    Before launch that destination was the waitlist form on the page itself. It is the
+    product now, reached through `/dashboard-entry` — one address that sends a signed-in
+    person to their dashboard and everybody else to sign-up, so nothing on the page has
+    to guess which of the two the visitor is.
+    """
 
     response = await test_context["client"].get("/")
     assert response.status_code == 200
@@ -47,61 +54,83 @@ async def test_landing_page_links_to_primary_start_paths(test_context):
     chrome = (
         ROOT / "Hilal-Markets-Website" / "src" / "components" / "SiteChrome.tsx"
     ).read_text(encoding="utf-8")
-    footer = (
-        ROOT
-        / "Hilal-Markets-Website"
-        / "src"
-        / "imports"
-        / "10Footer-1"
-        / "index.tsx"
-    ).read_text(encoding="utf-8")
-    assert 'href="#waitlist"' in source
-    assert "/subscribe?" not in source
-    assert "{ label: 'Pricing', target: '#pricing' }" not in chrome
-    assert "Join the waitlist" in chrome
-    assert "Get started" not in chrome
-    assert "Sign in" not in chrome
-    for href in ('href="/privacy"', 'href="/terms"', 'href="/contact"'):
-        assert href in footer
+    assert 'href="#waitlist"' not in source
+    assert "Join the waitlist" not in chrome
+    # One owner for the entry address, and the page uses it rather than writing its own.
+    assert "export const DASHBOARD_ENTRY = '/dashboard-entry'" in chrome
+    assert "dashboardEntryHref()" in source
+    assert 'href="/dashboard"' not in source
+    assert 'href="/signup"' not in source
+    # The footer menu now comes from the server, so the React file holds no copy of it.
+    assert "FALLBACK_FOOTER_GROUPS" in chrome
+    for group in ("Product", "Legal", "Contact"):
+        assert f"label: '{group}'" in chrome, group
     # "How We Screen" was withdrawn from the footer menu. Both the address and the
     # analytics name go, so a click cannot be recorded for a link nobody can see.
     for withdrawn in ('href="/how-we-screen"', "how_we_screen", "How We Screen"):
-        assert withdrawn not in footer, withdrawn
+        assert withdrawn not in chrome, withdrawn
     assert "TODO_" not in response.text
 
 
-async def test_the_shipped_landing_bundle_matches_the_waitlist_source(test_context):
+async def test_the_shipped_landing_bundle_matches_the_launched_source(test_context):
     """The built file is what visitors actually get; the source is only what we meant.
 
-    A change to `App.tsx` that was never rebuilt leaves the old page live, so the shipped
-    bundle is checked directly: it must offer the waitlist and must contain no route into
-    the product and no plan price.
+    A change to `App.tsx` that was never rebuilt leaves the old page live. The copy step
+    into `static/landing/assets/` is done by hand, so this is the only thing standing
+    between an edited source and a stale page: the shipped bundle must carry the plans
+    and must not carry the waitlist.
     """
 
     bundle = (
         ROOT / "src/ai_market_monitor/static/landing/assets/landing.js"
     ).read_text(encoding="utf-8")
-    assert "Join the waitlist" in bundle
+    assert "Join the waitlist" not in bundle
+    assert "/dashboard-entry" in bundle
+    # The plans really shipped, not just the component that can draw them.
+    assert "Choose how deeply you want to monitor the market." in bundle
     assert "public-forms/bootstrap" in bundle
     # The withdrawn consent box is gone from what visitors are actually served, not only
     # from the source. A stale bundle would keep showing it and keep sending its answer.
     for withdrawn in ("beta_contact_consent", "waitlist-beta-consent", "beta testing"):
         assert withdrawn not in bundle, withdrawn
-    # The Privacy and Terms pages carry the waitlist band, and their legal text scopes
-    # accounts and payment to the private beta. Both are drawn by this file. Contact does
-    # not carry the band: its own form is the one action on that page.
-    assert "contact_footer" not in bundle
-    assert "privacy_footer" in bundle
-    assert "terms_footer" in bundle
-    assert "Paid access is not offered to the public during the private beta." in bundle
-    assert "Accounts are issued by invitation during the private beta." in bundle
-    for forbidden in (
+    # No page closes on a waitlist band any more. Privacy and Terms end on the sibling
+    # documents instead, and Contact ends on its own form, which is the one action
+    # that page is for.
+    for withdrawn in ("contact_footer", "privacy_footer", "terms_footer"):
+        assert withdrawn not in bundle, withdrawn
+    # The two legal documents describe the live service. Checked in the built file
+    # rather than the source, because a rewrite that was never rebuilt leaves the
+    # private-beta wording live on the site whatever the source now says.
+    for beta in (
+        "private beta",
+        "private-beta",
+        "invite-only",
+        "Accounts are issued by invitation",
+        "Paid access is not offered to the public",
+    ):
+        assert beta not in bundle, beta
+    # And the promises those sentences used to carry are in the bundle in live form.
+    assert "the checkout shows the price" in bundle
+    assert "no charge may be taken" in bundle
+    # The three rebuilt pages actually shipped, not only their source.
+    assert "Answers, before you write" in bundle
+    assert "Read the full wording" in bundle
+    assert "In short" in bundle
+    # The way into the product, and the plans, really shipped. Each of these was on the
+    # forbidden list while the site was pre-launch; the list is inverted rather than
+    # deleted, so a bundle that quietly loses the pricing section fails here.
+    for required in (
         "/signin",
-        "/signup",
+        "/dashboard-entry",
         "/subscribe?",
         "Choose Monitor monthly",
         "monthlyPrice",
         "7-day money-back guarantee",
+    ):
+        assert required in bundle, required
+    for forbidden in (
+        "#waitlist",
+        "Join the waitlist",
         "unless a separately presented offer expressly states otherwise",
     ):
         assert forbidden not in bundle, forbidden
@@ -213,17 +242,24 @@ async def test_subscription_selection_is_validated_and_preserved_through_signup(
     )
 
 
-async def test_an_unknown_plan_link_lands_on_the_waitlist_not_a_missing_anchor(
-    test_context,
-):
-    """There is no pricing section to scroll to while the site is pre-launch."""
+async def test_an_unknown_plan_link_lands_somewhere_that_exists(test_context):
+    """An unusable plan link goes to whatever the current stage actually shows.
 
-    response = await test_context["client"].get(
-        "/subscribe?plan_code=internal&billing_interval=annual",
-        follow_redirects=False,
-    )
-    assert response.status_code == 303
-    assert response.headers["location"] == "/#waitlist"
+    Launched, that is the pricing section. Pre-launch there is no pricing section to
+    scroll to, so it is the waitlist. Both are asserted because the point of the rule is
+    that the address always exists — sending somebody to `#pricing` on a page with no
+    plans on it is the missing anchor this test is named after.
+    """
+
+    settings = test_context["settings"]
+    for waitlist_mode, expected in ((False, "/#pricing"), (True, "/#waitlist")):
+        settings.public_waitlist_mode = waitlist_mode
+        response = await test_context["client"].get(
+            "/subscribe?plan_code=internal&billing_interval=annual",
+            follow_redirects=False,
+        )
+        assert response.status_code == 303, waitlist_mode
+        assert response.headers["location"] == expected, waitlist_mode
 
 
 async def test_dashboard_preview_pages_are_available(test_context):

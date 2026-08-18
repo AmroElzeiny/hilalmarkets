@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.dashboard_paths import COMPLIANCE_CHANGES_PATH
 from ai_market_monitor.db.models import (
     Alert,
     ApprovedWatchlist,
@@ -871,7 +872,7 @@ class ComplianceDigestService:
                         "event_type": "sharia.compliance_daily_digest",
                         "event_count": len(user_rows),
                         "drift_notification_ids": event_ids,
-                        "evidence_path": "/dashboard/opportunities?tab=compliance_changes",
+                        "evidence_path": COMPLIANCE_CHANGES_PATH,
                         "generated_at": now.isoformat(),
                         "ai_generated_ruling": False,
                     },

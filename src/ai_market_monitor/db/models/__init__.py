@@ -77,6 +77,12 @@ from ai_market_monitor.db.models.discord import (
     DiscordRoleSyncJob,
     DiscordSetupThread,
 )
+from ai_market_monitor.db.models.hilal_chat import (
+    HilalChatConversation,
+    HilalChatMessage,
+    HilalChatMessageReport,
+    HilalChatRating,
+)
 from ai_market_monitor.db.models.monitoring import (
     Alert,
     AlertDelivery,
@@ -158,6 +164,10 @@ from ai_market_monitor.db.models.sharia_governance import (
     SourceSnapshot,
     TelegramNotificationAttempt,
 )
+from ai_market_monitor.db.models.site_analytics import (
+    SiteSignupAttribution,
+    SiteVisit,
+)
 from ai_market_monitor.db.models.strategy import (
     Strategy,
     StrategyCondition,
@@ -169,6 +179,7 @@ from ai_market_monitor.db.models.support import (
     Incident,
     IncidentImpact,
     IncidentUpdate,
+    SupportIntakeRecord,
     SupportRequest,
     UserFeedback,
 )
@@ -182,6 +193,7 @@ from ai_market_monitor.db.models.system_brain import (
     CapabilityResolutionEvent,
     CustomerConversationEvent,
     RepositoryEvidenceIndex,
+    ReviewActionBatch,
     SystemBrainActionProposal,
     SystemBrainArtifact,
     SystemBrainAuthChallenge,
@@ -303,6 +315,10 @@ __all__ = [
     "PaymentEmailDelivery",
     "Plan",
     "PublishedAssetAssessment",
+    "HilalChatConversation",
+    "HilalChatMessage",
+    "HilalChatMessageReport",
+    "HilalChatRating",
     "PublicChatAnswerFeedback",
     "PublicChatAnswerEvent",
     "PublicChatConversation",
@@ -332,6 +348,8 @@ __all__ = [
     "ShariaReviewerProfile",
     "ShariaReviewAssignmentEvent",
     "ShariaUniverseSnapshot",
+    "SiteSignupAttribution",
+    "SiteVisit",
     "Strategy",
     "StrategyCondition",
     "StrategyDecayEvent",
@@ -345,11 +363,13 @@ __all__ = [
     "StrategyValidationRecord",
     "StrategyVersion",
     "StrategyVersionVerification",
+    "ReviewActionBatch",
     "ReviewCase",
     "ReviewDecision",
     "SourceChangeEvent",
     "SourceSnapshot",
     "Subscription",
+    "SupportIntakeRecord",
     "SupportRequest",
     "SupportTicketMessage",
     "SystemBrainAuthChallenge",

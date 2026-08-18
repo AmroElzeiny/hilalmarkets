@@ -1,0 +1,327 @@
+{% extends "hilal/base_dashboard.html" %}
+{#- The visual canvas, on its own page.
+
+    The board is drawn by `hm-monitor-test.js` from the Builder contract, so almost
+    nothing here is markup: what a person can add, choose or set is decided by the
+    server, and a template that listed any of it would be a second opinion about the
+    same question. What *is* here is the frame — the toolbar, the two dialogs, the
+    readout — and the plain-language copy around it.
+
+    There is no assistant on this page: no chat panel, no chat popup, and no
+    "Hilal Markets Assistant" box. Authoring never requires the assistant. -#}
+{% block page_styles_late %}
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260818-live-4">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-monitor-test.css') }}?v=20260818-live-4">
+{% endblock %}
+{% block content %}
+
+<div
+  class="hm-t hm-m"
+  data-monitor-root
+  data-contract-url="{{ monitor_contract_url }}"
+  data-limits='{{ monitor_limits | tojson }}'
+  data-channels='{{ monitor_channels | tojson }}'
+  data-market-path="{{ market_path }}"
+  data-watchlists-path="{{ watchlists_path }}"
+  data-screening-configured="{{ 'true' if builder_screening.configured else 'false' }}"
+  data-screening-name="{{ builder_screening.methodology_name or '' }}"
+  data-screening-version="{{ builder_screening.methodology_version or '' }}"
+>
+
+  {#- `data-hm-part` names the parts of this page in the page's own words, so Hilal can
+      be told which one is in front of the person. -#}
+  <header class="t-head m-head" data-hm-part="The page heading">
+    <div class="t-head-copy">
+      <p class="t-eyebrow"><span data-icon="workflow" data-icon-class="icon-sm"></span>Visual canvas</p>
+      <h1>Monitor</h1>
+    </div>
+
+    <p class="m-saved t-chamfer" data-saved-pill data-state="empty">
+      <span data-icon="clock" data-icon-class="icon-sm" aria-hidden="true"></span>
+      <span data-saved-text>Nothing drawn yet</span>
+    </p>
+  </header>
+
+  {#- Which screened universe the board would draw from. Said once, plainly, and never
+      as a promise: a draft can be built either way, and the difference is only which
+      coins the finished monitor would look at. -#}
+  <div class="t-banner m-universe-banner" data-tone="{{ 'info' if builder_screening.configured else 'error' }}" role="status">
+    <span data-icon="{{ 'shield_check' if builder_screening.configured else 'alert' }}" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      {% if builder_screening.configured %}
+      <strong>Coins come from the Shariah review</strong>
+      <p>Standard in use: {{ builder_screening.methodology_name }}, version {{ builder_screening.methodology_version }}. If a coin's review result changes, that coin pauses.</p>
+      {% else %}
+      <strong>No screening standard is active yet</strong>
+      <p>You can still draw and save a draft. A real monitor can only start once a published Shariah standard is in place.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="m-stage" data-stage data-mode="page" aria-label="Monitor canvas"
+           data-hm-part="The canvas, where the cards are">
+
+    {#- Deliberately not `role="toolbar"`. That role promises arrow-key movement
+        between the buttons, and these are ordinary tab stops. Claiming the pattern
+        without implementing it is worse than not claiming it. -#}
+    <div class="m-bar" role="group" aria-label="Canvas tools">
+      <div class="m-bar-group">
+        <button class="t-action is-primary m-add" type="button" data-open-library>
+          <span data-icon="plus" data-icon-class="icon-sm"></span>Add condition
+        </button>
+        <button class="t-action" type="button" data-add-group>
+          <span data-icon="branch" data-icon-class="icon-sm"></span>Add group
+        </button>
+      </div>
+
+      <div class="m-bar-group m-bar-history">
+        <button class="t-icon-btn" type="button" data-undo disabled>
+          <span data-icon="undo" data-icon-class="icon-sm"></span><span class="sr-only">Undo</span>
+        </button>
+        <button class="t-icon-btn" type="button" data-redo disabled>
+          <span data-icon="redo" data-icon-class="icon-sm"></span><span class="sr-only">Redo</span>
+        </button>
+        <button class="t-icon-btn" type="button" data-tidy>
+          <span data-icon="tidy" data-icon-class="icon-sm"></span><span class="sr-only">Tidy up the board</span>
+        </button>
+      </div>
+
+      <div class="m-bar-group m-bar-zoom">
+        <button class="t-icon-btn" type="button" data-zoom="out">
+          <span data-icon="zoom_out" data-icon-class="icon-sm"></span><span class="sr-only">Zoom out</span>
+        </button>
+        <button class="m-zoom-value t-figure" type="button" data-zoom="fit" data-zoom-label>100%</button>
+        <button class="t-icon-btn" type="button" data-zoom="in">
+          <span data-icon="zoom_in" data-icon-class="icon-sm"></span><span class="sr-only">Zoom in</span>
+        </button>
+      </div>
+
+      <div class="m-bar-group m-bar-end">
+        <div class="t-segment m-modes" role="radiogroup" aria-label="Canvas size">
+          <button type="button" role="radio" data-canvas-mode="page" aria-checked="true">
+            <span data-icon="minimize" data-icon-class="icon-sm"></span>Fit to page
+          </button>
+          <button type="button" role="radio" data-canvas-mode="full" aria-checked="false">
+            <span data-icon="expand" data-icon-class="icon-sm"></span>Full screen
+          </button>
+        </div>
+        <button class="t-icon-btn" type="button" data-open-shortcuts>
+          <span data-icon="keyboard" data-icon-class="icon-sm"></span><span class="sr-only">Keyboard shortcuts</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="m-work">
+      <div class="m-board" id="m-board" data-board tabindex="0" aria-label="The board. Use the arrow keys to move between cards.">
+        <div class="m-world" data-world>
+          {#- The arrow heads say which way the rule flows. Two of them, because a
+              marker cannot inherit the colour of the line that uses it in every
+              browser, and the lit line is a different colour from the rest. -#}
+          <svg class="m-wires" data-wires aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="m-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0 1 L7 4 L0 7 z" class="m-arrow-head"></path>
+              </marker>
+              <marker id="m-arrow-lit" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0 1 L7 4 L0 7 z" class="m-arrow-head is-lit"></path>
+              </marker>
+            </defs>
+          </svg>
+          <div class="m-nodes" data-nodes role="tree" aria-label="Your monitor, card by card"></div>
+
+          {#- Cards whose connection has been cancelled. Deliberately outside the tree
+              above: a `tree` may only hold `treeitem`s, and a card that is not part of
+              the monitor is not an item of it. Its own list, with its own caption. -#}
+          <div class="m-shelf" data-shelf hidden aria-hidden="true">
+            <span data-icon="unlink" data-icon-class="icon-sm"></span>
+            <span>Set aside — not part of this monitor</span>
+          </div>
+          <div class="m-aside" data-aside role="list" aria-label="Cards set aside, not part of your monitor"></div>
+
+          {#- The button that cancels one connection, drawn on the connection itself.
+              A layer of its own so it sits over the lines and under nothing. -#}
+          <div class="m-cuts" data-cuts></div>
+        </div>
+
+        <p class="m-coach" data-coach role="status" hidden></p>
+
+        <div class="m-load" data-loading>
+          <span class="m-load-dot" aria-hidden="true"></span>
+          <span>Reading what this platform can watch for…</span>
+        </div>
+
+        <div class="t-banner m-load-error" data-tone="error" data-contract-error hidden role="alert">
+          <span data-icon="alert" data-icon-class="icon"></span>
+          <div class="t-banner-body">
+            <strong>The list of conditions could not be read</strong>
+            <p>Nothing was guessed in its place, so the board stays empty. Your saved draft is untouched.</p>
+            <button class="t-action" type="button" data-contract-retry><span data-icon="refresh" data-icon-class="icon-sm"></span>Try again</button>
+          </div>
+        </div>
+      </div>
+
+      <aside class="m-inspector" data-inspector hidden aria-label="Card settings">
+        <header class="m-inspector-head">
+          <span class="m-inspector-kind" data-inspector-kind></span>
+          <button class="t-close" type="button" data-inspector-close aria-label="Close card settings">
+            <span data-icon="close" data-icon-class="icon"></span>
+          </button>
+        </header>
+        <div class="m-inspector-body" data-inspector-body></div>
+      </aside>
+    </div>
+
+    <section class="m-checks" data-checks hidden aria-label="What is still missing">
+      <ul class="m-check-list" id="m-check-list" data-check-list></ul>
+    </section>
+
+    <div class="m-readout" data-hm-part="The plain-words readout and the checks">
+      <p class="m-sentence" data-sentence>
+        <span class="m-sentence-label">In plain words</span>
+        <span data-sentence-text>Add one condition to begin.</span>
+      </p>
+      <div class="m-readout-end">
+        <span class="m-meter" data-meter data-tone="empty">
+          <span class="m-meter-track" aria-hidden="true"><span class="m-meter-fill" data-meter-fill></span></span>
+          <span class="m-meter-text" data-meter-text>Not ready</span>
+        </span>
+        <button class="t-action m-checks-toggle" type="button" data-checks-toggle aria-expanded="false" aria-controls="m-check-list">
+          <span data-icon="list" data-icon-class="icon-sm"></span><span data-checks-count>Checks</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <ul class="m-next">
+    <li class="t-card m-next-card">
+      <span class="m-next-icon"><span data-icon="workflow" data-icon-class="icon"></span></span>
+      <strong>This board is the drawing</strong>
+      <p>Nothing is being watched while you are here. The picture is a plan.</p>
+    </li>
+    <li class="t-card m-next-card">
+      <span class="m-next-icon"><span data-icon="database" data-icon-class="icon"></span></span>
+      <strong>Your draft stays in this browser</strong>
+      <p>It is kept as you work, on this device only, and you can clear it any time.</p>
+    </li>
+    <li class="t-card m-next-card">
+      <span class="m-next-icon"><span data-icon="radar" data-icon-class="icon"></span></span>
+      <strong>Starting a monitor happens on Watchlists</strong>
+      <p>When the plan is finished, take it there. <a href="{{ watchlists_path }}">Open Watchlists</a></p>
+    </li>
+  </ul>
+
+  {#- The board is drawn by script. Saying so plainly beats an empty rectangle. -#}
+  <noscript>
+    <div class="t-state">
+      <div class="t-state-icon"><span data-icon="workflow" data-icon-class="icon"></span></div>
+      <h2>The canvas needs JavaScript</h2>
+      <p>Turn it on for this site to draw a monitor here. You can still build one step by step on the Watchlists page.</p>
+      <p><a class="t-action" href="{{ watchlists_path }}"><span data-icon="arrow" data-icon-class="icon-sm"></span>Open Watchlists</a></p>
+    </div>
+  </noscript>
+
+  <p class="sr-only" data-announce role="status" aria-live="polite"></p>
+</div>
+
+<dialog class="t-dialog m-library" data-library aria-labelledby="m-library-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <h2 id="m-library-title">Add a condition</h2>
+        <p>Pick what the market has to do. You set the numbers straight after.</p>
+      </div>
+      <button class="t-close" type="button" data-library-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+
+    <div class="m-lib-search">
+      <span data-icon="search" data-icon-class="icon" aria-hidden="true"></span>
+      <label class="sr-only" for="m-lib-search-input">Search conditions</label>
+      <input id="m-lib-search-input" type="search" data-library-search autocomplete="off"
+             placeholder="Try: rises, RSI, breaks the high, busy trading">
+      <button class="t-icon-btn" type="button" data-library-clear hidden>
+        <span data-icon="close" data-icon-class="icon-sm"></span><span class="sr-only">Clear the search</span>
+      </button>
+    </div>
+
+    <div class="t-dialog-body m-lib-body">
+      <nav class="m-lib-rail" data-library-rail aria-label="Kinds of condition"></nav>
+
+      <div class="m-lib-results">
+        <p class="m-lib-count" data-library-count role="status" aria-live="polite"></p>
+        <ul class="m-lib-list" data-library-list aria-label="Conditions"></ul>
+        <button class="t-action m-lib-more" type="button" data-library-more hidden>
+          <span data-icon="chevron" data-icon-class="icon-sm"></span><span data-library-more-text>Show more</span>
+        </button>
+        <div class="t-state m-lib-empty" data-library-empty hidden>
+          <div class="t-state-icon"><span data-icon="search" data-icon-class="icon"></span></div>
+          <h3>Nothing matches those words</h3>
+          <p>Try one plain word instead, like <em>rises</em>, <em>volume</em> or <em>high</em>.</p>
+          <button class="t-action" type="button" data-library-reset>
+            <span data-icon="refresh" data-icon-class="icon-sm"></span>Show everything again
+          </button>
+        </div>
+      </div>
+
+      <aside class="m-lib-detail" data-library-detail aria-live="polite" aria-label="About the selected condition"></aside>
+    </div>
+
+    <footer class="t-dialog-foot">
+      <span class="t-foot-note" data-library-note>Nothing is added until you choose it.</span>
+      <button class="t-action" type="button" data-library-cancel>Cancel</button>
+      <button class="t-action is-primary" type="button" data-library-add disabled>
+        <span data-icon="plus" data-icon-class="icon-sm"></span>Add to the board
+      </button>
+    </footer>
+  </div>
+</dialog>
+
+<dialog class="t-dialog m-shortcuts" data-shortcuts aria-labelledby="m-shortcuts-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <h2 id="m-shortcuts-title">Keys and gestures</h2>
+        <p>Every one of these also has a button on screen. Nothing needs a mouse.</p>
+      </div>
+      <button class="t-close" type="button" data-shortcuts-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <div class="t-dialog-body">
+      <dl class="m-keys">
+        <div><dt><kbd>Tab</kbd></dt><dd>Move to the next control</dd></div>
+        <div><dt><kbd>&uarr;</kbd> <kbd>&darr;</kbd></dt><dd>Move between cards on the board</dd></div>
+        <div><dt><kbd>&larr;</kbd> <kbd>&rarr;</kbd></dt><dd>Go out to the group, or into its cards</dd></div>
+        <div><dt><kbd>Enter</kbd></dt><dd>Open the settings of the card you are on</dd></div>
+        <div><dt><kbd>Tab</kbd></dt><dd>Reach that card's own buttons, including &ldquo;cancel the connection&rdquo;</dd></div>
+        <div><dt><kbd>Delete</kbd></dt><dd>Remove that card. You can undo it</dd></div>
+        <div><dt><kbd>Ctrl</kbd> + <kbd>Z</kbd></dt><dd>Undo</dd></div>
+        <div><dt><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></dt><dd>Redo</dd></div>
+        <div><dt><kbd>Ctrl</kbd> + <kbd>Enter</kbd></dt><dd>Open the list of conditions</dd></div>
+        <div><dt><kbd>Ctrl</kbd> + <kbd>0</kbd></dt><dd>Fit the whole board on screen</dd></div>
+        <div><dt><kbd>Esc</kbd></dt><dd>Close what is open, leave full screen, or drop a line you are dragging without changing anything</dd></div>
+      </dl>
+
+      {#- What a pointer does. This was the one part of the board with no written
+          explanation anywhere: dragging a wire off a card is how a connection is
+          cancelled, and the only way to find that out was to try it. It is also what
+          Hilal reads when somebody asks how to join or cancel a connection — it may
+          only describe what the page itself says, so anything undocumented here is
+          something it cannot help with. -#}
+      <h3 class="m-keys-heading">With a mouse or a finger</h3>
+      <dl class="m-keys" data-gestures>
+        <div><dt>Drag the board</dt><dd>Move around it. Nothing on the board changes</dd></div>
+        <div><dt>Drag a card</dt><dd>Move that card. Its connection stays where it was</dd></div>
+        <div><dt>Drag the circle on a card's left edge onto a group</dt><dd>Join the card to that group instead</dd></div>
+        <div><dt>Drag that same circle onto empty space</dt><dd>Cancel the connection. The card is set aside, keeping everything you typed</dd></div>
+        <div><dt>Point at a line</dt><dd>A small button appears on the line to cancel it</dd></div>
+        <div><dt>Point at a set-aside card</dt><dd>A button appears to join it back into the monitor</dd></div>
+      </dl>
+    </div>
+  </div>
+</dialog>
+
+{% endblock %}
+
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-monitor-test.js') }}?v=20260818-live-4"></script>{% endblock %}

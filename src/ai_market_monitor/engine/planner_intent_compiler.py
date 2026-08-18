@@ -56,6 +56,7 @@ from ai_market_monitor.engine.boolean_topology import (
     parse_stated_topology,
     validate_boolean_topology,
 )
+from ai_market_monitor.engine.capability_index import get_capability_index
 from ai_market_monitor.engine.capability_shortlist import CapabilityShortlist
 from ai_market_monitor.engine.operator_authority import (
     OperatorNormalizationKind,
@@ -107,7 +108,7 @@ from ai_market_monitor.schemas.setup_agent import (
     ACTIONABLE_SEGMENT_KINDS,
     SetupAgentTurnPlan,
 )
-from ai_market_monitor.schemas.strategy import Comparator
+from ai_market_monitor.schemas.strategy import UNARY_COMPARATORS, Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeType,
     ConditionNodeV2,
@@ -2416,6 +2417,31 @@ def _resolve_condition_references(
     return condition.model_copy(update=update) if update else condition
 
 
+def _capability_implied_comparator(capability_key: str | None) -> Comparator | None:
+    """The comparator to assume when the trader's words name no comparison at all.
+
+    Only returns a value when the capability's own registered contract leaves no other
+    choice: a pattern match like a liquidity sweep or a candle shape supports nothing
+    but is_true/is_false, so there is no comparison for the trader to have stated in
+    the first place. A capability that supports even one numeric comparator (RSI,
+    a percent-change threshold, ...) still requires the trader's own words, exactly as
+    before -- this never invents a threshold-based comparison.
+    """
+
+    if capability_key is None:
+        return None
+    try:
+        capability = get_capability_index().resolver.get(capability_key)
+    except ValueError:
+        return None
+    if set(capability.supported_comparators) - UNARY_COMPARATORS:
+        return None
+    try:
+        return Comparator(capability.default_comparator)
+    except ValueError:
+        return None
+
+
 def _validate_new_condition(
     condition: ConditionIntent,
     *,
@@ -2434,7 +2460,9 @@ def _validate_new_condition(
     missing: list[str] = []
     if condition.formula_key is None and condition.capability_key is None:
         missing.append("formula_key")
-    if condition.comparator is None:
+    if condition.comparator is None and _capability_implied_comparator(
+        condition.capability_key
+    ) is None:
         missing.append("comparator")
     if (
         condition.comparator is not None
@@ -2667,6 +2695,13 @@ def _condition_fields(
     elif intent.strategy_bias is not None:
         derivations.append("condition:strategy_bias:ungrounded_platform_default_removed")
     comparator = _authoritative_comparator(intent, authorizing_text, derivations)
+    if comparator is None and intent.capability_key is not None:
+        implied = _capability_implied_comparator(intent.capability_key)
+        if implied is not None:
+            comparator = implied
+            derivations.append(
+                f"condition:operator:capability_implied:{intent.capability_key}:{implied.value}"
+            )
     if comparator is not None:
         stated["operator"] = comparator.value
     if intent.threshold is not None:

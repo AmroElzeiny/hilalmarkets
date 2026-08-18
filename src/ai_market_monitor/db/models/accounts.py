@@ -130,8 +130,15 @@ class AccountEmailDelivery(UUIDPrimaryKeyMixin, Base):
     user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
-    admin_action_id: Mapped[UUID] = mapped_column(
-        ForeignKey("account_admin_actions.id", ondelete="CASCADE"), nullable=False
+    #: The admin action that caused this email, when one did.
+    #:
+    #: Nullable, because not every account email comes from an administrator. The
+    #: welcome a person gets when they finish signing up is raised by the person
+    #: themselves, and there is no action to point at. Required, this table could only
+    #: ever hold admin notices — which is what it held, and why the welcome had nowhere
+    #: to queue.
+    admin_action_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("account_admin_actions.id", ondelete="CASCADE")
     )
     event_key: Mapped[str] = mapped_column(String(255), nullable=False)
     recipient: Mapped[str] = mapped_column(String(320), nullable=False)

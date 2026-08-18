@@ -7,10 +7,24 @@ import type { FirstTouchAttribution, WaitlistErrorType } from './analytics'
  */
 export type PublicFormErrorType = WaitlistErrorType
 
+/**
+ * How many messages one person may send, and over how long.
+ *
+ * Sent by the server rather than written here, because the numbers are settings the
+ * operator can change. A page that carried its own copy would go on promising a limit
+ * that stopped being the one enforced.
+ */
+export type ContactLimits = {
+  per_email: number
+  per_client: number
+  window_hours: number
+}
+
 type Bootstrap = {
   csrf_token: string
   waitlist_endpoint: string
   contact_endpoint: string
+  contact_limits?: ContactLimits
 }
 
 type WaitlistResponse = {
@@ -24,17 +38,41 @@ type WaitlistResponse = {
 type ContactResponse = {
   status: 'sent' | 'queued'
   message: string
+  remaining_messages: number
+  window_hours: number
 }
 
 let bootstrapPromise: Promise<Bootstrap> | null = null
 
 export class PublicFormError extends Error {
   readonly category: PublicFormErrorType
+  /**
+   * What the server said, when it said something a person can act on.
+   *
+   * A refused message is the one case where the server knows more than the page: it
+   * knows which limit was reached and when it clears. Showing our own guess instead
+   * would tell somebody to wait when they cannot, or to retry when they should not.
+   */
+  readonly detail: string
 
-  constructor(category: PublicFormErrorType) {
+  constructor(category: PublicFormErrorType, detail = '') {
     super('The form could not be submitted.')
     this.category = category
+    this.detail = detail
   }
+}
+
+/** The message a server refusal carried, if it carried one a person can read. */
+async function refusalDetail(response: Response): Promise<string> {
+  try {
+    const body = await response.json()
+    const detail = body?.detail
+    if (typeof detail === 'string') return detail
+    if (detail && typeof detail.message === 'string') return detail.message
+  } catch {
+    // A refusal with no readable body is still a refusal. The caller has a default.
+  }
+  return ''
 }
 
 async function bootstrap(): Promise<Bootstrap> {
@@ -68,11 +106,24 @@ async function post<T>(endpoint: string, csrfToken: string, payload: object): Pr
     throw new PublicFormError('network_error')
   }
   if (!response.ok) {
-    if (response.status === 429) throw new PublicFormError('rate_limited')
-    if (response.status >= 500) throw new PublicFormError('server_error')
-    throw new PublicFormError('unknown_error')
+    const detail = await refusalDetail(response)
+    if (response.status === 429) throw new PublicFormError('rate_limited', detail)
+    if (response.status >= 500) throw new PublicFormError('server_error', detail)
+    throw new PublicFormError('unknown_error', detail)
   }
   return response.json() as Promise<T>
+}
+
+/**
+ * The message limit, from the server.
+ *
+ * Falls back to nothing rather than to a guessed number: a page that invents "2 per
+ * hour" while the server enforces something else has told the visitor a lie, and no
+ * number at all is better than a wrong one.
+ */
+export async function contactLimits(): Promise<ContactLimits | null> {
+  const config = await bootstrap()
+  return config.contact_limits ?? null
 }
 
 function idempotency(prefix: string): string {

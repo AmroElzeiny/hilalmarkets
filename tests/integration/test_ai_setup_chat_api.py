@@ -254,13 +254,22 @@ async def test_setup_chat_html_is_mobile_ready_and_does_not_expose_api_key(test_
     assert "must-never-appear-in-html" not in response.text
 
 
-async def test_legacy_quick_scan_page_redirects_to_chat_scanner(test_context):
+async def test_the_scanner_survives_the_removal_of_its_old_pages(test_context):
+    """Trading Assistant is gone; the one-time scan it opened is not.
+
+    It had two addresses, `/dashboard/scan-now` and `/dashboard/check-market`, and both
+    refuse now. The scan itself is a mode of the builder and is reached there — which is
+    where the Telegram buttons that used to come through those addresses point.
+    """
+
     await _signup(test_context, "ai-chat-scanner-redirect@example.com")
-    response = await test_context["client"].get(
-        "/dashboard/scan-now", follow_redirects=False
-    )
-    assert response.status_code == 303
-    assert response.headers["location"] == "/dashboard/strategies/new?mode=scanner"
+    for gone in ("/dashboard/scan-now", "/dashboard/check-market"):
+        response = await test_context["client"].get(gone, follow_redirects=False)
+        assert response.status_code == 404, gone
+
+    scanner = await test_context["client"].get("/dashboard/strategies/new?mode=scanner")
+    assert scanner.status_code == 200
+    assert "ai-setup-chat.js" in scanner.text
 
 
 async def test_unknown_fragment_can_enter_certified_mechanic_queue(test_context):

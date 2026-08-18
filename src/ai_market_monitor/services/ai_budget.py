@@ -32,7 +32,7 @@ predicted.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -77,6 +77,11 @@ class BudgetLimits:
     global_monthly_usd: Decimal | None = Decimal("2000.00")
     #: Per model, per day. Stops one expensive route quietly eating the whole budget.
     model_daily_usd: dict[str, Decimal] = field(default_factory=dict)
+    #: Per feature, per person, per day. A named assistant that promises a person "this
+    #: much a day" needs a window of its own; held against the shared ``user_daily``
+    #: figure instead, whichever feature they used first would spend the other's
+    #: allowance, and the promise would be true only for whoever went first.
+    feature_user_daily_usd: dict[str, Decimal] = field(default_factory=dict)
     #: How many reservations one person may hold at once. Without it, a client that
     #: reserves and never settles can hold the whole allowance open.
     max_concurrent_reservations: int = 3
@@ -115,11 +120,19 @@ class BudgetLimits:
             global_daily_usd=self.global_daily_usd,
             global_monthly_usd=self.global_monthly_usd,
             model_daily_usd=dict(self.model_daily_usd),
+            feature_user_daily_usd=dict(self.feature_user_daily_usd),
             max_concurrent_reservations=self.max_concurrent_reservations,
             plan_daily_usd=daily_usd,
             plan_monthly_usd=monthly_usd,
             plan_daily_messages=daily_messages,
         )
+
+    def for_feature(self, feature: str, daily_usd: Decimal) -> BudgetLimits:
+        """These limits, with one feature given its own daily allowance per person."""
+
+        merged = dict(self.feature_user_daily_usd)
+        merged[str(feature)] = daily_usd
+        return replace(self, feature_user_daily_usd=merged)
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,12 +245,24 @@ class AIBudgetService:
 
     # -- windows ---------------------------------------------------------
 
+    @staticmethod
+    def feature_window_key(feature: str, user_id: UUID | str) -> str:
+        """The scope key one feature's per-person daily window is stored under.
+
+        One writer for this string. The reserve path and the summary path must name the
+        identical row, and two places building it by hand is how a limit gets enforced
+        against one counter and displayed from another.
+        """
+
+        return f"{feature}:{user_id}"
+
     def windows_for(
         self,
         *,
         user_id: UUID | None,
         model: str,
         now: datetime,
+        feature: str | None = None,
     ) -> tuple[BudgetWindow, ...]:
         """Every ceiling this call is held against, in a fixed order.
 
@@ -272,6 +297,18 @@ class AIBudgetService:
                         day,
                         Decimal(int(self.limits.plan_daily_messages)),
                         unit="message",
+                    )
+                )
+            feature_cap = (
+                self.limits.feature_user_daily_usd.get(str(feature)) if feature else None
+            )
+            if feature_cap is not None:
+                windows.append(
+                    BudgetWindow(
+                        "user_feature_daily",
+                        self.feature_window_key(str(feature), user_id),
+                        day,
+                        feature_cap,
                     )
                 )
         return tuple(sorted(windows, key=lambda item: (item.scope, item.scope_key)))
@@ -339,7 +376,9 @@ class AIBudgetService:
                     scope="concurrency",
                 )
 
-        windows = self.windows_for(user_id=user_id, model=model, now=moment)
+        windows = self.windows_for(
+            user_id=user_id, model=model, now=moment, feature=feature
+        )
         counters = []
         for window in windows:
             counter = await self._locked_counter(window, moment)
@@ -551,12 +590,31 @@ class AIBudgetService:
         now: datetime | None = None,
         ai_available: bool = True,
         unavailable_reason: str | None = None,
+        feature: str | None = None,
     ) -> BudgetSummary:
-        """One person's own allowance. Never another person's, and never a provider secret."""
+        """One person's own allowance. Never another person's, and never a provider secret.
+
+        ``feature`` reports the window that feature is really held against, so a named
+        assistant with its own allowance shows the number that would actually refuse it.
+        Reading the shared ``user_daily`` row instead would show a figure nothing
+        enforces, and every refusal would look like a bug.
+        """
 
         moment = now or datetime.now(UTC)
-        window = BudgetWindow(
-            "user_daily", str(user_id), day_window(moment), self.limits.user_daily_usd
+        feature_cap = (
+            self.limits.feature_user_daily_usd.get(str(feature)) if feature else None
+        )
+        window = (
+            BudgetWindow(
+                "user_feature_daily",
+                self.feature_window_key(str(feature), user_id),
+                day_window(moment),
+                feature_cap,
+            )
+            if feature_cap is not None
+            else BudgetWindow(
+                "user_daily", str(user_id), day_window(moment), self.limits.user_daily_usd
+            )
         )
         counter = await self.session.get(
             AIBudgetCounter, (window.scope, window.scope_key, window.window_key)
@@ -679,6 +737,7 @@ def _refusal_code(scope: str) -> str:
         "global_monthly": "GLOBAL_MONTHLY_BUDGET_EXCEEDED",
         "model_daily": "MODEL_DAILY_BUDGET_EXCEEDED",
         "user_messages_daily": "PLAN_MESSAGE_QUOTA_EXCEEDED",
+        "user_feature_daily": "USER_DAILY_BUDGET_EXCEEDED",
     }.get(scope, "BUDGET_EXCEEDED")
 
 
@@ -691,6 +750,9 @@ def _refusal_message(scope: str) -> str:
 
     return {
         "user_daily": "You have used today's assistant allowance. It resets tomorrow.",
+        "user_feature_daily": (
+            "You have used today's assistant allowance. It resets at midnight UTC."
+        ),
         "user_monthly": "You have used this month's assistant allowance.",
         "global_daily": "The assistant is busy today. You can still build setups yourself.",
         "global_monthly": "The assistant is paused for this month. Setups still work.",

@@ -2,6 +2,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ai_market_monitor.core.dashboard_paths import (
+    COMPLIANCE_CHANGES_PATH,
+    LIFECYCLES_PATH,
+    OPPORTUNITIES_PATH,
+)
 from ai_market_monitor.db.models import Alert
 from ai_market_monitor.db.models.enums import AlertType
 from ai_market_monitor.services.sharia_screening import sharia_evidence_from_proof
@@ -27,11 +32,54 @@ class AlertConditionPresentation:
         )
 
 
+#: What the buttons on an alert are called, in the words a person reads.
+#:
+#: One owner, for two reasons. They were written twice — here and again in
+#: `telegram/service.py` — so the same button had two definitions waiting to drift. And
+#: what they said was wrong for this product's readers: "🔄 View lifecycle" carries an
+#: emoji the brand rules exclude and "lifecycle" is a word from inside the machine.
+#: Email made that visible, because these labels become the buttons in the email too.
+#:
+#: The keys beside them (`dashboard_lifecycle:`, `mute_symbol:`) are what the Telegram
+#: callback handler matches on. Those are machine identifiers and must never change —
+#: renaming one would break every button already sitting in somebody's chat history.
+ACTION_LABELS = {
+    "opportunity": "See what happened",
+    "dashboard": "Open dashboard",
+    "mute": "Stop messages about this coin",
+    "subscription": "Open your account",
+    "evidence": "See the evidence",
+    "affected": "Which of my lists this touches",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class AlertActionPresentation:
     label: str
     action_id: str
     url: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AlertFactPresentation:
+    """One thing this alert states.
+
+    Three parts, and the split matters:
+
+    * ``key`` is what the fact *is*. Stable, never shown to anybody, and how a channel
+      picks out the one fact it needs without matching on wording.
+    * ``label`` is the plain-words name a person reads.
+    * ``value`` is what the alert claims.
+
+    The value is the claim, and it is written once. The label is allowed to differ per
+    channel — the Telegram message keeps the terse wording its readers already know,
+    while an email written for a beginner says "How fresh the numbers were" rather than
+    "Data freshness". What must never differ is the number beside it.
+    """
+
+    key: str
+    label: str
+    value: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +167,7 @@ class AlertPresentation:
                 dashboard_url=dashboard_url,
                 actions=[
                     AlertActionPresentation(
-                        "Open Dashboard",
+                        ACTION_LABELS["subscription"],
                         f"dashboard:{alert.id}",
                         dashboard_url,
                     )
@@ -132,7 +180,7 @@ class AlertPresentation:
             asset = str(proof.get("canonical_asset") or "Asset")
             passport_url = f"{base}/dashboard/market/{asset.lower()}" if base else None
             activity_url = (
-                f"{base}/dashboard/opportunities?tab=compliance_changes" if base else None
+                f"{base}{COMPLIANCE_CHANGES_PATH}" if base else None
             )
             return cls(
                 alert_id=str(alert.id),
@@ -167,7 +215,7 @@ class AlertPresentation:
                     *(
                         [
                             AlertActionPresentation(
-                                "View evidence",
+                                ACTION_LABELS["evidence"],
                                 f"sharia_passport:{asset}",
                                 passport_url,
                             )
@@ -178,7 +226,7 @@ class AlertPresentation:
                     *(
                         [
                             AlertActionPresentation(
-                                "View affected Watchlists",
+                                ACTION_LABELS["affected"],
                                 f"compliance_activity:{alert.id}",
                                 activity_url,
                             )
@@ -211,8 +259,8 @@ class AlertPresentation:
             for target in proof.get("target_levels", [])
         ]
         base = (public_base_url or "").rstrip("/")
-        proof_url = f"{base}/dashboard/opportunities" if base else None
-        dashboard_url = f"{base}/dashboard/opportunities" if base else None
+        proof_url = f"{base}{LIFECYCLES_PATH}" if base else None
+        dashboard_url = f"{base}{OPPORTUNITIES_PATH}" if base else None
         screening = sharia_evidence_from_proof(proof)
         raw_screening_asset = screening.get("asset")
         screening_asset = (
@@ -254,10 +302,12 @@ class AlertPresentation:
             setup_age = _duration(created_at - market_data_timestamp)
         actions = [
             AlertActionPresentation(
-                "🔄 View lifecycle", f"dashboard_lifecycle:{alert.id}", dashboard_url
+                ACTION_LABELS["opportunity"], f"dashboard_lifecycle:{alert.id}", dashboard_url
             ),
-            AlertActionPresentation("📊 Dashboard", f"dashboard:{alert.id}", dashboard_url),
-            AlertActionPresentation("🔕 Mute symbol", f"mute_symbol:{alert.id}"),
+            AlertActionPresentation(
+                ACTION_LABELS["dashboard"], f"dashboard:{alert.id}", dashboard_url
+            ),
+            AlertActionPresentation(ACTION_LABELS["mute"], f"mute_symbol:{alert.id}"),
         ]
         return cls(
             alert_id=str(alert.id),
@@ -301,45 +351,128 @@ class AlertPresentation:
             actions=actions,
         )
 
+    # ── What this alert says, once, for every channel ─────────────────────────
+    #
+    # Telegram and email describe the same alert. They lay it out differently — one is
+    # plain text in a chat, the other is a page — but what the alert *claims* must be
+    # written in exactly one place, or the two channels eventually tell one person two
+    # different things about one event and neither is obviously wrong.
+    #
+    # So the claims live in the three methods below, and each channel only decides how
+    # to arrange them. A channel that built its own line out of `proof_receipt` would be
+    # a second opinion about the same evidence.
+
+    def key_facts(self) -> list[AlertFactPresentation]:
+        """What was monitored, and what the platform read."""
+
+        score = f"{self.setup_score:.0f}%" if self.setup_score is not None else "n/a"
+        trust = self.trust_grade
+        if self.trust_score is not None:
+            trust = f"{trust} ({self.trust_score:.0f}%)"
+        return [
+            AlertFactPresentation("watchlist", "Watchlist", self.strategy),
+            AlertFactPresentation("version", "Which version of it", self.strategy_version or "n/a"),
+            AlertFactPresentation(
+                "market", "Exchange and candle size", f"{self.exchange} {self.timeframe}"
+            ),
+            AlertFactPresentation("completion", "How much of your list was met", score),
+            AlertFactPresentation("freshness", "How fresh the numbers were", self.data_freshness),
+            AlertFactPresentation("trust", "How reliable this reading is", trust),
+            AlertFactPresentation("age", "How old this setup is", self.setup_age),
+            # The stored state, not a translation of it. What this state *means* in
+            # plain words is owned by `product_language.opportunity_presentation`, and
+            # a channel writing for beginners resolves it there rather than this
+            # module growing a second set of words for the same states.
+            AlertFactPresentation("stage", "Stage it reached", self.lifecycle_state),
+        ]
+
+    def trade_context_facts(self) -> list[AlertFactPresentation]:
+        """The entry, stop and targets a person set for themselves.
+
+        Empty when they set none. It is never filled in with a default: an invented
+        stop price is a number somebody could act on that nobody chose.
+        """
+
+        if not self.has_trade_context:
+            return []
+        return [
+            AlertFactPresentation("entry_zone", "Entry zone", self.entry_zone),
+            AlertFactPresentation("stop", "Stop", f"{self.stop} ({self.stop_distance})"),
+            AlertFactPresentation("targets", "Targets", ", ".join(self.targets) or "n/a"),
+            AlertFactPresentation("reward_to_risk", "R:R", self.reward_to_risk),
+        ]
+
+    def screening_facts(self) -> list[AlertFactPresentation]:
+        """The stored screening status this alert was evaluated against.
+
+        Empty when the proof carries none. Never inferred, never softened, and never
+        restated as a conclusion of its own — it is a record of what was published at
+        the moment the alert was raised.
+        """
+
+        if not self.sharia_status:
+            return []
+        return [
+            AlertFactPresentation(
+                "screening_status",
+                "Screening status at evaluation",
+                self.sharia_status.replace("_", " "),
+            ),
+            AlertFactPresentation(
+                "methodology", "Methodology", self.sharia_methodology or "recorded in proof"
+            ),
+            AlertFactPresentation(
+                "reviewed_at", "Last reviewed", self.sharia_reviewed_at or "not recorded"
+            ),
+            AlertFactPresentation(
+                "passport_url",
+                "Evidence Passport",
+                self.sharia_passport_url or "available in dashboard proof",
+            ),
+        ]
+
+    @property
+    def is_account_notice(self) -> bool:
+        """True for the alerts that are about the account rather than about a market."""
+
+        return self.alert_type in {AlertType.TRIAL.value, AlertType.COMPLIANCE.value}
+
+    #: Said when somebody set no entry, stop or target for themselves. It is a fact
+    #: about the monitor, so it is written here rather than by each channel.
+    RESEARCH_ONLY_NOTE = (
+        "Research-only monitor: no user-defined entry, stop, target, or R:R context."
+    )
+
     def telegram_text(self) -> str:
-        if self.alert_type in {AlertType.TRIAL.value, AlertType.COMPLIANCE.value}:
+        if self.is_account_notice:
             return f"{self.title}\n\n{self.body}"
         passed = "\n".join(condition.line() for condition in self.passed_conditions) or "None"
         missing = "\n".join(condition.line() for condition in self.missing_conditions) or "None"
-        score = f"{self.setup_score:.0f}%" if self.setup_score is not None else "n/a"
-        targets = ", ".join(self.targets) or "n/a"
         trade_context = (
-            (
-                "User-defined trade context:\n"
-                f"Entry zone: {self.entry_zone}\n"
-                f"Stop: {self.stop} ({self.stop_distance})\n"
-                f"Targets: {targets}\n"
-                f"R:R: {self.reward_to_risk}\n"
-            )
+            "User-defined trade context:\n"
+            + "".join(f"{fact.label}: {fact.value}\n" for fact in self.trade_context_facts())
             if self.has_trade_context
-            else "Research-only monitor: no user-defined entry, stop, target, or R:R context.\n"
+            else f"{self.RESEARCH_ONLY_NOTE}\n"
         )
-        screening_context = ""
-        if self.sharia_status:
-            screening_context = (
-                f"Screening status at evaluation: {self.sharia_status.replace('_', ' ')}\n"
-                f"Methodology: {self.sharia_methodology or 'recorded in proof'}\n"
-                f"Last reviewed: {self.sharia_reviewed_at or 'not recorded'}\n"
-                f"Evidence Passport: {self.sharia_passport_url or 'available in dashboard proof'}\n"
-            )
+        screening_context = "".join(
+            f"{fact.label}: {fact.value}\n" for fact in self.screening_facts()
+        )
+        # Picked out by `key`, not by wording. This message keeps the terse labels its
+        # readers already know, and the beginner-facing labels can be reworded for email
+        # without silently rewriting a chat message somebody is used to reading.
+        fact = {item.key: item.value for item in self.key_facts()}
         return (
             f"Research match confirmed: {self.symbol}\n"
-            f"Strategy: {self.strategy}\n"
-            f"Strategy version: {self.strategy_version}\n"
-            f"Exchange/timeframe: {self.exchange} {self.timeframe}\n"
-            f"Required completion: {score}\n"
+            f"Strategy: {fact['watchlist']}\n"
+            f"Strategy version: {fact['version']}\n"
+            f"Exchange/timeframe: {fact['market']}\n"
+            f"Required completion: {fact['completion']}\n"
             f"{trade_context}"
             f"{screening_context}"
-            f"Data freshness: {self.data_freshness}\n"
-            f"Alert trust: {self.trust_grade}"
-            f"{f' ({self.trust_score:.0f}%)' if self.trust_score is not None else ''}\n"
-            f"Setup age: {self.setup_age}\n"
-            f"Lifecycle: {self.lifecycle_state}\n\n"
+            f"Data freshness: {fact['freshness']}\n"
+            f"Alert trust: {fact['trust']}\n"
+            f"Setup age: {fact['age']}\n"
+            f"Lifecycle: {fact['stage']}\n\n"
             f"Passed:\n{passed}\n\nMissing:\n{missing}"
         )
 

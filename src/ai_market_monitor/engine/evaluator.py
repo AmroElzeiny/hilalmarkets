@@ -1170,14 +1170,6 @@ class StrategyRuleEngine:
         if operand.name == "previous_high_sweep":
             prior_high = max(candle.high for candle in prior)
             return current.high > prior_high and current.close < prior_high
-        if operand.name == "higher_high":
-            return current.high > max(candle.high for candle in prior)
-        if operand.name == "higher_low":
-            return current.low > min(candle.low for candle in prior)
-        if operand.name == "lower_high":
-            return current.high < max(candle.high for candle in prior)
-        if operand.name == "lower_low":
-            return current.low < min(candle.low for candle in prior)
         if operand.name in {
             "range_breakout",
             "break_of_structure_bullish",
@@ -1279,6 +1271,14 @@ class StrategyRuleEngine:
             if start_hour <= end_hour:
                 return start_hour <= hour_value <= end_hour
             return hour_value >= start_hour or hour_value <= end_hour
+        # "higher_high"/"higher_low"/"lower_high"/"lower_low" are deliberately not
+        # hardcoded above. This module used to carry its own copy of them --
+        # `current.high > max(prior highs)`, a same-candle breakout check -- which is
+        # not what a higher high/low means in price action: a confirmed swing high or
+        # low compared with the one before it. That copy silently shadowed
+        # `evaluate_price_action`'s swing-based definition below for every capability
+        # sharing the name, with no error and no test catching the disagreement.
+        # `evaluate_price_action` is the one owner now.
         if supports_price_action(operand.name):
             return evaluate_price_action(
                 operand.name or "",

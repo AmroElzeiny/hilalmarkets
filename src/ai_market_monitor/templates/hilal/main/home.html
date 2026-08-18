@@ -1,0 +1,355 @@
+{% extends "hilal/base_dashboard.html" %}
+{% from "hilal/macros/coin_logo.html" import coin_logo %}
+{% block page_styles_late %}
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260818-live-4">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-main.css') }}?v=20260818-live-4">
+{% endblock %}
+{% block content %}
+
+{#- Main, the front page.
+
+    Four questions, in the order somebody asks them:
+
+      1. Is anything happening right now?      -> the band
+      2. Where do things stand?                -> four tiles
+      3. What is closest, and what is missing? -> one card with its evidence
+      4. Will I be told?                       -> the delivery strip
+
+    Nothing here is decided in this file. Every word and every number arrives already
+    resolved from `api/routers/main_dashboard.py`, so the page cannot form an opinion
+    the tests never see. -#}
+
+<div class="hm-t hm-main" data-main-root>
+
+  {#- ── 1. Right now ──────────────────────────────────────────────────────────
+      Near-black, which `brand guide.md` section 9 allows for a single high-contrast
+      card. It is the one focal element on the page: white on near-black measures
+      15.7:1, and it is the one surface where bright apple green is readable, so the
+      accent finally gets to carry a word instead of decorating one. -#}
+  <section class="m-now" data-tone="{{ now.tone }}" data-main-now aria-labelledby="m-now-title" data-hm-guide-target="today-now">
+    <div class="m-now-body">
+      <p class="m-now-eyebrow">
+        <span class="m-live" aria-hidden="true"><i></i></span>
+        {% if now.checked %}Market last checked {{ now.checked }}{% else %}No list has checked the market yet{% endif %}
+      </p>
+      <h1 id="m-now-title">
+        <span class="m-now-icon" aria-hidden="true"><span data-icon="{{ now.icon }}" data-icon-class="icon"></span></span>
+        {{ now.headline }}
+      </h1>
+      <p class="m-now-detail">{{ now.detail }}</p>
+      <div class="m-now-actions">
+        <a class="m-cta" href="{{ now.action.href }}">
+          {{ now.action.label }}<span data-icon="{{ now.action.icon }}" data-icon-class="icon-sm"></span>
+        </a>
+        {#- The second way out of the band, and it is never the same place as the first:
+            the headline's own action changes with what is happening, and this one always
+            opens the full list of monitors. -#}
+        {% if lists_total and now.action.href != watchlists_path %}
+        <a class="m-cta is-quiet" href="{{ watchlists_path }}">
+          <span data-icon="radar" data-icon-class="icon-sm"></span>Monitors
+        </a>
+        {% endif %}
+      </div>
+    </div>
+
+    {#- It carries the screening standard rather than a number. The heading beside it is
+        already a sentence with the count in it, and a seal repeating that count would be
+        the same fact twice in one band. What nothing else on the band says is *under
+        which published standard* any of this was screened — which is the thing the whole
+        product rests on. -#}
+    <div class="m-seal" data-main-seal>
+      <span class="m-seal-icon" aria-hidden="true"><span data-icon="shield_check" data-icon-class="icon"></span></span>
+      <span class="m-seal-label">{{ 'Screened under' if screening_standard else 'Screening' }}</span>
+      <span class="m-seal-name">{{ screening_standard or 'No standard published yet' }}</span>
+    </div>
+  </section>
+
+  {#- ── 2. Where things stand ────────────────────────────────────────────────
+      Four tiles. Each is one question, one number, one place to go. Each carries its
+      own "what does this mean" popup, so the explanation is one key press away and
+      never a paragraph sitting on the page. -#}
+  <section aria-labelledby="m-stand-title">
+    <h2 class="sr-only" id="m-stand-title">Where things stand</h2>
+    <ul class="m-tiles" data-main-tiles data-hm-guide-target="today-standing">
+      {% for tile in tiles %}
+      <li class="m-tile" data-tone="{{ tile.tone }}" data-main-tile>
+        <a class="m-tile-link" href="{{ tile.href }}">
+          <span class="m-tile-icon" aria-hidden="true"><span data-icon="{{ tile.icon }}" data-icon-class="icon"></span></span>
+          <span class="m-tile-figure t-figure" data-main-count="{{ tile.value }}">{{ tile.value }}</span>
+          <span class="m-tile-unit">{{ tile.unit }}</span>
+          <span class="m-tile-question-row">
+            <span class="m-tile-question">{{ tile.question }}</span>
+            <span class="t-info">
+              <span class="t-info-icon" aria-hidden="true"><span data-icon="info" data-icon-class="icon-sm"></span></span>
+              <span class="t-info-box m-tile-meaning">{{ tile.meaning }}</span>
+            </span>
+          </span>
+          <span class="m-tile-go" aria-hidden="true"><span data-icon="arrow" data-icon-class="icon-sm"></span></span>
+        </a>
+        <button class="m-tile-explain" type="button"
+                data-main-explain
+                data-explain-title="{{ tile.question }}"
+                data-explain-body="{{ tile.explain|join('\n') }}"
+                aria-label="What does &quot;{{ tile.question }}&quot; mean?">
+          <span data-icon="circle_help" data-icon-class="icon-sm"></span>
+        </button>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <div class="m-split">
+    <div class="m-col">
+
+      {#- ── 3. Closest to ready ───────────────────────────────────────────────
+          One card, for the single coin nearest to everything a person asked for. The
+          ring is the count of their own rules that are true — not a score, and never a
+          number without the rules behind it. -#}
+      <section class="t-card m-closest" aria-labelledby="m-closest-title">
+        <header class="m-panel-head">
+          <div>
+            <p class="t-eyebrow"><span data-icon="spark" data-icon-class="icon-sm"></span>Closest to ready</p>
+            <h2 id="m-closest-title">{% if closest %}{{ closest.symbol }}{% else %}Nothing found yet{% endif %}</h2>
+          </div>
+          {% if closest %}
+          <a class="m-link" href="{{ opportunities_path }}">All of them<span data-icon="arrow" data-icon-class="icon-sm"></span></a>
+          {% endif %}
+        </header>
+
+        {% if closest %}
+        <div class="m-closest-body">
+          {#- The ring. An SVG circle whose stroke is drawn from empty to its real value
+              once, on arrival, so the movement says "this much is true" rather than
+              decorating the number. Reduced motion draws it already full. -#}
+          <div class="m-ring" data-main-ring data-value="{{ closest.checks.percent if closest.checks else 0 }}">
+            <svg viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+              <circle class="m-ring-track" cx="60" cy="60" r="52"></circle>
+              <circle class="m-ring-fill" cx="60" cy="60" r="52" data-main-ring-path></circle>
+            </svg>
+            {{ coin_logo(closest.coin, module_url=closest.logo_module_url, image_url=closest.logo_url, class='m-ring-coin', decorative=true) }}
+          </div>
+
+          <div class="m-closest-copy">
+            <p class="m-state" data-tone="{{ closest.state.tone }}">
+              <span data-icon="{{ 'check' if closest.state.kind == 'ready' else 'spark' if closest.state.kind == 'close' else 'alert' if closest.state.kind == 'unchecked' else 'history' if closest.state.kind == 'ended' else 'clock' }}" data-icon-class="icon-sm"></span>
+              <strong>{{ closest.state.label }}</strong>
+              <span class="t-info">
+                <span class="t-info-icon" aria-hidden="true"><span data-icon="info" data-icon-class="icon-sm"></span></span>
+                <span class="t-info-box">{{ closest.state.meaning }}</span>
+              </span>
+            </p>
+
+            {% if closest.checks %}
+            <p class="m-checks">{{ closest.checks.sentence }}</p>
+            {% endif %}
+
+            <dl class="m-facts">
+              <div><dt>Found by</dt><dd>{{ closest.watchlist_name or 'One of your monitors' }}</dd></div>
+              {% if closest.how_often %}<div><dt>Looks</dt><dd>{{ closest.how_often }}</dd></div>{% endif %}
+              {% if closest.changed %}<div><dt>Last change</dt><dd>{{ closest.changed }}</dd></div>{% endif %}
+            </dl>
+
+            {% if closest.waiting_on %}
+            <p class="m-waiting">
+              <span data-icon="clock" data-icon-class="icon-sm"></span>
+              <span><strong>Waiting on {{ closest.waiting_on.name }}.</strong> {{ closest.waiting_on.sentence }}</span>
+            </p>
+            {% endif %}
+
+            <div class="m-closest-actions">
+              <a class="m-cta is-small" href="{{ opportunities_path }}">
+                See every reading<span data-icon="arrow" data-icon-class="icon-sm"></span>
+              </a>
+              {% if closest.coin %}
+              <button class="m-cta is-small is-quiet" type="button"
+                      data-main-passport="{{ closest.coin }}"
+                      data-standard="{{ closest.standard_id }}">
+                <span data-icon="passport" data-icon-class="icon-sm"></span>Its Shariah evidence
+              </button>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="m-empty">
+          <span class="m-empty-icon" aria-hidden="true"><span data-icon="radar" data-icon-class="icon"></span></span>
+          <p><strong>No coin has been found yet.</strong></p>
+          <p>A coin appears here after one of your monitors checks the market and something starts to match.</p>
+          <a class="m-cta is-small" href="{{ new_watchlist_path }}">
+            <span data-icon="plus" data-icon-class="icon-sm"></span>Make a monitor
+          </a>
+        </div>
+        {% endif %}
+      </section>
+
+      {#- ── Coins a person may watch ──────────────────────────────────────────
+          Pictures, not a table. Each chip opens the Passport popup for that coin, so
+          the evidence is one press away from the front page. -#}
+      <section class="t-card m-coins" aria-labelledby="m-coins-title">
+        <header class="m-panel-head">
+          <div>
+            <p class="t-eyebrow"><span data-icon="shield_check" data-icon-class="icon-sm"></span>Screened and published</p>
+            <h2 id="m-coins-title">Coins you can watch</h2>
+          </div>
+          <a class="m-link" href="{{ market_path }}">
+            {% if coins_total > coins|length %}All {{ coins_total }}{% else %}Open the list{% endif %}<span data-icon="arrow" data-icon-class="icon-sm"></span>
+          </a>
+        </header>
+
+        {% if coins %}
+        <p class="m-coins-note">Press a coin to read why it passed{% if screening_standard %}, under {{ screening_standard }}{% endif %}.</p>
+        <ul class="m-chips">
+          {% for item in coins %}
+          <li>
+            <button class="m-chip" type="button"
+                    data-main-passport="{{ item.coin }}"
+                    data-standard="{{ item.standard_id }}"
+                    data-tone="{{ item.tone }}">
+              {{ coin_logo(item.coin, module_url=item.logo_module_url, image_url=item.logo_url, class='m-chip-logo', decorative=true) }}
+              <span class="m-chip-text">
+                <span class="m-chip-coin">{{ item.coin }}</span>
+                <span class="m-chip-status">
+                  <span data-icon="{{ 'check' if item.tone == 'success' else 'alert' }}" data-icon-class="icon-sm"></span>{{ item.status_label }}
+                </span>
+              </span>
+            </button>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <div class="m-empty">
+          <span class="m-empty-icon" aria-hidden="true"><span data-icon="shield" data-icon-class="icon"></span></span>
+          <p><strong>No coin has a published review yet.</strong></p>
+          <p>{{ screening_warning or 'A coin is listed here only after a qualified reviewer has finished its evidence review. Missing information never becomes an eligible result.' }}</p>
+        </div>
+        {% endif %}
+      </section>
+    </div>
+
+    <aside class="m-col">
+
+      {#- ── Your monitors ─────────────────────────────────────────────────────
+          The same rows the Monitors page shows, so the two can never disagree about
+          how many are running or which one needs a look. -#}
+      <section class="t-card m-lists" aria-labelledby="m-lists-title">
+        <header class="m-panel-head">
+          <div>
+            <p class="t-eyebrow"><span data-icon="radar" data-icon-class="icon-sm"></span>Watching for you</p>
+            <h2 id="m-lists-title">Your monitors</h2>
+          </div>
+          {% if lists_total %}
+          <a class="m-link" href="{{ watchlists_path }}">
+            {% if lists_total > lists|length %}All {{ lists_total }}{% else %}Open them{% endif %}<span data-icon="arrow" data-icon-class="icon-sm"></span>
+          </a>
+          {% endif %}
+        </header>
+
+        {% if lists_attention %}
+        <p class="m-flag" data-tone="warning" role="status">
+          <span data-icon="alert" data-icon-class="icon-sm"></span>
+          {{ lists_attention }} {{ 'monitor needs' if lists_attention == 1 else 'monitors need' }} a look.
+        </p>
+        {% endif %}
+
+        {% if lists %}
+        <ul class="m-list-rows">
+          {% for item in lists %}
+          <li class="m-list-row" data-tone="{{ item.working.tone }}">
+            <a class="m-list-link" href="{{ item.opportunities_url }}">
+              <span class="m-list-top">
+                <span class="m-list-name">{{ item.name }}</span>
+                <span class="m-pill" data-tone="{{ item.working.tone }}">
+                  <span data-icon="{{ 'check' if item.working.tone == 'success' else 'clock' if item.working.tone == 'neutral' else 'alert' }}" data-icon-class="icon-sm"></span>{{ item.working.label }}
+                </span>
+              </span>
+              <span class="m-list-detail">{{ item.working.detail }}</span>
+              <span class="m-list-foot">
+                <span class="m-list-meta">
+                  <span data-icon="coins" data-icon-class="icon-sm"></span>
+                  {{ item.watching_count }} {{ 'coin' if item.watching_count == 1 else 'coins' }}
+                </span>
+                <span class="m-list-meta">
+                  <span data-icon="history" data-icon-class="icon-sm"></span>
+                  {% if item.last_checked %}Looked {{ item.last_checked }}{% else %}Not looked yet{% endif %}
+                </span>
+              </span>
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <div class="m-empty">
+          <span class="m-empty-icon" aria-hidden="true"><span data-icon="workflow" data-icon-class="icon"></span></span>
+          <p><strong>You have no monitor yet.</strong></p>
+          <p>A monitor is your own set of rules. You approve every rule before anything is watched.</p>
+          <a class="m-cta is-small" href="{{ new_watchlist_path }}">
+            <span data-icon="plus" data-icon-class="icon-sm"></span>Make your first monitor
+          </a>
+        </div>
+        {% endif %}
+      </section>
+
+      {#- ── 4. Will I be told? ────────────────────────────────────────────────
+          Only the channels this deployment can really deliver. -#}
+      <section class="t-card m-delivery" aria-labelledby="m-delivery-title">
+        <header class="m-panel-head">
+          <div>
+            <p class="t-eyebrow"><span data-icon="send" data-icon-class="icon-sm"></span>How you are told</p>
+            <h2 id="m-delivery-title">Your messages</h2>
+          </div>
+          <a class="m-link" href="{{ connections_path }}">Change<span data-icon="arrow" data-icon-class="icon-sm"></span></a>
+        </header>
+        <ul class="m-channels">
+          {% for channel in delivery %}
+          <li class="m-channel" data-ready="{{ 'true' if channel.ready else 'false' }}">
+            <span class="m-channel-icon" aria-hidden="true"><span data-icon="{{ channel.icon }}" data-icon-class="icon"></span></span>
+            <span class="m-channel-copy">
+              <span class="m-channel-name">{{ channel.label }}</span>
+              <span class="m-channel-detail">{{ channel.detail }}</span>
+            </span>
+            {% if channel.ready %}
+            <span class="m-pill" data-tone="success"><span data-icon="check" data-icon-class="icon-sm"></span>{{ channel.state }}</span>
+            {% else %}
+            <a class="m-pill is-action" data-tone="neutral" href="{{ connections_path }}">
+              <span data-icon="plus" data-icon-class="icon-sm"></span>{{ channel.state }}
+            </a>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </section>
+    </aside>
+  </div>
+
+  <p class="m-boundary">
+    <span data-icon="info" data-icon-class="icon-sm"></span>
+    Hilal Markets watches and explains. It never buys, never sells, and never tells you what to buy.
+  </p>
+</div>
+
+{#- The "what does this mean" popup. One dialog, filled by whichever tile opened it —
+    four copies of the same markup is four places for the same fix to be missed. -#}
+<dialog class="t-dialog m-explain" data-main-explain-dialog aria-labelledby="m-explain-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <p class="t-eyebrow"><span data-icon="info" data-icon-class="icon-sm"></span>What this means</p>
+        <h2 id="m-explain-title" data-main-explain-title>&nbsp;</h2>
+      </div>
+      <button class="t-close" type="button" data-main-explain-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <div class="t-dialog-body">
+      <ul class="m-explain-points" data-main-explain-body></ul>
+    </div>
+    <footer class="t-dialog-foot">
+      <span class="t-foot-note">Nothing here is advice to buy or sell.</span>
+    </footer>
+  </div>
+</dialog>
+{% endblock %}
+
+{% block page_scripts %}
+<script type="module" src="{{ url_for('static', path='/hm-main.js') }}?v=20260818-live-4"></script>
+{% endblock %}

@@ -98,6 +98,12 @@ class AgentRuntimePolicyState:
     successful_tools: set[str] = field(default_factory=set)
     candidate_capability_keys: set[str] = field(default_factory=set)
     candidate_source_fragments: set[str] = field(default_factory=set)
+    #: Which capability keys were actual candidates for *this exact wording* —
+    #: normalised fragment text -> the keys the registry shortlisted for it. Narrower
+    #: than the two flattened sets above, which only prove a key and a fragment each
+    #: appeared *somewhere* in the turn, not that they were ever paired. See
+    #: AgentPolicyService.validate_call.
+    candidate_capability_keys_by_fragment: dict[str, frozenset[str]] = field(default_factory=dict)
     resolution_complete: bool = False
     compiled_hash: str | None = None
 
@@ -310,15 +316,30 @@ class AgentPolicyService:
                 )
             capability_key = str(arguments.capability_key)
             source_fragment = " ".join(str(arguments.source_fragment).split())
+            normalized_fragment = source_fragment.casefold()
             if capability_key not in runtime.candidate_capability_keys:
                 raise AgentPolicyViolation(
                     "capability_not_shortlisted",
                     "The selected capability was not returned by the current registry shortlist.",
                 )
-            if source_fragment.casefold() not in runtime.candidate_source_fragments:
+            if normalized_fragment not in runtime.candidate_source_fragments:
                 raise AgentPolicyViolation(
                     "source_fragment_not_resolved",
                     "The capability source fragment was not resolved in this turn.",
+                )
+            # Both checks above only prove a key and a fragment each appeared
+            # somewhere in this turn's resolution — not that the registry ever
+            # offered this key *for this wording*. A multi-condition message
+            # ("RSI below 30 and volume 2x average") could otherwise let a
+            # capability that scored on one clause be bound to a different
+            # clause's text, unnoticed by either flattened set.
+            if capability_key not in runtime.candidate_capability_keys_by_fragment.get(
+                normalized_fragment, frozenset()
+            ):
+                raise AgentPolicyViolation(
+                    "capability_not_shortlisted_for_fragment",
+                    "The selected capability was not among the candidates the registry "
+                    "returned for this exact wording.",
                 )
         elif tool_name == "get_monitor_status":
             if not isinstance(arguments, GetMonitorStatusArgs):

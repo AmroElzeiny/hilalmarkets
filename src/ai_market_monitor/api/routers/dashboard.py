@@ -15,10 +15,17 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_market_monitor.api.dependencies import get_market_data_provider, get_market_previewer
+from ai_market_monitor.api.dependencies import get_market_previewer
 from ai_market_monitor.cockpit_service import StrategyCockpitService
+from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.csrf import csrf_token, csrf_token_matches
+from ai_market_monitor.core.dashboard_paths import (
+    CONNECTIONS_PATH,
+    HOME_PATH,
+    INTEGRATIONS_PATH,
+    LIFECYCLES_PATH,
+)
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     COMING_SOON_LABEL,
@@ -35,7 +42,11 @@ from ai_market_monitor.core.plans import (
     visible_plan_comparison_headers,
     visible_public_plan_codes,
 )
-from ai_market_monitor.core.site_content import DASHBOARD_NAVIGATION, WAITLIST_ANCHOR
+from ai_market_monitor.core.site_content import (
+    DASHBOARD_NAVIGATION,
+    WAITLIST_ANCHOR,
+    dashboard_page_identity,
+)
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
@@ -43,9 +54,7 @@ from ai_market_monitor.db.models import (
     ApprovedWatchlistAsset,
     AssetShariaStatusHistory,
     BillingCheckoutAttempt,
-    CanonicalAsset,
     CapabilityExtension,
-    ComplianceDriftNotification,
     DashboardNotification,
     DashboardPreference,
     MonitorShariaAssetState,
@@ -62,7 +71,6 @@ from ai_market_monitor.db.models import (
     StrategyUniverse,
     StrategyVersion,
     Subscription,
-    SupportRequest,
     TelegramConnection,
     Trial,
     User,
@@ -70,7 +78,6 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import (
     ComplianceChangeBehavior,
-    ConnectionStatus,
     DeliveryChannel,
     DeliveryStatus,
     IdentityProvider,
@@ -86,6 +93,9 @@ from ai_market_monitor.observability.banners import (
     customer_status_banners,
 )
 from ai_market_monitor.observability.metrics import get_metrics_recorder
+from ai_market_monitor.services.account_settings import (
+    SUPPORTED_TIMEZONES,
+)
 from ai_market_monitor.services.activity import ActivityReadService
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.billing import (
@@ -116,6 +126,7 @@ from ai_market_monitor.services.sharia_screening import (
     methodology_is_development_only,
     sharia_evidence_from_proof,
 )
+from ai_market_monitor.services.site_analytics import SiteAnalyticsService
 from ai_market_monitor.services.telegram_account_links import (
     TelegramAccountLinkError,
     TelegramAccountLinkService,
@@ -176,21 +187,10 @@ def _plan_limit(value: object) -> str:
 templates.env.filters["short_dt"] = _short_datetime
 templates.env.filters["reward_amount"] = _reward_amount
 templates.env.filters["plan_limit"] = _plan_limit
-
-SUPPORTED_TIMEZONES = [
-    "UTC",
-    "America/New_York",
-    "America/Chicago",
-    "America/Los_Angeles",
-    "Europe/London",
-    "Europe/Moscow",
-    "Europe/Berlin",
-    "Asia/Dubai",
-    "Asia/Singapore",
-    "Asia/Tokyo",
-    "Australia/Sydney",
-]
-
+# The one owner of "which pictures exist for this coin", reachable from a template. Six
+# templates used to answer it themselves, each knowing a different subset; the catalogue
+# address was typed into two of them by hand.
+templates.env.globals["asset_logo"] = asset_logo
 
 def _timezone_options(at: datetime | None = None) -> list[dict[str, str]]:
     instant = at or datetime.now(UTC)
@@ -209,17 +209,6 @@ def _timezone_options(at: datetime | None = None) -> list[dict[str, str]]:
     return options
 
 
-ALERT_DAYS = [
-    "Every Day",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
-]
-ALERT_HOURS = [f"{hour:02d}:00" for hour in range(24)]
 SUPPORTED_THEMES = ["light"]
 
 
@@ -845,6 +834,13 @@ async def _context(
         "telegram_url": telegram_url,
         "plans": PLAN_DEFINITIONS,
         "dashboard_navigation": DASHBOARD_NAVIGATION,
+        # Which menu entry this page belongs to, so the topbar can say where a person is.
+        # Read from the navigation data rather than written per page: a second list would
+        # start disagreeing with the menu the first time an entry was renamed.
+        "page_identity": dashboard_page_identity(page),
+        # What the shared topbar draws on this page's behalf. Empty unless the page says
+        # otherwise through `**extra`, which is spread last and therefore wins.
+        "topbar_actions": (),
         "dashboard_preference": dashboard_preference,
         # The one server-owned answer to "is this person new?". It is written by
         # OnboardingService.complete(), so it records a step the user actually finished.
@@ -1133,6 +1129,19 @@ async def signup_verify_submit(
             )
             telegram_connected = True
         cookie = await service.create_session(user, user_agent=request.headers.get("user-agent"))
+        # The sign-up counter on the System Brain Stats page counts accounts, not clicks
+        # on a button. This is the only place an account is really created, so it is the
+        # only place the count is written.
+        await SiteAnalyticsService(session, settings).record_signup(
+            user_id=user.id,
+            remote_address=(
+                (request.headers.get("cf-connecting-ip") or "").strip()
+                or (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
+                or (request.client.host if request.client else "unknown")
+            ),
+            user_agent=request.headers.get("user-agent", ""),
+            context={"door": "dashboard", "plan_code": plan_code or ""},
+        )
         await session.commit()
     except (WebAuthError, TelegramAccountLinkError) as exc:
         await session.rollback()
@@ -1462,186 +1471,64 @@ async def dashboard_signed_link(
     return response
 
 
-@router.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+#: Where "/dashboard" goes now.
+#:
+#: The old counting front page is gone. It answered "how many of everything do you have"
+#: with four counters, three of which normally read zero and none of which said what
+#: nothing meant, and Home answers the question a person actually arrives with. Two front
+#: pages meant two places to fix the same wording and two different answers to "what is
+#: happening".
+#:
+#: The address stays and moves, rather than refusing. It is written into old email, into
+#: Telegram buttons, into the `target_path` column of two tables and into the default
+#: landing path after sign-in; a 404 there would strand every one of them for the sake of
+#: a page that no longer exists anyway.
+#:
+#: The name is kept for the call sites; the address itself is `core/dashboard_paths.py`,
+#: which is now the only place it is written. Three files used to hold their own copy of
+#: the string, and renaming the page meant finding all three.
+MAIN_DASHBOARD_PATH: Final[str] = HOME_PATH
+
+
+@router.get("/dashboard", response_class=RedirectResponse, include_in_schema=False)
 async def dashboard_home(
     request: Request,
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    counts = {
-        "strategies": await session.scalar(
-            select(func.count(Strategy.id)).where(Strategy.user_id == user.id)
-        )
-        or 0,
-        "active": await session.scalar(
-            select(func.count(Strategy.id)).where(
-                Strategy.user_id == user.id, Strategy.status == StrategyStatus.ACTIVE
-            )
-        )
-        or 0,
-        "alerts": await session.scalar(select(func.count(Alert.id)).where(Alert.user_id == user.id))
-        or 0,
-        "setups": await session.scalar(
-            select(func.count(SetupInstance.id)).where(SetupInstance.user_id == user.id)
-        )
-        or 0,
-    }
-    alerts_today = (
-        await session.scalar(
-            select(func.count(Alert.id)).where(
-                Alert.user_id == user.id,
-                Alert.created_at >= today_start,
-            )
-        )
-        or 0
-    )
-    active_lifecycle_count = (
-        await session.scalar(
-            select(func.count(SetupInstance.id)).where(
-                SetupInstance.user_id == user.id,
-                SetupInstance.state.not_in(
-                    [
-                        "expired",
-                        "invalidated",
-                        "completed",
-                        "closed",
-                        "manually_closed",
-                    ]
-                ),
-            )
-        )
-        or 0
-    )
-    latest_setup = await session.scalar(
-        select(SetupInstance)
-        .where(SetupInstance.user_id == user.id)
-        .order_by(SetupInstance.updated_at.desc())
-        .limit(1)
-    )
-    latest_alert = await session.scalar(
-        select(Alert).where(Alert.user_id == user.id).order_by(Alert.created_at.desc()).limit(1)
-    )
-    latest_setup_asset = None
-    if latest_setup is not None:
-        latest_setup_asset = await session.scalar(
-            select(CanonicalAsset)
-            .where(CanonicalAsset.symbol == canonical_asset(latest_setup.symbol))
-            .order_by(CanonicalAsset.created_at.desc())
-            .limit(1)
-        )
-    telegram = await session.scalar(
-        select(TelegramConnection).where(TelegramConnection.user_id == user.id)
-    )
-    coverage = await market_coverage_for_user(session, user.id)
-    trial = await session.scalar(select(Trial).where(Trial.user_id == user.id))
-    entitlement = await EntitlementService(session).current(user.id)
-    screening = ShariaScreeningService(session, settings)
-    screened_home = await screening.list_screened_assets(
-        methodology_id=None,
-        statuses=DEFAULT_ALLOWED_STATUSES,
-        page=1,
-        limit=1,
-    )
-    forming_screened = int(
-        await session.scalar(
-            select(func.count(SetupInstance.id)).where(
-                SetupInstance.user_id == user.id,
-                SetupInstance.state.not_in(
-                    ["expired", "invalidated", "completed", "closed", "manually_closed"]
-                ),
-                SetupInstance.sharia_status_at_detection.in_(
-                    [
-                        ShariaAssetStatus.ELIGIBLE.value,
-                        ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
-                    ]
-                ),
-            )
-        )
-        or 0
-    )
-    compliance_attention = int(
-        await session.scalar(
-            select(func.count(ComplianceDriftNotification.id)).where(
-                ComplianceDriftNotification.user_id == user.id,
-                ComplianceDriftNotification.created_at >= datetime.now(UTC) - timedelta(days=30),
-                ComplianceDriftNotification.new_status.in_(
-                    [ShariaAssetStatus.UNDER_REVIEW, ShariaAssetStatus.EXCLUDED]
-                ),
-            )
-        )
-        or 0
-    )
-    overview = {
-        "alerts_today": alerts_today,
-        "active_lifecycle_count": active_lifecycle_count,
-        "latest_setup": latest_setup,
-        "latest_setup_asset_symbol": (
-            latest_setup_asset.symbol if latest_setup_asset is not None else None
-        ),
-        "latest_setup_logo_module_url": (
-            "https://cdn.jsdelivr.net/npm/@web3icons/core@4.0.53/"
-            f"dist/svgs/tokens/branded/{latest_setup_asset.symbol.upper()}.svg.js"
-            if latest_setup_asset is not None
-            else None
-        ),
-        "latest_setup_logo_url": (
-            str((latest_setup_asset.provider_ids or {}).get("logo_url") or "").strip()
-            if latest_setup_asset is not None
-            else None
-        ),
-        "latest_alert": _alert_view(latest_alert) if latest_alert else None,
-        "coverage": coverage,
-        "telegram_connected": bool(
-            telegram
-            and telegram.status == ConnectionStatus.ACTIVE
-            and telegram.alerts_enabled
-        ),
-        "eligible_market_count": screened_home.total,
-        "screening_methodology": screened_home.methodology,
-        "forming_screened_count": forming_screened,
-        "compliance_attention_count": compliance_attention,
-    }
-    return templates.TemplateResponse(
-        request,
-        "hilal/dashboard/home.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="home",
-            title="Dashboard",
-            counts=counts,
-            trial=trial,
-            entitlement=entitlement,
-            overview=overview,
-            analytics=await _analytics_context(session, user),
-        ),
-    )
+) -> RedirectResponse:
+    """The old front page. Everything that arrives here is taken to Home."""
+
+    del request, user, session, settings
+    return _redirect(MAIN_DASHBOARD_PATH)
 
 
-@router.get("/dashboard/market", response_class=HTMLResponse, include_in_schema=False)
-async def screened_market_page(
+async def screened_market_context(
+    *,
     request: Request,
-    methodology_id_input: str | None = Query(
-        default=None,
-        alias="methodology_id",
-        max_length=64,
-    ),
-    status_filter: list[ShariaAssetStatus] | None = Query(default=None, alias="status"),
-    exchange: str | None = Query(default=None, max_length=40),
-    quote_asset: str = Query(default="USDT", max_length=12),
-    liquidity: float | None = Query(default=None, ge=0),
-    search: str | None = Query(default=None, max_length=120),
-    view: str = Query(default="assets", pattern="^(opportunities|assets)$"),
-    page_number: int = Query(default=1, ge=1, alias="page"),
-    user: User = Depends(_require_user),
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-    provider: MarketDataProvider = Depends(get_market_data_provider),
-) -> HTMLResponse:
+    methodology_id_input: str | None,
+    status_filter: list[ShariaAssetStatus] | None,
+    exchange: str | None,
+    quote_asset: str,
+    liquidity: float | None,
+    search: str | None,
+    view: str,
+    page_number: int,
+    user: User,
+    session: AsyncSession,
+    settings: Settings,
+    provider: MarketDataProvider,
+    base_path: str = "/dashboard/market",
+) -> dict[str, Any]:
+    """Assemble everything the screened-market page needs, for any template.
+
+    `/dashboard/market` and `/dashboard/market` show the same screened assets
+    through different designs. Reading the market twice, in two functions, is how the
+    two would quietly start disagreeing about which assets are eligible. One owner
+    here; `base_path` is the only thing the two callers differ on, because their
+    pagination links must stay on their own path.
+    """
+
     # Opportunities have one authoritative home in Opportunities & Evidence.
     # Retain the old query value for compatible links, but render the market itself.
     view = "assets"
@@ -1801,59 +1688,66 @@ async def screened_market_page(
     maximum_page = max(1, (screened.total + screened.limit - 1) // screened.limit)
 
     def market_page_url(target_page: int) -> str:
-        return "/dashboard/market?" + urlencode([*market_query, ("page", str(target_page))])
+        return f"{base_path}?" + urlencode([*market_query, ("page", str(target_page))])
 
-    return templates.TemplateResponse(
-        request,
-        "hilal/dashboard/market.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="screened_market",
-            title="Halal Assets",
-            screened=screened,
-            methodologies=methodologies,
-            selected_methodology_id=selected_methodology_id,
-            opportunity_cards=[],
-            active_watch_plans=active_watch_plans,
-            status_changes=status_changes,
-            selected_statuses={
-                item.value for item in (status_filter or list(DEFAULT_ALLOWED_STATUSES))
-            },
-            selected_exchange=selected_live_exchange,
-            selected_quote_asset=quote_asset.upper(),
-            selected_liquidity=liquidity,
-            selected_view=view,
-            market_search=search or "",
-            market_data_warning=market_data_warning,
-            watchlists=watchlists,
-            saved_assets=saved_assets,
-            favorite_assets=favorite_assets,
-            favorite_watchlist_id=(default_watchlist.id if default_watchlist else None),
-            market_previous_url=(market_page_url(screened.page - 1) if screened.page > 1 else None),
-            market_next_url=(
-                market_page_url(screened.page + 1) if screened.page < maximum_page else None
-            ),
-            market_maximum_page=maximum_page,
+    return await _context(
+        request=request,
+        session=session,
+        settings=settings,
+        user=user,
+        page="screened_market",
+        title="Halal Assets",
+        screened=screened,
+        methodologies=methodologies,
+        selected_methodology_id=selected_methodology_id,
+        opportunity_cards=[],
+        active_watch_plans=active_watch_plans,
+        status_changes=status_changes,
+        selected_statuses={
+            item.value for item in (status_filter or list(DEFAULT_ALLOWED_STATUSES))
+        },
+        selected_exchange=selected_live_exchange,
+        selected_quote_asset=quote_asset.upper(),
+        selected_liquidity=liquidity,
+        selected_view=view,
+        market_search=search or "",
+        market_data_warning=market_data_warning,
+        watchlists=watchlists,
+        saved_assets=saved_assets,
+        favorite_assets=favorite_assets,
+        favorite_watchlist_id=(default_watchlist.id if default_watchlist else None),
+        market_base_path=base_path,
+        market_previous_url=(market_page_url(screened.page - 1) if screened.page > 1 else None),
+        market_next_url=(
+            market_page_url(screened.page + 1) if screened.page < maximum_page else None
         ),
+        market_maximum_page=maximum_page,
     )
 
 
-@router.get(
-    "/dashboard/market/{asset_slug}",
-    response_class=HTMLResponse,
-    include_in_schema=False,
-)
-async def screened_asset_passport_page(
+#: `/dashboard/market` is served by the redesigned page in `dashboard_test.py`.
+#:
+#: The older page that answered here is gone, template and all. It called the same
+#: `screened_market_context` below, which is why deleting it took nothing away: the
+#: redesigned page asks that function the same question and gets the same assets.
+
+
+async def asset_passport_context(
+    *,
     request: Request,
     asset_slug: str,
-    methodology_id: UUID | None = Query(default=None),
-    user: User = Depends(_require_user),
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
+    methodology_id: UUID | None,
+    user: User,
+    session: AsyncSession,
+    settings: Settings,
+    market_base_path: str = "/dashboard/market",
+) -> dict[str, Any]:
+    """Assemble the current Passport read model for any template.
+
+    Shared by `/dashboard/market/{asset}` and `/dashboard/market/{asset}` so the
+    two designs can never show different evidence for the same asset.
+    """
+
     screening = ShariaScreeningService(session, settings)
     try:
         passport = await ShariaPassportReadService(session, settings).current(
@@ -1873,21 +1767,25 @@ async def screened_asset_passport_page(
             )
         ).all()
     )
-    return templates.TemplateResponse(
-        request,
-        "hilal/dashboard/passport.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="asset_passport",
-            title=f"{passport.assessment.canonical_asset} Evidence Passport",
-            passport=passport,
-            methodology_comparison=comparison,
-            watchlists=watchlists,
-        ),
+    return await _context(
+        request=request,
+        session=session,
+        settings=settings,
+        user=user,
+        page="asset_passport",
+        title=f"{passport.assessment.canonical_asset} Evidence Passport",
+        passport=passport,
+        methodology_comparison=comparison,
+        watchlists=watchlists,
+        market_base_path=market_base_path,
     )
+
+
+#: `/dashboard/market/{asset}` — one coin's Evidence Passport — is served by the
+#: redesigned page in `dashboard_test.py`, over `asset_passport_context` above.
+#:
+#: The historical Passport below is *not* the same page. It reads a stored version of a
+#: record rather than the current one, and it is reached only from the version list.
 
 
 @router.get(
@@ -2083,7 +1981,7 @@ async def compliance_changes_page(
     query_values = [("tab", "compliance_changes")]
     if asset:
         query_values.append(("symbol", canonical_asset(asset)))
-    return _redirect(f"/dashboard/opportunities?{urlencode(query_values)}")
+    return _redirect(f"{LIFECYCLES_PATH}?{urlencode(query_values)}")
 
 
 @router.get("/dashboard/methodology", response_class=HTMLResponse, include_in_schema=False)
@@ -2097,12 +1995,9 @@ async def methodology_page(
     return _redirect("/how-we-screen")
 
 
-@router.get(
-    "/dashboard/watchlists",
-    response_class=HTMLResponse,
-    include_in_schema=False,
-    name="watchlists_page",
-)
+#: `/dashboard/watchlists` is served by the redesigned Monitors page in
+#: `dashboard_test.py`, which calls `_monitor_cards_context` below — the same rows.
+#: These two older addresses still answer here because links written years ago use them.
 @router.get(
     "/dashboard/strategies",
     response_class=HTMLResponse,
@@ -2537,20 +2432,33 @@ async def create_monitor_page(
     return await new_strategy_builder_page(request, user, session, settings)
 
 
-@router.get("/dashboard/scan-now", response_class=RedirectResponse, include_in_schema=False)
+#: Trading Assistant is gone from the product, and so are both of its addresses.
+#:
+#: It was one page with two names — `/dashboard/scan-now` and `/dashboard/check-market` —
+#: which is the shape this repository keeps producing: one thing, several front doors,
+#: and no way to remove it without missing one. Both refuse now.
+#:
+#: What is *not* removed is the one-time scan itself. It is a mode of the builder
+#: (`/dashboard/strategies/new?mode=scanner`), it is reached from inside the builder and
+#: from the Telegram buttons that used to come through here, and nothing asked for the
+#: feature to go — only the menu entry and the page behind it.
+_SCANNER_PAGE_GONE = "Trading Assistant was removed. Build a monitor instead."
+
+
+@router.get("/dashboard/scan-now", response_class=HTMLResponse, include_in_schema=False)
 async def scan_now_page(
     request: Request,
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> RedirectResponse:
+) -> HTMLResponse:
     del request, user, session, settings
-    return _redirect("/dashboard/strategies/new?mode=scanner")
+    raise HTTPException(status_code=404, detail=_SCANNER_PAGE_GONE)
 
 
 @router.get(
     "/dashboard/check-market",
-    response_class=RedirectResponse,
+    response_class=HTMLResponse,
     include_in_schema=False,
     name="dashboard_check_market",
 )
@@ -2559,10 +2467,10 @@ async def dashboard_check_market(
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> RedirectResponse:
-    """Open the one-time scanner through the shared validated builder flow."""
+) -> HTMLResponse:
+    """The Trading Assistant page. Removed; this address no longer serves anything."""
     del request, user, session, settings
-    return _redirect("/dashboard/strategies/new?mode=scanner")
+    raise HTTPException(status_code=404, detail=_SCANNER_PAGE_GONE)
 
 
 async def near_miss_page(
@@ -2585,19 +2493,26 @@ async def setups_page(
 
 
 #: The one address for this page. Everything else that used to serve it now sends the
-#: browser here.
-LIFECYCLES_PATH: Final[str] = "/dashboard/opportunities"
+#: browser here. It lives in `dashboard_paths.py` because both routers write it.
+#:
+#: It used to be `/dashboard/opportunities`, which was never this page's name: the title
+#: says "Evidence and Activity" and the constant says lifecycles. The redesigned
+#: Opportunities page answers at that address now, and this page keeps its own name.
+#: Nothing that used to reach it stopped reaching it — `/dashboard/activity` and
+#: `/dashboard/opportunities?tab=…` both arrive here, and so does every link that asked
+#: about a screening change or a missed alert, which Opportunities cannot answer.
 
-#: The two addresses that used to serve the same page from a second and third route.
-#: They stayed registered so old bookmarks would not 404, but serving one page from
-#: three URLs meant the address bar disagreed with itself: the in-product guide keys
-#: its steps on the path, so whichever URL the customer arrived on decided whether
-#: they got a guide at all. They are permanent redirects now, so there is one address
-#: the guide, the links and the tests can all agree on.
-LIFECYCLES_LEGACY_PATHS: Final[tuple[str, ...]] = (
-    "/dashboard/activity",
-    "/dashboard/lifecycles",
-)
+#: The address that used to serve the same page from a second route.
+#:
+#: It stayed registered so old bookmarks would not 404, but serving one page from several
+#: URLs meant the address bar disagreed with itself: the in-product guide keys its steps
+#: on the path, so whichever URL the customer arrived on decided whether they got a guide
+#: at all. It is a permanent redirect now, so there is one address the guide, the links
+#: and the tests can all agree on.
+#:
+#: `/dashboard/lifecycles` used to be in this list. It is the page's own address now, so
+#: leaving it here would have been a route that redirects to itself for ever.
+LIFECYCLES_LEGACY_PATHS: Final[tuple[str, ...]] = ("/dashboard/activity",)
 
 
 def _permanent_redirect(request: Request, path: str) -> RedirectResponse:
@@ -2615,11 +2530,6 @@ def _permanent_redirect(request: Request, path: str) -> RedirectResponse:
 
 @router.get("/dashboard/activity", response_class=HTMLResponse, include_in_schema=False)
 async def activity_page_redirect(request: Request) -> RedirectResponse:
-    return _permanent_redirect(request, LIFECYCLES_PATH)
-
-
-@router.get("/dashboard/lifecycles", response_class=HTMLResponse, include_in_schema=False)
-async def lifecycles_page_redirect(request: Request) -> RedirectResponse:
     return _permanent_redirect(request, LIFECYCLES_PATH)
 
 
@@ -2733,7 +2643,7 @@ async def lifecycles_page(
 async def alerts_page(
     user: User = Depends(_require_user),
 ) -> RedirectResponse:
-    return _redirect("/dashboard/opportunities?message=alerts_moved_to_lifecycles")
+    return _redirect(f"{LIFECYCLES_PATH}?message=alerts_moved_to_lifecycles")
 
 
 @router.get(
@@ -2749,7 +2659,7 @@ async def alert_detail_page(
     alert = await session.get(Alert, alert_id)
     if alert is None or alert.user_id != user.id:
         raise HTTPException(status_code=404, detail="Alert not found")
-    return _redirect("/dashboard/opportunities?message=alert_context_moved_to_lifecycles")
+    return _redirect(f"{LIFECYCLES_PATH}?message=alert_context_moved_to_lifecycles")
 
 
 @router.get(
@@ -2923,8 +2833,10 @@ async def claim_trial(
     )
 
 
+#: `/dashboard/subscription` — the plan somebody is on — is the redesigned page in
+#: `dashboard_test.py`. This is the checkout and billing-history page behind it, and it
+#: keeps its own address because it is a different screen, not a second copy of that one.
 @router.get("/dashboard/billing", response_class=HTMLResponse, include_in_schema=False)
-@router.get("/dashboard/subscription", response_class=HTMLResponse, include_in_schema=False)
 async def billing_page(
     request: Request,
     user: User = Depends(_require_user),
@@ -3644,48 +3556,15 @@ async def payment_email_preview(
     return response
 
 
-@router.get("/dashboard/integrations", response_class=HTMLResponse, include_in_schema=False)
-@router.get("/dashboard/connections", response_class=HTMLResponse, include_in_schema=False)
-async def connections_page(
-    request: Request,
-    user: User = Depends(_require_user),
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    user_id = user.id
-    telegram_connect_url = None
-    telegram_start_command = None
-    try:
-        telegram_connect_url = await TelegramAccountLinkService(
-            session,
-            settings,
-        ).create_dashboard_start_link(user_id=user_id)
-        if telegram_connect_url and "?start=" in telegram_connect_url:
-            telegram_start_command = (
-                "/start " + telegram_connect_url.split("?start=", 1)[1].split("&", 1)[0]
-            )
-        await session.commit()
-    except TelegramAccountLinkError:
-        await session.rollback()
-    await session.refresh(user)
-    telegram = await session.scalar(
-        select(TelegramConnection).where(TelegramConnection.user_id == user_id)
-    )
-    return templates.TemplateResponse(
-        request,
-        "hilal/dashboard/integrations.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="integrations",
-            title="Notifications",
-            telegram=telegram,
-            telegram_connect_url=telegram_connect_url,
-            telegram_start_command=telegram_start_command,
-        ),
-    )
+#: `/dashboard/connections` is served by the redesigned page in `dashboard_test.py`.
+#:
+#: This is the older name for the same thing, and it is written into outgoing WhatsApp
+#: replies, the Telegram account-link flow, several dashboard notices and a handful of
+#: pages, so it answers rather than 404s — with a redirect, not a second copy of the
+#: page. Two pages under two names is how they came to disagree in the first place.
+@router.get(INTEGRATIONS_PATH, response_class=HTMLResponse, include_in_schema=False)
+async def integrations_page_redirect(request: Request) -> RedirectResponse:
+    return _permanent_redirect(request, CONNECTIONS_PATH)
 
 
 @router.get("/dashboard/exports", response_class=HTMLResponse, include_in_schema=False)
@@ -3698,240 +3577,13 @@ async def exports_page(
     return _redirect("/dashboard?message=exports_hidden")
 
 
-@router.get("/dashboard/settings", response_class=HTMLResponse, include_in_schema=False)
-async def settings_page(
-    request: Request,
-    user: User = Depends(_require_user),
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    preference = await session.scalar(
-        select(DashboardPreference).where(DashboardPreference.user_id == user.id)
-    )
-    sharia_preferences = dict((preference.notification_preferences or {}) if preference else {})
-    return templates.TemplateResponse(
-        request,
-        "hilal/dashboard/settings.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="settings",
-            title="Settings",
-            preference=preference,
-            supported_timezones=_timezone_options(),
-            supported_themes=SUPPORTED_THEMES,
-            alert_days=ALERT_DAYS,
-            alert_hours=ALERT_HOURS,
-            sharia_preferences=sharia_preferences,
-        ),
-    )
-
-
-@router.post("/dashboard/settings", include_in_schema=False)
-async def settings_submit(
-    timezone: str = Form(...),
-    near_miss_enabled: str = Form("true"),
-    near_miss_threshold: int = Form(70),
-    maximum_alerts_per_hour: int = Form(50),
-    maximum_alerts_per_day: int = Form(500),
-    alert_channels: list[str] = Form(default=[]),
-    providers: list[str] = Form(default=["binance"]),
-    alert_days: list[str] = Form(default=["Every Day"]),
-    alert_hours: list[str] = Form(default=ALERT_HOURS),
-    default_sharia_methodology_id: str = Form(default=""),
-    allowed_sharia_statuses: list[str] = Form(
-        default=[
-            ShariaAssetStatus.ELIGIBLE.value,
-            ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
-        ]
-    ),
-    compliance_change_behavior: str = Form(default=ComplianceChangeBehavior.PAUSE_ASSET.value),
-    compliance_alert_channels: list[str] = Form(default=["web"]),
-    compliance_alert_digest: str = Form(default="immediate"),
-    dashboard_notifications_enabled: str = Form(default="true"),
-    dashboard_notification_sound: str = Form(default="chime"),
-    forming_dashboard_notifications: str = Form(default="false"),
-    forming_notification_sound: str = Form(default="pulse"),
-    qualification_change_alerts: str = Form(default="true"),
-    under_review_alerts: str = Form(default="true"),
-    exclusion_alerts: str = Form(default="true"),
-    advanced_sharia_override_acknowledged: str = Form(default="false"),
-    user: User = Depends(_require_user),
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> RedirectResponse:
-    if timezone not in SUPPORTED_TIMEZONES:
-        return _redirect("/dashboard/settings?error=unsupported_timezone")
-    entitlement = await EntitlementService(session).current(user.id)
-    whatsapp_allowed = bool(
-        settings.whatsapp_enabled and entitlement.feature_enabled("whatsapp")
-    )
-    allowed_channels = {"telegram"}
-    if whatsapp_allowed:
-        allowed_channels.add("whatsapp")
-    external_channels = [
-        channel for channel in dict.fromkeys(alert_channels) if channel in allowed_channels
-    ]
-    channels = ["web", *external_channels]
-    allowed_providers = {"binance", "bybit"}
-    selected_providers = [provider for provider in providers if provider in allowed_providers]
-    if not selected_providers:
-        selected_providers = ["binance"]
-    days = [day for day in alert_days if day in ALERT_DAYS]
-    if not days:
-        days = ["Every Day"]
-    if "Every Day" in days:
-        days = ["Every Day"]
-    hours = [hour for hour in alert_hours if hour in ALERT_HOURS]
-    screening = ShariaScreeningService(session, settings)
-    selected_methodology_id: UUID | None = None
-    if default_sharia_methodology_id:
-        try:
-            selected_methodology_id = UUID(default_sharia_methodology_id)
-            await screening.methodology(selected_methodology_id, require_active=True)
-        except (ValueError, ShariaScreeningError):
-            return _redirect("/dashboard/settings?error=invalid_sharia_methodology")
-    valid_statuses = {item.value for item in ShariaAssetStatus}
-    selected_statuses = list(
-        dict.fromkeys(item for item in allowed_sharia_statuses if item in valid_statuses)
-    )
-    if not selected_statuses:
-        selected_statuses = [
-            ShariaAssetStatus.ELIGIBLE.value,
-            ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
-        ]
-    default_statuses = {
-        ShariaAssetStatus.ELIGIBLE.value,
-        ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS.value,
-    }
-    advanced_ack = advanced_sharia_override_acknowledged == "true"
-    if not set(selected_statuses).issubset(default_statuses) and not advanced_ack:
-        return _redirect("/dashboard/settings?error=screening_override_ack_required")
-    try:
-        change_behavior = ComplianceChangeBehavior(compliance_change_behavior)
-    except ValueError:
-        change_behavior = ComplianceChangeBehavior.PAUSE_ASSET
-    selected_compliance_channels = [
-        channel
-        for channel in dict.fromkeys(compliance_alert_channels)
-        if channel in ({"web", "telegram", "whatsapp"} if whatsapp_allowed else {"web", "telegram"})
-    ]
-    if "web" not in selected_compliance_channels:
-        selected_compliance_channels.insert(0, "web")
-    user.timezone = timezone
-    preference = await session.scalar(
-        select(DashboardPreference).where(DashboardPreference.user_id == user.id)
-    )
-    if preference is None:
-        preference = DashboardPreference(
-            user_id=user.id,
-            default_timezone=timezone,
-            theme="light",
-        )
-        session.add(preference)
-    else:
-        preference.default_timezone = timezone
-    prefs = dict(preference.notification_preferences or {})
-    prefs.update(
-        {
-            "timezone": timezone,
-            "near_miss_enabled": near_miss_enabled == "true",
-            "near_miss_threshold": max(1, min(100, near_miss_threshold)),
-            "maximum_alerts_per_hour": max(1, min(1000, maximum_alerts_per_hour)),
-            "maximum_alerts_per_day": max(1, min(10000, maximum_alerts_per_day)),
-            "alert_channels": channels,
-            "channels": channels,
-            "providers": selected_providers,
-            "alert_days": days,
-            "alert_hours": hours,
-            "dashboard_notifications_enabled": dashboard_notifications_enabled == "true",
-            "dashboard_notification_sound": (
-                dashboard_notification_sound
-                if dashboard_notification_sound in {"chime", "bell", "soft", "none"}
-                else "chime"
-            ),
-            "forming_dashboard_notifications": forming_dashboard_notifications == "true",
-            "forming_notification_sound": (
-                forming_notification_sound
-                if forming_notification_sound in {"pulse", "chime", "soft", "none"}
-                else "pulse"
-            ),
-            "default_sharia_methodology_id": (
-                str(selected_methodology_id) if selected_methodology_id else None
-            ),
-            "allowed_sharia_statuses": selected_statuses,
-            "compliance_change_behavior": change_behavior.value,
-            "compliance_alerts_enabled": True,
-            "compliance_alert_channels": selected_compliance_channels,
-            "compliance_alert_digest": (
-                compliance_alert_digest
-                if compliance_alert_digest in {"immediate", "daily"}
-                else "immediate"
-            ),
-            "qualification_change_alerts": qualification_change_alerts == "true",
-            # Active Watchlists must retain at least in-app notices for these events.
-            "under_review_alerts": True,
-            "exclusion_alerts": True,
-            "advanced_sharia_override_acknowledged": advanced_ack,
-            "sharia": {
-                "default_methodology_id": (
-                    str(selected_methodology_id) if selected_methodology_id else None
-                ),
-                "allowed_statuses": selected_statuses,
-                "compliance_change_behavior": change_behavior.value,
-                "advanced_override_acknowledged": advanced_ack,
-            },
-        }
-    )
-    preference.notification_preferences = prefs
-    await session.commit()
-    return _redirect("/dashboard/settings?message=settings_saved")
-
-
-@router.get("/dashboard/support", response_class=HTMLResponse, include_in_schema=False)
-async def support_page(
-    request: Request,
-    user: User = Depends(_require_user),
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    tickets = (
-        await session.scalars(
-            select(SupportRequest)
-            .where(SupportRequest.user_id == user.id)
-            .order_by(SupportRequest.created_at.desc())
-            .limit(20)
-        )
-    ).all()
-    email_identity = await session.scalar(
-        select(UserIdentity)
-        .where(
-            UserIdentity.user_id == user.id,
-            UserIdentity.provider == IdentityProvider.EMAIL,
-        )
-        .order_by(UserIdentity.is_primary.desc(), UserIdentity.created_at.asc())
-        .limit(1)
-    )
-    return templates.TemplateResponse(
-        request,
-        "hilal/dashboard/support.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="support",
-            title="Support",
-            tickets=tickets,
-            support_email=(
-                email_identity.display_identifier or email_identity.normalized_identifier
-                if email_identity
-                else ""
-            ),
-        ),
-    )
+#: `/dashboard/settings`, `/dashboard/support` and the form that used to save the
+#: settings are all served by the redesigned pages in `dashboard_test.py`.
+#:
+#: The older Settings page was one long form that posted the whole set of preferences
+#: back to a `POST` here. The redesigned page saves one control at a time through
+#: `PUT /api/v1/dashboard/preferences/settings`, and both call `AccountSettingsService`,
+#: so nothing about what a setting may be was lost with the form.
 
 
 @router.get("/dashboard/admin", response_class=HTMLResponse, include_in_schema=False)

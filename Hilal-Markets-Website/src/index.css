@@ -81,15 +81,29 @@
   --font-sans: 'Onest', ui-sans-serif, system-ui, sans-serif;
   --font-display: 'Geometria', 'Onest', sans-serif;
 
-  /* Hilal Markets palette */
-  --color-ink: #2b2e35;         /* near-black primary text */
-  --color-ink-soft: #7a8089;    /* muted labels */
+  /* Hilal Markets palette.
+     The five brand colours are unchanged. Two of the neutrals were measured against
+     the surfaces they are actually used on and did not pass, so they were darkened
+     inside the same blue-grey family — no new hue, no new brand colour. Section 20 of
+     `brand guide.md` leaves these production values to be specified, and section 18
+     requires them to be readable. */
+  --color-ink: #2b2e35;         /* near-black primary text — 13.59:1 on white */
+  /* Was #7a8089, which measured 3.98:1 on white and 3.73:1 on the page ground: below
+     the 4.5:1 that body text needs, everywhere it was used. */
+  --color-ink-soft: #5c646e;    /* muted labels — 5.99:1 on white, 5.62:1 on canvas */
   --color-canvas: #f5f8fb;      /* page ground (near-white) */
   --color-surface: #ffffff;     /* cards */
-  --color-hairline: #e1e5ea;    /* light borders */
-  --color-apple: #cbfa4d;       /* apple green accent */
-  --color-apple-deep: #55712a;  /* accessible green for text/labels */
-  --color-accent-blue: #2a8fc3; /* rare secondary detail */
+  --color-hairline: #e1e5ea;    /* decorative card edges only — 1.27:1, never a control */
+  /* The boundary of anything a person operates: inputs, checkboxes, segmented
+     controls. WCAG 1.4.11 asks for 3:1 and `--color-hairline` gives 1.21:1, so a text
+     field drawn with it had no visible edge at all.
+     Chosen to clear 3:1 on *every* surface this site puts a control on, including the
+     apple-green panel — a value that passed only on white would fail the moment a
+     control moved onto the panel, and nothing would report it. */
+  --color-control: #79828d;     /* white 3.90, ground 3.65, field 3.72, apple 3.21 */
+  --color-apple: #cbfa4d;       /* apple green accent — never text, never a status */
+  --color-apple-deep: #55712a;  /* accessible green for text/labels — 5.55:1 on white */
+  --color-accent-blue: #2a8fc3; /* rare secondary detail — 3.61:1, so never small text */
 }
 
 /* Geometria Medium as default weight for display headings */
@@ -99,6 +113,52 @@
 
 :root {
   --radius: 16px;
+
+  /* The focus indicator, identical to the one the rest of the product draws.
+     `static/hilalmarkets.css` and `static/hilalmarkets-brand.css` hold the same two
+     values; a keyboard user must not meet a different mark on the public pages than
+     in the dashboard. Near-black so it reads on white, with the accent behind it as a
+     halo — the accent alone measures 1.21:1 and would be invisible. */
+  --hm-focus-ring: 3px solid #202329;
+  --hm-focus-halo: 0 0 0 6px #cbfa4d;
+
+  /* Spacing. Not a new scale — these are the step sizes already used across the
+     landing sections and the dashboard, named so the new pages cannot drift from
+     them. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --ease-brand: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* One focus indicator for every control on the public site. Declared once, on the
+   elements rather than per component, so a new control cannot ship without it.
+
+   `!important` on an accessibility guarantee, deliberately.
+
+   The halo is a `box-shadow`, and `:where()` has no specificity at all — so *any*
+   component that gave itself a shadow silently removed it. Measuring the rendered page
+   found two already: the segmented control's selected button and a search field both
+   drew their own shadow and lost the halo, leaving a near-black ring on a near-white
+   card at the edge of what a person can see.
+
+   That is not a bug in those two components. It is what this rule invites from every
+   component, forever, because a decorative shadow and the focus indicator were sharing
+   one property. Marking the indicator important settles it: a shadow can no longer
+   outrank it, and the two places that deliberately draw a different halo — on the green
+   panel and on the chat launcher — are marked the same way, so ordinary specificity
+   still decides between them. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: var(--hm-focus-ring) !important;
+  outline-offset: 2px;
+  box-shadow: var(--hm-focus-halo) !important;
+  border-radius: 6px;
 }
 
 html {
@@ -159,91 +219,417 @@ body:hover *::-webkit-scrollbar-thumb {
   color: var(--color-ink);
 }
 
-/* ---- Public navigation -------------------------------------------------- */
-.site-menu-toggle {
-  min-width: 54px;
-  min-height: 44px;
-  border: 1px solid var(--color-hairline);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
-  color: var(--color-ink);
-  font-size: 14px;
-  font-weight: 700;
-  box-shadow: 0 14px 34px -22px rgb(43 46 53 / 60%);
-}
+/* ---- Focus for controls the blanket rule cannot reach -------------------
+   `:where(a, button, input, …):focus-visible` above covers every real control. These
+   three are not reached by it:
 
-.site-menu-toggle:hover,
-.site-menu-toggle:active {
-  background: #eef1f4;
-}
+   - `.billing-toggle label` wraps its radio, so the *label* is what has to show the
+     ring, and it does it on `:focus-within` — a state the blanket rule never matches.
+   - `.plan-cta` and `.feature-expander` draw their own `box-shadow`, and a shadow and
+     the focus halo share one property, so without an explicit rule the decorative one
+     wins.
 
-.site-menu-toggle:focus-visible,
-.site-mobile-menu a:focus-visible,
+   This block was briefly deleted with the old navigation CSS it happened to be written
+   beside, which left the whole pricing section without a visible focus indicator. */
 .billing-toggle label:focus-within,
 .plan-cta:focus-visible,
 .feature-expander:focus-visible {
-  outline: 3px solid var(--color-apple-deep);
+  outline: var(--hm-focus-ring) !important;
   outline-offset: 3px;
+  box-shadow: var(--hm-focus-halo) !important;
 }
 
-/* ---- Waitlist form ------------------------------------------------------ */
-/* The form sits on the apple-green panel, where the green focus ring used
-   everywhere else would disappear. Near-black keeps the ring visible without
-   introducing a second focus colour anywhere it is not needed. */
-#waitlist input:focus-visible,
-#waitlist button:focus-visible {
-  outline: 3px solid var(--color-ink);
-  outline-offset: 3px;
-}
-
-#waitlist button[type='submit'] {
-  min-height: 44px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  #waitlist button {
-    transition: none;
-  }
-}
-
-.site-mobile-menu {
-  position: absolute;
-  top: calc(100% + 12px);
-  right: 20px;
-  left: 20px;
+/* ---- Public header ------------------------------------------------------
+   One header for every public page. It is fixed, so every rule below is written
+   against a phone first: the bar is what a 360px screen gets, and the menu and the
+   two buttons appear as the width allows. */
+.hm-header {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
   z-index: 60;
-  padding: 12px;
-  border: 1px solid var(--color-hairline);
-  border-radius: 24px;
-  background: var(--color-surface);
-  box-shadow: 0 24px 50px -28px rgb(43 46 53 / 55%);
+  padding-block: 14px;
+  transition: padding-block 0.3s var(--ease-brand), background-color 0.3s var(--ease-brand);
 }
 
-.site-mobile-menu.is-open {
-  display: grid;
-  gap: 4px;
+.hm-header.is-scrolled {
+  padding-block: 8px;
+  background: color-mix(in srgb, var(--color-canvas) 82%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-hairline) 70%, transparent);
 }
 
-.site-mobile-menu a {
-  min-height: 44px;
+.hm-header-bar {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
-  padding: 10px 14px;
-  border-radius: 14px;
-  color: var(--color-ink);
-  font-size: 15px;
-  font-weight: 650;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: min(100%, 1360px);
+  margin-inline: auto;
+  padding-inline: clamp(16px, 4vw, 24px);
 }
 
-.site-mobile-menu a:hover,
-.site-mobile-menu a:active {
+.hm-header-nav {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+  box-shadow: 0 14px 34px -24px rgb(43 46 53 / 55%);
+  backdrop-filter: blur(8px);
+}
+
+.hm-header-link {
+  padding: 9px 16px;
+  border-radius: 999px;
+  color: var(--color-ink);
+  font-size: 15px;
+  font-weight: 500;
+  transition: background-color 0.18s var(--ease-brand);
+}
+
+.hm-header-link:hover {
   background: #eef1f4;
 }
 
-.site-mobile-menu .site-mobile-primary {
+/* The current page is marked by weight and a ground, never by colour alone. */
+.hm-header-link[aria-current='page'] {
+  background: #e7ecf1;
+  font-weight: 650;
+}
+
+.hm-header-actions {
+  display: none;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---- The menu control ----------------------------------------------------
+   Two rules that fold into a cross. They are real elements so the change is visible
+   while it happens; a glyph swapped for another reads as a flicker. */
+.hm-menu-toggle {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  margin-top: 4px;
-  background: var(--color-apple);
+  width: 46px;
+  height: 46px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 16px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: 0 14px 30px -24px rgb(43 46 53 / 60%);
+  transition: background-color 0.18s var(--ease-brand), border-color 0.18s var(--ease-brand);
+}
+
+.hm-menu-toggle:hover {
+  background: #eef1f4;
+}
+
+.hm-menu-bars {
+  position: relative;
+  display: block;
+  width: 18px;
+  height: 12px;
+}
+
+.hm-menu-bars span {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  transition: transform 0.28s var(--ease-brand), top 0.28s var(--ease-brand);
+}
+
+.hm-menu-bars span:first-child {
+  top: 0;
+}
+
+.hm-menu-bars span:last-child {
+  top: 10px;
+}
+
+.hm-header[data-menu-open='true'] .hm-menu-bars span:first-child {
+  top: 5px;
+  transform: rotate(45deg);
+}
+
+.hm-header[data-menu-open='true'] .hm-menu-bars span:last-child {
+  top: 5px;
+  transform: rotate(-45deg);
+}
+
+/* ---- The menu panel ------------------------------------------------------
+   Kept in the document and hidden with opacity and a transform, so it animates out as
+   well as in. `visibility` is what actually removes it from the tab order and from a
+   screen reader; opacity alone would leave every link reachable behind a closed menu. */
+.hm-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: clamp(16px, 4vw, 24px);
+  left: clamp(16px, 4vw, 24px);
+  z-index: 2;
+  display: grid;
+  gap: var(--space-2);
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--color-hairline);
+  border-radius: 24px;
+  background: var(--color-surface);
+  box-shadow: 0 30px 60px -30px rgb(43 46 53 / 55%);
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-10px) scale(0.985);
+  transition: opacity 0.24s var(--ease-brand), transform 0.24s var(--ease-brand),
+    visibility 0s linear 0.24s;
+}
+
+.hm-menu-panel[data-open='true'] {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition-delay: 0s;
+}
+
+.hm-menu-links {
+  display: grid;
+  gap: 2px;
+}
+
+.hm-menu-links a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  color: var(--color-ink);
+  font-size: 15.5px;
+  font-weight: 550;
+  transition: background-color 0.18s var(--ease-brand);
+}
+
+.hm-menu-links a:hover {
+  background: #eef1f4;
+}
+
+.hm-menu-links a[aria-current='page'] {
+  background: #e7ecf1;
+  font-weight: 650;
+}
+
+.hm-menu-actions {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-hairline);
+}
+
+.hm-menu-actions .hm-btn {
+  justify-content: center;
+  width: 100%;
+}
+
+/* The ground behind an open menu. A button, so a tap anywhere closes it. */
+.hm-menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background: rgb(23 26 31 / 34%);
+  backdrop-filter: blur(2px);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.24s var(--ease-brand), visibility 0s linear 0.24s;
+}
+
+.hm-menu-scrim[data-open='true'] {
+  visibility: visible;
+  opacity: 1;
+  transition-delay: 0s;
+}
+
+@media (min-width: 1024px) {
+  .hm-header-nav,
+  .hm-header-actions {
+    display: flex;
+  }
+
+  .hm-menu-toggle,
+  .hm-menu-panel,
+  .hm-menu-scrim {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-header,
+  .hm-menu-bars span,
+  .hm-menu-panel,
+  .hm-menu-scrim,
+  .hm-header-link {
+    transition-duration: 0.01ms;
+  }
+}
+
+/* ---- Public footer -------------------------------------------------------
+   The same footer on every page of the site except the dashboard. Its links come from
+   the server, so this file styles a menu it does not contain. */
+.hm-footer {
+  background: var(--color-ink);
+  color: #e7ebf1;
+}
+
+.hm-footer-inner {
+  width: min(100%, 1248px);
+  margin-inline: auto;
+  padding: clamp(48px, 7vw, 76px) clamp(16px, 4vw, 24px) clamp(28px, 3vw, 36px);
+}
+
+.hm-footer-top {
+  display: grid;
+  gap: var(--space-7);
+}
+
+.hm-footer-brand {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 460px;
+}
+
+/* The wordmark, 31px tall — the same height the header draws it at above the small
+   breakpoint, so the logo is one size on the whole site.
+
+   Both numbers are set, and that is not belt and braces. The SVG inside is drawn
+   `preserveAspectRatio="none"` and fills its box, so it takes whatever shape the box is;
+   a height on its own would leave the width at 0 and a `max-width` on a narrow screen
+   would squeeze the letters, which `brand guide.md` section 5 forbids outright. 197x31
+   is the artwork's own ratio, and it fits inside the footer's padding on the narrowest
+   phone this site supports.
+
+   It had no height at all before. Its only child is absolutely positioned, so the link
+   collapsed to nothing and the footer logo did not appear on any React page. */
+.hm-footer-logo {
+  display: block;
+  width: 197px;
+  height: 31px;
+}
+
+/* The logo is drawn in the ink colour for a light page. On the footer's dark ground it
+   has to be reversed, and it is one shared component — so the colour is turned here
+   rather than by shipping a second copy of the artwork. */
+.hm-footer-logo svg path {
+  fill: #ffffff;
+}
+
+.hm-footer-brand p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #b6c0cd;
+}
+
+.hm-social {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.hm-social-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #464c58;
+  border-radius: 12px;
+  color: #e7ebf1;
+  transition: background-color 0.18s var(--ease-brand), border-color 0.18s var(--ease-brand),
+    transform 0.18s var(--ease-brand);
+}
+
+.hm-social-link:hover {
+  border-color: var(--color-apple);
+  background: #363b45;
+  color: var(--color-apple);
+  transform: translateY(-2px);
+}
+
+.hm-footer-menus {
+  display: grid;
+  gap: var(--space-6) var(--space-5);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.hm-footer-menus h2 {
+  margin-bottom: var(--space-3);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8f9aa9;
+}
+
+.hm-footer-menus ul {
+  display: grid;
+  gap: 2px;
+}
+
+.hm-footer-menus a,
+.hm-footer-menus button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding-block: 3px;
+  color: #e7ebf1;
+  font-size: 14.5px;
+  font-weight: 450;
+  text-align: left;
+  transition: color 0.18s var(--ease-brand);
+}
+
+.hm-footer-menus a:hover,
+.hm-footer-menus button:hover {
+  color: var(--color-apple);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.hm-footer-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: clamp(32px, 4vw, 48px);
+  padding-top: var(--space-5);
+  border-top: 1px solid #464c58;
+}
+
+.hm-footer-bottom p {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #a4aebc;
+}
+
+@media (min-width: 900px) {
+  .hm-footer-top {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+    gap: var(--space-8);
+  }
+}
+
+/* The focus indicator is near-black, which disappears on the footer's dark ground.
+   Same indicator, inverted: the ring becomes the surface colour and the accent stays
+   the halo, so it still measures well above 3:1 here. */
+.hm-footer a:focus-visible,
+.hm-footer button:focus-visible {
+  outline: 3px solid var(--color-surface) !important;
+  box-shadow: 0 0 0 6px rgb(203 250 77 / 55%) !important;
 }
 
 /* ---- Pricing ------------------------------------------------------------ */
@@ -1291,6 +1677,824 @@ body:hover *::-webkit-scrollbar-thumb {
   transition-delay: 180ms;
 }
 
+/* ========================================================================== *\
+   Contact, Privacy and Terms
+
+   Three pages rebuilt together, so they share one set of parts rather than three
+   near-copies. Everything below is built from the tokens above: no new hue, no new
+   typeface, no new spacing step.
+
+   Two ideas carry the design:
+
+   - **A surface you can see.** A white card on a near-white ground is a 1.06:1
+     difference, which is not an edge. These cards get a real edge and a soft shadow,
+     so the structure is visible rather than implied.
+   - **Motion that says where you are.** Hover lifts a card slightly, the rail marks
+     the section you are reading, and the progress line shows how much is left. None
+     of it decorates; each answers a question a person would otherwise have to ask.
+\* ========================================================================== */
+
+/* ---- Page frame --------------------------------------------------------- */
+.hm-page {
+  --hm-page-gutter: clamp(16px, 4vw, 24px);
+}
+
+.hm-shell {
+  width: min(100%, 1200px);
+  margin-inline: auto;
+  padding-inline: var(--hm-page-gutter);
+}
+
+.hm-shell--narrow {
+  width: min(100%, 880px);
+}
+
+/* A soft field of light behind the top of the page. Purely a ground: it never sits
+   over text, and it carries no meaning. */
+.hm-aura {
+  position: absolute;
+  z-index: -10;
+  pointer-events: none;
+  border-radius: 999px;
+  filter: blur(64px);
+  opacity: 0.75;
+}
+
+.hm-aura--apple {
+  background: radial-gradient(circle, rgb(203 250 77 / 34%), transparent 68%);
+}
+
+.hm-aura--cool {
+  background: radial-gradient(circle, rgb(255 255 255 / 92%), transparent 70%);
+}
+
+/* ---- Eyebrow ------------------------------------------------------------ */
+.hm-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 14px 6px 10px;
+  border: 1px solid rgb(85 113 42 / 28%);
+  border-radius: 999px;
+  background: #f4f9e8;
+  color: var(--color-apple-deep);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+/* ---- Card --------------------------------------------------------------- */
+.hm-card {
+  position: relative;
+  border: 1px solid var(--color-hairline);
+  border-radius: 24px;
+  background: var(--color-surface);
+  box-shadow: 0 1px 2px rgb(43 46 53 / 4%), 0 18px 44px -34px rgb(43 46 53 / 45%);
+}
+
+.hm-card--flush {
+  border-radius: 20px;
+}
+
+/* A card that rises a little under the pointer. Cheaper than `.hm-tilt` — no pointer
+   tracking — for grids where every item is a card and the tilt would be noise. */
+.hm-lift {
+  transition: transform 0.22s var(--ease-brand), box-shadow 0.22s var(--ease-brand),
+    border-color 0.22s var(--ease-brand);
+}
+
+.hm-lift:hover {
+  transform: translateY(-3px);
+  border-color: #c3cad3;
+  box-shadow: 0 1px 2px rgb(43 46 53 / 5%), 0 24px 50px -34px rgb(43 46 53 / 55%);
+}
+
+/* ---- Availability chips -------------------------------------------------
+   The one place the site says whether something can be used today. Never colour
+   alone: each chip carries its own words, and the live one carries a dot as well. */
+.hm-chip-live,
+.hm-chip-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.hm-chip-live {
+  border: 1px solid rgb(85 113 42 / 26%);
+  background: #f1f8e0;
+  color: var(--color-apple-deep);
+}
+
+.hm-chip-live span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-apple-deep);
+}
+
+.hm-chip-next {
+  border: 1px solid #dbe1e7;
+  background: #f3f6f9;
+  color: #4a505a;
+}
+
+/* ---- The strategy canvas ------------------------------------------------
+   The hero's middle panel: four blocks, read top to bottom, on the same dotted field
+   the builder itself uses. */
+.hm-canvas {
+  position: relative;
+  margin-top: var(--space-4);
+  overflow: hidden;
+  border: 1px solid var(--color-hairline);
+  border-radius: 18px;
+  background: #fbfcfd;
+  padding: var(--space-4) var(--space-3);
+}
+
+.hm-canvas-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, #e1e5ea 1px, transparent 1px);
+  background-size: 14px 14px;
+  opacity: 0.7;
+}
+
+.hm-canvas-flow {
+  position: relative;
+  display: grid;
+  justify-items: center;
+}
+
+.hm-canvas-flow > li {
+  display: contents;
+}
+
+.hm-canvas-block {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: min(100%, 268px);
+  padding: 9px 11px;
+  border: 1px solid #dbe1e7;
+  border-radius: 13px;
+  background: var(--color-surface);
+  box-shadow: 0 10px 24px -20px rgb(43 46 53 / 55%);
+  transition: transform 0.2s var(--ease-brand), border-color 0.2s var(--ease-brand),
+    box-shadow 0.2s var(--ease-brand);
+}
+
+.hm-canvas-block[data-active='true'] {
+  transform: translateY(-2px);
+  border-color: #97b95f;
+  box-shadow: 0 14px 30px -20px rgb(85 113 42 / 55%);
+}
+
+.hm-canvas-block-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: #eef1f4;
+  color: #454b55;
+}
+
+/* The first block is the asset and the last is what you get; both are the ends of the
+   rule, so both are marked. The accent is on the ends only — one focal treatment. */
+.hm-canvas-block[data-tone='asset'] .hm-canvas-block-mark,
+.hm-canvas-block[data-tone='alert'] .hm-canvas-block-mark {
+  background: #e8fbbf;
+  color: #3f5219;
+}
+
+.hm-canvas-block-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1.3;
+  color: var(--color-ink);
+}
+
+.hm-canvas-block-value {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef1f4;
+  font-size: 11px;
+  font-weight: 700;
+  color: #4a505a;
+}
+
+.hm-canvas-block[data-tone='asset'] .hm-canvas-block-value {
+  background: #e8fbbf;
+  color: #3f5219;
+}
+
+.hm-canvas-link {
+  display: block;
+  width: 24px;
+  height: 22px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-lift,
+  .hm-canvas-block {
+    transition-duration: 0.01ms;
+  }
+}
+
+/* ---- A control that lifts under the pointer ------------------------------
+   The lift is 3D: the card turns a degree or two towards where the pointer is, which
+   is what makes it read as a physical thing rather than a rectangle changing colour.
+   The angle comes from two custom properties the page sets while the pointer moves;
+   with no pointer, both stay at zero and the card simply rises. */
+.hm-tilt {
+  transform: perspective(900px)
+    rotateX(calc(var(--tilt-x, 0) * 1deg))
+    rotateY(calc(var(--tilt-y, 0) * 1deg))
+    translateY(var(--tilt-lift, 0));
+  transform-style: preserve-3d;
+  transition:
+    transform 260ms var(--ease-brand),
+    border-color 200ms var(--ease-brand),
+    box-shadow 260ms var(--ease-brand),
+    background-color 200ms var(--ease-brand);
+  will-change: transform;
+}
+
+.hm-tilt:hover {
+  --tilt-lift: -3px;
+  border-color: #c3cad3;
+  box-shadow: 0 1px 2px rgb(43 46 53 / 5%), 0 28px 60px -38px rgb(43 46 53 / 55%);
+}
+
+.hm-tilt:active {
+  --tilt-lift: -1px;
+}
+
+/* ---- Segmented control -------------------------------------------------- */
+.hm-segment {
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--color-control);
+  border-radius: 999px;
+  background: #eef1f4;
+}
+
+.hm-segment button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  color: #454b55;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background-color 200ms var(--ease-brand), color 200ms var(--ease-brand);
+}
+
+.hm-segment button:hover {
+  background: rgb(255 255 255 / 65%);
+  color: var(--color-ink);
+}
+
+.hm-segment button[aria-pressed='true'] {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: 0 8px 20px -14px rgb(43 46 53 / 60%);
+}
+
+/* A card that is really a radio button.
+   The input itself is visually hidden, so the ring has to be drawn on the card around
+   it — the indicator has moved outwards, it has not disappeared. Written here rather
+   than as utility classes on the element so it uses the same two tokens as every other
+   focus state on the site. */
+.hm-choice:focus-within {
+  outline: var(--hm-focus-ring);
+  outline-offset: 2px;
+  /* Important for the same reason as the blanket rule: this card also carries a hover
+     shadow, and without it the shadow would win and the halo would vanish exactly when
+     somebody tabbed onto it. */
+  box-shadow: var(--hm-focus-halo) !important;
+}
+
+/* ---- Form fields -------------------------------------------------------- */
+.hm-field {
+  display: block;
+}
+
+.hm-field-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: 7px;
+}
+
+.hm-field-label > span:first-child {
+  color: var(--color-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hm-field-hint {
+  margin-top: 7px;
+  color: var(--color-ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.hm-input,
+.hm-textarea {
+  width: 100%;
+  padding: 13px 15px;
+  /* A real edge. The old field used the decorative hairline, which measures 1.21:1
+     against the fill behind it — a boundary nobody could see. */
+  border: 1.5px solid var(--color-control);
+  border-radius: 14px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: 15.5px;
+  line-height: 1.5;
+  transition: border-color 180ms var(--ease-brand), box-shadow 180ms var(--ease-brand);
+}
+
+.hm-textarea {
+  min-height: 168px;
+  resize: vertical;
+}
+
+.hm-input::placeholder,
+.hm-textarea::placeholder {
+  color: #6d7480;
+}
+
+.hm-input:hover,
+.hm-textarea:hover {
+  border-color: #6b7480;
+}
+
+.hm-input:focus-visible,
+.hm-textarea:focus-visible {
+  border-color: var(--color-ink);
+}
+
+.hm-input[aria-invalid='true'],
+.hm-textarea[aria-invalid='true'] {
+  border-color: #a8342a;
+  background: #fffaf9;
+}
+
+/* The count of characters left. Never the only warning: the message beside it says
+   the same thing in words. */
+.hm-counter {
+  color: var(--color-ink-soft);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hm-counter[data-state='near'] {
+  color: #7a5410;
+  font-weight: 600;
+}
+
+.hm-counter[data-state='full'] {
+  color: #8d3029;
+  font-weight: 600;
+}
+
+/* ---- Notices ------------------------------------------------------------ */
+.hm-notice {
+  display: flex;
+  gap: var(--space-3);
+  padding: 14px 16px;
+  border: 1px solid;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.hm-notice strong {
+  display: block;
+  font-weight: 600;
+}
+
+.hm-notice--ok {
+  border-color: #97b95f;
+  background: #f4faea;
+  color: #33421c;
+}
+
+.hm-notice--warn {
+  border-color: #d8ab5a;
+  background: #fdf7ec;
+  color: #6d4d10;
+}
+
+.hm-notice--stop {
+  border-color: #d79b93;
+  background: #fdf4f2;
+  color: #79281f;
+}
+
+.hm-notice--info {
+  border-color: #a9c6d8;
+  background: #f1f7fb;
+  color: #1c4a63;
+}
+
+/* ---- Quota meter --------------------------------------------------------
+   How many messages are left, shown as marks rather than only as a number. The marks
+   are never the whole message — the sentence beside them says it too. */
+.hm-quota {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.hm-quota-pip {
+  width: 22px;
+  height: 6px;
+  border-radius: 999px;
+  background: #cfd6dd;
+  transition: background-color 240ms var(--ease-brand);
+}
+
+.hm-quota-pip[data-used='false'] {
+  background: var(--color-apple-deep);
+}
+
+/* ---- Dialog ------------------------------------------------------------- */
+.hm-dialog-ground {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: rgb(24 27 32 / 52%);
+  backdrop-filter: blur(3px);
+  animation: hm-fade-in 200ms var(--ease-brand);
+}
+
+@keyframes hm-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.hm-dialog-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 560px);
+  max-height: min(88vh, 720px);
+  border-radius: 26px;
+  background: var(--color-surface);
+  box-shadow: 0 40px 90px -40px rgb(20 23 28 / 70%);
+}
+
+.hm-dialog-panel--wide {
+  width: min(100%, 760px);
+}
+
+.hm-dialog-panel:focus {
+  outline: none;
+}
+
+.hm-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-5) var(--space-4);
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.hm-dialog-title {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.hm-dialog-description {
+  margin-top: 6px;
+  color: var(--color-ink-soft);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.hm-dialog-close {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 14px;
+  color: #454b55;
+  transition: background-color 180ms var(--ease-brand), color 180ms var(--ease-brand);
+}
+
+.hm-dialog-close:hover {
+  background: #eef1f4;
+  color: var(--color-ink);
+}
+
+.hm-dialog-body {
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+.hm-dialog-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: flex-end;
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--color-hairline);
+  background: #fafbfc;
+  border-radius: 0 0 26px 26px;
+}
+
+/* ---- Buttons ------------------------------------------------------------ */
+.hm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 48px;
+  padding: 0 22px;
+  border: 1.5px solid transparent;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  transition:
+    transform 200ms var(--ease-brand),
+    background-color 200ms var(--ease-brand),
+    border-color 200ms var(--ease-brand);
+}
+
+.hm-btn:hover {
+  transform: translateY(-2px);
+}
+
+.hm-btn:active {
+  transform: translateY(0);
+}
+
+.hm-btn[disabled] {
+  transform: none;
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.hm-btn--primary {
+  background: var(--color-apple);
+  color: var(--color-ink);
+  box-shadow: 0 16px 34px -22px rgb(120 170 40 / 90%);
+}
+
+.hm-btn--primary:hover {
+  background: #c1f43a;
+}
+
+.hm-btn--ink {
+  background: var(--color-ink);
+  color: var(--color-surface);
+}
+
+.hm-btn--ink:hover {
+  background: #1f2229;
+}
+
+.hm-btn--quiet {
+  border-color: var(--color-control);
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.hm-btn--quiet:hover {
+  border-color: var(--color-ink);
+  background: #f3f6f9;
+}
+
+.hm-btn--sm {
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 14px;
+}
+
+/* ---- Legal reading rail -------------------------------------------------- */
+.hm-rail {
+  position: sticky;
+  top: 104px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 132px);
+}
+
+.hm-rail-list {
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.hm-rail-link {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 12px 9px 14px;
+  border-radius: 12px;
+  color: #454b55;
+  font-size: 13.5px;
+  line-height: 1.4;
+  text-align: left;
+  transition: background-color 180ms var(--ease-brand), color 180ms var(--ease-brand);
+}
+
+.hm-rail-link:hover {
+  background: #f2f5f8;
+  color: var(--color-ink);
+}
+
+/* The section being read. Marked three ways at once — a bar, a weight change and
+   `aria-current` — because colour alone tells a colour-blind reader nothing, and a
+   weight change alone is easy to miss. */
+.hm-rail-link[aria-current='true'] {
+  background: #f4f9e8;
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.hm-rail-link[aria-current='true']::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 4px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--color-apple-deep);
+}
+
+.hm-rail-progress {
+  overflow: hidden;
+  height: 5px;
+  border-radius: 999px;
+  background: #e4e9ee;
+}
+
+.hm-rail-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-apple-deep);
+  transition: width 220ms var(--ease-brand);
+}
+
+/* ---- Legal section ------------------------------------------------------ */
+.hm-legal-section {
+  scroll-margin-top: 112px;
+}
+
+/* The plain-language line. It is the first thing in every section on purpose: a
+   beginner reads this and can stop, and the full clause is there for anyone who
+   needs it. */
+.hm-inshort {
+  display: flex;
+  gap: var(--space-3);
+  padding: 14px 16px;
+  border: 1px solid rgb(85 113 42 / 26%);
+  border-radius: 16px;
+  background: #f5faec;
+  color: #33421c;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.hm-legal-body {
+  color: #4a505a;
+  font-size: 15px;
+  line-height: 1.72;
+}
+
+.hm-legal-body p + p {
+  margin-top: 13px;
+}
+
+.hm-legal-body strong {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.hm-legal-list {
+  display: grid;
+  gap: 11px;
+  margin-top: 13px;
+}
+
+.hm-legal-list li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.hm-legal-list li > svg {
+  margin-top: 3px;
+  color: var(--color-apple-deep);
+}
+
+/* The button that opens the full clause under a summary. */
+.hm-disclose {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  color: var(--color-ink);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.hm-disclose svg {
+  transition: transform 240ms var(--ease-brand);
+}
+
+.hm-disclose[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+/* A panel that opens without a fixed height. `grid-template-rows` from 0fr to 1fr
+   animates a height nobody had to measure, so a longer clause cannot be clipped. */
+.hm-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 280ms var(--ease-brand);
+}
+
+.hm-collapse[data-open='true'] {
+  grid-template-rows: 1fr;
+}
+
+.hm-collapse > div {
+  overflow: hidden;
+}
+
+/* ---- Back to top -------------------------------------------------------- */
+/* Deliberately not styled here.
+ *
+ * `.hm-to-top` lives in `static/hilalmarkets-public.css`, which **both** halves of the
+ * public site load — the React pages and the server-rendered ones. It has to, because
+ * the button is drawn on both and because where it sits depends on the assistant's own
+ * button, which is styled in a third sheet that both also load. Two copies of that
+ * arithmetic in two sheets is two answers to "where is this corner", and the sheet
+ * loaded second would silently win.
+ *
+ * The markup is `BackToTop` in `components/SiteChrome.tsx` for these pages and
+ * `partials/back_to_top.html` for the others. */
+
+/* ---- Print: the legal pages must be readable on paper ------------------- */
+@media print {
+  .hm-rail,
+  .hm-to-top,
+  .site-menu-toggle,
+  header,
+  footer,
+  .hm-no-print {
+    display: none !important;
+  }
+
+  .hm-card {
+    border: 1px solid #b9c0c8;
+    box-shadow: none;
+    break-inside: avoid;
+  }
+
+  /* Every clause is printed, whether or not it was open on screen. Paper has no
+     buttons to press. */
+  .hm-collapse {
+    grid-template-rows: 1fr !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -1306,10 +2510,694 @@ body:hover *::-webkit-scrollbar-thumb {
     translate: none;
     transition: none;
   }
+  /* The tilt is the one effect with no reduced form: an element that turns in space
+     is exactly what this setting asks not to happen. Hover still changes the border
+     and the shadow, so the control still answers the pointer. */
+  .hm-tilt,
+  .hm-tilt:hover,
+  .hm-tilt:active {
+    transform: none;
+  }
+  .hm-btn:hover,
+  .hm-btn:active {
+    transform: none;
+  }
+  .hm-dialog-ground {
+    animation: none;
+  }
+  .hm-collapse {
+    transition: none;
+  }
   *,
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* ==========================================================================
+   Marketing pages — /features and /how-it-works
+   ==========================================================================
+   Both pages are built from the pieces below and nothing else. No new colour, no new
+   font, no new spacing step: every value here is a token or a step already in this
+   file. What is new is the arrangement.
+
+   The rule these pages follow about grey: secondary text is used where it genuinely
+   ranks lower — a caption, a measured value, a note under a control — and nowhere
+   else. Body copy is #4a505a (7.4:1 on white), not the #8a9099 the old pages used for
+   whole paragraphs. A page of grey is a page nobody finishes.
+   -------------------------------------------------------------------------- */
+
+/* ---- Shared page furniture ---------------------------------------------- */
+.hm-hero {
+  position: relative;
+  overflow: hidden;
+  padding-block: clamp(112px, 13vw, 160px) clamp(32px, 5vw, 56px);
+}
+
+.hm-hero-grid {
+  display: grid;
+  gap: var(--space-7);
+  align-items: center;
+}
+
+@media (min-width: 900px) {
+  .hm-hero-grid {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: var(--space-8);
+  }
+}
+
+.hm-hero-centre {
+  width: min(100%, 720px);
+  margin-inline: auto;
+  text-align: center;
+}
+
+.hm-h1 {
+  margin-top: var(--space-5);
+  font-family: var(--font-display);
+  font-size: clamp(32px, 5.2vw, 52px);
+  font-weight: 500;
+  line-height: 1.06;
+  letter-spacing: -0.035em;
+  color: var(--color-ink);
+}
+
+.hm-lede {
+  margin-top: var(--space-4);
+  max-width: 60ch;
+  font-size: clamp(16px, 1.6vw, 18.5px);
+  line-height: 1.6;
+  color: #4a505a;
+}
+
+.hm-hero-centre .hm-lede {
+  margin-inline: auto;
+}
+
+.hm-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.hm-hero-actions--center {
+  justify-content: center;
+}
+
+.hm-hero-card {
+  padding: var(--space-5);
+}
+
+.hm-hero-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.hm-hero-card-title {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--color-ink);
+}
+
+.hm-hero-card-note {
+  font-size: 12.5px;
+  color: #5c646e;
+}
+
+.hm-section {
+  padding-block: clamp(56px, 7vw, 96px);
+}
+
+.hm-section--tight {
+  padding-block: clamp(28px, 4vw, 48px) clamp(56px, 7vw, 96px);
+}
+
+.hm-section--tint {
+  background: var(--color-canvas);
+}
+
+.hm-section-head {
+  width: min(100%, 660px);
+  margin: 0 auto clamp(28px, 4vw, 44px);
+  text-align: center;
+}
+
+.hm-section-head h2,
+.hm-closer h2,
+.hm-boundaries-head h2 {
+  font-family: var(--font-display);
+  font-size: clamp(26px, 3.4vw, 38px);
+  font-weight: 500;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  color: var(--color-ink);
+}
+
+.hm-section-head p {
+  margin-top: var(--space-3);
+  font-size: 16px;
+  line-height: 1.6;
+  color: #4a505a;
+}
+
+.hm-closer {
+  width: min(100%, 620px);
+  margin-inline: auto;
+  text-align: center;
+}
+
+.hm-closer p {
+  margin-top: var(--space-3);
+  font-size: 16px;
+  line-height: 1.6;
+  color: #4a505a;
+}
+
+/* ---- Three-card row ------------------------------------------------------ */
+.hm-trio {
+  display: grid;
+  gap: var(--space-4);
+}
+
+@media (min-width: 760px) {
+  .hm-trio {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.hm-trio-card {
+  height: 100%;
+  padding: var(--space-5);
+}
+
+.hm-trio-card h3 {
+  margin-top: var(--space-4);
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--color-ink);
+}
+
+.hm-trio-card p {
+  margin-top: var(--space-2);
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: #4a505a;
+}
+
+/* ---- Small interface visuals --------------------------------------------
+   The pieces every card and panel is built from. They are deliberately literal —
+   a status row looks like a status row — because the point is to show the thing
+   rather than describe it. */
+.hm-vstack {
+  display: grid;
+  gap: 7px;
+}
+
+.hm-vrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: #4a505a;
+}
+
+.hm-vrow[data-tone='good'] {
+  border-color: #97b95f;
+  background: #f6fbec;
+  color: #3f5219;
+}
+
+.hm-vrow[data-tone='wait'] {
+  border-color: #cfd6dd;
+  background: #f7f9fb;
+}
+
+.hm-vrow[data-tone='off'] {
+  color: #5c646e;
+}
+
+.hm-vrow-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.8px;
+  font-weight: 550;
+  line-height: 1.35;
+}
+
+.hm-vrow-value {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.hm-vnote {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #4a505a;
+}
+
+.hm-vbar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e4e9ee;
+}
+
+.hm-vbar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #a8d936, var(--color-apple));
+}
+
+.hm-vquote {
+  padding: 11px 13px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  background: #f7f9fb;
+  font-size: 12.8px;
+  font-style: italic;
+  line-height: 1.5;
+  color: #4a505a;
+}
+
+.hm-vsummary {
+  display: grid;
+  gap: 6px;
+  padding: 12px 13px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  background: var(--color-surface);
+  font-size: 13px;
+  line-height: 1.5;
+  color: #4a505a;
+}
+
+.hm-vsummary strong {
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.hm-vapprove {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* A picture of the button, not a button. It carries no href and no handler on
+   purpose — a control that looks live and does nothing is worse than an image. */
+.hm-vapprove-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: var(--color-apple);
+  font-size: 12.8px;
+  font-weight: 650;
+  color: #2b2e35;
+}
+
+.hm-vapprove-note {
+  font-size: 12px;
+  color: #5c646e;
+}
+
+/* ---- Canvas visual ------------------------------------------------------- */
+.hm-vcanvas {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  padding: 13px 11px;
+  overflow: hidden;
+  border: 1px solid var(--color-hairline);
+  border-radius: 14px;
+  background: #fbfcfd;
+}
+
+.hm-vcanvas-dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, #e1e5ea 1px, transparent 1px);
+  background-size: 13px 13px;
+  opacity: 0.7;
+}
+
+.hm-vblock {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 250px);
+  padding: 8px 10px;
+  border: 1px solid #dbe1e7;
+  border-radius: 11px;
+  background: var(--color-surface);
+  box-shadow: 0 8px 20px -18px rgb(43 46 53 / 55%);
+  font-size: 12.3px;
+  font-weight: 550;
+  line-height: 1.3;
+  color: var(--color-ink);
+}
+
+.hm-vblock[data-end='true'] {
+  border-color: #97b95f;
+  background: #f4faea;
+}
+
+.hm-vwire {
+  position: relative;
+  width: 2px;
+  height: 16px;
+  background: #c3cad3;
+}
+
+.hm-vpill {
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #e8fbbf;
+  font-size: 11px;
+  font-weight: 700;
+  color: #3f5219;
+}
+
+/* ---- The journey stepper ------------------------------------------------- */
+.hm-journey {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.hm-journey-tabs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: var(--space-2);
+}
+
+.hm-journey-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  min-height: 96px;
+  padding: 13px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 18px;
+  background: var(--color-surface);
+  text-align: left;
+  transition: transform 0.2s var(--ease-brand), border-color 0.2s var(--ease-brand),
+    background-color 0.2s var(--ease-brand), box-shadow 0.2s var(--ease-brand);
+}
+
+.hm-journey-tab:hover {
+  transform: translateY(-2px);
+  border-color: #c3cad3;
+  box-shadow: 0 18px 36px -30px rgb(43 46 53 / 60%);
+}
+
+/* The selected step is marked three ways — ground, edge and weight — because colour
+   alone is never allowed to carry a state. */
+.hm-journey-tab[data-selected='true'] {
+  border-color: #97b95f;
+  background: #f4faea;
+  box-shadow: 0 18px 36px -30px rgb(85 113 42 / 55%);
+}
+
+.hm-journey-tab-index {
+  font-size: 11px;
+  font-weight: 700;
+  color: #5c646e;
+}
+
+.hm-journey-tab[data-selected='true'] .hm-journey-tab-index {
+  color: var(--color-apple-deep);
+}
+
+.hm-journey-tab-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 11px;
+  background: #eef1f4;
+  color: #454b55;
+  transition: background-color 0.2s var(--ease-brand), color 0.2s var(--ease-brand);
+}
+
+.hm-journey-tab[data-selected='true'] .hm-journey-tab-mark {
+  background: #e8fbbf;
+  color: #3f5219;
+}
+
+.hm-journey-tab-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.hm-journey-panel {
+  padding: var(--space-5);
+  border: 1px solid var(--color-hairline);
+  border-radius: 24px;
+  background: var(--color-surface);
+  box-shadow: 0 1px 2px rgb(43 46 53 / 4%), 0 18px 44px -34px rgb(43 46 53 / 45%);
+}
+
+.hm-journey-panel-inner {
+  display: grid;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (min-width: 860px) {
+  .hm-journey-panel-inner {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.85fr);
+    gap: var(--space-6);
+  }
+}
+
+.hm-journey-count {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-apple-deep);
+}
+
+.hm-journey-copy h3 {
+  margin-top: var(--space-3);
+  font-family: var(--font-display);
+  font-size: clamp(21px, 2.6vw, 27px);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  color: var(--color-ink);
+}
+
+.hm-journey-line {
+  margin-top: var(--space-3);
+  font-size: 15.5px;
+  line-height: 1.62;
+  color: #4a505a;
+}
+
+.hm-journey-control {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: var(--space-4);
+  padding: 11px 13px;
+  border: 1px solid rgb(85 113 42 / 24%);
+  border-radius: 14px;
+  background: #f6fbec;
+  font-size: 14px;
+  font-weight: 600;
+  color: #3f5219;
+}
+
+/* ---- Feature grid -------------------------------------------------------- */
+.hm-filters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-bottom: clamp(24px, 3vw, 36px);
+}
+
+.hm-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 9px 16px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 999px;
+  background: var(--color-surface);
+  font-size: 14px;
+  font-weight: 550;
+  color: #4a505a;
+  transition: transform 0.18s var(--ease-brand), background-color 0.18s var(--ease-brand),
+    border-color 0.18s var(--ease-brand), color 0.18s var(--ease-brand);
+}
+
+.hm-filter:hover {
+  transform: translateY(-1px);
+  border-color: #c3cad3;
+  background: #f7f9fb;
+}
+
+.hm-filter[data-selected='true'] {
+  border-color: var(--color-ink);
+  background: var(--color-ink);
+  color: #ffffff;
+  font-weight: 650;
+}
+
+.hm-feature-grid {
+  display: grid;
+  gap: var(--space-4);
+}
+
+@media (min-width: 700px) {
+  .hm-feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1080px) {
+  .hm-feature-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* The reveal wrapper is a plain div, so it has to be told to fill the track or the
+   cards in a row stop at their own heights and the grid looks ragged. */
+.hm-feature-grid > .reveal {
+  height: 100%;
+}
+
+.hm-feature-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--space-5);
+}
+
+.hm-feature-card[data-planned='true'] {
+  background: #fbfcfd;
+  border-style: dashed;
+}
+
+.hm-feature-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hm-feature-head h3 {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--color-ink);
+}
+
+/* `.hm-feature-line` used to sit here — a sentence of description between a card's name
+   and its picture. The picture already says it, and the sentence turned a grid you can
+   scan into a grid you have to read. The rule is gone with the paragraph, so nothing is
+   left waiting to style an element that is no longer drawn. */
+
+.hm-feature-visual {
+  margin-top: auto;
+  padding-top: var(--space-4);
+}
+
+/* ---- Boundaries ----------------------------------------------------------
+   What the product will never do.
+
+   Drawn on the page's own near-white rather than on a dark panel. A dark block here
+   put two of them back to back — this section and the footer directly under it — which
+   is heavier than the brand's 70–80% white asks for, and it needed a palette of dark
+   neutrals that exists nowhere else in the product. The list carries its weight through
+   the stop tone on each mark instead, which is the tone the rest of the product already
+   uses to mean "no". */
+.hm-boundaries {
+  padding-block: clamp(56px, 7vw, 96px);
+  background: var(--color-canvas);
+}
+
+.hm-boundaries-head {
+  width: min(100%, 640px);
+  margin: 0 auto clamp(28px, 4vw, 40px);
+  text-align: center;
+}
+
+.hm-boundaries-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+@media (min-width: 700px) {
+  .hm-boundaries-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1000px) {
+  .hm-boundaries-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.hm-boundaries-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 15px 17px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 16px;
+  background: var(--color-surface);
+  font-size: 14.5px;
+  font-weight: 550;
+  color: var(--color-ink);
+}
+
+.hm-boundaries-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 1px solid #d79b93;
+  border-radius: 9px;
+  background: #fdf4f2;
+  color: #79281f;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-journey-tab,
+  .hm-filter,
+  .hm-journey-tab-mark {
+    transition-duration: 0.01ms;
   }
 }

@@ -116,6 +116,12 @@ def rate_limit_rules(settings: Settings) -> tuple[RateLimitRule, ...]:
             configured,
         ),
         _rule(
+            "site_analytics",
+            {"POST"},
+            r"^/api/v1/site-analytics/collect(?:/|$)",
+            configured,
+        ),
+        _rule(
             "admin_mutation",
             {"POST", "PUT", "PATCH", "DELETE"},
             (
@@ -139,9 +145,9 @@ async def apply_request_guards(
     rule = matching_rate_limit_rule(request.method, request.url.path, settings)
     if rule is None:
         return None
-    fingerprints = {_request_fingerprint(request, settings)}
+    fingerprints = {client_fingerprint(request, settings)}
     if rule.scope in {"public_chat", "public_waitlist", "public_contact"}:
-        fingerprints.add(_request_ip_fingerprint(request, settings))
+        fingerprints.add(client_ip_fingerprint(request, settings))
     for fingerprint in fingerprints:
         key = f"hm:rate:{rule.scope}:{fingerprint}"
         try:
@@ -255,7 +261,18 @@ async def _memory_increment(key: str, window_seconds: int) -> tuple[int, int]:
         return count, max(1, int(expires_at - now))
 
 
-def _request_fingerprint(request: Request, settings: Settings) -> str:
+def client_fingerprint(request: Request, settings: Settings) -> str:
+    """Who is asking, as one opaque value: the browser session, else the address.
+
+    One owner. This is "IP or user session" for the whole product — the rate limiter
+    here and the support-intake quota in ``services/support_intake.py`` both call it,
+    so a person cannot be one caller to one guard and a different caller to the other.
+    Writing it twice is how two guards end up counting two different people.
+
+    Never reversible: the value is hashed with the application secret, so a stored
+    counter is not a stored address.
+    """
+
     principal_hint = request.headers.get("X-User-ID")
     session_hint = request.cookies.get(SESSION_COOKIE_NAME)
     remote = request.client.host if request.client else "unknown"
@@ -266,7 +283,9 @@ def _request_fingerprint(request: Request, settings: Settings) -> str:
     return hashlib.sha256(material).hexdigest()[:32]
 
 
-def _request_ip_fingerprint(request: Request, settings: Settings) -> str:
+def client_ip_fingerprint(request: Request, settings: Settings) -> str:
+    """The calling address alone, hashed. Shares no material with the session value."""
+
     remote = request.client.host if request.client else "unknown"
     material = f"{settings.app_secret_key.get_secret_value()}:ip:{remote}".encode()
     return hashlib.sha256(material).hexdigest()[:32]

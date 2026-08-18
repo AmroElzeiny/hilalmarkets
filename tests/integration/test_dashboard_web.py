@@ -1,9 +1,11 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import pytest
 from pydantic import SecretStr
 from sqlalchemy import select
 
+from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.core.csrf import csrf_token
 from ai_market_monitor.core.plans import plan_offer_payload
 from ai_market_monitor.core.security import hash_password
@@ -29,6 +31,7 @@ from ai_market_monitor.db.models.enums import (
     ShariaAssetStatus,
 )
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
+from ai_market_monitor.services.fixture_market_data import FixtureMarketDataProvider
 from ai_market_monitor.services.telegram_account_links import TelegramAccountLinkService
 from ai_market_monitor.telegram.adapter import TelegramDeliveryResult
 
@@ -96,10 +99,15 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
     assert response.headers["location"].startswith("/dashboard")
     assert "amm_session=" in response.headers["set-cookie"]
 
-    dashboard = await test_context["client"].get("/dashboard")
+    # `/dashboard` was the old counting front page. It is deleted, and the address takes
+    # a person to Home — which is the page a new account is meant to land on.
+    moved = await test_context["client"].get("/dashboard", follow_redirects=False)
+    assert moved.status_code == 303
+    assert moved.headers["location"] == "/home"
+
+    dashboard = await test_context["client"].get("/home")
     assert dashboard.status_code == 200
-    assert "Create your first Watchlist" in dashboard.text
-    assert "Your next useful action" in dashboard.text
+    assert "Let us set up your first monitor." in dashboard.text
     assert "Coverage score" not in dashboard.text
     assert 'class="dashboard-body hilal-dashboard theme-' in dashboard.text
 
@@ -131,23 +139,42 @@ async def test_dashboard_uses_account_locale_and_only_reports_active_telegram(te
         )
         await session.commit()
 
-    pending = await test_context["client"].get("/dashboard")
+    pending = await test_context["client"].get("/dashboard/connections")
     assert pending.status_code == 200
     assert '<html lang="ar" dir="rtl"' in pending.text
-    assert ">Set up<" in pending.text
-    assert "<small>Not connected</small>" not in pending.text
+    # A Telegram link that was started and never finished is never reported as working.
+    # Only Telegram's own card is read, because the other three channels have states of
+    # their own that have nothing to do with this.
+    #
+    # It used to say "Not set up", which was the wrong half of the truth: enough *is* set
+    # up that starting again from scratch fails, because the half-made row is already
+    # attached to this person. So the card says it was not finished, and offers the one
+    # action that clears it — which it did not offer at all before.
+    telegram_card = pending.text.split('data-channel="telegram"', 1)[1].split("</li>", 1)[0]
+    assert "Not finished" in telegram_card
+    assert "Connected" not in telegram_card
+    assert "data-c-unlink-telegram" in telegram_card
+    assert "data-c-connect-telegram" not in telegram_card
 
     async with test_context["session_factory"]() as session:
         connection = await session.scalar(select(TelegramConnection))
         assert connection is not None
         connection.status = ConnectionStatus.ACTIVE
         connection.alerts_enabled = True
+        # A Telegram link with no chat to send to cannot deliver anything, so the page
+        # refuses to call it live without one. The fixture has to be a real connection
+        # for the "active" half of this test to mean what it says.
+        connection.chat_id = "rtl-active-chat"
         await session.commit()
 
-    active = await test_context["client"].get("/dashboard")
+    active = await test_context["client"].get("/dashboard/connections")
     assert active.status_code == 200
-    assert ">Ready<" in active.text
-    assert "<small>Connected</small>" not in active.text
+    live_card = active.text.split('data-channel="telegram"', 1)[1].split("</li>", 1)[0]
+    # Linked *and* switched on. The two are separate facts and the card says which:
+    # showing one word for both is how somebody ends up certain they will be told and
+    # hearing nothing.
+    assert "Messages are being sent here." in live_card
+    assert "Not set up" not in live_card
 
 
 async def test_signup_verification_sends_admin_notification(test_context, monkeypatch):
@@ -258,10 +285,12 @@ async def test_consolidated_market_and_notification_pages_use_only_persisted_use
     assert "SOL" in watchlist_page.text
     assert "Your saved asset passports will appear here." not in watchlist_page.text
 
+    # Screening changes are answered by Evidence and Activity, which is a different page
+    # from Opportunities and keeps its own address.
     compliance_redirect = await test_context["client"].get("/dashboard/compliance")
     assert compliance_redirect.status_code == 303
     assert compliance_redirect.headers["location"] == (
-        "/dashboard/opportunities?tab=compliance_changes"
+        "/dashboard/lifecycles?tab=compliance_changes"
     )
     compliance_page = await test_context["client"].get(compliance_redirect.headers["location"])
     assert compliance_page.status_code == 200
@@ -508,21 +537,35 @@ async def test_disabled_provider_blocks_checkout_without_obsolete_beta_copy(test
 
 
 async def test_dashboard_settings_timezone_dropdown_persists(test_context):
+    """The one Settings page offers the zones, and one service saves the choice.
+
+    It used to be a whole-form `POST` to a handler of its own. That page and that handler
+    were removed together when the redesigned page took over `/dashboard/settings`; the
+    redesigned page saves one control at a time through the JSON endpoint, and both ways
+    always called `AccountSettingsService`, which is why nothing about what a zone may be
+    changed with the form.
+    """
+
     await _signup_and_verify(test_context, email="timezone@example.com")
 
     page = await test_context["client"].get("/dashboard/settings")
     assert page.status_code == 200
     assert "Europe/Moscow" in page.text
     assert 'name="theme"' not in page.text
-    assert "data-settings-save" in page.text
+    # It saves as you go, so there is no Save button and no form to post.
+    assert "data-g-saved" in page.text
+    assert "data-settings-save" not in page.text
 
-    response = await test_context["client"].post(
-        "/dashboard/settings",
-        data={"timezone": "Europe/Moscow"},
-        follow_redirects=False,
+    async with test_context["session_factory"]() as session:
+        saver = await session.scalar(select(User))
+        token = csrf_token(test_context["settings"], saver.id)
+
+    response = await test_context["client"].put(
+        "/api/v1/dashboard/preferences/settings",
+        json={"timezone": "Europe/Moscow"},
+        headers={"X-CSRF-Token": token},
     )
-    assert response.status_code == 303
-    assert response.headers["location"] == "/dashboard/settings?message=settings_saved"
+    assert response.status_code == 200, response.text
 
     async with test_context["session_factory"]() as session:
         user = await session.scalar(select(User))
@@ -629,12 +672,18 @@ async def test_integrations_telegram_link_opens_new_tab_and_creates_pending_link
     test_context["settings"].telegram_bot_username = "trace_edge_bot"
     await _signup_and_verify(test_context, email="dashboard-telegram-link@example.com")
 
-    page = await test_context["client"].get("/dashboard/integrations")
+    # `/dashboard/integrations` is the older name for the same page and is written into
+    # outgoing WhatsApp replies and the account-link flow, so it still answers — with a
+    # redirect to the one page, never a second copy of it.
+    moved = await test_context["client"].get("/dashboard/integrations", follow_redirects=False)
+    assert moved.status_code == 308
+    assert moved.headers["location"] == "/dashboard/connections"
+
+    page = await test_context["client"].get("/dashboard/connections")
 
     assert page.status_code == 200
     assert 'target="_blank"' in page.text
     assert "https://t.me/trace_edge_bot?start=link_" in page.text
-    assert "Using Telegram Web?" in page.text
     assert "/start link_" in page.text
     assert "Under Maintenance" not in page.text
     assert "Discord" not in page.text
@@ -642,3 +691,49 @@ async def test_integrations_telegram_link_opens_new_tab_and_creates_pending_link
         pending = await session.scalar(select(TelegramDashboardLink))
         assert pending is not None
         assert pending.telegram_user_id == "pending"
+
+
+class _RaisingMarketProvider:
+    """Stands in for a live exchange that cannot currently be reached."""
+
+    async def list_symbols(self, exchange: str, quote_currencies: list[str]) -> list[str]:
+        raise RuntimeError("api.binance.com unreachable")
+
+    async def close(self) -> None:
+        return None
+
+
+_EXCHANGE_UNREACHABLE = "Exchange market data is currently unavailable"
+
+#: What the page always says about an empty list, whatever the exchange is doing.
+#:
+#: It is a screening result, not an outage: nothing is listed until a Shariah standard
+#: and its evidence are published. This sentence is in the page every time, so it can
+#: never be evidence of *why* the list is empty on any one request.
+_NOTHING_PUBLISHED_YET = "Coins appear here only after a Shariah standard"
+
+
+@pytest.mark.parametrize(
+    ("provider_factory", "exchange_is_reachable"),
+    [
+        pytest.param(_RaisingMarketProvider, False, id="the_exchange_cannot_be_reached"),
+        pytest.param(FixtureMarketDataProvider, True, id="the_exchange_answers"),
+    ],
+)
+async def test_market_page_banner_matches_the_real_cause(
+    test_context, provider_factory, exchange_is_reachable
+):
+    # A live-exchange fetch failure and "this methodology has zero eligible assets" are
+    # different facts and must never share a message: the first is an infrastructure
+    # problem, the second is a screening result. The note about the exchange appears when
+    # — and only when — the exchange really could not be read.
+    await _signup_and_verify(
+        test_context, email=f"market-banner-{uuid4().hex[:8]}@example.com"
+    )
+    test_context["app"].dependency_overrides[get_market_data_provider] = provider_factory
+
+    page = await test_context["client"].get("/dashboard/market")
+
+    assert page.status_code == 200
+    assert (_EXCHANGE_UNREACHABLE in page.text) is not exchange_is_reachable
+    assert _NOTHING_PUBLISHED_YET in page.text

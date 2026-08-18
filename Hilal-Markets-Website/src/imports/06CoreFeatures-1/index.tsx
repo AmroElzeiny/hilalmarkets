@@ -151,7 +151,7 @@ function FeatureCopy1() {
     <div className="content-stretch flex flex-col gap-[20px] items-start justify-center overflow-clip relative shrink-0 w-[540px]" data-name="Feature copy">
       <Frame2 />
       <p className="[word-break:break-word] font-['Geometria:Medium',sans-serif] leading-[1.1] not-italic relative shrink-0 text-[#2b2e35] text-[36px] tracking-[-1.08px] w-[520px]">Your strategy, turned into clear rules</p>
-      <p className="[word-break:break-word] font-['Onest:Regular',sans-serif] font-normal leading-[1.5] relative shrink-0 text-[#68717d] text-[17px] w-[520px]">Describe your setup in your own words through the AI chatbot. Hilal Markets structures it into measurable conditions and lets you review every rule before monitoring begins. No coding is required.</p>
+      <p className="[word-break:break-word] font-['Onest:Regular',sans-serif] font-normal leading-[1.5] relative shrink-0 text-[#68717d] text-[17px] w-[520px]">Drag your conditions together on the canvas, or describe the setup in your own words. Hilal Markets turns it into measurable conditions and shows you every rule before monitoring begins. No coding is required.</p>
     </div>
   );
 }
@@ -176,7 +176,7 @@ function AiChatbot() {
   return (
     <div className="bg-white h-[175px] relative rounded-[18px] shrink-0 w-[574px]" data-name="AI chatbot">
       <div className="content-stretch flex flex-col gap-[11px] items-start overflow-clip px-[18px] py-[16px] relative rounded-[inherit] size-full">
-        <p className="[word-break:break-word] font-['Onest:Medium',sans-serif] font-medium leading-[1.5] relative shrink-0 text-[#68717d] text-[10px] whitespace-nowrap">AI STRATEGY CHATBOT</p>
+        <p className="[word-break:break-word] font-['Onest:Medium',sans-serif] font-medium leading-[1.5] relative shrink-0 text-[#68717d] text-[10px] whitespace-nowrap">Strategy canvas</p>
         <UserPrompt />
         <AiResponse />
       </div>

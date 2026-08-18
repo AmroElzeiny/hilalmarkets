@@ -86,6 +86,33 @@ export type WaitlistRuntimeConfig = {
   href?: string
 }
 
+/**
+ * The site menu and the social channels, sent by the server.
+ *
+ * The header and footer exist twice — once in Jinja for the server-rendered pages and
+ * once in React for these — and a menu written by hand in both is a menu that disagrees
+ * with itself the first time a page is added to one of them. Both read
+ * `core/site_content.py` now: Jinja directly, React through this.
+ *
+ * Everything is optional because a page opened without the shell must still draw a
+ * footer. `FALLBACK_FOOTER_GROUPS` in `SiteChrome.tsx` is what it draws then.
+ */
+export type ChromeRuntimeConfig = {
+  footerGroups?: Array<{
+    label: string
+    items: Array<{ label: string; href: string }>
+  }>
+  social?: Array<{ label: string; handle: string; href: string }>
+  /** Signed in goes to the dashboard, anyone else to sign-up. The server decides which.
+   *  Absolute, on the product's own hostname, whenever it has one of its own. */
+  dashboardEntryHref?: string
+  /** Sign-in, on the product's own hostname when it has one. */
+  signInHref?: string
+  /** Where the footer's "Cookie settings" link goes when no script catches the click. */
+  cookieSettingsHref?: string
+  primaryCtaLabel?: string
+}
+
 declare global {
   interface Window {
     HilalMarketsRuntimeConfig?: {
@@ -93,8 +120,16 @@ declare global {
       legal?: LegalRuntimeConfig
       commerce?: CommerceRuntimeConfig
       waitlist?: WaitlistRuntimeConfig
+      chrome?: ChromeRuntimeConfig
     }
     HilalAnalytics?: typeof publicAnalyticsApi
+    /**
+     * The product's one icon set, loaded by the page shell from
+     * `static/hilalmarkets-icons.js`. It returns the paths for one name, without the
+     * `<svg>` around them, so React can draw the element itself and still take the
+     * geometry from the single owner every Jinja template already uses.
+     */
+    iconBody?: (name: string) => string
     dataLayer?: unknown[]
     gtag?: (...args: unknown[]) => void
     fbq?: MetaPixelFunction

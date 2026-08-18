@@ -1,16 +1,35 @@
 from pathlib import Path
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.launch_stage import LaunchStage
 from ai_market_monitor.schemas.public_chat import PublicInquiryRequest
 from ai_market_monitor.services.public_chat import PublicKnowledgeService, mask_email
 
 
-def _settings() -> Settings:
+def _settings(**overrides: object) -> Settings:
+    """The product as it ships: open to the public.
+
+    These tests used to take the launch stage from the default and assert what the
+    default happened to be. That made every one of them a test of the default rather
+    than of the behaviour it named, and the whole file failed the day the product
+    opened. A test about a stage now names that stage.
+    """
+
     return Settings(
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
         database_url="sqlite+aiosqlite://",
         sharia_default_methodology_code=None,
+        **overrides,  # type: ignore[arg-type]
+    )
+
+
+def _pre_launch_settings() -> Settings:
+    """The public-waitlist stage, stated rather than inherited."""
+
+    return _settings(
+        launch_stage=LaunchStage.PUBLIC_WAITLIST,
+        public_waitlist_mode=True,
     )
 
 
@@ -18,22 +37,43 @@ def test_public_knowledge_answers_only_from_catalog():
     service = PublicKnowledgeService(_settings())
 
     status, message, score, sources, routes, gap = service.answer(
-        "Which coins and exchange are available in the private beta?"
+        "Which coins and exchange are supported?"
     )
 
     assert status == "answered"
-    assert "BTC, ETH, and SOL" in message
-    assert "Binance spot" in message
+    assert "Binance" in message
+    assert "spot" in message
     assert score > 0
     assert sources == ["beta-scope:v1"]
     assert routes == ["how_it_works"]
     assert gap is None
 
+    # The channel list is derived from the stage rather than written into the entry, so
+    # the assistant cannot name a channel the product does not offer. In-app and
+    # Telegram are what `public_launch` offers; WhatsApp needs its own switch.
     channels = service.answer("Which notification channels are available?")
     assert channels[0] == "answered"
-    assert channels[1] == "The private beta supports in-app and Telegram notifications."
+    assert channels[1] == "Hilal Markets delivers notifications through the app and Telegram."
     assert "Discord" not in channels[1]
     assert "WhatsApp" not in channels[1]
+
+
+def test_no_public_fact_describes_the_product_as_a_beta_once_it_has_launched():
+    """The post-launch wording must not have been inherited from the pre-launch wording.
+
+    Four entries had "private beta" written into the branch shown *after* launch — a
+    title, a pricing question, a channel list and an account-access heading. Each was
+    correctly gated and still wrong, because the words on the open side of the gate were
+    never rewritten. Checked across the whole catalogue: one entry saying it is as bad
+    as four.
+    """
+
+    service = PublicKnowledgeService(_settings())
+
+    for entry in service.entries:
+        text = f"{entry.title} {entry.answer}".casefold()
+        for forbidden in ("private beta", "invite-only", "in the beta", "during beta"):
+            assert forbidden not in text, (entry.source_id, forbidden)
 
 
 def test_every_public_fact_avoids_account_entry_while_the_site_is_pre_launch():
@@ -45,8 +85,8 @@ def test_every_public_fact_avoids_account_entry_while_the_site_is_pre_launch():
     as wrong.
     """
 
-    settings = _settings()
-    assert settings.public_waitlist_mode is True
+    settings = _pre_launch_settings()
+    assert settings.waitlist_mode is True
     service = PublicKnowledgeService(settings)
 
     for entry in service.entries:

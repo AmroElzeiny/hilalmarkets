@@ -1,3 +1,28 @@
+/* The side menu on a phone. It is a drawer there and a fixed column on a computer, so
+   the button only exists at small widths and the drawer closes on Escape, on a tap
+   outside it, and on following a link. */
+(() => {
+  const toggle = document.querySelector("[data-brain-menu-toggle]");
+  const nav = document.getElementById("brain-nav");
+  const scrim = document.querySelector("[data-brain-scrim]");
+  if (!toggle || !nav) return;
+  const setOpen = (open) => {
+    document.body.classList.toggle("brain-nav-open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    if (scrim) scrim.hidden = !open;
+  };
+  toggle.addEventListener("click", () => {
+    setOpen(!document.body.classList.contains("brain-nav-open"));
+  });
+  scrim?.addEventListener("click", () => setOpen(false));
+  nav.querySelectorAll("a").forEach((link) => link.addEventListener("click", () => setOpen(false)));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setOpen(false);
+  });
+  setOpen(false);
+})();
+
 document.querySelectorAll("[data-filter-target]").forEach((input) => {
   input.addEventListener("input", () => {
     const table = document.getElementById(input.dataset.filterTarget);
@@ -197,6 +222,206 @@ document.querySelectorAll("[data-accept-ai-rationale]").forEach((button) => {
     target.focus();
   });
 });
+
+/* "Mark all as passed", on one review case.
+ *
+ * It selects "pass" on every condition that allows it and "covered" on every use rule
+ * that allows it, then carries the reviewer's own written reason into each box.
+ *
+ * Three things it deliberately does not do:
+ *   - it never invents wording. Every explanation is the sentence the reviewer typed,
+ *     mirrored, and it stops mirroring into any box the reviewer edits by hand;
+ *   - it never selects an outcome a condition does not offer. Such a condition is left
+ *     untouched and stays visible in the "x of y" count as still open;
+ *   - it never submits. The reviewer still presses Approve.
+ */
+(() => {
+  const form = document.querySelector("[data-review-decision-form]");
+  if (!form) return;
+  const trigger = form.querySelector("[data-approve-all]");
+  const progress = form.querySelector("[data-criteria-progress]");
+  const reason = form.querySelector("#decision-reason");
+  const outcomes = [...form.querySelectorAll("select[name='criterion_outcome']")];
+  const explanations = [...form.querySelectorAll("textarea[name='criterion_reason']")];
+  const useDecisions = [...form.querySelectorAll("select[name='use_decision']")];
+  const useReasons = [...form.querySelectorAll("textarea[name='use_reason']")];
+
+  const refreshProgress = () => {
+    if (!progress) return;
+    const decided = outcomes.filter((item) => item.value).length;
+    progress.textContent = `${decided} of ${outcomes.length}`;
+    progress.dataset.complete = String(decided === outcomes.length && outcomes.length > 0);
+  };
+
+  const mirror = () => {
+    const text = reason ? reason.value.trim() : "";
+    [...explanations, ...useReasons].forEach((box) => {
+      if (box.dataset.mirrored !== "true") return;
+      box.value = text;
+    });
+  };
+
+  const select = (element, wanted) => {
+    const option = [...element.options].find((item) => item.value === wanted);
+    if (!option) return false;
+    element.value = wanted;
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  };
+
+  [...explanations, ...useReasons].forEach((box) => {
+    // A box the reviewer touches stops following the shared reason from then on.
+    box.addEventListener("input", () => { box.dataset.mirrored = "false"; });
+  });
+  outcomes.forEach((item) => item.addEventListener("change", refreshProgress));
+  reason?.addEventListener("input", mirror);
+
+  trigger?.addEventListener("click", () => {
+    let refused = 0;
+    outcomes.forEach((item, index) => {
+      if (select(item, "pass")) {
+        const box = explanations[index];
+        if (box && !box.value.trim()) box.dataset.mirrored = "true";
+      } else {
+        refused += 1;
+      }
+    });
+    useDecisions.forEach((item, index) => {
+      if (select(item, "covered")) {
+        const box = useReasons[index];
+        if (box && !box.value.trim()) box.dataset.mirrored = "true";
+      } else {
+        refused += 1;
+      }
+    });
+    mirror();
+    refreshProgress();
+    trigger.dataset.refused = String(refused);
+    trigger.setAttribute(
+      "aria-label",
+      refused
+        ? `${refused} condition(s) cannot be passed and were left for you to decide`
+        : "Every condition marked as passed",
+    );
+    if (reason && !reason.value.trim()) reason.focus();
+  });
+
+  refreshProgress();
+})();
+
+/* Ticking several cases and deciding them at once.
+ *
+ * The bar only appears once something is selected, and it counts what is selected so a
+ * decision can never be recorded on a different number of cases than the page shows.
+ *
+ * The ceiling is read from `data-bulk-max`, which the page renders from the same
+ * constant the endpoint enforces. It is never written here. Select all stops at that
+ * number and says so, because the failure this replaces was silent: the reviewer ticked
+ * every row, wrote a reason, pressed Approve, and the whole batch came back refused
+ * with nothing decided and no hint anywhere that a limit existed. */
+(() => {
+  const table = document.querySelector("[data-case-table]");
+  const bar = document.querySelector("[data-bulk-form]");
+  if (!table || !bar) return;
+  const boxes = [...table.querySelectorAll("[data-case-select]")];
+  const all = table.querySelector("[data-select-all]");
+  const count = bar.querySelector("[data-bulk-count]");
+  const limitNote = bar.querySelector("[data-bulk-limit-note]");
+
+  /* A missing or unreadable attribute must not become "no limit". Falling back to
+     Infinity would rebuild the exact bug this replaces, so an unreadable value falls
+     back to selecting nothing extra rather than to selecting everything. */
+  const parsed = Number.parseInt(bar.dataset.bulkMax || "", 10);
+  const maximum = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+
+  const refresh = () => {
+    const selected = boxes.filter((box) => box.checked);
+    bar.hidden = selected.length === 0;
+    if (count) count.textContent = String(selected.length);
+    boxes.forEach((box) => {
+      box.closest("[data-case-row]")?.classList.toggle("is-selected", box.checked);
+    });
+    if (limitNote) {
+      const capped = selected.length >= maximum && boxes.length > maximum;
+      limitNote.hidden = !capped;
+      limitNote.textContent = capped
+        ? `${maximum} is the most one decision can cover. ${boxes.length - maximum} of the ${boxes.length} shown are not selected.`
+        : "";
+    }
+    if (all) {
+      /* "Every row is ticked" and "the ceiling is reached" are different states and the
+         box has to show the right one. With more rows on the page than the ceiling
+         allows, a full tick is impossible, so the box stays indeterminate rather than
+         claiming everything is selected. */
+      const reachable = Math.min(boxes.length, maximum);
+      all.checked = selected.length > 0 && selected.length >= reachable;
+      all.indeterminate = selected.length > 0 && selected.length < boxes.length;
+    }
+  };
+
+  boxes.forEach((box) => box.addEventListener("change", refresh));
+  all?.addEventListener("change", () => {
+    /* Ticking down the list and stopping at the ceiling, rather than ticking everything
+       and letting the server throw the whole selection away. */
+    let taken = 0;
+    boxes.forEach((box) => {
+      box.checked = all.checked && taken < maximum;
+      if (box.checked) taken += 1;
+    });
+    refresh();
+  });
+  bar.querySelector("[data-bulk-clear]")?.addEventListener("click", () => {
+    boxes.forEach((box) => { box.checked = false; });
+    refresh();
+  });
+
+  /* Last stop before the request. Nothing on this page can build a selection over the
+     ceiling any more, but a decision the endpoint will refuse must never leave the
+     browser, however it came to be ticked.
+
+     Bound on the document in the capture phase so it runs *before* the shared
+     confirm-before-submit handler on the form. Bound on the form it would run after it,
+     and the reviewer would answer "are you sure?" about a decision that was never going
+     to be sent. */
+  document.addEventListener(
+    "submit",
+    (event) => {
+      if (event.target !== bar) return;
+      const selected = boxes.filter((box) => box.checked).length;
+      if (selected <= maximum) return;
+      event.preventDefault();
+      event.stopPropagation();
+      window.alert(
+        `${selected} cases are selected and ${maximum} is the most one decision can cover. ` +
+          "Untick some before deciding.",
+      );
+    },
+    true,
+  );
+
+  refresh();
+})();
+
+/* Stat tiles count up to their measured value, then show the exact text again — so a
+   rounded animation frame is never the number somebody reads. */
+if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  document.querySelectorAll("[data-count-to]").forEach((node) => {
+    const target = Number.parseFloat(node.dataset.countTo || "");
+    const display = node.dataset.countDisplay || node.textContent;
+    if (!Number.isFinite(target) || target <= 0) return;
+    const started = performance.now();
+    const duration = 620;
+    const tick = (now) => {
+      const progress = Math.min((now - started) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      node.textContent = progress < 1
+        ? Math.round(target * eased).toLocaleString()
+        : display;
+      if (progress < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
 
 const workspace = document.querySelector("[data-system-brain-workspace]");
 if (workspace) {
@@ -545,6 +770,18 @@ if (workspace) {
     await loadAgentConversations(true);
   });
 
+  /* The two assistants a customer talks to, named the way the filter menu names them.
+     The raw source value is a database word; nobody reading a support log should have to
+     translate "public_site_chat" in their head. */
+  const SOURCE_LABELS = {
+    public_site_chat: "Support AI",
+    dashboard_hilal_agent: "Hilal Agent",
+  };
+
+  function sourceLabel(value) {
+    return SOURCE_LABELS[value] || String(value || "").replaceAll("_", " ");
+  }
+
   function customerQuery(append = false) {
     const parameters = new URLSearchParams();
     new FormData(filters).forEach((value, key) => {
@@ -568,8 +805,8 @@ if (workspace) {
       if (item.unread) button.dataset.unread = "true";
       button.innerHTML = "<strong></strong><span></span><small></small>";
       button.querySelector("strong").textContent = item.display_name;
-      button.querySelector("span").textContent = `${item.source_type.replaceAll("_", " ")} · ${item.lifecycle_or_stage}`;
-      button.querySelector("small").textContent = item.last_message_excerpt || "No retained message excerpt";
+      button.querySelector("span").textContent = `${sourceLabel(item.source_type)} · ${item.lifecycle_or_stage}`;
+      button.querySelector("small").textContent = item.last_message_excerpt || "No message kept";
       button.addEventListener("click", () => openCustomerConversation(item));
       customerList.append(button);
     });
@@ -589,7 +826,9 @@ if (workspace) {
     const heading = document.createElement("header");
     heading.innerHTML = "<h3></h3><p></p>";
     heading.querySelector("h3").textContent = data.summary.display_name;
-    heading.querySelector("p").textContent = data.summary.user_email || (data.summary.anonymous ? "Anonymous visitor" : "No retained email");
+    heading.querySelector("p").textContent = `${sourceLabel(data.summary.source_type)} · ${
+      data.summary.user_email || (data.summary.anonymous ? "Visitor, not signed in" : "No email kept")
+    }`;
     const timeline = document.createElement("div");
     timeline.className = "brain-customer-timeline";
     data.messages.forEach((item) => timeline.append(renderAgentMessage(item)));

@@ -19,7 +19,7 @@ function Frame() {
     <div className="content-stretch flex flex-col gap-[18px] items-start relative shrink-0">
       <StepHeader />
       <p className="[word-break:break-word] font-['Geometria:Medium',sans-serif] leading-[1.18] not-italic relative shrink-0 text-[#2b2e35] text-[25px] tracking-[-0.5px] w-[354px]">Build your strategy</p>
-      <p className="[word-break:break-word] font-['Onest:Regular',sans-serif] font-normal leading-[1.5] relative shrink-0 text-[#68717d] text-[14px] w-[354px]">Describe what you look for in plain language through the AI chatbot. Hilal Markets turns your idea into clear rules that you review and approve. No coding is required.</p>
+      <p className="[word-break:break-word] font-['Onest:Regular',sans-serif] font-normal leading-[1.5] relative shrink-0 text-[#68717d] text-[14px] w-[354px]">Build your rule on the canvas, or describe it in plain words. Either way you see the exact conditions and approve them before anything starts. No coding is required.</p>
     </div>
   );
 }
@@ -27,7 +27,7 @@ function Frame() {
 function Frame5() {
   return (
     <div className="bg-[#cbfa4d] content-stretch flex items-center justify-center px-[6px] py-[2px] relative rounded-[100px] shrink-0">
-      <p className="[word-break:break-word] font-['Onest:Medium',sans-serif] font-medium leading-[1.5] relative shrink-0 text-[#19191b] text-[10px] whitespace-nowrap">AI strategy chatbot</p>
+      <p className="[word-break:break-word] font-['Onest:Medium',sans-serif] font-medium leading-[1.5] relative shrink-0 text-[#19191b] text-[10px] whitespace-nowrap">Strategy canvas</p>
     </div>
   );
 }

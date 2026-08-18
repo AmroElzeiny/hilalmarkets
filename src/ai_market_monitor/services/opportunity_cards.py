@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.dashboard_paths import LIFECYCLES_PATH
 from ai_market_monitor.core.site_content import SHARIA_STATUS_PRESENTATION
 from ai_market_monitor.db.models import (
     CandidateReadinessSnapshot,
@@ -18,6 +18,7 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import ConditionOutcome, ShariaAssetStatus
 from ai_market_monitor.schemas.sharia import AssetAssessmentSummary
+from ai_market_monitor.services.product_language import number_in_words
 from ai_market_monitor.services.sharia_screening import canonical_symbol
 
 
@@ -92,7 +93,7 @@ class OpportunityCardReadService:
             "mapping_state": "verified" if market is not None else "unavailable",
             "summary": assessment.summary,
             "qualifications": tuple(assessment.qualifications[:3]),
-            "journey_href": "/dashboard/opportunities",
+            "journey_href": LIFECYCLES_PATH,
             "can_create_watch_plan": (
                 market is not None
                 and assessment.status
@@ -231,8 +232,11 @@ class OpportunityCardReadService:
             return None
         if isinstance(value, bool):
             return "Yes" if value else "No"
-        if isinstance(value, (int, float, Decimal)):
-            return f"{float(value):.4f}".rstrip("0").rstrip(".")
+        # How a market number is written is decided in one place, so a threshold cannot
+        # be shown to four decimals on one surface and to two on another.
+        number = number_in_words(value)
+        if number is not None:
+            return number
         return str(value)[:80]
 
     @staticmethod

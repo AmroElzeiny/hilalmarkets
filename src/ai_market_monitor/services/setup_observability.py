@@ -15,6 +15,7 @@ from sqlalchemy import Integer, and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.dashboard_paths import LIFECYCLES_PATH
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
@@ -1179,11 +1180,11 @@ class SetupObservabilityService:
                 for item in deliveries
             ],
             "actions": {
-                "view_full_lifecycle": f"/dashboard/opportunities?setup={setup.id}",
+                "view_full_lifecycle": f"{LIFECYCLES_PATH}?setup={setup.id}",
                 "open_canvas": f"/dashboard/strategies/{strategy.id}/builder",
                 "refine_chat": f"/dashboard/strategies/new?refine={strategy.id}",
                 "view_monitor_health": (
-                    f"/dashboard/opportunities?monitor={strategy.id}#monitor-health"
+                    f"{LIFECYCLES_PATH}?monitor={strategy.id}#monitor-health"
                 ),
                 "retry_delivery_id": str(failed_delivery.id)
                 if failed_delivery and not successful

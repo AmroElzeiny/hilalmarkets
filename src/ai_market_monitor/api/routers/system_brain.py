@@ -54,6 +54,7 @@ from ai_market_monitor.services.sharia_governance import (
     ShariaGovernanceError,
     ShariaGovernanceService,
 )
+from ai_market_monitor.services.site_analytics import SiteAnalyticsService
 from ai_market_monitor.services.system_brain_actions import (
     SystemBrainActionError,
     SystemBrainActionService,
@@ -62,6 +63,11 @@ from ai_market_monitor.services.system_brain_agent import (
     SystemBrainAgentService,
     SystemBrainAgentUnavailable,
     SystemBrainConversationService,
+)
+from ai_market_monitor.services.system_brain_bulk_review import (
+    MAX_BATCH_SIZE,
+    BulkReviewError,
+    BulkReviewService,
 )
 from ai_market_monitor.services.system_brain_conversations import (
     AdminConversationExplorer,
@@ -73,6 +79,14 @@ from ai_market_monitor.services.system_brain_repository_index import (
 
 PACKAGE_DIR = Path(__file__).resolve().parents[2]
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
+
+#: How many cases the Cases page lists at once.
+#:
+#: This is also the real ceiling on one quick decision, because a reviewer can only tick
+#: what the page shows. It is deliberately below the number of form fields one request
+#: can carry — ``tests/unit/test_invariant_bulk_case_decision.py`` holds the two
+#: together, so raising this cannot silently start returning bare HTTP 400s.
+CASES_PAGE_LIMIT = 300
 
 SECTIONS = {
     "published-assets",
@@ -323,7 +337,7 @@ async def system_brain_reviews(
         assignee_id=assignee,
         deadline=deadline,
         asset_query=asset,
-        limit=300,
+        limit=CASES_PAGE_LIMIT,
     )
     cases = _apply_case_view(cases, view=view, reviewer_id=principal.user_id)
     context.update(
@@ -336,6 +350,15 @@ async def system_brain_reviews(
             "review_asset": asset or "",
             "review_view": view or "",
             "cases": cases,
+            # The ceiling comes from the service that enforces it, never from a number
+            # typed into the page. The browser stops the reviewer at the same count the
+            # endpoint would refuse, so a selection can no longer be built and lost.
+            "bulk_max_batch_size": MAX_BATCH_SIZE,
+            # The last quick decision this reviewer can still take back. Offered on the
+            # page rather than hidden behind a menu: an undo nobody can find is not one.
+            "undo_batch": await BulkReviewService(session, settings).latest_undoable_batch(
+                principal.user_id
+            ),
         }
     )
     return _protect(
@@ -344,6 +367,152 @@ async def system_brain_reviews(
             name="system_brain.html",
             context=context,
         )
+    )
+
+
+@router.get(
+    "/system-brain/stats",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+@router.get(
+    "/dashboard/system-brain/stats",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def system_brain_stats(
+    request: Request,
+    days: int = Query(default=30, ge=1, le=365),
+    tag: str = Query(default="", max_length=40),
+    scope: str = Query(default="landing", pattern="^(landing|site)$"),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Who looked at the public site, for how long, and what they did next."""
+
+    context = await _base_context(request, session, settings, principal, section="stats")
+    service = SiteAnalyticsService(session, settings)
+    # A browser that is force-quit never sends its closing beacon. Stamping those visits
+    # closed here keeps the live list honest without changing any measured duration.
+    await service.close_stale_visits()
+    await session.commit()
+    context["stats"] = await service.report(
+        days=days,
+        tag=tag or None,
+        landing_only=scope == "landing",
+    )
+    context["stats_scope"] = scope
+    context["recent_visits"] = await service.recent_visits()
+    context["measurement_enabled"] = settings.site_visit_measurement_enabled
+    return _protect(
+        templates.TemplateResponse(
+            request=request,
+            name="system_brain.html",
+            context=context,
+        )
+    )
+
+
+@router.post(
+    "/dashboard/system-brain/cases/bulk-decision",
+    include_in_schema=False,
+)
+async def system_brain_bulk_case_decision(
+    request: Request,
+    action: str = Form(...),
+    reason: str = Form(...),
+    case_id: list[UUID] = Form(default=[]),
+    csrf_token: str = Form(...),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Record one decision on the selected cases, each through the normal review path."""
+
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    try:
+        outcome = await BulkReviewService(session, settings).apply(
+            case_id,
+            action=action,
+            reason=reason,
+            admin_user_id=principal.user_id,
+        )
+        await session.commit()
+    except BulkReviewError as exc:
+        await session.rollback()
+        return _cases_redirect(request, error=str(exc))
+    refused = "; ".join(
+        f"{item.reference}: {item.message}" for item in outcome.results if not item.applied
+    )
+    if not outcome.applied:
+        return _cases_redirect(
+            request,
+            error=refused or "No case could be decided this way.",
+        )
+    return _cases_redirect(
+        request,
+        success=outcome.message() + (f" Not decided — {refused}" if refused else ""),
+    )
+
+
+@router.post(
+    "/dashboard/system-brain/cases/bulk-decision/undo",
+    include_in_schema=False,
+)
+async def system_brain_undo_bulk_case_decision(
+    request: Request,
+    batch_id: UUID = Form(...),
+    reason: str = Form(default=""),
+    csrf_token: str = Form(...),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Put the cases from one quick decision back where they were."""
+
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    try:
+        outcome = await BulkReviewService(session, settings).undo(
+            batch_id,
+            admin_user_id=principal.user_id,
+            reason=reason,
+        )
+        await session.commit()
+    except BulkReviewError as exc:
+        await session.rollback()
+        return _cases_redirect(request, error=str(exc))
+    refused = "; ".join(
+        f"{item.reference}: {item.message}" for item in outcome.results if not item.applied
+    )
+    if not outcome.applied:
+        return _cases_redirect(request, error=refused or "Nothing could be put back.")
+    return _cases_redirect(
+        request,
+        success=(
+            f"{outcome.applied} case(s) put back. The earlier decision stays in the "
+            "history." + (f" Not put back — {refused}" if refused else "")
+        ),
+    )
+
+
+def _cases_redirect(
+    request: Request,
+    *,
+    success: str | None = None,
+    error: str | None = None,
+) -> RedirectResponse:
+    """Back to the list the reviewer was looking at, filters and all."""
+
+    filters = {
+        key: value
+        for key, value in request.query_params.items()
+        if key in {"kind", "state", "priority", "assignee", "deadline", "asset", "view"}
+    }
+    filters.update({"success": success} if success else {"error": error or "Action failed."})
+    return RedirectResponse(
+        f"/dashboard/system-brain/cases?{urlencode(filters)}",
+        status_code=303,
     )
 
 

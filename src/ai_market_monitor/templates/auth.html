@@ -29,10 +29,10 @@
   <meta name="description" content="Secure access to Hilal Markets Halal Assets intelligence and guided monitoring.">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260805-y5-5">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260805-y5-5">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260805-y5-5">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-auth.css') }}?v=20260805-y5-5">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260818-live-4">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260818-live-4">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260818-live-4">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-auth.css') }}?v=20260818-live-4">
 </head>
 <body class="hilal-auth-page">
   <div class="auth-shell">
@@ -185,13 +185,24 @@
       <p class="auth-switch">New here? <a href="/signup{{ link_suffix }}">Create an account</a></p>
     {% endif %}
       </div>
+      {# The sign-up and sign-in pages carried no link to the Terms, the Privacy Policy
+         or the Cookie Policy at all — on the one page that asks somebody to create an
+         account. The full site footer does not belong here: it is a long dark menu
+         under a short form, and it would push the form off a phone screen. A single
+         quiet row of the three documents is what this page actually needs. #}
+      <nav class="auth-legal" aria-label="Legal">
+        <a href="/terms">Terms of Use</a>
+        <a href="/privacy">Privacy Policy</a>
+        <a href="/cookies">Cookie Policy</a>
+        <button type="button" data-cookie-settings>Cookie settings</button>
+      </nav>
     </main>
   </div>
   {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
   {% include "hilal/partials/cookie_banner.html" %}
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260805-y5-5"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260805-y5-5"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260805-y5-5"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260818-live-4"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260818-live-4"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260818-live-4"></script>
   <script>
     function clearSensitiveAuthFields() {
       document

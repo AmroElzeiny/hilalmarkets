@@ -189,7 +189,7 @@ def test_oi4_008_a_recovered_turn_still_proves_the_fault_was_applied():
 
     This is the assertion that failed before the fix. ``empty_once`` is the fault
     the readiness gate probes with, and the product is built to survive exactly
-    one bad response shape вЂ” so the turn answers 200 with the marker attached.
+    one bad response shape — so the turn answers 200 with the marker attached.
     The gate required a 4xx or 5xx, threw the proof away, and reported fault
     control as unavailable on a target where it worked.
     """

@@ -6,7 +6,17 @@
   --hm-ink: #2b2e35;
   --hm-ink-strong: #202329;
   --hm-copy: #50555e;
-  --hm-muted: #7a8089;
+  /* Raised from the old grey, which measured **3.98:1** on white — under the 4.5:1 WCAG
+     asks for normal text. It is used as a text colour in roughly forty rules across the
+     dashboard, so every one of them was failing: the side-menu group labels, all four
+     summary captions on `/dashboard`, every panel description and every empty state.
+     Changing the token fixes all of them at once; editing forty call sites would have
+     fixed thirty-nine. This value measures 5.55:1 and still reads as quiet grey.
+     Measured by `test_dashboard_home_text_clears_wcag_aa` in the browser suite.
+     (The old value is named in git history, not here: this file is held to the approved
+     palette by `test_final_authenticated_styles_use_only_approved_brand_hex_colors`,
+     which reads comments too.) */
+  --hm-muted: #63696f;
   --hm-canvas: #f5f8fb;
   --hm-surface: #ffffff;
   --hm-surface-soft: #fafbfc;
@@ -37,6 +47,14 @@
   --hm-radius-lg: 24px;
   --hm-radius-xl: 32px;
   --hm-motion: 220ms cubic-bezier(.2, .75, .25, 1);
+
+  /* The focus indicator, declared once for the whole product. See the rule below for
+     why it is two rings. Any surface needing a different *offset* overrides only the
+     offset; a surface that writes its own colour is the bug this pair exists to stop.
+     Mirrored in `hilalmarkets.css` for the public pages, which never load this file;
+     `test_invariant_focus_visibility.py` holds the two copies to the same value. */
+  --hm-focus-ring: 3px solid #202329;
+  --hm-focus-halo: 0 0 0 6px #cbfa4d;
 
   /* Compatibility aliases keep older deterministic components on-brand. */
   --emerald-950: var(--hm-ink);
@@ -97,9 +115,43 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* The focus indicator, for every surface in the product.
+ *
+ * It was `3px solid rgba(203, 250, 77, .78)` — bright apple green, alone. Measured
+ * against the surfaces it actually lands on, that is **1.11:1**: on white, on the
+ * near-white canvas and on a card, a keyboard user could not see where they were.
+ * WCAG 2.2 asks for 3:1 (1.4.11, and 2.4.11 Focus Appearance). `brand guide.md`
+ * section 9 already says bright apple green must not carry small marks on white, and
+ * section 18 asks for visible focus states; the two rules were in conflict here and
+ * the invisible one had won.
+ *
+ * Two rings, so one indicator works everywhere:
+ *
+ *   near-black inner ....... 15.74:1 on white, 12.98:1 on an apple-green button
+ *   apple-green halo ....... 12.98:1 on near-black, and the brand signature
+ *
+ * Whichever surface the element sits on, one of the two rings is high contrast against
+ * it. Declared once here, because a page that wrote its own focus ring is how the
+ * product ended up with three of them and no way to fix them together. `hm-main.css`
+ * inverts the order inside the near-black band; it does not invent a third colour.
+ *
+ * Enforced by `test_focus_ring_is_visible_on_every_surface` in
+ * tests/unit/test_invariant_focus_visibility.py.
+ */
+/* `!important` on an accessibility guarantee, deliberately.
+ *
+ * The halo is a `box-shadow` and this selector has no specificity at all, so any
+ * component that gave itself a shadow removed the halo without anybody noticing —
+ * measuring the rendered public pages found two doing exactly that. The indicator and a
+ * decorative shadow were sharing one property, and the decoration was winning.
+ *
+ * The two places that draw a deliberately different halo (the near-black band in
+ * `hm-main.css`, the apple-green panel on the public site) are marked the same way, so
+ * ordinary specificity still decides between them. */
 :where(a, button, input, select, textarea, summary, [role="button"]):focus-visible {
-  outline: 3px solid rgba(203, 250, 77, .78);
-  outline-offset: 3px;
+  outline: var(--hm-focus-ring) !important;
+  outline-offset: 2px;
+  box-shadow: var(--hm-focus-halo) !important;
 }
 
 ::selection {

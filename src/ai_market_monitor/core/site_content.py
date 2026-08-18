@@ -26,6 +26,26 @@ class NavigationGroup:
 
 
 @dataclass(frozen=True, slots=True)
+class TopbarAction:
+    """One action the shared topbar draws on behalf of the page that declared it.
+
+    Pages used to draw their own button in their own heading, which is why the same
+    action appeared in three different places with three different names and one of
+    them was always the odd one out. A page now *declares* what belongs at the top and
+    the shared topbar draws it, so there is one shape, one target size, one focus ring
+    and one place to change all of them.
+
+    ``kind`` is only how loud it is. ``primary`` is the one thing this page most wants
+    a person to do, and there is at most one of those; everything else is ``quiet``.
+    """
+
+    label: str
+    href: str
+    icon: str
+    kind: str = "quiet"
+
+
+@dataclass(frozen=True, slots=True)
 class PublicPageMetadata:
     page: str
     endpoint: str
@@ -110,47 +130,76 @@ PUBLIC_NAVIGATION = (
 )
 
 
+#: The footer menu, in three groups: Product, Legal, Contact.
+#:
+#: **Not every served page is in it.** Pricing, Halal Assets, Risk Disclosure,
+#: Trust & Safety, About and the Help Center were taken out of the footer deliberately;
+#: each one is still served, still in :data:`PUBLIC_PAGES` and still in the sitemap, so a
+#: bookmark or a search result keeps working. What changed is only that the footer no
+#: longer leads there.
+#:
+#: One list, two renderers. The Jinja footer loops over this, and the React footer is
+#: handed the same groups through the runtime config, so a link removed here disappears
+#: from both at once. The React fallback in `components/SiteChrome.tsx` — used only for a
+#: page opened without the server shell — has to be kept in step with it by hand, and
+#: `test_both_footers_offer_the_same_menu` is what notices when it is not.
 FOOTER_NAVIGATION = (
     NavigationGroup(
         "Product",
         (
             NavigationItem("Features", "public_features", "features"),
-            NavigationItem("How It Works", "public_how_it_works", "how_it_works"),
-            NavigationItem("Pricing", "public_pricing", "pricing"),
-            NavigationItem(
-                "Halal Assets",
-                "screened_market_page",
-                "screened_market",
-            ),
-        ),
-    ),
-    NavigationGroup(
-        "Trust",
-        (
-            NavigationItem("Trust & Safety", "public_trust_safety", "trust_safety"),
-            NavigationItem(
-                "Risk Disclosure",
-                "public_risk_disclosure",
-                "risk_disclosure",
-            ),
-        ),
-    ),
-    NavigationGroup(
-        "Company & Support",
-        (
-            NavigationItem("About", "public_about", "about"),
-            NavigationItem("Help Center", "public_help", "help"),
-            NavigationItem("Contact", "public_contact", "contact"),
+            NavigationItem("How it works", "public_how_it_works", "how_it_works"),
         ),
     ),
     NavigationGroup(
         "Legal",
         (
-            NavigationItem("Privacy", "public_privacy", "privacy"),
-            NavigationItem("Terms", "public_terms", "terms"),
+            NavigationItem("Terms of Use", "public_terms", "terms"),
+            NavigationItem("Privacy Policy", "public_privacy", "privacy"),
             NavigationItem("Cookie Policy", "public_cookies", "cookies"),
         ),
     ),
+    NavigationGroup(
+        "Contact",
+        (NavigationItem("Contact", "public_contact", "contact"),),
+    ),
+)
+
+
+#: Where the "Cookie settings" link in the footer goes.
+#:
+#: It is a **link**, not a button, and this is the address it opens. The consent script
+#: catches the click and opens the settings panel in place; a visitor with no scripting,
+#: or one who opens it in a new tab, lands on the Cookie Policy with `settings=1`, which
+#: the same script reads on load and opens the panel from. Either way the person reaches
+#: the same panel, which is what a footer link has to promise.
+#:
+#: Written once because three places need it: both footers, and the test that checks
+#: they agree.
+COOKIE_SETTINGS_PATH = "/cookies?settings=1"
+
+
+@dataclass(frozen=True, slots=True)
+class SocialLink:
+    """One channel, named once for every renderer of the footer.
+
+    ``handle`` is what a person reads; ``href`` is where it goes. The addresses in
+    :data:`SOCIAL_LINKS` are placeholders until the accounts are opened, and they are
+    the only thing that has to change then — both footers read that tuple, so neither
+    holds an address of its own to be forgotten.
+    """
+
+    label: str
+    handle: str
+    href: str
+
+
+#: Placeholder addresses. Replace the three `href` values when the accounts are opened;
+#: nothing else in the site needs to change, because both footers read this tuple.
+SOCIAL_LINKS: tuple[SocialLink, ...] = (
+    SocialLink("Instagram", "@hilalmarkets", "https://instagram.com/hilalmarkets"),
+    SocialLink("X", "@hilalmarkets", "https://x.com/hilalmarkets"),
+    SocialLink("Threads", "@hilalmarkets", "https://threads.net/@hilalmarkets"),
 )
 
 
@@ -193,6 +242,11 @@ ACCOUNT_ONLY_PATH_PREFIXES = (
     # the shape of a name cuts both ways: a rule loose enough to catch this one also
     # claims an innocent /signup-guide article and fails a build over a public page.
     "/dashboard-entry",
+    # Home, and the address it used to have. Both are signed-in pages that do not sit
+    # under /dashboard, so neither was recognised here and a public page could have
+    # linked straight into the product without this list noticing.
+    "/home",
+    "/main",
     "/signin",
     "/signup",
     "/subscribe",
@@ -202,14 +256,21 @@ ACCOUNT_ONLY_PATH_PREFIXES = (
 )
 
 
-def is_account_only_path(path: str) -> bool:
+def is_account_only_path(address: str) -> bool:
     """True when the address can only be used by somebody who already has an account.
 
     A prefix matches the address itself or a child of it, and nothing else. Every other
     account-only address has to be named in ACCOUNT_ONLY_PATH_PREFIXES, which is the
     point: the list is the decision, and it is written down rather than inferred.
+
+    **A whole address is read, not only a path.** Links into the product are absolute
+    when the dashboard has a hostname of its own — `https://app.hilalmarkets.com/signin`
+    is the same door as `/signin`, and reading only the second spelling meant a link
+    written the first way walked straight past this check. The scheme and host are
+    dropped and the path is judged, which is the same decision either way.
     """
 
+    path = urlsplit(address).path if "//" in address else address
     normalized = path.split("?", 1)[0].split("#", 1)[0].rstrip("/") or "/"
     return any(
         normalized == prefix or normalized.startswith(f"{prefix}/")
@@ -278,11 +339,35 @@ def footer_navigation(*, hidden_pages: frozenset[str]) -> tuple[NavigationGroup,
     return tuple(groups)
 
 
+#: The side menu.
+#:
+#: Nine destinations in three groups, and every one of them opens the redesigned page
+#: rather than an older copy of it — which is now the only page at that address. The
+#: redesigned pages used to live at `/dashboard-test/...` while an older copy of each one
+#: answered at `/dashboard/...`; this menu opened the redesigned ones and every Telegram
+#: button, WhatsApp reply and alert email opened the older ones, so a person following a
+#: message from us and a person using this menu saw two different screens with the same
+#: name. There is one of each now. See `api/routers/dashboard_paths.py`.
+#:
+#: `icon` is a name in `hilalmarkets-icons.js`, the product's single icon table. The menu
+#: used to have a second icon system of its own — eleven `.nav-icon-*` rules masking
+#: eleven files that nothing else on the site used — so adding an entry meant adding an
+#: icon in two places and a mismatch drew an empty square with nothing reporting it.
 DASHBOARD_NAVIGATION = (
     NavigationGroup(
-        "Discover",
+        "Overview",
         (
-            NavigationItem("Home", "dashboard_home", "home", "home"),
+            #: The front page. It answers "what is happening right now" over the same
+            #: read models the deeper pages own, so it can never disagree with the page
+            #: it links to.
+            #:
+            #: Called **Home**, and it answers at `/home`. It used to be called "Main" at
+            #: `/main`, which is an internal word for a page whose whole job is to be the
+            #: obvious place to start. The old address is kept as a permanent redirect —
+            #: it is written into sent email, into Telegram buttons and into the
+            #: `target_path` column of two tables, and none of those can be corrected
+            #: after the fact. See `core/dashboard_paths.py`.
+            NavigationItem("Home", "main_dashboard_page", "main", "gauge"),
             NavigationItem(
                 "Halal Assets",
                 "screened_market_page",
@@ -294,10 +379,10 @@ DASHBOARD_NAVIGATION = (
         ),
     ),
     NavigationGroup(
-        "Watch",
+        "Your monitors",
         (
             NavigationItem(
-                "Watchlists",
+                "Monitors",
                 "watchlists_page",
                 "watchlists",
                 "radar",
@@ -308,21 +393,19 @@ DASHBOARD_NAVIGATION = (
                     "strategy_versions",
                 ),
             ),
+            #: The visual canvas, named for what a person does on it rather than for
+            #: what the page is called internally. It sits directly after Monitors
+            #: because it is where one is drawn before it becomes one.
             NavigationItem(
-                "Trading Assistant",
-                "dashboard_check_market",
-                "check_market",
-                "scan",
-                guide_target="nav-trading-assistant",
+                "Create a monitor",
+                "monitor_canvas_page",
+                "monitor_canvas",
+                "circle_plus",
+                guide_target="nav-create-monitor",
             ),
-        ),
-    ),
-    NavigationGroup(
-        "Review",
-        (
             NavigationItem(
-                "Opportunities & Evidence",
-                "lifecycles_page",
+                "Opportunities",
+                "opportunities_page",
                 "activity",
                 "activity",
                 ("lifecycles", "alert_proof"),
@@ -340,8 +423,8 @@ DASHBOARD_NAVIGATION = (
                 "bell",
             ),
             NavigationItem(
-                "Plan & Billing",
-                "billing_page",
+                "Plan and billing",
+                "subscription_page",
                 "billing",
                 "billing",
             ),
@@ -350,6 +433,30 @@ DASHBOARD_NAVIGATION = (
         ),
     ),
 )
+
+
+def dashboard_page_identity(page: str) -> dict[str, str] | None:
+    """Which menu entry the current page belongs to, for the topbar to say out loud.
+
+    The topbar used to show a search box and two buttons and nothing else, so a person
+    arriving from a link had no way to tell which of nine pages they were on except by
+    reading the menu. This returns the group, the name and the icon of the entry that is
+    highlighted, taken from the same navigation data the menu draws — never a second
+    list, which is how the two would come to disagree.
+
+    ``None`` for a page that is not in the menu. The topbar then shows the page title on
+    its own rather than inventing a group for it.
+    """
+
+    for group in DASHBOARD_NAVIGATION:
+        for item in group.items:
+            if page == item.page or page in item.active_pages:
+                return {
+                    "group": group.label,
+                    "label": item.label,
+                    "icon": item.icon or "spark",
+                }
+    return None
 
 
 PUBLIC_PAGES = (

@@ -7,10 +7,12 @@ import pytest
 from ai_market_monitor.core.plans import PLAN_DEFINITIONS, plan_offer_payload
 from ai_market_monitor.core.site_content import (
     ACCOUNT_ONLY_PATH_PREFIXES,
+    COOKIE_SETTINGS_PATH,
     DASHBOARD_NAVIGATION,
     FOOTER_NAVIGATION,
     PUBLIC_NAVIGATION,
     PUBLIC_PAGES,
+    SOCIAL_LINKS,
     SOCIAL_PREVIEW_DESCRIPTION,
     SOCIAL_PREVIEW_TITLE,
     WAITLIST_HIDDEN_PAGES,
@@ -29,6 +31,22 @@ WAITLIST_REDIRECTED_PATHS = frozenset(
 )
 
 _HREF_RE = re.compile(r"""href=["']([^"']+)["']""", re.IGNORECASE)
+
+
+def _hold_pre_launch(test_context) -> None:
+    """Put the site back into the public-waitlist stage for one test.
+
+    Every test below about pre-launch behaviour used to read this from the *default*,
+    with `assert settings.public_waitlist_mode is True` standing in for setting it. The
+    day the product opened, the default changed and sixteen of them failed at once —
+    while testing nothing that had broken. A test about a stage names its stage.
+
+    The pre-launch tests are kept rather than deleted because `PUBLIC_WAITLIST_MODE` is
+    the live emergency brake: turning it on has to pull the whole site back, and these
+    are what prove it still does.
+    """
+
+    test_context["settings"].public_waitlist_mode = True
 
 
 def _react_rendered(template: str) -> bool:
@@ -187,9 +205,22 @@ async def test_public_legal_pages_do_not_expose_internal_launch_placeholders(
 
 
 async def test_public_header_and_footer_follow_the_central_navigation(test_context):
+    """The server-rendered chrome draws the menus from `core/site_content.py`.
+
+    Read on `/about`, which is still a Jinja page. It used to be read on `/features` —
+    which is now rendered by the React bundle, so the header and footer are not in the
+    response at all and every assertion here found nothing. The page is chosen from the
+    templates rather than named by hand for exactly that reason.
+    """
+
     test_context["settings"].public_waitlist_mode = False
-    response = await test_context["client"].get("/features")
-    assert response.status_code == 200
+    jinja_path = next(
+        item.path
+        for item in PUBLIC_PAGES
+        if not _react_rendered(item.template) and item.page not in WAITLIST_HIDDEN_PAGES
+    )
+    response = await test_context["client"].get(jinja_path)
+    assert response.status_code == 200, jinja_path
     content = html.unescape(response.text)
 
     header_labels = re.findall(
@@ -203,8 +234,17 @@ async def test_public_header_and_footer_follow_the_central_navigation(test_conte
         assert f"<h2>{group.label}</h2>" in content
         for item in group.items:
             assert f">{item.label}</a>" in content
+    # Cookie settings is a link with a real address, not a button that goes nowhere.
+    # As a `<button>` it was the one entry in this menu that could not be opened in a new
+    # tab, could not be copied, and did nothing at all with scripting off.
     assert "data-cookie-settings" in content
-    assert ">Cookie Settings</button>" in content
+    assert f'<a href="{COOKIE_SETTINGS_PATH}" data-cookie-settings>Cookie settings</a>' in content
+    assert ">Cookie settings</button>" not in content
+
+    # The three channels, from the same module, each announced by name.
+    for channel in SOCIAL_LINKS:
+        assert f'aria-label="Hilal Markets on {channel.label}"' in content
+        assert channel.href in content
 
 
 @pytest.mark.parametrize(
@@ -221,7 +261,7 @@ async def test_no_public_page_links_into_the_product_in_waitlist_mode(test_conte
     whole family, including a page added next month.
     """
 
-    assert test_context["settings"].public_waitlist_mode is True
+    _hold_pre_launch(test_context)
 
     response = await test_context["client"].get(path)
     assert response.status_code == 200, path
@@ -253,6 +293,7 @@ async def test_every_server_rendered_page_closes_on_the_waitlist(test_context, p
     property that makes that worth doing: a page cannot ship without it.
     """
 
+    _hold_pre_launch(test_context)
     response = await test_context["client"].get(path)
     assert response.status_code == 200, path
     content = html.unescape(response.text)
@@ -274,6 +315,7 @@ async def test_how_we_screen_offers_the_waitlist_instead_of_the_dashboard(test_c
     never looked at, because nothing looked at page bodies.
     """
 
+    _hold_pre_launch(test_context)
     response = await test_context["client"].get("/how-we-screen")
     content = html.unescape(response.text)
 
@@ -288,6 +330,7 @@ async def test_how_we_screen_offers_the_waitlist_instead_of_the_dashboard(test_c
 async def test_help_center_routes_support_through_the_public_contact_form(test_context):
     """The second regression: the Help Center sent people to authenticated Support."""
 
+    _hold_pre_launch(test_context)
     response = await test_context["client"].get("/help")
     content = html.unescape(response.text)
 
@@ -306,6 +349,7 @@ async def test_react_pages_are_given_the_waitlist_state_and_wording(test_context
     """Contact, Privacy and Terms are rendered by the bundle, so the server hands it the
     same words the server-rendered pages use. One source of the message, two renderers."""
 
+    _hold_pre_launch(test_context)
     for path in ("/contact", "/privacy", "/terms"):
         response = await test_context["client"].get(path)
         assert response.status_code == 200, path
@@ -318,7 +362,7 @@ async def test_react_pages_are_given_the_waitlist_state_and_wording(test_context
 async def test_waitlist_mode_removes_every_public_route_into_the_product(test_context):
     """The site-wide effects of the one setting: menus, sitemap, pricing address, prices."""
 
-    assert test_context["settings"].public_waitlist_mode is True
+    _hold_pre_launch(test_context)
 
     # The plans and the comparison table are not reachable, and an old link lands on
     # the waitlist rather than on a page of prices.
@@ -359,11 +403,23 @@ async def test_launched_mode_restores_the_product_routes_the_waitlist_hides(test
     assert "authenticated Support" in help_page
     assert "Where do I manage my plan?" in help_page
 
-    features = html.unescape((await test_context["client"].get("/features")).text)
-    assert ">Sign in</a>" in features
-    assert ">Start free</a>" in features
+    # The account entry comes back on the server-rendered pages. Read on a Jinja page,
+    # not on `/features`: that page is drawn by the React bundle now, so its header is
+    # not in the response and this assertion could only ever fail there.
+    jinja_path = next(
+        item.path
+        for item in PUBLIC_PAGES
+        if not _react_rendered(item.template) and item.page not in WAITLIST_HIDDEN_PAGES
+    )
+    server_rendered = html.unescape((await test_context["client"].get(jinja_path)).text)
+    assert ">Sign in</a>" in server_rendered, jinja_path
+    assert ">Start free</a>" in server_rendered, jinja_path
     # And the pre-launch closing section is not shown once there is nothing to wait for.
-    assert 'id="waitlist-band"' not in features
+    assert 'id="waitlist-band"' not in server_rendered, jinja_path
+
+    # The React pages are told the same thing through the runtime config they read.
+    features = (await test_context["client"].get("/features")).text
+    assert '"mode": false' in features
 
     landing = await test_context["client"].get("/")
     assert '"plans": []' not in landing.text
@@ -499,7 +555,9 @@ async def test_dashboard_navigation_matches_the_customer_information_architectur
     test_context,
 ):
     await _signup(test_context, "dashboard-navigation@example.com")
-    dashboard = await test_context["client"].get("/dashboard")
+    # `/dashboard` is the old front page's address and now sends a browser to Home, which
+    # is the page the menu is read on.
+    dashboard = await test_context["client"].get("/home")
     assert dashboard.status_code == 200
     expected = [
         item.label
@@ -507,24 +565,24 @@ async def test_dashboard_navigation_matches_the_customer_information_architectur
         for item in group.items
     ]
     nav_match = re.search(
-        r'<nav data-testid="dashboard-nav".*?</nav>',
+        r'<nav[^>]*data-testid="dashboard-nav".*?</nav>',
         dashboard.text,
         flags=re.DOTALL,
     )
     assert nav_match
     nav = html.unescape(nav_match.group(0))
-    positions = [nav.index(f"<span>{label}</span>") for label in expected]
+    positions = [nav.index(f'class="hm-nav-text">{label}</span>') for label in expected]
     assert positions == sorted(positions)
     assert "Portfolio" not in nav
     assert "Referrals" not in nav
     assert "System Brain" not in nav
 
+    # Trading Assistant is gone from the menu and its page is gone with it.
     market_check = await test_context["client"].get(
         "/dashboard/check-market",
         follow_redirects=False,
     )
-    assert market_check.status_code == 303
-    assert market_check.headers["location"] == "/dashboard/strategies/new?mode=scanner"
+    assert market_check.status_code == 404
 
 
 def test_landing_and_contact_templates_delegate_to_the_supplied_react_site():

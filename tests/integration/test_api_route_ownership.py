@@ -14,7 +14,7 @@ async def test_public_billing_catalog_exposes_only_customer_plans(test_context) 
     response = await test_context["client"].get("/api/v1/billing/plans")
     assert response.status_code == 200
     assert response.json()["billing_enabled"] is False
-    assert response.json()["billing_mode"] == "disabled_private_beta"
+    assert response.json()["billing_mode"] == "disabled"
     codes = {plan["code"] for plan in response.json()["plans"]}
     assert codes == {"demo", "trader", "pro"}
     assert not codes & {

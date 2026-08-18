@@ -42,10 +42,10 @@
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
   {# The brand faces are self-hosted, so the public site loads no third-party font
      service and renders the same typefaces as the landing page and the dashboard. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260805-y5-5">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260805-y5-5">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260805-y5-5">
-  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260805-y5-5">{% endif %}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260818-live-4">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260818-live-4">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260818-live-4">
+  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260818-live-4">{% endif %}
   <script>
     window.HilalMarketsConsentConfig = {{ {
       "version": cookie_consent_version,
@@ -69,13 +69,19 @@
     {% if waitlist_mode %}{% include "hilal/partials/public_waitlist_band.html" %}{% endif %}
   </main>
   {% include "hilal/partials/public_footer.html" %}
+  {#- Before the assistant, and styled to sit above it. Every public page carries it now;
+      it used to exist only on the React pages, so the longest server-rendered pages —
+      the Help Center and Trust & Safety — had no way back but scrolling. -#}
+  {% include "hilal/partials/back_to_top.html" %}
   {% include "hilal/partials/cookie_banner.html" %}
   {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260805-y5-5"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260805-y5-5"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260805-y5-5"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260805-y5-5" defer></script>
-  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260805-y5-5"></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260818-live-4"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260818-live-4"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260818-live-4"></script>
+{% if site_visit_measurement_enabled %}<script src="{{ url_for('static', path='/hm-visit-analytics.js') }}?v=20260818-live-4" defer></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260818-live-4" defer></script>
+  <script src="{{ url_for('static', path='/hm-to-top.js') }}?v=20260818-live-4" defer></script>
+  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260818-live-4"></script>{% endif %}
   {% block page_scripts %}{% endblock %}
 </body>
 </html>

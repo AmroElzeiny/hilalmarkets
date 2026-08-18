@@ -88,19 +88,62 @@
 .site-footer h2{font-size:.92rem;color:#fff;letter-spacing:0}
 .footer-link-button{appearance:none;border:0;padding:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .footer-link-button:hover,.footer-link-button:focus-visible{color:#fff;text-decoration:underline}
-.cookie-banner{display:none;position:fixed;z-index:500;left:18px;right:18px;bottom:18px;max-width:1160px;margin:auto;background:#fff;border:1px solid #cddbd6;border-radius:22px;box-shadow:0 24px 80px rgba(8,47,41,.25);padding:20px}
+/* ---- Cookie choices, on the brand -----------------------------------------
+   The banner and the settings panel, in the product's own palette: near-black ink,
+   apple-green accent, hairline #e1e5ea, and the two brand faces. They were on the
+   emerald-and-gold palette this brand no longer uses — a dark green backdrop, an emerald
+   tick colour, a gold icon box — while the dashboard's copy of the same panel had
+   already been redrawn. One control, two looks, depending on which half of the site a
+   person reached it from.
+
+   Apple green is used for the surround of the mark and never for a word or a rule: it
+   measures 1.21:1 against white, so anything that has to be *read* stays ink. */
+.cookie-banner{display:none;position:fixed;z-index:500;left:18px;right:18px;bottom:18px;max-width:1160px;margin:auto;background:#fff;border:1px solid #e1e5ea;border-radius:22px;box-shadow:0 24px 80px rgba(43,46,53,.22);padding:20px;color:#2b2e35}
 .cookie-banner.is-visible{display:block}
+/* The banner is fixed to the bottom of the window, so the page keeps that much room
+   clear under its footer. Its measured height is published as
+   `--hm-cookie-banner-height` by `hilalmarkets-consent.js`, and is 0px once answered
+   and 0px for anyone with scripting off, who never sees it. */
+body.public-page .site-footer{padding-bottom:calc(var(--hm-cookie-banner-height, 0px) + 36px)}
 .cookie-banner-inner{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:start}
-.cookie-banner h2{font-size:1.05rem;margin:2px 0 5px}.cookie-banner p{font-size:.82rem;margin:0;max-width:650px}
+/* The mark, on the accent rather than on gold. `.icon-box.is-gold` is the older
+   palette's shape and it still carries the markup, so it is turned here instead of the
+   template naming a class that only this one place uses. */
+.cookie-banner .icon-box,.cookie-banner .icon-box.is-gold{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;border:1px solid #e1e5ea;background:#eefbc4;color:#2b2e35}
+.cookie-banner h2{font-family:var(--hm-font-display);font-size:1.05rem;font-weight:500;letter-spacing:-.02em;color:#2b2e35;margin:2px 0 5px}
+.cookie-banner p{font-size:.82rem;line-height:1.55;color:#4a505a;margin:0;max-width:650px}
+.cookie-banner a{color:#2b2e35;text-decoration:underline;text-underline-offset:3px}
 .cookie-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-.cookie-modal-backdrop{display:none;position:fixed;inset:0;background:rgba(7,31,27,.55);z-index:510;align-items:center;justify-content:center;padding:18px}
+.cookie-modal-backdrop{display:none;position:fixed;inset:0;background:rgba(43,46,53,.55);z-index:510;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(2px)}
 .cookie-modal-backdrop.is-visible{display:flex}
-.cookie-modal{width:min(620px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:24px;border:1px solid var(--line);box-shadow:var(--shadow-lg);padding:26px}
-.cookie-modal h2{font-size:2rem}
-.cookie-category{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:16px 0;border-bottom:1px solid var(--line);cursor:pointer}
-.cookie-category:last-of-type{border-bottom:0}.cookie-category span span{display:block;color:var(--muted);font-size:.8rem;margin-top:4px}.cookie-category input{width:20px;height:20px;accent-color:var(--emerald-700)}
-.cookie-fixed{font-size:.73rem;font-weight:800;color:var(--emerald-700)}
+.cookie-modal{width:min(620px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:26px;border:1px solid #e1e5ea;box-shadow:0 34px 90px -30px rgba(43,46,53,.55);padding:26px;color:#2b2e35}
+.cookie-modal .eyebrow{display:inline-flex;align-items:center;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#5c646e}
+/* 2rem was the old panel's heading size and it filled the whole top of the box for a
+   sentence nobody needs shouted. This is the brand's display face at a size that reads
+   as a panel title rather than as a page. */
+.cookie-modal h2{font-family:var(--hm-font-display);font-size:1.45rem;font-weight:500;letter-spacing:-.025em;line-height:1.15;color:#2b2e35;margin:4px 0 0}
+.cookie-modal>p{font-size:.85rem;line-height:1.6;color:#4a505a;margin:14px 0 4px}
+.cookie-category{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:16px 0;border-bottom:1px solid #e1e5ea;cursor:pointer}
+.cookie-category:last-of-type{border-bottom:0}
+.cookie-category strong{font-size:.95rem;font-weight:600;color:#2b2e35}
+.cookie-category span span{display:block;color:#4a505a;font-size:.8rem;line-height:1.5;margin-top:4px}
+/* The deep apple, not the accent itself: a tick drawn in #cbfa4d on white is invisible,
+   and this one has to be readable as "on". */
+.cookie-category input{width:20px;height:20px;accent-color:#55712a}
+.cookie-fixed{flex:0 0 auto;padding:4px 10px;border:1px solid #e1e5ea;border-radius:999px;background:#f5f8fb;font-size:.73rem;font-weight:600;color:#4a505a}
 .cookie-modal-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:20px}
+
+/* The buttons inside these two boxes, on the brand.
+   `.btn-primary` and `.btn-secondary` in `hilalmarkets.css` are still emerald-and-gold
+   for the rest of the server-rendered pages, and changing them there would repaint every
+   page on the site — which is not what was asked for here. Scoped to the consent boxes
+   so this control matches the brand without moving anything else. The accent carries no
+   meaning and no words: the label on it is ink, which is what makes it readable. */
+.cookie-banner .btn,.cookie-modal .btn{font-family:var(--hm-font-ui);font-weight:500}
+.cookie-banner .btn-primary,.cookie-modal .btn-primary{background:#cbfa4d;border-color:#cbfa4d;color:#2b2e35;box-shadow:0 12px 26px -14px rgba(85,113,42,.8)}
+.cookie-banner .btn-primary:hover,.cookie-modal .btn-primary:hover{background:#d6fb72;border-color:#d6fb72;box-shadow:0 16px 32px -14px rgba(85,113,42,.85)}
+.cookie-banner .btn-secondary,.cookie-modal .btn-secondary{background:#fff;border-color:#d3d9e0;color:#2b2e35}
+.cookie-banner .btn-secondary:hover,.cookie-modal .btn-secondary:hover{border-color:#2b2e35;background:#f5f8fb}
 .skip-link{position:absolute;left:-9999px;top:0;background:#fff;padding:10px;z-index:1000}.skip-link:focus{left:10px;top:10px}
 .opportunity-context{display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 15px;color:var(--muted);font-size:.75rem}.opportunity-context span+span:before{content:"|";margin-right:8px}
 .opportunity-summary{min-height:72px}.opportunity-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}
@@ -131,3 +174,261 @@
 }
 @media(max-width:480px){.public-mobile-actions{grid-template-columns:1fr}.cookie-modal{padding:20px}.cookie-modal-actions{display:grid}.cookie-modal-actions .btn{width:100%}}
 @media(prefers-reduced-motion:reduce){.help-category{transition:none}}
+
+/* ==========================================================================
+   The shared public footer
+   ==========================================================================
+   The same footer the React pages draw, styled for the server-rendered ones. Both take
+   their links from `footer_navigation` in core/site_content.py, so only the rendering
+   lives in two places — never the menu itself.
+
+   These rules override the older `.site-footer` in hilalmarkets.css, which paints a
+   dark emerald (#071f1b) inherited from a palette this brand no longer uses. The
+   footer is near-black now, the same ink as the rest of the product.
+   -------------------------------------------------------------------------- */
+body.public-page .site-footer.hm-jinja-footer {
+  padding: clamp(48px, 7vw, 76px) 0 clamp(28px, 3vw, 36px);
+  background: #2b2e35;
+  color: #e7ebf1;
+}
+
+.hm-jinja-footer .hm-footer-top {
+  display: grid;
+  gap: 48px;
+}
+
+@media (min-width: 900px) {
+  .hm-jinja-footer .hm-footer-top {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+    gap: 64px;
+  }
+}
+
+.hm-jinja-footer .hm-footer-brand {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  max-width: 460px;
+}
+
+/* The wordmark, 31px tall, which is the height the React footer and the header both draw
+   it at. One logo at one size on every page of the site.
+
+   This used to be the 39px symbol beside the words "Hilal Markets" typed out in HTML,
+   while the React footer drew the real wordmark — two different brand marks in the same
+   place on the same site.
+
+   The artwork is drawn in the brand's near-black and this footer *is* near-black, so it
+   is turned white here rather than kept as a second file. One shape, one source: a
+   separate light copy is a second drawing to keep in step, which is exactly how the mark
+   this replaced went stale while the real logo moved on. `brightness(0)` flattens it to
+   black first, so `invert(1)` lands on pure white rather than a washed-out grey. */
+.hm-jinja-footer .hm-footer-brand .hm-footer-logo {
+  display: block;
+  width: max-content;
+}
+
+.hm-jinja-footer .hm-footer-brand .hm-footer-logo img {
+  display: block;
+  width: auto;
+  height: 31px;
+  filter: brightness(0) invert(1);
+}
+
+.hm-jinja-footer .hm-footer-brand p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #b6c0cd;
+}
+
+.hm-jinja-footer .hm-social {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hm-jinja-footer .hm-social-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #464c58;
+  border-radius: 12px;
+  color: #e7ebf1;
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+}
+
+.hm-jinja-footer .hm-social-link:hover {
+  border-color: #cbfa4d;
+  background: #363b45;
+  color: #cbfa4d;
+  transform: translateY(-2px);
+}
+
+.hm-jinja-footer .hm-footer-menus {
+  display: grid;
+  gap: 32px 24px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.hm-jinja-footer .hm-footer-menus h2 {
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #8f9aa9;
+}
+
+.hm-jinja-footer .hm-footer-menus ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hm-jinja-footer .hm-footer-menus a,
+.hm-jinja-footer .hm-footer-menus button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 3px 0;
+  border: 0;
+  background: none;
+  color: #e7ebf1;
+  font-family: inherit;
+  font-size: 14.5px;
+  font-weight: 450;
+  text-align: left;
+  cursor: pointer;
+  transition: color .18s ease;
+}
+
+.hm-jinja-footer .hm-footer-menus a:hover,
+.hm-jinja-footer .hm-footer-menus button:hover {
+  color: #cbfa4d;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.hm-jinja-footer .hm-footer-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: clamp(32px, 4vw, 48px);
+  padding-top: 24px;
+  border-top: 1px solid #464c58;
+}
+
+.hm-jinja-footer .hm-footer-bottom p {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #a4aebc;
+}
+
+/* Near-black would vanish on this ground, so the indicator inverts here — surface
+   ring, accent halo. Same indicator, still well above 3:1. */
+.hm-jinja-footer a:focus-visible,
+.hm-jinja-footer button:focus-visible {
+  outline: 3px solid #fff !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px rgba(203, 250, 77, .55) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-jinja-footer .hm-social-link,
+  .hm-jinja-footer .hm-footer-menus a,
+  .hm-jinja-footer .hm-footer-menus button {
+    transition-duration: .01ms;
+  }
+}
+
+/* ==========================================================================
+   Back to the top
+   ==========================================================================
+   One owner, for every public page. This sheet is loaded by the server-rendered pages
+   and by the React ones, so the button looks and sits the same on both; it used to be
+   defined in the React bundle's own sheet, which the other half of the site never loads.
+
+   **It sits above the assistant's button, not beside it.** Both are fixed to the
+   bottom-right corner and neither knew about the other, so on every long page the two
+   overlapped. The numbers here are the assistant's own, from
+   `hilalmarkets-public-chat.css`: it is 56px wide at right:22px bottom:22px, so
+   22 + 56 + 12 of air puts this clear above it, and right:26px centres this smaller
+   48px circle over the larger one — the pair reads as one column rather than two
+   near-misses.
+
+   `z-index` stays below the assistant's panel and backdrop (445-450), so an open chat
+   covers this rather than leaving a stray button floating over it.
+   -------------------------------------------------------------------------- */
+.hm-to-top {
+  position: fixed;
+  right: 26px;
+  bottom: 90px;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid #dbe1e7;
+  border-radius: 16px;
+  background: #fff;
+  color: #2b2e35;
+  box-shadow: 0 18px 40px -24px rgb(43 46 53 / 65%);
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  cursor: pointer;
+  transition: opacity 240ms cubic-bezier(.2, .75, .25, 1), transform 240ms cubic-bezier(.2, .75, .25, 1), background-color 180ms ease;
+}
+
+.hm-to-top[data-shown='true'] {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* The arrow points up, and which way it points is decided here for both renderers.
+   The icon set draws one arrow, pointing right; the React button used to turn it with a
+   utility class the server-rendered pages have no equivalent of, so the same button
+   would have pointed sideways on half the site. */
+.hm-to-top svg {
+  width: 20px;
+  height: 20px;
+  transform: rotate(-90deg);
+}
+
+.hm-to-top:hover {
+  background: #f3f6f9;
+}
+
+/* The assistant's button moves in at 640px, and this moves with it so the pair keeps
+   the same column and the same gap on a phone. */
+@media (max-width: 640px) {
+  .hm-to-top {
+    right: 18px;
+    bottom: 82px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-to-top {
+    transition-duration: .01ms;
+  }
+}
+
+/* Paper has no buttons. This was only ever hidden by the React bundle's own print rule,
+   so it printed on every server-rendered page. */
+@media print {
+  .hm-to-top,
+  .hm-no-print {
+    display: none !important;
+  }
+}

@@ -47,6 +47,7 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import IdentityProvider, UserRole
 from ai_market_monitor.schemas.system_brain import (
+    CONVERSATION_SOURCE_LABELS,
     ActionProposalRequest,
     EvidenceEnvelope,
     InternalArtifactRequest,
@@ -1549,8 +1550,10 @@ def _string(value: Any) -> str | None:
 
 
 def _source_filter(value: Any) -> Any:
+    # The one list of sources lives in `schemas/system_brain.py`. Typing a second copy
+    # here is how a filter the page offers becomes a filter the agent silently drops.
     text = _string(value)
-    return text if text in {"authenticated_setup_chat", "public_site_chat"} else None
+    return text if text in CONVERSATION_SOURCE_LABELS else None
 
 
 def _identity_filter(value: Any) -> Any:

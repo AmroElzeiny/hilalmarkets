@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -22,6 +23,22 @@ DEFAULT_PREVIEW_SYMBOLS_BY_QUOTE = {
     "USDT": ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"],
     "USDC": ["BTC/USDC", "ETH/USDC", "SOL/USDC"],
 }
+
+#: How many symbols one ticker request may name.
+#:
+#: Some exchanges put the requested symbols in the query string. Binance does:
+#: ccxt sends ``GET /api/v3/ticker/24hr?symbols=["BTCUSDT",...]``. Naming a whole
+#: USDT spot universe there builds an 8.3 KB URL for 490 pairs and Binance answers
+#: HTTP 414 Request-URI Too Large, so *every* symbol lost its ticker at once and the
+#: market rendered as if no coin were trading. Bybit hid the fault because ccxt sends
+#: it no symbol list at all. 100 is Binance's own request-weight tier boundary and
+#: builds a ~1.7 KB URL, which leaves ample headroom under the 8 KB limit.
+_TICKER_BATCH_SIZE = 100
+
+#: How many symbols may be probed one at a time once the batched and unfiltered
+#: reads have both failed. A bound keeps a provider outage from turning into
+#: hundreds of sequential requests.
+_TICKER_PROBE_LIMIT = 20
 
 
 @dataclass(frozen=True)
@@ -314,23 +331,7 @@ class CcxtMarketDataProvider:
             if "/" in symbol
         }
         ticker_symbols = sorted({*normalized_symbols, *benchmark_symbols})
-        tickers: dict[str, Any] = {}
-        try:
-            raw_tickers = await client.fetch_tickers(ticker_symbols)
-            tickers = {
-                _canonical_symbol(symbol): value
-                for symbol, value in raw_tickers.items()
-                if isinstance(value, dict)
-            }
-        except Exception:
-            if len(ticker_symbols) <= 20:
-                for symbol in ticker_symbols:
-                    try:
-                        ticker = await client.fetch_ticker(symbol)
-                    except Exception:
-                        continue
-                    if isinstance(ticker, dict):
-                        tickers[symbol] = ticker
+        tickers = await self._fetch_tickers(client, ticker_symbols)
 
         benchmark_percentages: dict[str, float] = {}
         for quote in {
@@ -441,6 +442,54 @@ class CcxtMarketDataProvider:
                 )
                 metadata[symbol]["metadata_source"] = "ccxt+configured_market_metadata"
         return metadata
+
+    async def _fetch_tickers(self, client: Any, symbols: list[str]) -> dict[str, Any]:
+        """Read tickers for a symbol universe of any size.
+
+        One request that names every symbol is refused once the universe grows past
+        a few hundred pairs (see ``_TICKER_BATCH_SIZE``). Three reads are tried in
+        order, each one narrower than the last, and every symbol a read does deliver
+        is kept:
+
+        1. batches of ``_TICKER_BATCH_SIZE`` symbols, so one refused batch costs only
+           the symbols it named rather than the whole market;
+        2. one unfiltered read, which names nothing in the query string and therefore
+           covers whatever the batches could not deliver;
+        3. a bounded per-symbol probe for whatever is still missing.
+
+        A symbol that no read returns keeps no ticker. The caller marks it as having
+        no verified data instead of substituting a value from somewhere else.
+        """
+
+        tickers: dict[str, Any] = {}
+
+        def absorb(raw: Any) -> None:
+            if not isinstance(raw, dict):
+                return
+            for symbol, value in raw.items():
+                if isinstance(value, dict):
+                    tickers[_canonical_symbol(symbol)] = value
+
+        def still_missing() -> list[str]:
+            return [symbol for symbol in symbols if symbol not in tickers]
+
+        for start in range(0, len(symbols), _TICKER_BATCH_SIZE):
+            try:
+                absorb(await client.fetch_tickers(symbols[start : start + _TICKER_BATCH_SIZE]))
+            except Exception:
+                continue
+
+        if still_missing():
+            with suppress(Exception):
+                absorb(await client.fetch_tickers())
+
+        for symbol in still_missing()[:_TICKER_PROBE_LIMIT]:
+            try:
+                absorb({symbol: await client.fetch_ticker(symbol)})
+            except Exception:
+                continue
+
+        return tickers
 
     async def fetch_order_book_context(
         self,

@@ -1,0 +1,365 @@
+{% extends "hilal/base_dashboard.html" %}
+{% import "hilal/dashboard_test/macros/tone.html" as tone %}
+{% import "hilal/dashboard_test/macros/coin.html" as coin %}
+{% set status_tone = tone.asset_tone(passport.assessment.status.value) %}
+{% set asset_symbol = passport.identity.symbol if passport.identity else passport.assessment.canonical_asset %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260818-live-4">{% endblock %}
+{% block content %}
+
+<div class="hm-t" data-passport-page>
+
+  {% if passport.historical.is_historical %}
+  <div class="t-banner" data-tone="info" role="status">
+    <span data-icon="history" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      <strong>You are reading an older version</strong>
+      <p>This is the record as it stood{% if passport.historical.event_time %} on {{ passport.historical.event_time|short_dt(user.timezone) }}{% endif %}. It is kept exactly as it was. Today's result is {{ passport.historical.current_status.value|replace('_', ' ') if passport.historical.current_status else 'not published' }}.</p>
+    </div>
+  </div>
+  {% endif %}
+
+  {#- The header answers "which coin, what result, how fresh" before anything else. -#}
+  <section class="t-passport-hero">
+    <div class="t-passport-identity">
+      {{ coin.logo(asset_symbol, passport.identity) }}
+      <div class="t-head-copy">
+        <p class="t-eyebrow"><span data-icon="passport" data-icon-class="icon-sm"></span>{{ 'Version ' ~ passport.passport_version if passport.historical.is_historical else 'Current published record' }}</p>
+        <h1>{{ passport.identity.name if passport.identity else passport.assessment.asset_name or passport.assessment.canonical_asset }}</h1>
+        <p>{{ asset_symbol }}{% if passport.identity and passport.identity.network %} &middot; {{ passport.identity.network }}{% endif %} &middot; {% if passport.identity and passport.identity.native_asset %}Native coin{% elif passport.identity and passport.identity.native_asset == false %}Token{% else %}Type not recorded{% endif %}</p>
+      </div>
+    </div>
+
+    <div class="t-pq-answer" data-tone="{{ status_tone }}">
+      {{ tone.chip(status_tone, passport.assessment.status_label) }}
+      <p>{{ passport.why_this_status }}</p>
+    </div>
+
+    <div class="t-facts">
+      <div><small>Standard used</small><strong>{{ passport.assessment.methodology_name }} v{{ passport.assessment.methodology_version }}</strong></div>
+      <div><small>Decision made</small><strong>{{ passport.decision_date|short_dt(user.timezone) if passport.decision_date else 'Not recorded' }}</strong></div>
+      <div><small>Published</small><strong>{{ passport.publication_date|short_dt(user.timezone) if passport.publication_date else 'Not recorded' }}</strong></div>
+      <div><small>Evidence last checked</small><strong>{{ passport.last_verified_at|short_dt(user.timezone) if passport.last_verified_at else passport.assessment.reviewed_at|short_dt(user.timezone) }}</strong></div>
+      <div><small>Evidence expires</small><strong>{{ passport.evidence_expires_at|short_dt(user.timezone) if passport.evidence_expires_at else 'Not recorded' }}</strong></div>
+      <div><small>Next source check</small><strong>{{ passport.next_source_scan_at|short_dt(user.timezone) if passport.next_source_scan_at else 'Not scheduled' }}</strong></div>
+    </div>
+
+    {% if passport.main_qualification %}
+    <div class="t-banner">
+      <span data-icon="alert" data-icon-class="icon"></span>
+      <div class="t-banner-body"><strong>One condition applies</strong><p>{{ passport.main_qualification }}</p></div>
+    </div>
+    {% endif %}
+
+    <div class="t-asset-actions t-no-print" style="border-top:0;padding-top:0;">
+      <a class="t-action" href="{{ market_base_path }}"><span data-icon="chevron_left" data-icon-class="icon-sm"></span>Back to the list</a>
+      <a class="t-action is-primary" href="{{ market_base_path }}/{{ passport.assessment.canonical_asset|lower }}/report"><span data-icon="file_text" data-icon-class="icon-sm"></span>Open the full report</a>
+      {% if passport.identity and passport.identity.canonical_asset_id %}
+      <button class="t-action" type="button" data-copy-reference="{{ passport.identity.canonical_asset_id }}"><span data-icon="copy" data-icon-class="icon-sm"></span>Copy reference</button>
+      {% endif %}
+    </div>
+  </section>
+
+  <div class="t-banner" data-tone="info">
+    <span data-icon="info" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      <strong>What this result is</strong>
+      <p>A screening result for this coin, under the one standard named above, on the date named above. It is not a universal religious ruling, and it is not approval of every way the coin can be used.</p>
+    </div>
+  </div>
+
+  <nav class="t-tabs t-no-print" aria-label="Sections of this Passport" data-passport-tabs>
+    <a href="#why" aria-current="true"><span data-icon="check" data-icon-class="icon-sm"></span>Why</a>
+    <a href="#coverage"><span data-icon="layers" data-icon-class="icon-sm"></span>What it covers</a>
+    <a href="#identity"><span data-icon="globe" data-icon-class="icon-sm"></span>Which coin exactly</a>
+    <a href="#evidence"><span data-icon="book" data-icon-class="icon-sm"></span>Evidence</a>
+    <a href="#history"><span data-icon="history" data-icon-class="icon-sm"></span>History</a>
+    {% if passport.identity and passport.identity.canonical_asset_id %}<a href="#report-problem"><span data-icon="flag" data-icon-class="icon-sm"></span>Report a problem</a>{% endif %}
+  </nav>
+
+  {# ── Why ───────────────────────────────────────────────────────────────── #}
+  <section class="t-section" id="why">
+    <div class="t-section-head">
+      <h2>Why this result</h2>
+      <p class="t-lede">The short reasons a reviewer recorded. The criterion-by-criterion detail is under Evidence.</p>
+    </div>
+    <div class="t-panel">
+      <ul class="t-reasons">
+        {% for reason in passport.main_reasons %}
+        <li><span data-icon="check" data-icon-class="icon-sm"></span><span>{{ reason }}</span></li>
+        {% else %}
+        <li><span data-icon="info" data-icon-class="icon-sm"></span><span>No short reason was kept with this record. The evidence section below still has the full detail.</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    {% if passport.methodology_references|length > 1 %}
+    <details class="t-more">
+      <summary>
+        <span data-icon="scale" data-icon-class="icon-sm"></span>
+        Other standards reviewed this coin
+        <span class="t-more-count">{{ passport.methodology_references|length }} standards</span>
+        <span data-icon="chevron" data-icon-class="icon"></span>
+      </summary>
+      <div class="t-more-body">
+        <p>Each standard reaches its own result. Nothing is averaged and no combined score is created.</p>
+        {% for reference in passport.methodology_references %}
+        <div class="t-use">
+          <span>{{ reference.methodology_name }}{% if reference.review_date %} &middot; reviewed {{ reference.review_date|short_dt(user.timezone) }}{% endif %}</span>
+          {{ tone.chip('neutral', reference.status_label) }}
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
+  </section>
+
+  {# ── Use coverage ──────────────────────────────────────────────────────── #}
+  <section class="t-section" id="coverage">
+    <div class="t-section-head">
+      <h2>What this covers</h2>
+      <p class="t-lede">A result for the coin is not a result for everything you can do with it. Each use is decided on its own.</p>
+    </div>
+    <div class="t-panel">
+      {% for use in passport.use_coverage %}
+      {% set use_tone = tone.coverage_tone(use.status) %}
+      <details class="t-more">
+        <summary>
+          <span data-icon="{{ tone.tone_icon(use_tone) }}" data-icon-class="icon-sm"></span>
+          {{ use.label }}
+          <span class="t-more-count">{{ tone.humanize(use.status) }}</span>
+          <span data-icon="chevron" data-icon-class="icon"></span>
+        </summary>
+        <div class="t-more-body">
+          <p>{{ use.reason }}</p>
+          {% if use.scope %}<p><strong>Scope:</strong> {{ use.scope }}</p>{% endif %}
+          {% if use.supporting_reference %}<p><strong>Based on:</strong> {{ use.supporting_reference }}</p>{% endif %}
+          <p class="t-foot-note">Checked {{ use.last_verified_at|short_dt(user.timezone) if use.last_verified_at else 'date not recorded' }}</p>
+        </div>
+      </details>
+      {% else %}
+      <div class="t-state"><div class="t-state-icon"><span data-icon="layers" data-icon-class="icon"></span></div><h3>No separate use decisions were kept</h3><p>This record does not say which uses it covers. Nothing was assumed on its behalf.</p></div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {# ── Identity ──────────────────────────────────────────────────────────── #}
+  <section class="t-section" id="identity">
+    <div class="t-section-head">
+      <h2>Which coin exactly</h2>
+      <p class="t-lede">Many coins share a ticker. A ticker on its own is never treated as proof of which coin was reviewed.</p>
+    </div>
+    {% if passport.identity %}
+    <div class="t-panel">
+      <div class="t-facts">
+        <div><small>Official name</small><strong>{{ passport.identity.name }}</strong></div>
+        <div><small>Symbol</small><strong>{{ passport.identity.symbol }}</strong></div>
+        <div><small>Network</small><strong>{{ passport.identity.network or 'Not recorded' }}</strong></div>
+        <div><small>Type</small><strong>{% if passport.identity.native_asset %}Native coin{% elif passport.identity.native_asset == false %}Token{% else %}{{ tone.humanize(passport.identity.asset_type) }}{% endif %}</strong></div>
+        <div><small>Identity state</small><strong>{{ tone.humanize(passport.identity.identity_state) }}</strong></div>
+        <div><small>Identity checked</small><strong>{{ passport.identity.identity_verified_at|short_dt(user.timezone) if passport.identity.identity_verified_at else 'Date not kept' }}</strong></div>
+      </div>
+
+      {% if passport.identity.contract_addresses %}
+      <details class="t-more">
+        <summary><span data-icon="link" data-icon-class="icon-sm"></span>Contract addresses<span class="t-more-count">{{ passport.identity.contract_addresses|length }}</span><span data-icon="chevron" data-icon-class="icon"></span></summary>
+        <div class="t-more-body">
+          {% for network, address in passport.identity.contract_addresses.items() %}
+          <div class="t-source">
+            <span class="t-source-name">{{ network }}</span>
+            <span class="t-code">{{ address }}</span>
+            <button class="t-action t-no-print" type="button" data-copy-reference="{{ address }}" style="flex:0 0 auto;"><span data-icon="copy" data-icon-class="icon-sm"></span>Copy</button>
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+
+      <div>
+        <h3>Where it trades</h3>
+        <p class="t-foot-note" style="margin-bottom:8px;">Whether an exchange lists a coin is separate from whether it passed the review.</p>
+        {% for market in passport.identity.exchange_markets %}
+        <div class="t-use">
+          <span><strong>{{ market.exchange|capitalize }}</strong> &middot; {{ market.market_symbol }} &middot; {{ market.market_type }}</span>
+          {{ tone.chip('eligible' if market.is_active else 'neutral', 'Trading now' if market.is_active else 'Not trading now') }}
+        </div>
+        {% else %}
+        <p>No checked spot market is recorded for this coin on a supported exchange.</p>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+    <div class="t-state">
+      <div class="t-state-icon"><span data-icon="globe" data-icon-class="icon"></span></div>
+      <h3>Identity details are not available</h3>
+      <p>This Passport is still shown, but Hilal Markets will not invent which coin a ticker refers to.</p>
+    </div>
+    {% endif %}
+  </section>
+
+  {# ── Evidence ──────────────────────────────────────────────────────────── #}
+  <section class="t-section" id="evidence">
+    <div class="t-section-head">
+      <h2>Evidence</h2>
+      <p class="t-lede">What the reviewer decided on each rule, and the sources behind it. Reviewer decisions and AI-organised facts are kept apart.</p>
+    </div>
+
+    <div class="t-two">
+      <div class="t-panel">
+        <h3>Rule by rule</h3>
+        {% for criterion in passport.criteria %}
+        {% set criterion_tone = tone.criterion_tone(criterion.outcome) %}
+        <details class="t-more">
+          <summary>
+            <span data-icon="{{ tone.tone_icon(criterion_tone) }}" data-icon-class="icon-sm"></span>
+            {{ criterion.label }}
+            <span class="t-more-count">{{ tone.humanize(criterion.outcome) }}</span>
+            <span data-icon="chevron" data-icon-class="icon"></span>
+          </summary>
+          <div class="t-more-body">
+            <p>{{ criterion.reviewer_explanation or 'The reviewer did not add an explanation for this rule.' }}</p>
+            {% if criterion.evidence %}<p><strong>Evidence:</strong> {{ criterion.evidence|join(' · ') }}</p>{% endif %}
+            {% if criterion.known_gaps %}<p><strong>Still missing:</strong> {{ criterion.known_gaps|join(' · ') }}</p>{% endif %}
+            {% if criterion.contradictions %}<p><strong>Sources disagree:</strong> {{ criterion.contradictions|join(' · ') }}</p>{% endif %}
+          </div>
+        </details>
+        {% else %}
+        <p>This record did not keep rule-by-rule decisions. Nothing was reconstructed to fill the gap.</p>
+        {% endfor %}
+      </div>
+
+      <div class="t-panel">
+        <h3>Sources</h3>
+        <p class="t-foot-note">A live link can change. The saved copy and its fingerprint cannot.</p>
+        {% for source in passport.evidence_details %}
+        <details class="t-more">
+          <summary>
+            <span data-icon="{{ 'shield_check' if source.availability == 'available' else 'clock' }}" data-icon-class="icon-sm"></span>
+            {{ source.title }}
+            <span class="t-more-count">{{ tone.humanize(source.availability) }}</span>
+            <span data-icon="chevron" data-icon-class="icon"></span>
+          </summary>
+          <div class="t-more-body">
+            <p>{{ source.evidence_summary }}</p>
+            <p class="t-foot-note">{{ source.publisher }} &middot; taken {{ source.retrieved_at|short_dt(user.timezone) }}{% if source.published_at %} &middot; published {{ source.published_at|short_dt(user.timezone) }}{% endif %}</p>
+            {% if source.source_url %}<p><a href="{{ source.source_url }}" target="_blank" rel="noopener">Open the source <span data-icon="external" data-icon-class="icon-sm"></span></a></p>{% endif %}
+            <details class="t-more">
+              <summary><span data-icon="database" data-icon-class="icon-sm"></span>Technical details<span data-icon="chevron" data-icon-class="icon"></span></summary>
+              <div class="t-more-body">
+                <div class="t-kv"><span>Saved copy</span><strong class="t-code">{{ source.snapshot_id or 'Older record' }}</strong></div>
+                <div class="t-kv"><span>Fingerprint</span><strong class="t-code">{{ source.content_hash or 'Not kept' }}</strong></div>
+                <div class="t-kv"><span>Reader version</span><strong>{{ source.parser_version or 'Not kept' }}</strong></div>
+                <div class="t-kv"><span>AI reading</span><strong>{{ source.ai_extraction_version or 'Not used' }}</strong></div>
+              </div>
+            </details>
+          </div>
+        </details>
+        {% else %}
+        <p>The exact sources for this version are not available. Hilal Markets does not substitute a different source in their place.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% set profile = passport.hilalmarkets_factual_information_profile %}
+    {% if profile %}
+    <details class="t-more">
+      <summary>
+        <span data-icon="database" data-icon-class="icon-sm"></span>
+        Facts gathered about this coin
+        <span class="t-more-count">Not a religious decision</span>
+        <span data-icon="chevron" data-icon-class="icon"></span>
+      </summary>
+      <div class="t-more-body">
+        <p>These facts were organised by software from published sources. Software cannot approve, reject or set a Shariah status; only the reviewer above can.</p>
+        {% for key, value in profile.items() %}
+        {% if value and key not in ['missing_information', 'contradictions'] and value is string %}
+        <div class="t-kv"><span>{{ tone.humanize(key) }}</span><strong>{{ value }}</strong></div>
+        {% endif %}
+        {% endfor %}
+        {% if profile.get('missing_information') %}
+        <div class="t-banner"><span data-icon="alert" data-icon-class="icon"></span><div class="t-banner-body"><strong>Gaps in the evidence</strong><p>{{ profile.get('missing_information')|join(' · ') }}</p></div></div>
+        {% endif %}
+        {% if profile.get('contradictions') %}
+        <div class="t-banner" data-tone="error"><span data-icon="alert" data-icon-class="icon"></span><div class="t-banner-body"><strong>Sources that disagree</strong><p>{{ profile.get('contradictions')|join(' · ') }}</p></div></div>
+        {% endif %}
+      </div>
+    </details>
+    {% endif %}
+  </section>
+
+  {# ── History ───────────────────────────────────────────────────────────── #}
+  <section class="t-section" id="history">
+    <div class="t-section-head">
+      <h2>History</h2>
+      <p class="t-lede">Older events stay visible after newer versions replace them.</p>
+    </div>
+    <div class="t-two">
+      <div class="t-panel">
+        <h3>The human decision</h3>
+        {% if passport.decision_record %}
+        <div class="t-kv"><span>Decision</span><strong>{{ tone.humanize(passport.decision_record.decision) }}</strong></div>
+        <div class="t-kv"><span>Who decided</span><strong>{{ tone.humanize(passport.decision_record.actor_role) }}</strong></div>
+        <div class="t-kv"><span>When</span><strong>{{ passport.decision_record.decided_at|short_dt(user.timezone) if passport.decision_record.decided_at else 'Not recorded' }}</strong></div>
+        <div class="t-kv"><span>Published</span><strong>{{ passport.decision_record.published_at|short_dt(user.timezone) if passport.decision_record.published_at else 'Not published' }}</strong></div>
+        <p>{{ passport.decision_record.reason }}</p>
+        {% if passport.decision_record.qualifications %}
+        <div class="t-banner"><span data-icon="alert" data-icon-class="icon"></span><div class="t-banner-body"><strong>Conditions</strong><p>{{ passport.decision_record.qualifications|join(' · ') }}</p></div></div>
+        {% endif %}
+        {% else %}
+        <p>A structured record of the human decision was not kept for this version. The published result and its date still stand.</p>
+        {% endif %}
+      </div>
+
+      <div class="t-panel">
+        <h3>Everything that happened</h3>
+        {% if passport.timeline %}
+        <ul class="t-timeline">
+          {% for event in passport.timeline %}
+          <li>
+            <strong>{{ tone.humanize(event.action) }}</strong>
+            <p>{{ event.reason }}</p>
+            <small>{{ event.occurred_at|short_dt(user.timezone) }} &middot; {{ event.actor }}{% if event.previous_state or event.new_state %} &middot; {{ event.previous_state or 'start' }} &rarr; {{ event.new_state or 'no change' }}{% endif %}</small>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p>No history events are recorded for this version.</p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  {# ── Report a problem ──────────────────────────────────────────────────── #}
+  {% if passport.identity and passport.identity.canonical_asset_id %}
+  <section class="t-section t-no-print" id="report-problem">
+    <div class="t-section-head">
+      <h2>Something looks wrong?</h2>
+      <p class="t-lede">Your report opens a review item for a person to look at. It never changes a published result by itself.</p>
+    </div>
+    <form class="t-panel" data-problem-form data-canonical-asset-id="{{ passport.identity.canonical_asset_id }}">
+      <input type="hidden" name="passport_version_id" value="{{ passport.passport_version_id or '' }}">
+      <div class="t-form-row">
+        <label for="t-problem-type">What kind of problem is it?</label>
+        <select id="t-problem-type" name="report_type" required>
+          <option value="wrong_asset_identity">This is the wrong coin</option>
+          <option value="broken_source">A source link does not work</option>
+          <option value="outdated_evidence">The evidence is out of date</option>
+          <option value="incorrect_qualification">A condition looks wrong</option>
+          <option value="status_disagreement">I disagree with the result</option>
+          <option value="other">Something else</option>
+        </select>
+      </div>
+      <div class="t-form-row">
+        <label for="t-problem-details">What should we look at? Please give at least 20 characters.</label>
+        <textarea id="t-problem-details" name="details" minlength="20" maxlength="5000" rows="4" required></textarea>
+      </div>
+      <div class="t-asset-actions" style="border-top:0;padding-top:0;">
+        <button class="t-action is-primary" type="submit" style="flex:0 0 auto;"><span data-icon="flag" data-icon-class="icon-sm"></span>Send the report</button>
+        <span class="t-foot-note" data-problem-status aria-live="polite" style="align-self:center;"></span>
+      </div>
+    </form>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20260818-live-4"></script>{% endblock %}

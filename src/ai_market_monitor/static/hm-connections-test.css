@@ -1,0 +1,387 @@
+/* The Connections page at /dashboard/connections.
+ *
+ * Every colour, space, radius and typeface comes from the `--t-*` aliases declared in
+ * hm-dashboard-test.css, which are themselves the `--hm-*` brand tokens. Nothing new is
+ * invented here: no new brand colour, no second spacing scale, no third typeface.
+ *
+ * The page is quiet on purpose. `brand guide.md` section 12 asks for hierarchy from
+ * spacing and type before decoration, and this is a settings page — the interesting
+ * thing on it is a person's own state, not the design.
+ */
+
+/* ── The page heading ──────────────────────────────────────────────────────── */
+
+/* "When and how often" — under the page's name, and small.
+ *
+ * It used to be a `.t-action`, full size, on the far right of the heading row, which is
+ * where this path puts the one thing a page most wants a person to do. This page's
+ * heading is "Connections" and this link leaves for a different page, so being the
+ * loudest thing on the row said the wrong thing about it.
+ *
+ * It stays a real link with a real target size — 44px is the smallest anything on this
+ * path may be pressed at — and is quiet in weight and colour rather than in size. */
+body.hilal-dashboard .hm-c .c-head-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  min-height: 44px;
+  margin-top: calc(var(--t-1) * -1);
+  color: var(--t-copy);
+  font-size: .85rem;
+  font-weight: 450;
+  text-decoration: none;
+}
+
+body.hilal-dashboard .hm-c .c-head-link:hover {
+  color: var(--t-ink-strong);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+body.hilal-dashboard .hm-c .c-head-link .icon-sm {
+  color: var(--t-muted);
+}
+
+/* ── The banner ────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-c .t-banner {
+  display: flex;
+  align-items: flex-start;
+  padding: var(--t-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+  gap: var(--t-3);
+}
+
+body.hilal-dashboard .hm-c .t-banner[data-tone="information"] {
+  border-color: var(--hm-hairline-strong);
+  background: var(--hm-info-bg);
+  color: var(--hm-info);
+}
+
+body.hilal-dashboard .hm-c .t-banner-body { display: grid; gap: var(--t-1); }
+body.hilal-dashboard .hm-c .t-banner-body strong { color: var(--t-ink-strong); }
+body.hilal-dashboard .hm-c .t-banner-body p { color: var(--t-copy); font-size: .9rem; }
+
+/* ── The channel cards ─────────────────────────────────────────────────────── */
+
+/* Two across on a wide screen, one on a phone. Not three: there are four ways of being
+   told, and three columns strands the fourth on a row of its own. Two gives an even
+   block and leaves each card wide enough for a full sentence. */
+body.hilal-dashboard .hm-c .c-grid {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: var(--t-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  list-style: none;
+}
+
+body.hilal-dashboard .hm-c .c-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: var(--t-5);
+  overflow: hidden;
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+  gap: var(--t-4);
+  transition: border-color var(--t-base) var(--t-ease), transform var(--t-base) var(--t-ease), box-shadow var(--t-base) var(--t-ease);
+}
+
+/* Hover says "this one", and says it by lifting rather than by colouring: colour on
+   this page already carries state, and a second meaning on the same colour is how a
+   person stops trusting either. */
+body.hilal-dashboard .hm-c .c-card:hover {
+  border-color: var(--t-line-strong);
+  box-shadow: var(--hm-shadow-xs);
+  transform: translateY(-2px);
+}
+
+body.hilal-dashboard .hm-c .c-card:focus-within {
+  border-color: var(--t-ink);
+}
+
+body.hilal-dashboard .hm-c .c-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-3);
+}
+
+body.hilal-dashboard .hm-c .c-mark {
+  display: grid;
+  flex: none;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+  color: var(--t-ink-strong);
+  transition: background var(--t-base) var(--t-ease), transform var(--t-base) var(--t-ease);
+}
+
+/* A channel that is really on carries the accent on its mark. One focal green per card,
+   and only where it means "this is working". */
+body.hilal-dashboard .hm-c .c-mark[data-tone="success"] {
+  border-color: var(--t-accent);
+  background: var(--t-accent-pale);
+}
+
+body.hilal-dashboard .hm-c .c-card:hover .c-mark { transform: scale(1.06); }
+
+body.hilal-dashboard .hm-c .c-title { min-width: 0; display: grid; gap: var(--t-1); }
+body.hilal-dashboard .hm-c .c-title h2 { color: var(--t-ink-strong); }
+body.hilal-dashboard .hm-c .c-title p { font-size: .86rem; }
+
+/* ── The state line ────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-c .c-state {
+  display: grid;
+  align-items: start;
+  padding: var(--t-3);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+  gap: 0 var(--t-2);
+  grid-template-columns: auto 1fr;
+}
+
+body.hilal-dashboard .hm-c .c-state .icon,
+body.hilal-dashboard .hm-c .c-state .icon-sm { margin-top: 2px; }
+body.hilal-dashboard .hm-c .c-state strong { color: var(--t-ink-strong); font-size: .92rem; }
+body.hilal-dashboard .hm-c .c-state > span:last-child {
+  grid-column: 2;
+  color: var(--t-copy);
+  font-size: .84rem;
+  line-height: 1.55;
+}
+
+body.hilal-dashboard .hm-c .c-state[data-tone="success"] {
+  border-color: var(--t-accent);
+  background: var(--t-accent-soft);
+  color: var(--t-accent-text);
+}
+
+body.hilal-dashboard .hm-c .c-state[data-tone="warning"] {
+  border-color: var(--hm-hairline-strong);
+  background: var(--hm-warning-bg);
+  color: var(--hm-warning);
+}
+
+/* ── The facts ─────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-c .c-facts { display: grid; margin: 0; gap: var(--t-2); }
+body.hilal-dashboard .hm-c .c-fact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--t-2);
+}
+body.hilal-dashboard .hm-c .c-fact dt { color: var(--t-copy); font-size: .8rem; }
+body.hilal-dashboard .hm-c .c-fact dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--t-ink-strong);
+  font-size: .85rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+/* ── Not available yet ─────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-c .c-locked {
+  display: grid;
+  padding: var(--t-3);
+  border: 1px dashed var(--t-line-strong);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+  gap: var(--t-1);
+}
+
+body.hilal-dashboard .hm-c .c-locked-why {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-2);
+  color: var(--t-ink-strong);
+  font-size: .85rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-c .c-locked-fix { color: var(--t-copy); font-size: .82rem; }
+
+/* ── The actions ───────────────────────────────────────────────────────────── */
+
+/* Stacked, for the same reason the Watchlist and Opportunity cards stack: the number of
+   actions on a card changes with the data, and a wrapping row puts the same action in a
+   different place on every card in the grid. */
+body.hilal-dashboard .hm-c .c-actions {
+  display: grid;
+  margin-top: auto;
+  gap: var(--t-2);
+}
+
+body.hilal-dashboard .hm-c .c-actions > .t-action { width: 100%; }
+
+/* A card whose only "action" is a note has nothing to push to the bottom. Pushing it
+   there anyway opened a hole in the middle of the always-on card, which reads as
+   something failing to load. Where `:has` is unsupported this simply does not apply and
+   the card looks as it did — a gap, not a break. */
+body.hilal-dashboard .hm-c .c-actions:has(.c-always) { margin-top: var(--t-1); }
+
+body.hilal-dashboard .hm-c .c-always {
+  display: flex;
+  align-items: center;
+  gap: var(--t-2);
+  color: var(--t-copy);
+  font-size: .84rem;
+}
+
+/* ── The switch ──────────────────────────────────────────────────────────────
+ *
+ * There is no switch here any more. It lives in `hm-dashboard-test.css` as `.t-switch`,
+ * shared with the Settings page, which needs the same control a dozen times. Two copies
+ * of one control is how two pages end up disagreeing about what "on" looks like.
+ */
+
+/* ── What you will be told about ───────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-c .c-kinds {
+  display: grid;
+  padding: var(--t-5);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+  gap: var(--t-4);
+}
+
+body.hilal-dashboard .hm-c .c-kinds-head { display: grid; gap: var(--t-2); }
+body.hilal-dashboard .hm-c .c-kinds-head h2 { color: var(--t-ink-strong); }
+
+body.hilal-dashboard .hm-c .c-kind-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: var(--t-3);
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  list-style: none;
+}
+
+body.hilal-dashboard .hm-c .c-kind {
+  display: flex;
+  align-items: center;
+  padding: var(--t-2) var(--t-3);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+  gap: var(--t-3);
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-c .c-kind:hover { border-color: var(--t-line-strong); background: var(--t-surface); }
+body.hilal-dashboard .hm-c .c-kind div { min-width: 0; }
+body.hilal-dashboard .hm-c .c-kind strong { color: var(--t-ink-strong); font-size: .88rem; }
+
+body.hilal-dashboard .hm-c .c-kind-mark {
+  display: grid;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: var(--t-r-sm);
+  background: var(--t-surface);
+  color: var(--t-ink-strong);
+  border: 1px solid var(--t-line);
+}
+
+body.hilal-dashboard .hm-c .c-kind-mark[data-tone="success"] { border-color: var(--t-accent); background: var(--t-accent-pale); }
+body.hilal-dashboard .hm-c .c-kind-mark[data-tone="warning"] { border-color: var(--hm-hairline-strong); background: var(--hm-warning-bg); color: var(--hm-warning); }
+body.hilal-dashboard .hm-c .c-kind-mark[data-tone="information"] { border-color: var(--hm-hairline-strong); background: var(--hm-info-bg); color: var(--hm-info); }
+
+/* ── Linking Telegram ──────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .c-link .c-steps {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: var(--t-4);
+  list-style: none;
+  counter-reset: none;
+}
+
+body.hilal-dashboard .c-link .c-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-3);
+}
+
+body.hilal-dashboard .c-link .c-step > div { display: grid; gap: var(--t-2); min-width: 0; }
+body.hilal-dashboard .c-link .c-step strong { color: var(--t-ink-strong); }
+body.hilal-dashboard .c-link .c-step p { font-size: .88rem; }
+
+body.hilal-dashboard .c-link .c-step-number {
+  display: grid;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--t-accent-pale);
+  color: var(--t-ink-strong);
+  font-family: var(--hm-font-display);
+  font-size: .85rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .c-link .c-step .t-action { justify-self: start; flex: none; }
+
+body.hilal-dashboard .c-link .c-step-blocked {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-2);
+  color: var(--hm-warning);
+  font-size: .85rem;
+}
+
+body.hilal-dashboard .c-link .c-step-note { color: var(--t-copy); font-size: .8rem; }
+
+body.hilal-dashboard .c-link .c-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: var(--t-2) var(--t-3);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+  gap: var(--t-2);
+}
+
+body.hilal-dashboard .c-link .c-copy code {
+  min-width: 0;
+  color: var(--t-ink-strong);
+  font-size: .84rem;
+  overflow-wrap: anywhere;
+}
+
+body.hilal-dashboard .c-link .c-copy .t-action { flex: none; }
+
+/* ── Small screens ─────────────────────────────────────────────────────────── */
+
+@media (max-width: 560px) {
+  body.hilal-dashboard .hm-c .c-card { padding: var(--t-4); }
+  body.hilal-dashboard .hm-c .c-kinds { padding: var(--t-4); }
+  body.hilal-dashboard .hm-c .c-fact { flex-direction: column; gap: 0; }
+}
+
+/* ── Less motion ───────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  body.hilal-dashboard .hm-c :where(.c-card, .c-mark, .c-kind) {
+    transition: none;
+  }
+  body.hilal-dashboard .hm-c .c-card:hover { transform: none; }
+  body.hilal-dashboard .hm-c .c-card:hover .c-mark { transform: none; }
+}

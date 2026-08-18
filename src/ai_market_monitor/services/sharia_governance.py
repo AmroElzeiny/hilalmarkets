@@ -57,6 +57,19 @@ SC_METHODOLOGY_CODE = "SC_MALAYSIA_SAC_REFERENCE"
 FASSET_METHODOLOGY_CODE = "FASSET_SHARIAH_REPORTS"
 SRB_METHODOLOGY_CODE = "SHARIAH_REVIEW_BUREAU"
 TERMINAL_CASE_STATES = {"published", "rejected", "stored", "superseded"}
+#: The states an undo may put a case back into.
+#:
+#: Only states a case can legitimately be *waiting* in. Undo is a way back from a
+#: decision that was taken too quickly, so restoring a case into another finished state
+#: — published, superseded — is never what it means, and listing them here would let one
+#: mistake be corrected into a different one.
+ALLOWED_UNDO_STATES = {
+    "draft",
+    "researching",
+    "research_failed",
+    "ready_for_review",
+    "needs_evidence",
+}
 OPEN_REMINDER_STATES = {
     "draft",
     "researching",
@@ -1945,6 +1958,111 @@ class ShariaGovernanceService:
             available_evidence_categories=context.available_evidence_categories,
             reviewer_user_id=decision.admin_user_id,
         )
+
+    async def review_contract(self, case: ReviewCase) -> GovernanceReviewContext:
+        """The exact contract an approval of this case will be validated against.
+
+        Public so a caller that needs to know *which conditions this case has* — the
+        Cases page's quick decision — reads the same methodology, the same criteria
+        version and the same evidence categories that ``approve_for_publication`` will
+        then check. A second resolver next to this one is how a page offers a condition
+        list that the approval does not recognise.
+        """
+
+        return await self._review_context(case)
+
+    async def undo_decision(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+        decision_id: UUID,
+        previous_state: str,
+        previous_publication_state: str,
+    ) -> ReviewCase:
+        """Put one case back where it was before a decision, and record that too.
+
+        This is the way back from a mistake, not an eraser. The decision being undone
+        stays in the review history for ever with its evidence and its reasoning; what
+        changes is where the case sits, so it can be decided again properly.
+
+        Three things make it refuse rather than guess, and each closes a way of quietly
+        corrupting the record:
+
+        * the decision being undone must still be the **latest** one on the case, so an
+          undo cannot silently reverse somebody else's later work;
+        * a **published** Passport is never undone here — it is already in front of
+          customers, and the recorded way to withdraw it is a safety hold;
+        * the state being restored must be one the case can really be in.
+        """
+
+        admin = await self._require_permission(admin_user_id, "REVIEWER")
+        case = await self.session.get(ReviewCase, case_id)
+        if case is None:
+            raise ShariaGovernanceError("case_not_found", "Review case not found.")
+        if len(reason.strip()) < 10:
+            raise ShariaGovernanceError(
+                "undo_reason_required", "Record why this decision is being undone."
+            )
+        latest = await self.session.scalar(
+            select(ReviewDecision)
+            .where(ReviewDecision.review_case_id == case.id)
+            .order_by(ReviewDecision.decision_version.desc())
+            .limit(1)
+        )
+        if latest is None or latest.id != decision_id:
+            raise ShariaGovernanceError(
+                "undo_superseded",
+                "A newer decision was recorded on this case, so the earlier one can no "
+                "longer be undone. Reopen the case instead.",
+            )
+        if case.state == "published" or case.publication_state == "published":
+            raise ShariaGovernanceError(
+                "undo_published_blocked",
+                "This Passport is already published to customers. Place a safety hold "
+                "rather than undoing the decision.",
+            )
+        if previous_state not in ALLOWED_UNDO_STATES:
+            raise ShariaGovernanceError(
+                "undo_state_unknown",
+                "The state this case came from cannot be restored automatically.",
+            )
+        now = datetime.now(UTC)
+        restored_from = case.state
+        case.state = previous_state
+        case.publication_state = previous_publication_state
+        case.done_at = None
+        case.next_reminder_at = now + timedelta(
+            hours=self.settings.sharia_review_reminder_hours
+        )
+        self.session.add(
+            ShariaReviewAssignmentEvent(
+                review_case_id=case.id,
+                actor_user_id=admin.id,
+                previous_assignee_id=case.assigned_reviewer_id,
+                assigned_reviewer_id=case.assigned_reviewer_id,
+                action="decision_undone",
+                priority=case.priority,
+                reason=reason.strip(),
+                created_at=now,
+            )
+        )
+        self._audit(
+            admin.id,
+            "sharia.review_decision_undone",
+            "sharia_review_case",
+            str(case.id),
+            {
+                "undone_decision_id": str(decision_id),
+                "undone_decision": latest.decision,
+                "restored_from": restored_from,
+                "restored_to": previous_state,
+                "decision_record_retained": True,
+            },
+        )
+        await self.session.flush()
+        return case
 
     async def _open_case(self, case_id: UUID) -> ReviewCase:
         case = await self.session.get(ReviewCase, case_id)

@@ -1,14 +1,14 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260805-y5-5">
-<link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260805-y5-5">
-<link rel="stylesheet" href="{{ url_for('static', path='/ai-setup-chat.css') }}?v=20260805-y5-5">
-<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-builder.css') }}?v=20260805-y5-5">
+<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260818-live-4">
+<link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260818-live-4">
+<link rel="stylesheet" href="{{ url_for('static', path='/ai-setup-chat.css') }}?v=20260818-live-4">
+<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-builder.css') }}?v=20260818-live-4">
 {% endblock %}
 {% block content %}
 <section class="guided-builder-heading" data-testid="strategy-builder-entry" {% if strategy %}hidden{% endif %}>
   <div class="guided-builder-heading-line">
-    <h1>Market Assistant</h1>
+    <h1>Market assistant</h1>
   </div>
   <div class="guided-builder-heading-actions">
     <button class="btn btn-secondary btn-sm" type="button" data-ai-open-canvas data-hm-guide-target="builder-open-canvas"><span data-icon="chart" data-icon-class="icon"></span>Open Visual Canvas</button>
@@ -66,7 +66,7 @@
     </section>
 
     <aside class="ai-preview-panel" data-ai-preview-panel aria-label="Live Watchlist translation" data-hm-guide-target="builder-canvas">
-      <div class="ai-preview-head"><div class="ai-preview-title"><h2>AI Sheet</h2><span class="ai-preview-status" data-ai-preview-status>Interviewing</span></div></div>
+      <div class="ai-preview-head"><div class="ai-preview-title"><h2>AI sheet</h2><span class="ai-preview-status" data-ai-preview-status>Interviewing</span></div></div>
       <div class="ai-preview-empty" data-ai-preview-empty><span class="icon-box"><span data-icon="scan" data-icon-class="icon-lg"></span></span><h3>Your reviewed rules will appear here</h3><p>Primary trigger, required filters, confirmations, screened universe, policy, assumptions, and alert behavior remain separate.</p></div>
       <div class="ai-preview-content" data-ai-preview-content data-testid="ai-setup-structured-preview" hidden></div>
       {# The Guided Watchlist Builder. Every field in here is drawn from the server's
@@ -81,8 +81,8 @@
 {% include "hilal/dashboard/partials/builder_workspace.html" %}
 {% endblock %}
 {% block page_scripts %}
-<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260805-y5-5"></script>
-<script src="{{ url_for('static', path='/chat-message-renderer.js') }}?v=20260805-y5-5"></script>
-<script src="{{ url_for('static', path='/ai-setup-chat.js') }}?v=20260805-y5-5"></script>
-<script src="{{ url_for('static', path='/hilalmarkets-builder.js') }}?v=20260805-y5-5"></script>
+<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260818-live-4"></script>
+<script src="{{ url_for('static', path='/chat-message-renderer.js') }}?v=20260818-live-4"></script>
+<script src="{{ url_for('static', path='/ai-setup-chat.js') }}?v=20260818-live-4"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-builder.js') }}?v=20260818-live-4"></script>
 {% endblock %}

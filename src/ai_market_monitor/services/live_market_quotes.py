@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import monotonic
 from uuid import UUID
 
+from ai_market_monitor.core.asset_logos import asset_logo_module_url
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.schemas.sharia import (
     AssetAssessmentSummary,
@@ -17,9 +17,6 @@ from ai_market_monitor.schemas.sharia import (
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.sharia_screening import canonical_asset, canonical_symbol
-
-_LOGO_CDN_BASE = "https://cdn.jsdelivr.net/npm/@web3icons/core@4.0.53/dist/svgs/tokens/branded"
-_SAFE_ASSET = re.compile(r"^[A-Z0-9]{1,24}$")
 
 
 @dataclass(slots=True)
@@ -189,7 +186,7 @@ class LiveMarketQuoteService:
                     low_24h=values.get("low_24h"),
                     base_volume_24h=values.get("base_volume_24h"),
                     quote_volume_24h=values.get("quote_volume_24h"),
-                    logo_module_url=self._logo_module_url(asset),
+                    logo_module_url=asset_logo_module_url(asset),
                     data_available=bool(values.get("data_quality_ok")),
                     updated_at=captured_at,
                 )
@@ -211,9 +208,3 @@ class LiveMarketQuoteService:
             captured_at=captured_at,
         )
 
-    @staticmethod
-    def _logo_module_url(asset: str) -> str | None:
-        normalized = asset.strip().upper()
-        if not _SAFE_ASSET.fullmatch(normalized):
-            return None
-        return f"{_LOGO_CDN_BASE}/{normalized}.svg.js"

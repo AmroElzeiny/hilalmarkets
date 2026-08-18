@@ -1,47 +1,134 @@
-<aside class="sidebar" data-sidebar data-hilal-sidebar>
-  <div class="sidebar-head">
-    <a class="logo dashboard-brand-logo" href="{{ url_for('dashboard_home') }}" aria-label="Hilal Markets home">
+{#- The side menu, on every signed-in page.
+
+    It has two shapes and they are the same menu, not two menus:
+
+      * open      — group headings, names, icons, and the account card;
+      * minimized — the same rows at 44px, icons only, each with a flyout name.
+
+    The rule that decides the markup: **a name is never taken out of the page, only out
+    of sight.** The old minimized menu hid every label with `display: none`, which takes
+    it out of the accessibility tree as well — so nine links had no accessible name at
+    all, and a screen reader read nine identical "link". `.hm-nav-text` is moved off
+    screen instead, so the name is still there for anybody who cannot see the icon, and
+    the flyout beside it is `aria-hidden` because it is a second copy of a name that is
+    already correct.
+
+    Nothing decides anything here. The entries, their names, their icons and which one
+    is current all arrive from `core/site_content.py`. -#}
+
+{%- set nav_user_name = (user.display_name or 'Hilal Markets user') if user else 'Hilal Markets' -%}
+{%- set nav_plan_name = entitlement.plan.name if entitlement is defined and entitlement else none -%}
+
+<aside class="sidebar hm-nav" data-sidebar data-hilal-sidebar data-hm-shell-nav>
+  <div class="sidebar-head hm-nav-head">
+    {#- One logo file, in both menu shapes.
+
+        The minimized menu shows the symbol by *narrowing the window* over the real
+        wordmark until only its symbol is left — `brand guide.md` section 5 forbids
+        squeezing the logo, and this never squeezes it. There is no second image and no
+        second file to keep in step: a separate `hilalmarkets-logo-mark.svg` was drawn
+        by hand, was not the brand's symbol, and went stale the moment the real logo
+        changed. See `.dashboard-logo-viewport` in hm-shell.css. -#}
+    <a class="logo dashboard-brand-logo hm-nav-brand" href="{{ url_for('main_dashboard_page') }}" aria-label="Hilal Markets — go to Home">
       <span class="dashboard-logo-viewport" aria-hidden="true">
         <img class="dashboard-logo-art" src="{{ url_for('static', path='/hilal-markets-logo.svg') }}" alt="">
       </span>
     </a>
-    <button class="btn btn-secondary btn-icon sidebar-close" type="button" data-close-sidebar data-hilal-close-sidebar aria-label="Close menu"><span data-icon="close" data-icon-class="icon"></span></button>
+    <button class="hm-nav-icon-btn sidebar-close" type="button" data-close-sidebar data-hilal-close-sidebar aria-label="Close menu">
+      <span data-icon="close" data-icon-class="icon"></span>
+    </button>
   </div>
 
-  <button class="sidebar-collapse" type="button" data-sidebar-collapse aria-expanded="true" aria-label="Minimize side menu" title="Minimize side menu">
-    <span data-sidebar-collapse-icon="minimize" data-icon="panel" data-icon-class="icon-sm"></span>
-    <span data-sidebar-collapse-icon="expand" data-icon="panel_expand" data-icon-class="icon-sm" hidden></span>
-    <span>Minimize menu</span>
+  <button class="hm-nav-toggle sidebar-collapse" type="button" data-sidebar-collapse
+          aria-expanded="true" aria-label="Minimize side menu" title="Minimize side menu">
+    <span class="hm-nav-toggle-mark" aria-hidden="true">
+      <span data-sidebar-collapse-icon="minimize" data-icon="panel" data-icon-class="icon-sm"></span>
+      <span data-sidebar-collapse-icon="expand" data-icon="panel_expand" data-icon-class="icon-sm" hidden></span>
+    </span>
+    <span class="hm-nav-toggle-label">Minimize menu</span>
+    <span class="hm-nav-tip" aria-hidden="true">Open menu</span>
   </button>
 
-  <nav data-testid="dashboard-nav" aria-label="Dashboard navigation">
+  <nav class="hm-nav-body" data-testid="dashboard-nav" aria-label="Dashboard navigation" data-hm-nav-body>
+    {#- One marker for the whole menu. It travels from the row you left to the row you
+        opened, so the movement says which page replaced which. Nine markers that each
+        appeared and disappeared would say nothing. -#}
+    <span class="hm-nav-marker" data-hm-nav-marker aria-hidden="true"></span>
+
     {% for group in dashboard_navigation %}
-    <div class="nav-group">
-      <div class="nav-label">{{ group.label }}</div>
-      {% for item in group.items %}
-      {% set is_active = page == item.page or page in item.active_pages %}
-      {#- The guide marker comes from the navigation data, never from this loop, so each
-          name is declared exactly once. See NavigationItem.guide_target. -#}
-      <a class="nav-item {{ 'is-active' if is_active else '' }}" href="{{ url_for(item.endpoint) }}" {% if is_active %}aria-current="page"{% endif %}{% if item.guide_target %} data-hm-guide-target="{{ item.guide_target }}"{% endif %}>
-        <span class="nav-icon nav-icon-{{ item.icon }}" aria-hidden="true"></span>
-        <span>{{ item.label }}</span>
-      </a>
-      {% endfor %}
+    <div class="hm-nav-group">
+      {#- A paragraph rather than a heading. It names the group for a screen reader
+          through `aria-labelledby` below, without adding three headings to the outline
+          of every page in the product. -#}
+      <p class="hm-nav-group-label" id="hm-nav-group-{{ loop.index }}">{{ group.label }}</p>
+      <ul class="hm-nav-list" aria-labelledby="hm-nav-group-{{ loop.index }}">
+        {% for item in group.items %}
+        {% set is_active = page == item.page or page in item.active_pages %}
+        <li class="hm-nav-cell">
+          {#- The guide marker comes from the navigation data, never from this loop, so
+              each name is declared exactly once. See NavigationItem.guide_target. -#}
+          <a class="nav-item hm-nav-link{{ ' is-active' if is_active else '' }}"
+             href="{{ url_for(item.endpoint) }}"
+             data-hm-nav-link
+             {% if is_active %}aria-current="page"{% endif %}
+             {%- if item.guide_target %} data-hm-guide-target="{{ item.guide_target }}"{% endif %}>
+            <span class="hm-nav-icon" aria-hidden="true"><span data-icon="{{ item.icon }}" data-icon-class="icon"></span></span>
+            <span class="hm-nav-text">{{ item.label }}</span>
+            <span class="hm-nav-dot" aria-hidden="true"></span>
+          </a>
+          {#- A second copy of a name that is already on the link, so it is hidden from
+              anything that reads rather than looks. -#}
+          <span class="hm-nav-tip" aria-hidden="true">{{ item.label }}</span>
+        </li>
+        {% endfor %}
+      </ul>
     </div>
     {% endfor %}
   </nav>
 
-  <div class="sidebar-spacer"></div>
-  <div class="sidebar-profile">
-    <div class="avatar">{{ ((user.display_name or 'HM') if user else 'HM')[:2]|upper }}</div>
-    <div class="meta">
-      <strong>{{ (user.display_name or 'Hilal Markets user') if user else 'Hilal Markets' }}</strong>
-      <small>{{ entitlement.plan.name if entitlement is defined and entitlement else ('Member | ' ~ user.timezone if user else 'Halal Assets intelligence') }}</small>
+  <div class="hm-nav-foot">
+    <button class="hm-nav-user" type="button" data-hm-nav-user
+            aria-expanded="false" aria-haspopup="menu" aria-controls="hm-nav-account">
+      <span class="hm-nav-avatar avatar" aria-hidden="true">{{ ((user.display_name or 'HM') if user else 'HM')[:2]|upper }}</span>
+      <span class="hm-nav-user-copy">
+        <strong>{{ nav_user_name }}</strong>
+        <small>{{ nav_plan_name or 'Signed in' }}</small>
+      </span>
+      <span class="hm-nav-user-go" aria-hidden="true"><span data-icon="chevron" data-icon-class="icon-sm"></span></span>
+      <span class="sr-only">Open the account menu</span>
+      <span class="hm-nav-tip" aria-hidden="true">{{ nav_user_name }}</span>
+    </button>
+
+    {#- The account menu exists because the minimized menu had no way out of the product
+        at all: the sign-out form was one of the things `display: none` removed, so a
+        person who minimized the menu could not sign out without opening it again. -#}
+    <div class="hm-nav-account" id="hm-nav-account" data-hm-nav-account role="menu" hidden>
+      <p class="hm-nav-account-who">
+        <span class="hm-nav-account-name">{{ nav_user_name }}</span>
+        {% if user and user.email %}<span class="hm-nav-account-mail">{{ user.email }}</span>{% endif %}
+      </p>
+      {% if nav_plan_name %}
+      <p class="hm-nav-account-plan">
+        <span data-icon="shield_check" data-icon-class="icon-sm"></span>{{ nav_plan_name }}
+      </p>
+      {% endif %}
+      <a class="hm-nav-account-row" role="menuitem" href="{{ url_for('settings_page') }}">
+        <span data-icon="settings" data-icon-class="icon-sm"></span>Settings
+      </a>
+      <a class="hm-nav-account-row" role="menuitem" href="{{ url_for('support_page') }}">
+        <span data-icon="support" data-icon-class="icon-sm"></span>Get help
+      </a>
+      {% if user %}
+      <form method="post" action="/logout">
+        <button class="hm-nav-account-row is-leave" type="submit" role="menuitem">
+          <span data-icon="logout" data-icon-class="icon-sm"></span>Sign out
+        </button>
+      </form>
+      {% else %}
+      <a class="hm-nav-account-row" role="menuitem" href="{{ url_for('signin_page') }}">
+        <span data-icon="user" data-icon-class="icon-sm"></span>Sign in
+      </a>
+      {% endif %}
     </div>
-    {% if user %}
-    <form method="post" action="/logout"><button class="btn btn-ghost btn-icon" type="submit" aria-label="Sign out"><span data-icon="logout" data-icon-class="icon"></span></button></form>
-    {% else %}
-    <a class="btn btn-ghost btn-icon" href="{{ url_for('signin_page') }}" aria-label="Sign in"><span data-icon="user" data-icon-class="icon"></span></a>
-    {% endif %}
   </div>
 </aside>

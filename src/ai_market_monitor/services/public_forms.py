@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import html
 import json
 import secrets
 from collections.abc import Mapping
@@ -28,6 +27,7 @@ from ai_market_monitor.schemas.public_forms import (
     WaitlistDeliveryStatus,
     WaitlistSignupRequest,
 )
+from ai_market_monitor.services.email_branding import plain_text_block
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
 from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.services.waitlist_sheet_contract import (
@@ -149,6 +149,23 @@ class PublicFormsService:
             return existing, False
         await self._ensure_waitlist_delivery(signup)
         return signup, True
+
+    async def find_contact_by_idempotency_key(
+        self, idempotency_key: str
+    ) -> ContactSubmission | None:
+        """The message this request identifier already created, if it created one.
+
+        A network retry sends the same identifier again. That is one message being
+        delivered twice, not two messages, so the quota must not charge for it and the
+        guard must not refuse it — otherwise a flaky connection costs somebody their
+        allowance for the hour.
+        """
+
+        return await self.session.scalar(
+            select(ContactSubmission).where(
+                ContactSubmission.idempotency_key == idempotency_key
+            )
+        )
 
     async def submit_contact(
         self,
@@ -515,12 +532,9 @@ class PublicFormsService:
             f"Source page: {submission.source_page}\n\n"
             f"Description:\n{submission.description}\n"
         )
-        return (
-            subject,
-            text,
-            '<div style="font-family:Arial,sans-serif;line-height:1.55;color:#2b2e35">'
-            f"{html.escape(text).replace(chr(10), '<br>')}</div>",
-        )
+        # Laid out by `email_branding`, so this copy cannot drift away from every other
+        # email the product sends. It asked for Arial before.
+        return subject, text, plain_text_block(text)
 
     @staticmethod
     def _attribution(value: FirstTouchAttribution) -> dict[str, str]:

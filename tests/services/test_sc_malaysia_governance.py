@@ -602,6 +602,120 @@ async def test_canonical_mapping_reuses_compound_provider_identity(test_context)
     assert second.provider_ids["logo_url"].endswith("/bitcoin.png")
 
 
+async def test_map_candidate_leaves_unfetched_exchange_markets_untouched(test_context):
+    # A failed fetch for one exchange is not evidence that exchange delisted the
+    # coin. map_candidate() must only deactivate a market on an exchange it was
+    # actually told was re-checked this run (fetched_exchanges) — everything else
+    # keeps its last known state, and the legitimate "really delisted" case must
+    # still work once that exchange really was checked.
+    def _candidate(*, exchanges: tuple[str, ...]) -> CanonicalAssetCandidate:
+        return CanonicalAssetCandidate(
+            name="Bitcoin",
+            symbol="BTC",
+            asset_type="native_coin",
+            native_chain="Bitcoin Network",
+            official_website="https://bitcoin.org/",
+            official_documentation="https://developer.bitcoin.org/",
+            provider_ids={"coingecko": "bitcoin"},
+            exchange_markets=tuple(
+                ExchangeMarketIdentity(exchange, "BTC/USDT", "BTC", "USDT")
+                for exchange in exchanges
+            ),
+        )
+
+    async def _markets(asset_id):
+        async with test_context["session_factory"]() as session:
+            rows = (
+                await session.scalars(
+                    select(ExchangeMarket).where(ExchangeMarket.canonical_asset_id == asset_id)
+                )
+            ).all()
+            return {row.exchange: row.is_active for row in rows}
+
+    # _external()'s `name` also drives identity matching in _validate(), so a
+    # second, distinctly-named row would be rejected as a different asset. A
+    # re-fetch of the *same* coin instead needs the same name/symbol and only a
+    # fresh import_hash (which is uniquely constrained).
+    def _reimport(*, source_id, source_authority, source_url, suffix: str) -> ExternalAssessment:
+        return ExternalAssessment(
+            source_snapshot_id=source_id,
+            source_authority=source_authority,
+            source_url=source_url,
+            asset_name="Bitcoin",
+            asset_symbol="BTC",
+            exact_status_wording="Shariah-compliant",
+            regulatory_scope="SC Malaysia regulated digital-assets framework",
+            retrieval_date=datetime.now(UTC),
+            exact_row_text=f"Bitcoin (BTC) Shariah-compliant re-fetch {suffix}",
+            import_hash=f"btc-refetch-{suffix}",
+            mapping_state="unresolved",
+        )
+
+    async with test_context["session_factory"]() as session:
+        external, _, source = await _external(session)
+        source_id = source.id
+        source_authority = external.source_authority
+        source_url = external.source_url
+        asset = await CanonicalAssetMappingService(session).map_candidate(
+            external,
+            _candidate(exchanges=("binance", "bybit")),
+            verified_exchange_symbols={"BTC/USDT"},
+        )
+        await session.commit()
+        asset_id = asset.id
+
+    assert await _markets(asset_id) == {"binance": True, "bybit": True}
+
+    # Binance's fetch failed this run: the candidate carries no Binance market
+    # (mirrors what _exchange_markets() produces when an exchange is missing from
+    # exchange_symbols), and only Bybit is reported as actually fetched.
+    async with test_context["session_factory"]() as session:
+        second_external = _reimport(
+            source_id=source_id,
+            source_authority=source_authority,
+            source_url=source_url,
+            suffix="1",
+        )
+        session.add(second_external)
+        await session.flush()
+        await CanonicalAssetMappingService(session).map_candidate(
+            second_external,
+            _candidate(exchanges=("bybit",)),
+            verified_exchange_symbols={"BTC/USDT"},
+            fetched_exchanges={"bybit"},
+        )
+        await session.commit()
+
+    assert await _markets(asset_id) == {"binance": True, "bybit": True}, (
+        "Binance was never re-checked this run, so a missed check must not be "
+        "recorded as a delisting"
+    )
+
+    # Now Binance genuinely is re-checked and genuinely comes back empty for this
+    # asset: the legitimate delisting case must still take effect.
+    async with test_context["session_factory"]() as session:
+        third_external = _reimport(
+            source_id=source_id,
+            source_authority=source_authority,
+            source_url=source_url,
+            suffix="2",
+        )
+        session.add(third_external)
+        await session.flush()
+        await CanonicalAssetMappingService(session).map_candidate(
+            third_external,
+            _candidate(exchanges=("bybit",)),
+            verified_exchange_symbols={"BTC/USDT"},
+            fetched_exchanges={"binance", "bybit"},
+        )
+        await session.commit()
+
+    assert await _markets(asset_id) == {"binance": False, "bybit": True}, (
+        "Binance really was checked and really has no market for this asset, so "
+        "it must still be deactivated"
+    )
+
+
 async def test_canonical_mapping_reuses_provider_identity_across_name_aliases(
     test_context,
 ):

@@ -69,11 +69,24 @@ def test_system_brain_reviewer_first_desktop_and_mobile(
 
     page.goto(f"{base_url}/dashboard/system-brain", wait_until="domcontentloaded")
     expect(page.get_by_test_id("system-brain-assistant")).to_be_visible()
-    expect(page.locator(".brain-sidebar nav a")).to_have_count(6)
-    expect(page.get_by_role("heading", name="Needs Attention")).to_be_visible()
+    # Inbox, Cases, Stats, Operations, Governance, Users, Audit & Settings.
+    expect(page.locator(".brain-sidebar nav a")).to_have_count(7)
+    expect(page.get_by_role("heading", name="Needs attention")).to_be_visible()
     assert_no_horizontal_overflow(page)
     assert_no_raw_traceback(page)
     page.screenshot(path=str(output / "system-brain-desktop.png"), full_page=True)
+
+    # On a phone the menu is a drawer rather than a strip of unlabelled icons: the
+    # labels come back, and every link has a readable accessible name.
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.reload(wait_until="domcontentloaded")
+    expect(page.get_by_role("button", name="Open menu")).to_be_visible()
+    page.get_by_role("button", name="Open menu").click()
+    expect(page.locator(".brain-sidebar nav a").get_by_text("Stats")).to_be_visible()
+    assert_no_horizontal_overflow(page)
+    page.screenshot(path=str(output / "system-brain-menu-390.png"), full_page=True)
+    page.get_by_role("button", name="Close menu").click()
+    page.set_viewport_size({"width": 1440, "height": 900})
 
     page.goto(
         f"{base_url}/dashboard/system-brain/cases/{case_id}",
@@ -385,9 +398,13 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
     assert reduced_motion is True
 
     page.goto(f"{base_url}/contact", wait_until="domcontentloaded")
+    # The heading the React source really carries. The shipped bundle had been built from
+    # older source and still said "How can we help?", so this test was measuring a stale
+    # file rather than the page. Rebuilding the bundle to ship the Help Center removal
+    # brought the two back into step.
     expect(
         page.get_by_role(
-            "heading", name="How can we help?"
+            "heading", name="Tell us what you need."
         )
     ).to_be_visible()
     expect(page.locator("[data-contact-form]")).to_be_visible()
@@ -643,7 +660,7 @@ def test_public_product_chat_renders_safe_bold_without_executable_html(
 
 def test_dashboard_loads_after_signup_and_navigation(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("dashboard-load"))
-    # A new account lands on Home with the guide already open, and the guide's overlay
+    # A new account lands on Main with the guide already open, and the guide's overlay
     # takes the clicks aimed at the page under it. That is the guide working. Anything
     # that then drives the dashboard has to close it first.
     close_any_open_guide(page)
@@ -662,13 +679,19 @@ def test_dashboard_loads_after_signup_and_navigation(page: Page, base_url: str) 
     expect(expand_icon).to_be_visible()
     collapsed_width = sidebar.evaluate("node => node.getBoundingClientRect().width")
     assert expanded_width > 200
-    assert collapsed_width <= 80
+    # Icon width. Written as the rule rather than as one number: the row inside is a 44px
+    # target with room around it, so the exact figure belongs to the design.
+    assert collapsed_width <= 96
+    assert collapsed_width < expanded_width / 2
     expect(page.locator("[data-sidebar-collapse]")).to_have_attribute(
-        "aria-label", "Expand side menu"
+        "aria-label", "Open the menu"
     )
     page.locator("[data-sidebar-collapse]").click()
-    page.locator(".sidebar-create-quick").click()
-    page.wait_for_url(re.compile(r".*/dashboard/strategies/new.*"), timeout=10_000)
+    # The way to build something is the menu entry that says so. It used to be a button
+    # in the topbar on every page, including the pages where it made no sense.
+    page.get_by_role("link", name="Create a monitor").click()
+    page.wait_for_url(re.compile(r".*/dashboard/monitor.*"), timeout=10_000)
+    page.goto(f"{base_url}/dashboard/strategies/new", wait_until="domcontentloaded")
     expect(page.get_by_test_id("ai-setup-chat")).to_be_visible()
     expect(page.locator("[data-ai-chat-input]")).to_be_visible()
     expect(page.locator("[data-ai-chat-input]")).to_have_attribute(
@@ -701,7 +724,9 @@ def test_all_customer_dashboard_pages_use_the_brand_system(
         expect(page.locator("body")).to_have_attribute(
             "data-brand-system", "hilal-markets-v2"
         )
-        expect(page.locator(".sidebar .logo img")).to_have_attribute(
+        # The wordmark. The minimized menu shows the symbol on its own instead, so the
+        # brand link carries both pictures and this is the first of them.
+        expect(page.locator(".sidebar .dashboard-logo-art")).to_have_attribute(
             "src", re.compile(r"hilal-markets-logo\.svg")
         )
         assert "Onest" in page.locator("body").evaluate(
@@ -1354,13 +1379,15 @@ def test_ai_setup_chat_visual_qa_states(
     output.mkdir(parents=True, exist_ok=True)
     sidebar_box = page.locator("[data-hilal-sidebar]").bounding_box()
     notification_box = page.locator("[data-notification-center-trigger]").bounding_box()
-    create_plan_box = page.locator(".topbar-right > .sidebar-create-quick").bounding_box()
+    # The topbar used to carry a "New Watchlist" button on every page in the product,
+    # including this one, which *is* the page that makes one. It carries what the page
+    # below it declared now, and the builder declares nothing — so the bar says where you
+    # are and offers the things that belong to the shell.
+    here_box = page.locator(".hm-top-here").bounding_box()
     assert sidebar_box is not None and 14 <= sidebar_box["x"] <= 18
     assert notification_box is not None and notification_box["width"] <= 60
-    assert create_plan_box is not None and create_plan_box["width"] <= 220
-    expect(page.locator(".topbar-right > .sidebar-create-quick")).to_contain_text(
-        "New Watchlist"
-    )
+    assert here_box is not None and here_box["width"] <= 320
+    expect(page.locator("[data-hm-top-action]")).to_have_count(0)
     page.screenshot(path=str(output / "ai-setup-chat-desktop.png"), full_page=True)
 
     prompt = (
@@ -1607,9 +1634,20 @@ def test_approve_and_publish_executable_monitor(
 
 
 def test_legacy_scan_route_redirects_into_chat_scanner(page: Page, base_url: str) -> None:
+    """Trading Assistant's own pages are gone; the scan they opened is not.
+
+    Both of its addresses answer "not found" now. The one-time scan is a mode of the
+    builder and is opened there, which is where every button that used to pass through
+    those addresses points.
+    """
+
     signup(page, base_url, unique_email("scanner-route"))
-    page.goto(f"{base_url}/dashboard/scan-now", wait_until="domcontentloaded")
-    page.wait_for_url(re.compile(r".*/dashboard/strategies/new\?mode=scanner"), timeout=10_000)
+    gone = page.request.get(f"{base_url}/dashboard/scan-now", max_redirects=0)
+    assert gone.status == 404
+    page.goto(
+        f"{base_url}/dashboard/strategies/new?mode=scanner",
+        wait_until="domcontentloaded",
+    )
     expect(page.get_by_test_id("ai-setup-chat")).to_be_visible()
     expect(page.locator("[data-ai-chat-messages]")).to_contain_text(
         "switched to scanner", timeout=10_000
@@ -2011,8 +2049,16 @@ def test_guided_builder_shows_a_rule_the_assistant_wrote_and_lets_it_be_edited(
     """One state, two surfaces. What the assistant wrote is editable by hand."""
 
     signup(page, base_url, unique_email("guided-handoff"))
+    # The chat now opens on a choice — Scanner or Monitor — and holds the composer back
+    # until it has one. This test typed straight into a composer that was not there
+    # yet, so the key press went nowhere and it waited sixty seconds for a message it
+    # had never sent. The choice is made the way the product offers it.
     _open_builder(page, base_url)
-    page.get_by_test_id("ai-setup-input").fill(
+    page.get_by_test_id("guided-builder-mode").get_by_role("button", name="Monitor").click()
+    composer = page.get_by_test_id("ai-setup-input")
+    expect(composer).to_be_visible(timeout=20_000)
+    expect(composer).to_be_enabled()
+    composer.fill(
         "Monitor BTC/USDT when the 15m candle rises open-to-close by at least 3%"
     )
     with page.expect_response(

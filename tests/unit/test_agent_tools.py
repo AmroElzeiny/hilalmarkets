@@ -1,6 +1,7 @@
 from typing import Any
 from uuid import uuid4
 
+import pytest
 from pydantic import SecretStr
 from sqlalchemy import func, select
 
@@ -22,6 +23,8 @@ from ai_market_monitor.services.agent_policy import (
 from ai_market_monitor.services.agent_tools import (
     AgentToolRuntime,
     AgentToolService,
+    _comparator_is_user_authored,
+    _direction_is_user_authored,
     redact_agent_arguments,
 )
 
@@ -467,3 +470,65 @@ def test_openai_tool_schemas_are_strict_and_redaction_does_not_store_prompt_text
     )
     assert "RSI below" not in str(redacted)
     assert redacted["arguments"]["fragments"][0]["characters"] == 19
+
+
+# --------------------------------------------------------------------------------
+# _comparator_is_user_authored / _direction_is_user_authored
+#
+# These used to hold their own English-only word tables — a second copy of the
+# vocabulary ``comparators.py``/``price_movement.py`` already own, missing every
+# Arabic and Arabizi phrase. A trader whose comparator or direction was read
+# correctly by the deterministic compiler could still have the agent's own
+# selection refused here as "not expressed by the user", for writing Arabic.
+# --------------------------------------------------------------------------------
+
+_COMPARATOR_PHRASES_BY_VALUE = {
+    "gte": ("at least 30", "لا يقل عن 30", "على الأقل 30", "aw aktar men 30"),
+    "lte": ("at most 30", "لا يتجاوز 30", "على الأكثر 30", "3ala el aktar 30"),
+    "gt": ("above 30", "أكبر من 30", "fo2 30"),
+    "lt": ("below 30", "أصغر من 30", "ta7t 30"),
+}
+
+
+@pytest.mark.parametrize("comparator", sorted(_COMPARATOR_PHRASES_BY_VALUE))
+def test_comparator_grounding_understands_every_language_the_product_accepts(
+    comparator: str,
+) -> None:
+    for phrase in _COMPARATOR_PHRASES_BY_VALUE[comparator]:
+        assert _comparator_is_user_authored(comparator, phrase), (
+            f"{comparator!r} should be grounded by {phrase!r}"
+        )
+
+
+def test_comparator_grounding_still_accepts_bare_words_and_reclaim_phrasing() -> None:
+    """The narrow, English-only additions this fix keeps, not replaces."""
+    assert _comparator_is_user_authored("gt", "RSI greater 70")
+    assert _comparator_is_user_authored("lt", "RSI lower 30")
+    assert _comparator_is_user_authored("crosses_above", "price reclaims above the level")
+    assert _comparator_is_user_authored("is_false", "RSI is not oversold")
+    assert _comparator_is_user_authored("is_false", "بدون شرط")
+
+
+def test_comparator_grounding_still_refuses_an_unstated_comparator() -> None:
+    assert not _comparator_is_user_authored("gte", "RSI on 15m")
+
+
+_DIRECTION_PHRASES_BY_VALUE = {
+    "bullish": ("bullish move", "صعد السعر", "tele3 el se3r", "long setup", "green candle"),
+    "bearish": ("bearish move", "هبط السعر", "nezel el se3r", "short setup", "red candle"),
+    "neutral": ("neutral either direction", "محايد في أي اتجاه"),
+}
+
+
+@pytest.mark.parametrize("direction", sorted(_DIRECTION_PHRASES_BY_VALUE))
+def test_direction_grounding_understands_every_language_the_product_accepts(
+    direction: str,
+) -> None:
+    for phrase in _DIRECTION_PHRASES_BY_VALUE[direction]:
+        assert _direction_is_user_authored(direction, phrase), (
+            f"{direction!r} should be grounded by {phrase!r}"
+        )
+
+
+def test_direction_grounding_still_refuses_an_unstated_direction() -> None:
+    assert not _direction_is_user_authored("bearish", "RSI below 30")

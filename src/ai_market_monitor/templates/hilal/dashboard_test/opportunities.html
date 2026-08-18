@@ -1,0 +1,383 @@
+{% extends "hilal/base_dashboard.html" %}
+{% from "hilal/macros/coin_logo.html" import coin_logo %}
+{% block page_styles_late %}
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260818-live-4">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-watch-test.css') }}?v=20260818-live-4">
+{% endblock %}
+{% block content %}
+
+{#- What the monitors found.
+
+    Three questions, in the order somebody asks them:
+
+      1. What is closest to happening?   -> the cards, ordered and filtered
+      2. Why is it not there yet?        -> one line on every card, in words
+      3. What did we actually see?       -> a popup per card, with every reading
+
+    The live page answered these twice over. The same coin appeared once in a "radar"
+    panel and again in an "opportunity journey" card, with different words on each, and
+    nothing said they were the same thing. Here there is one card per coin: the two
+    records are joined on the server, so the page cannot disagree with itself. -#}
+
+<div class="hm-t hm-o" data-opportunities-root
+     data-count-all="{{ opportunity_counts.all }}">
+
+  {#- The way back to the monitors is a topbar action now, not a button drawn inside this
+      heading. One shape, one place, on every page that offers one. -#}
+  <header class="t-head" data-hm-part="The page heading">
+    <div class="t-head-copy">
+      <p class="t-eyebrow"><span data-icon="activity" data-icon-class="icon-sm"></span>What your monitors found</p>
+      <h1>Opportunities</h1>
+      <p class="t-lede">How close each coin is to everything you asked for. Hilal Markets never buys, sells, or tells you what to buy.</p>
+    </div>
+  </header>
+
+  {#- Which monitor to look at. A real form, so it works before any script runs and a
+      screen reader reads it as the one question it is. Shown whenever there is more
+      than one monitor — including when the chosen one found nothing, which is exactly
+      when somebody needs the way back. -#}
+  {% if opportunity_watchlists|length > 1 %}
+  <form class="o-pick" method="get" action="{{ opportunities_path }}" data-o-pick>
+    <label class="o-pick-field">
+      <span>Show me</span>
+      <select name="monitor" data-o-pick-select>
+        <option value="">Everything all my monitors found</option>
+        {% for watchlist_id, watchlist_name in opportunity_watchlists %}
+        <option value="{{ watchlist_id }}" {{ 'selected' if selected_watchlist_id == watchlist_id|string }}>Only {{ watchlist_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="t-action" type="submit" data-o-pick-go>
+      <span data-icon="check" data-icon-class="icon-sm"></span>Show
+    </button>
+  </form>
+  {% endif %}
+
+  {%- if opportunities %}
+
+  {#- The filter. The same five words the cards use, each carrying its real number and
+      greying itself out when it has nothing behind it. -#}
+  <div class="w-bar" data-hm-part="The filters and the search box">
+    <div class="w-filters" role="group" aria-label="Show which ones">
+      <button class="w-filter" type="button" data-o-filter="all" aria-pressed="true">
+        <span data-icon="list" data-icon-class="icon-sm"></span>
+        <span class="w-filter-label">All</span>
+        <span class="w-filter-count">{{ opportunity_counts.all }}</span>
+      </button>
+      {% for key, label, glyph in opportunity_buckets %}
+      {%- set count = opportunity_counts[key] -%}
+      <button class="w-filter" type="button" data-o-filter="{{ key }}" aria-pressed="false"
+              {{ 'disabled' if not count }}>
+        <span data-icon="{{ glyph }}" data-icon-class="icon-sm"></span>
+        <span class="w-filter-label">{{ label }}</span>
+        <span class="w-filter-count">{{ count }}</span>
+      </button>
+      {% endfor %}
+    </div>
+
+    <label class="t-search w-search">
+      <span data-icon="search" data-icon-class="icon"></span>
+      <span class="sr-only">Search by coin or by monitor name</span>
+      <input type="search" placeholder="Search by coin" data-o-search autocomplete="off">
+    </label>
+  </div>
+
+  <p class="sr-only" data-o-said role="status" aria-live="polite"></p>
+
+  <ul class="w-grid o-grid" data-o-grid data-hm-part="What was found">
+    {% for item in opportunities %}
+    <li class="w-card o-card" data-o-card
+        data-kind="{{ item.state.kind }}"
+        data-name="{{ (item.symbol ~ ' ' ~ item.watchlist_name ~ ' ' ~ item.coin)|lower }}">
+
+      <div class="w-card-head">
+        {{ coin_logo(item.coin, module_url=item.logo_module_url, image_url=item.logo_url, class='o-coin', decorative=true) }}
+        <div class="w-title">
+          <h2>{{ item.symbol }}</h2>
+          <p class="o-found-by">
+            <span data-icon="radar" data-icon-class="icon-sm"></span>
+            Found by <strong>{{ item.watchlist_name }}</strong>{% if item.how_often %} · {{ item.how_often }}{% endif %}
+          </p>
+        </div>
+      </div>
+
+      <p class="w-status o-state" data-tone="{{ item.state.tone }}">
+        <span data-icon="{{ 'check' if item.state.kind == 'ready' else 'spark' if item.state.kind == 'close' else 'alert' if item.state.kind == 'unchecked' else 'history' if item.state.kind == 'ended' else 'clock' }}" data-icon-class="icon-sm"></span>
+        <strong>{{ item.state.label }}</strong>
+        <span class="t-info">
+          <span class="t-info-icon" aria-hidden="true"><span data-icon="info" data-icon-class="icon-sm"></span></span>
+          <span class="t-info-box">{{ item.state.meaning }}</span>
+        </span>
+      </p>
+
+      {#- How much of a person's own monitor is true, counted rather than scored — and
+          only where a count is a true thing to say.
+
+          A card we could not check shows no bar at all. The live page drew one, empty,
+          reading "0/5 required rules passed", which says "your rules failed" when the
+          truth is "nobody ever looked". -#}
+      {% if item.state.kind == 'unchecked' %}
+      <p class="o-unchecked">
+        <span data-icon="alert" data-icon-class="icon-sm"></span>
+        <span>This is not a pass and not a fail. Nothing about your monitor changed.</span>
+      </p>
+      {% elif item.checks %}
+      <div class="o-progress">
+        <p class="o-progress-words">{{ item.checks.sentence }}</p>
+        <div class="o-track"
+             role="progressbar"
+             aria-valuemin="0"
+             aria-valuemax="{{ item.checks.total }}"
+             aria-valuenow="{{ item.checks.passed }}"
+             aria-valuetext="{{ item.checks.sentence }}">
+          <span class="o-fill" data-o-fill data-percent="{{ item.checks.percent }}"></span>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if item.waiting_on %}
+      <div class="o-waiting" data-tone="{{ item.state.tone }}">
+        <p class="o-waiting-head">
+          <span data-icon="filter" data-icon-class="icon-sm"></span>
+          <strong>Still waiting on:</strong> {{ item.waiting_on.name }}
+        </p>
+        {% if item.waiting_on.sentence %}<p class="o-waiting-why">{{ item.waiting_on.sentence }}</p>{% endif %}
+      </div>
+      {% endif %}
+
+      <dl class="w-facts o-facts">
+        <div class="w-fact">
+          <dt><span data-icon="clock" data-icon-class="icon-sm"></span>Last change</dt>
+          <dd{% if item.changed_exact %} title="{{ item.changed_exact|short_dt(user.timezone) }}"{% endif %}>{{ item.changed }}</dd>
+        </div>
+        <div class="w-fact">
+          <dt><span data-icon="history" data-icon-class="icon-sm"></span>How it moved</dt>
+          <dd>{% if item.changed_times %}{{ item.changed_times }}{% else %}<span class="w-none">Not moved yet</span>{% endif %}</dd>
+        </div>
+      </dl>
+
+      {% if item.old_numbers %}
+      <p class="o-old">
+        <span data-icon="info" data-icon-class="icon-sm"></span>
+        The numbers we used for this one were older than usual.
+      </p>
+      {% endif %}
+
+      <div class="w-actions o-actions">
+        <button class="t-action is-primary" type="button" data-o-saw data-symbol="{{ item.symbol }}">
+          <span data-icon="eye" data-icon-class="icon-sm"></span>What did we see?
+        </button>
+
+        {% if item.can_ask_why %}
+        <button class="t-action" type="button" data-o-why data-symbol="{{ item.symbol }}">
+          <span data-icon="bell" data-icon-class="icon-sm"></span>Why was I not told?
+        </button>
+        {% endif %}
+
+        {% if item.setup_id %}
+        <button class="t-action" type="button"
+                data-o-chart="{{ item.setup_id }}"
+                data-symbol="{{ item.symbol }}"
+                data-timeframe="{{ item.candle_size }}">
+          <span data-icon="chart" data-icon-class="icon-sm"></span>Price picture
+        </button>
+        {% endif %}
+
+        {#- Opened, not linked to. A link straight to the full Passport is a visible
+            button that lands on "not found" whenever the coin has no published record;
+            the popup says that in words instead, and carries the link to the full
+            Passport once there is one. -#}
+        {% if item.coin %}
+        <button class="t-action is-quiet" type="button"
+                data-o-passport
+                data-coin="{{ item.coin }}"
+                data-standard="{{ item.standard_id }}">
+          <span data-icon="passport" data-icon-class="icon-sm"></span>Is {{ item.coin }} halal?
+        </button>
+        {% endif %}
+      </div>
+
+      {#- The evidence itself, written by the server and hidden until it is asked for.
+          The popup shows this markup; it never builds sentences of its own from a
+          number, so what a person reads in the popup is what the server said. -#}
+      <template data-o-evidence>
+        {% if item.what_we_saw %}
+        <ul class="o-checks">
+          {% for check in item.what_we_saw %}
+          <li class="o-check" data-tone="{{ check.tone }}">
+            <span class="o-check-mark" data-tone="{{ check.tone }}" aria-hidden="true">
+              <span data-icon="{{ 'check' if check.tone == 'success' else 'alert' if check.tone == 'warning' else 'info' }}" data-icon-class="icon-sm"></span>
+            </span>
+            <div class="o-check-body">
+              <p class="o-check-name">
+                <strong>{{ check.name }}</strong>
+                {% if check.must_pass %}<span class="o-must">Must be true</span>{% endif %}
+              </p>
+              <p class="o-check-state">{{ check.label }}{% if check.how_often %} · looked at {{ check.how_often|lower }}{% endif %}</p>
+              {#- Each half is said only if we have it. Half a pair is still worth
+                  showing; a missing half is never filled in with a zero. -#}
+              {% if check.wanted or check.saw %}
+              <p class="o-check-numbers">
+                {%- if check.wanted %}You asked for <strong>{{ check.wanted }}</strong>. {% endif -%}
+                {%- if check.saw %}We saw <strong>{{ check.saw }}</strong>.{% elif check.wanted %}We could not read it.{% endif -%}
+              </p>
+              {% endif %}
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="o-check-none">Nothing was recorded for this one yet. As soon as your monitor looks at it, every reading appears here.</p>
+        {% endif %}
+      </template>
+
+      {% if item.why %}
+      <template data-o-why-answer>
+        <p class="o-why-head" data-tone="{{ item.why.tone }}">
+          <span data-icon="info" data-icon-class="icon-sm"></span>
+          <strong>{{ item.why.headline }}</strong>
+        </p>
+        <p class="o-why-meaning">{{ item.why.meaning }}</p>
+        <p class="o-why-do"><strong>What you can do:</strong> {{ item.why.what_to_do }}</p>
+      </template>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+
+  <div class="w-nothing" data-o-nothing hidden>
+    <span class="w-nothing-mark" aria-hidden="true"><span data-icon="search" data-icon-class="icon"></span></span>
+    <h2>Nothing here matches that</h2>
+    <p>Try another coin, or show all of them again.</p>
+    <button class="t-action is-primary" type="button" data-o-reset>
+      <span data-icon="undo" data-icon-class="icon-sm"></span>Show all
+    </button>
+  </div>
+
+  {%- else -%}
+
+  {#- Nothing found yet. Says why, and gives the button that changes it. The live page
+      said "Activate a validated Watchlist and allow its first market evaluation to
+      complete", which is an instruction in a language nobody speaks.
+
+      Two different nothings, and they need two different answers. Somebody who chose
+      one monitor and found it empty is not somebody with no monitors at all, and
+      offering them "make your first monitor" would answer a question they did not ask. -#}
+  <section class="w-first o-first" data-hm-part="Nothing found yet">
+    <span class="w-first-mark" aria-hidden="true"><span data-icon="activity" data-icon-class="icon"></span></span>
+    {% if selected_watchlist_name %}
+    <h2>{{ selected_watchlist_name }} has not found anything yet</h2>
+    <p>Nothing it is watching has matched so far. That is normal — a monitor can wait days before anything happens.</p>
+    <div class="w-first-ways o-first-ways">
+      <a class="w-way" href="{{ opportunities_path }}">
+        <span class="w-way-mark" aria-hidden="true"><span data-icon="list" data-icon-class="icon"></span></span>
+        <strong>Show everything again</strong>
+        <span>Look at what all of your monitors have found, not only this one.</span>
+        <span class="w-way-go" aria-hidden="true"><span data-icon="arrow" data-icon-class="icon-sm"></span></span>
+      </a>
+      <a class="w-way" href="{{ watchlists_path }}">
+        <span class="w-way-mark" aria-hidden="true"><span data-icon="settings" data-icon-class="icon"></span></span>
+        <strong>Look at this monitor</strong>
+        <span>Check that it is still watching, and see what it is waiting for.</span>
+        <span class="w-way-go" aria-hidden="true"><span data-icon="arrow" data-icon-class="icon-sm"></span></span>
+      </a>
+    </div>
+    {% else %}
+    <h2>Nothing has been found yet</h2>
+    <p>This page fills up on its own. A monitor has to be watching first, and it has to look at the market at least once. Then every coin it finds appears here with what we saw.</p>
+    <div class="w-first-ways o-first-ways">
+      <a class="w-way" href="{{ watchlists_path }}">
+        <span class="w-way-mark" aria-hidden="true"><span data-icon="radar" data-icon-class="icon"></span></span>
+        <strong>Look at your monitors</strong>
+        <span>See which of them are watching, and start any that are paused.</span>
+        <span class="w-way-go" aria-hidden="true"><span data-icon="arrow" data-icon-class="icon-sm"></span></span>
+      </a>
+      <a class="w-way" href="{{ new_watchlist_path }}">
+        <span class="w-way-mark" aria-hidden="true"><span data-icon="plus" data-icon-class="icon"></span></span>
+        <strong>Make your first monitor</strong>
+        <span>Answer a few questions and Hilal Markets starts watching for you.</span>
+        <span class="w-way-go" aria-hidden="true"><span data-icon="arrow" data-icon-class="icon-sm"></span></span>
+      </a>
+    </div>
+    <a class="w-first-browse" href="{{ market_path }}">
+      <span data-icon="coins" data-icon-class="icon-sm"></span>Or look at which coins passed screening first
+    </a>
+    {% endif %}
+  </section>
+
+  {%- endif %}
+</div>
+
+{#- What we saw. One popup, filled from the card that opened it. -#}
+<dialog class="t-dialog o-saw" data-o-saw-dialog aria-labelledby="o-saw-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <span class="t-eyebrow"><span data-icon="eye" data-icon-class="icon-sm"></span>Every reading we kept</span>
+        <h2 id="o-saw-title" data-o-saw-title>What did we see?</h2>
+        <p>These are the things you asked for, and what the market was doing when we last looked.</p>
+      </div>
+      <button class="t-close" type="button" data-o-saw-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <div class="t-dialog-body" data-o-saw-body></div>
+    <footer class="t-dialog-foot">
+      <span class="t-foot-note">Nothing here is advice. These are your own conditions.</span>
+      <button class="t-action" type="button" data-o-saw-cancel>Close</button>
+    </footer>
+  </div>
+</dialog>
+
+{#- Why nobody was told. -#}
+<dialog class="t-dialog o-why" data-o-why-dialog aria-labelledby="o-why-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <span class="t-eyebrow"><span data-icon="bell" data-icon-class="icon-sm"></span>About your messages</span>
+        <h2 id="o-why-title" data-o-why-title>Why was I not told?</h2>
+      </div>
+      <button class="t-close" type="button" data-o-why-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <div class="t-dialog-body" data-o-why-body></div>
+    <footer class="t-dialog-foot">
+      <a class="t-action" href="/dashboard/integrations">
+        <span data-icon="integrations" data-icon-class="icon-sm"></span>Ways of being told
+      </a>
+      <button class="t-action is-primary" type="button" data-o-why-cancel>Close</button>
+    </footer>
+  </div>
+</dialog>
+
+{#- The price picture.
+
+    It says where it comes from before it draws anything: the picture is made by an
+    outside company's drawing tool, and it is not our evidence. What we checked is in
+    "What did we see?". The drawing tool is fetched only when this popup is opened, so
+    a person who never asks for a chart never loads one. -#}
+<dialog class="t-dialog o-chart" data-o-chart-dialog aria-labelledby="o-chart-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <span class="t-eyebrow"><span data-icon="chart" data-icon-class="icon-sm"></span>The market, drawn</span>
+        <h2 id="o-chart-title" data-o-chart-title>Price picture</h2>
+        <p>Drawn by an outside company's tool. It is a picture of the market, not our evidence.</p>
+      </div>
+      <button class="t-close" type="button" data-o-chart-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <div class="t-dialog-body">
+      <div class="o-chart-stage" data-o-chart-stage></div>
+      <p class="o-chart-note" data-o-chart-note role="status" aria-live="polite">Getting the picture ready…</p>
+    </div>
+    <footer class="t-dialog-foot">
+      <button class="t-action" type="button" data-o-chart-cancel>Close</button>
+    </footer>
+  </div>
+</dialog>
+
+{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-opportunities-test.js') }}?v=20260818-live-4"></script>{% endblock %}

@@ -1,52 +1,10 @@
 document.addEventListener("DOMContentLoaded", () => {
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const sidebar = document.querySelector("[data-hilal-sidebar], [data-sidebar]");
-  const backdrop = document.querySelector("[data-hilal-sidebar-backdrop], [data-sidebar-backdrop]");
-
-  const closeSidebar = () => {
-    sidebar?.classList.remove("is-open");
-    backdrop?.classList.remove("is-open");
-    document.body.classList.remove("no-scroll");
-  };
-  const openSidebar = () => {
-    sidebar?.classList.add("is-open");
-    backdrop?.classList.add("is-open");
-    document.body.classList.add("no-scroll");
-  };
-
-  document.querySelectorAll("[data-hilal-open-sidebar], [data-open-sidebar]").forEach((button) => {
-    button.addEventListener("click", openSidebar);
-  });
-  document.querySelectorAll("[data-hilal-close-sidebar], [data-close-sidebar]").forEach((button) => {
-    button.addEventListener("click", closeSidebar);
-  });
-  backdrop?.addEventListener("click", closeSidebar);
-
-  const collapseButton = document.querySelector("[data-sidebar-collapse]");
-  const collapsedStorageKey = "hilalmarkets-sidebar-collapsed";
-  const desktopSidebar = window.matchMedia("(min-width: 901px)");
-  const syncSidebarCollapse = (collapsed) => {
-    document.body.classList.toggle("sidebar-collapsed", collapsed && desktopSidebar.matches);
-    collapseButton?.setAttribute("aria-expanded", String(!collapsed));
-    collapseButton?.setAttribute("aria-label", collapsed ? "Expand side menu" : "Minimize side menu");
-    collapseButton?.setAttribute("title", collapsed ? "Expand side menu" : "Minimize side menu");
-    const label = collapseButton?.querySelector("span:last-child");
-    if (label) label.textContent = collapsed ? "Expand menu" : "Minimize menu";
-    const minimizeIcon = collapseButton?.querySelector('[data-sidebar-collapse-icon="minimize"]');
-    const expandIcon = collapseButton?.querySelector('[data-sidebar-collapse-icon="expand"]');
-    if (minimizeIcon) minimizeIcon.hidden = collapsed;
-    if (expandIcon) expandIcon.hidden = !collapsed;
-  };
-  const savedSidebarState = window.localStorage.getItem(collapsedStorageKey) === "true";
-  syncSidebarCollapse(savedSidebarState);
-  collapseButton?.addEventListener("click", () => {
-    const collapsed = !document.body.classList.contains("sidebar-collapsed");
-    window.localStorage.setItem(collapsedStorageKey, String(collapsed));
-    syncSidebarCollapse(collapsed);
-  });
-  desktopSidebar.addEventListener?.("change", () => syncSidebarCollapse(
-    window.localStorage.getItem(collapsedStorageKey) === "true",
-  ));
+  // The side menu is not opened, closed or minimized here any more. It has one owner,
+  // `hm-shell.js`. This file and `dashboard.js` each used to run their own copy of that
+  // code against the same `sidebar-collapsed` class on `<body>`, from two different
+  // stored values, so whichever happened to run last decided what a person saw and the
+  // menu appeared to forget the state they had chosen.
 
   const brandedSelects = [...document.querySelectorAll("[data-hm-select]")];
   const closeBrandedSelect = (wrapper, restoreFocus = false) => {
@@ -797,6 +755,12 @@ document.addEventListener("DOMContentLoaded", () => {
       // Browser autoplay policy may suppress sound; visual delivery remains intact.
     }
   };
+  /* The one player, reachable by name.
+   *
+   * The Settings page lets somebody hear a sound before choosing it, and a preview that
+   * played a *different* tone from the real notice would be a lie told in the one place
+   * a person goes to check. There is one pattern table and one player: this one. */
+  window.hmPlayAlertSound = playDashboardSound;
   let notificationStack = notificationCenter
     ? document.getElementById("web-notification-stack")
     : null;

@@ -275,6 +275,55 @@ def test_custom_capability_requires_live_scope_consent_limit_and_exact_fragment(
     assert "request_custom_capability" not in policy.allowed_tools(exhausted, runtime)
 
 
+def test_capability_selection_is_bound_to_its_own_fragment_not_the_whole_turn() -> None:
+    """A multi-condition turn must not let a capability from one clause bind to another's text.
+
+    ``candidate_capability_keys`` and ``candidate_source_fragments`` are each a
+    flattened, whole-turn set. On their own they only prove a key and a fragment
+    each appeared *somewhere* in the turn's resolution, not that the registry ever
+    offered that key *for that wording* — so "RSI below 30 and volume 2x average"
+    could let ``volume_ratio`` bind to the RSI clause's text and neither flattened
+    check would notice.
+    """
+    policy = AgentPolicyService()
+    runtime = AgentRuntimePolicyState(
+        candidate_capability_keys={"rsi_below_30", "volume_ratio"},
+        candidate_source_fragments={"rsi below 30", "volume 2x average"},
+        candidate_capability_keys_by_fragment={
+            "rsi below 30": frozenset({"rsi_below_30"}),
+            "volume 2x average": frozenset({"volume_ratio"}),
+        },
+    )
+    context = _context()
+
+    def _call(capability_key: str, source_fragment: str):
+        return policy.validate_call(
+            tool_name="validate_capability_selection",
+            raw_arguments={
+                "capability_key": capability_key,
+                "parameters": [],
+                "timeframe": "15m",
+                "direction": None,
+                "required": True,
+                "source_fragment": source_fragment,
+                "comparator": None,
+            },
+            offered_tools=("validate_capability_selection",),
+            context=context,
+            runtime=runtime,
+        )
+
+    # The correct pairing for each clause clears this policy layer.
+    assert _call("rsi_below_30", "RSI below 30").tool_name == "validate_capability_selection"
+    assert _call("volume_ratio", "volume 2x average").tool_name == "validate_capability_selection"
+
+    # A capability that only ever scored on the OTHER clause must not bind here,
+    # even though both the key and this fragment separately appeared in the turn.
+    with pytest.raises(AgentPolicyViolation) as cross_wired:
+        _call("volume_ratio", "RSI below 30")
+    assert cross_wired.value.code == "capability_not_shortlisted_for_fragment"
+
+
 def test_multilingual_setup_and_custom_build_consent_are_recognized() -> None:
     assert _looks_like_setup_language(
         "\u0639\u0627\u064a\u0632 \u0623\u0631\u0627\u0642\u0628 \u0643\u0633\u0631 "

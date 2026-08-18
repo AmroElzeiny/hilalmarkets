@@ -92,7 +92,11 @@ async def test_system_brain_user_registry_has_bounded_controls_and_custom_dialog
     assert "Lifetime partner" in response.text
     assert 'data-user-action-dialog' in response.text
     assert 'data-user-admin-form' in response.text
-    assert "blocked from every future signup" in response.text
+    # Banning blocks the address for ever, so the confirmation has to say so before the
+    # admin agrees to it. Matched on the promise rather than on one sentence: the wording
+    # was rewritten into plainer English and the promise did not change.
+    ban_form = response.text.split("/ban", 1)[1].split("</form>", 1)[0]
+    assert "sign up again" in ban_form
     assert "window.confirm" not in response.text
 
     denied = await test_context["client"].get(
@@ -203,7 +207,7 @@ async def test_system_brain_applies_real_access_and_branded_email_once(
     assert email["purpose"] == "account_access_changed"
     assert 'data-hm-email-shell="true"' in email["html_body"]
     assert "#cbfa4d" in email["html_body"]
-    assert "Your HilalMarkets access is now" in email["subject"]
+    assert "Your Hilal Markets access is now" in email["subject"]
     if expected_days is not None:
         assert subscription.current_period_end is not None
         period_end = subscription.current_period_end

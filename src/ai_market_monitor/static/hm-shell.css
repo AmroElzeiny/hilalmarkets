@@ -1,0 +1,1068 @@
+/* The dashboard shell: the side menu and the topbar.
+ *
+ * These two are on every signed-in page, so everything here is written once and is
+ * right nine times. There is no second copy: the shell rules that used to live in
+ * `hilalmarkets-dashboard-v2.css` are gone, and the eleven `.nav-icon-*` mask rules that
+ * were a second icon system for the menu alone are gone with them. The menu now draws
+ * from `hilalmarkets-icons.js`, which is the product's one icon table.
+ *
+ * Every colour, radius, shadow and typeface is a token from `hilalmarkets-brand.css`.
+ * Nothing here invents a colour, a type family or a spacing step — the same rule the
+ * rest of the redesign works to, and the reason this file is in the palette test's list.
+ *
+ * `brand guide.md`:
+ *   §9  — predominantly white, apple green as one focal accent, blue almost never;
+ *   §11 — Geometria for display, Onest for interface, sentence case;
+ *   §12 — rounded surfaces, light borders, minimal shadow, space before decoration;
+ *   §15 — motion explains a relationship; it never loops for decoration;
+ *   §18 — visible focus, large targets, contrast, a reduced-motion form.
+ *
+ * The one thing to know before changing the minimized menu: **a name is moved off
+ * screen, never `display: none`.** `display: none` takes it out of the accessibility
+ * tree too, which is how nine links ended up with no accessible name at all.
+ */
+
+body.dashboard-body.hilal-dashboard {
+  /* Kept under the old name because the cookie banner and the page grid both measure
+     themselves against it. One value, every reader. */
+  --sidebar: 268px;
+  --hm-nav-min: 84px;
+  --hm-nav-row: 46px;
+  --hm-top-h: 72px;
+  --hm-shell-gap: 16px;
+}
+
+/* ── The grid ──────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .app-shell {
+  display: grid;
+  min-height: 100vh;
+  grid-template-columns: var(--sidebar) minmax(0, 1fr);
+  gap: var(--hm-shell-gap);
+  padding: var(--hm-shell-gap);
+  transition: grid-template-columns 260ms cubic-bezier(.2, .75, .25, 1);
+}
+
+body.hilal-dashboard .app-main { min-width: 0; }
+
+body.hilal-dashboard .app-content {
+  width: 100%;
+  max-width: 1500px;
+  margin: auto;
+  /* The cookie banner is fixed to the bottom of the window, so the page keeps exactly
+     that much room clear underneath itself. Its real height is measured and published as
+     `--hm-cookie-banner-height` by `hilalmarkets-consent.js`; it is 0px once the banner
+     is answered, and 0px for anyone with scripting off, who never sees it. */
+  padding: 10px 2px calc(34px + var(--hm-cookie-banner-height, 0px));
+}
+
+/* ── The side menu ─────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-nav {
+  position: sticky;
+  top: var(--hm-shell-gap);
+  z-index: 60;
+  display: flex;
+  height: calc(100vh - (var(--hm-shell-gap) * 2));
+  flex-direction: column;
+  padding: 14px 12px 12px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-lg);
+  background: var(--hm-surface);
+  box-shadow: var(--hm-shadow-md);
+  /* Visible on purpose: the flyout names in the minimized menu are placed outside this
+     box. They are `position: fixed`, so nothing here can clip them either way, but a
+     hidden overflow would also clip the focus ring on the first and last rows. */
+  overflow: visible;
+}
+
+body.hilal-dashboard .hm-nav-head {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 12px;
+  border-bottom: 1px solid var(--hm-hairline);
+}
+
+body.hilal-dashboard .hm-nav-brand {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  border-radius: 12px;
+}
+
+/* A window over the logo, not a second copy of it.
+ *
+ * `hilal-markets-logo.svg` is 197 units wide: the symbol is the first 31 of them and the
+ * word "Hilal Markets" begins at 44. Drawn at 190px, one unit is 0.964px, so a 30px
+ * window shows the symbol and nothing else. Narrowing the window is what the minimized
+ * menu does — `brand guide.md` §5 forbids squeezing the logo, and a window never
+ * squeezes anything.
+ *
+ * There used to be a second image here, `hilalmarkets-logo-mark.svg`, drawn by hand for
+ * this one place. It was not the brand's symbol and nothing kept it in step with the
+ * real logo, so the minimized menu showed a mark the rest of the product had stopped
+ * using. One file draws the logo now, in both shapes.
+ *
+ * 30px is also the width of the icon chip on every row below, so the symbol and the
+ * icons stand on one line down the middle of the minimized menu. */
+body.hilal-dashboard .dashboard-logo-viewport {
+  display: block;
+  width: 190px;
+  height: 30px;
+  flex: none;
+  overflow: hidden;
+  transition: width 220ms cubic-bezier(.2, .75, .25, 1);
+}
+
+body.hilal-dashboard .dashboard-logo-art,
+body.hilal-dashboard .logo .dashboard-logo-art {
+  display: block;
+  width: 190px;
+  max-width: none;
+  height: 30px;
+}
+
+/* ── The minimize control ──────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-nav-toggle {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 14px;
+  padding: 0 10px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 13px;
+  background: var(--hm-surface-soft);
+  color: var(--hm-copy);
+  font-family: var(--hm-font-ui);
+  font-size: .78rem;
+  font-weight: 550;
+  cursor: pointer;
+  transition:
+    background 180ms cubic-bezier(.2, .75, .25, 1),
+    border-color 180ms cubic-bezier(.2, .75, .25, 1),
+    color 180ms cubic-bezier(.2, .75, .25, 1);
+}
+
+body.hilal-dashboard .hm-nav-toggle-mark {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  place-items: center;
+  color: var(--hm-muted);
+  transition: transform 220ms cubic-bezier(.2, .75, .25, 1), color 180ms linear;
+}
+
+body.hilal-dashboard .hm-nav-toggle-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-nav-toggle:hover {
+  border-color: var(--hm-apple-pale);
+  background: var(--hm-apple-soft);
+  color: var(--hm-apple-deep);
+}
+
+body.hilal-dashboard .hm-nav-toggle:hover .hm-nav-toggle-mark {
+  color: var(--hm-apple-deep);
+  transform: translateX(-2px);
+}
+
+/* ── The links ─────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-nav-body {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 2px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+body.hilal-dashboard .hm-nav-body::-webkit-scrollbar { display: none; }
+
+body.hilal-dashboard .hm-nav-group { margin-bottom: 14px; }
+body.hilal-dashboard .hm-nav-group:last-of-type { margin-bottom: 0; }
+
+body.hilal-dashboard .hm-nav-group-label {
+  margin: 0;
+  padding: 0 12px 6px;
+  color: var(--hm-copy);
+  font-family: var(--hm-font-ui);
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: opacity 140ms linear;
+}
+
+body.hilal-dashboard .hm-nav-list {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+}
+
+body.hilal-dashboard .hm-nav-cell {
+  position: relative;
+  display: flex;
+}
+
+body.hilal-dashboard .hm-nav-link {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 100%;
+  min-height: var(--hm-nav-row);
+  align-items: center;
+  gap: 11px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  color: var(--hm-copy);
+  font-family: var(--hm-font-ui);
+  font-size: .875rem;
+  font-weight: 520;
+  text-decoration: none;
+  transition:
+    color 180ms cubic-bezier(.2, .75, .25, 1),
+    background 180ms cubic-bezier(.2, .75, .25, 1),
+    border-color 180ms cubic-bezier(.2, .75, .25, 1);
+}
+
+/* The icon lives in its own rounded chip, so the row still reads as a row when the
+   name is gone. It is the same chip in both states, which is what makes the two shapes
+   read as one menu. */
+body.hilal-dashboard .hm-nav-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--hm-surface-soft);
+  color: var(--hm-muted);
+  transition:
+    background 180ms cubic-bezier(.2, .75, .25, 1),
+    color 180ms cubic-bezier(.2, .75, .25, 1),
+    border-color 180ms cubic-bezier(.2, .75, .25, 1),
+    transform 220ms cubic-bezier(.2, .75, .25, 1);
+}
+
+body.hilal-dashboard .hm-nav-icon .icon { width: 18px; height: 18px; }
+
+body.hilal-dashboard .hm-nav-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The apple dot marks the page you are on. It is never the only signal: the row is
+   also filled near-black and carries `aria-current="page"`. §10 — colour alone never
+   carries a meaning. */
+body.hilal-dashboard .hm-nav-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  margin-inline-start: auto;
+  border-radius: 50%;
+  background: transparent;
+  transition: background 180ms linear, transform 220ms cubic-bezier(.2, .75, .25, 1);
+}
+
+body.hilal-dashboard .hm-nav-link:hover .hm-nav-icon,
+body.hilal-dashboard .hm-nav-link:focus-visible .hm-nav-icon {
+  border-color: var(--hm-apple-pale);
+  background: var(--hm-apple-soft);
+  color: var(--hm-apple-deep);
+  transform: translateY(-1px);
+}
+
+body.hilal-dashboard .hm-nav-link:hover,
+body.hilal-dashboard .hm-nav-link:focus-visible { color: var(--hm-ink); }
+
+/* Without scripting there is no travelling marker, so the row paints its own hover
+   surface. `hm-shell.js` adds `.has-marker` and this turns off, because two surfaces
+   under one pointer is one surface too many. */
+body.hilal-dashboard .hm-nav-body:not(.has-marker) .hm-nav-link:hover,
+body.hilal-dashboard .hm-nav-body:not(.has-marker) .hm-nav-link:focus-visible {
+  border-color: var(--hm-hairline);
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard .hm-nav-link.is-active {
+  border-color: var(--hm-ink);
+  background: var(--hm-ink);
+  color: var(--hm-surface);
+  box-shadow: 0 16px 34px -26px rgba(43, 46, 53, .85);
+}
+
+body.hilal-dashboard .hm-nav-link.is-active .hm-nav-icon {
+  border-color: transparent;
+  background: rgba(255, 255, 255, .12);
+  color: var(--hm-apple);
+}
+
+body.hilal-dashboard .hm-nav-link.is-active:hover .hm-nav-icon { transform: none; }
+body.hilal-dashboard .hm-nav-link.is-active .hm-nav-dot { background: var(--hm-apple); }
+
+/* One marker for the whole menu, moved by `hm-shell.js` to whichever row the pointer or
+   the keyboard is on, and parked on the current page when neither is anywhere. The
+   movement is the point: it says "this row, then that one" instead of one surface
+   blinking out while another blinks in. */
+body.hilal-dashboard .hm-nav-marker {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--hm-nav-row);
+  border: 1px solid var(--hm-hairline);
+  border-radius: 13px;
+  background: var(--hm-surface-soft);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Flyout names, for the minimized menu ──────────────────────────────────── */
+
+/* Placed by script, because the list scrolls and a name positioned inside a scrolling
+   box is clipped by it. Hidden from anything that reads: the same name is already the
+   accessible name of the link it belongs to. */
+body.hilal-dashboard .hm-nav-tip {
+  position: fixed;
+  z-index: 90;
+  display: none;
+  max-width: 220px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  background: var(--hm-ink);
+  color: var(--hm-surface);
+  font-family: var(--hm-font-ui);
+  font-size: .78rem;
+  font-weight: 520;
+  white-space: nowrap;
+  box-shadow: var(--hm-shadow-popover);
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.hilal-dashboard .hm-nav-tip.is-shown { display: block; }
+
+/* ── Who is signed in ──────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-nav-foot {
+  position: relative;
+  flex: none;
+  padding-top: 12px;
+  margin-top: 10px;
+  border-top: 1px solid var(--hm-hairline);
+}
+
+body.hilal-dashboard .hm-nav-user {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 52px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 15px;
+  background: var(--hm-surface-soft);
+  color: var(--hm-ink);
+  font-family: var(--hm-font-ui);
+  text-align: start;
+  cursor: pointer;
+  transition: background 180ms linear, border-color 180ms linear;
+}
+
+body.hilal-dashboard .hm-nav-user:hover {
+  border-color: var(--hm-hairline-strong);
+  background: var(--hm-surface);
+}
+
+body.hilal-dashboard .hm-nav-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--hm-apple-pale);
+  border-radius: 11px;
+  background: var(--hm-apple-soft);
+  color: var(--hm-apple-deep);
+  font-size: .78rem;
+  font-weight: 600;
+}
+
+body.hilal-dashboard .hm-nav-user-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+body.hilal-dashboard .hm-nav-user-copy strong,
+body.hilal-dashboard .hm-nav-user-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-nav-user-copy strong { font-size: .84rem; font-weight: 560; }
+body.hilal-dashboard .hm-nav-user-copy small { color: var(--hm-copy); font-size: .7rem; }
+
+body.hilal-dashboard .hm-nav-user-go {
+  display: grid;
+  flex: none;
+  margin-inline-start: auto;
+  place-items: center;
+  color: var(--hm-muted);
+  transition: transform 220ms cubic-bezier(.2, .75, .25, 1);
+}
+
+body.hilal-dashboard .hm-nav-user[aria-expanded="true"] .hm-nav-user-go { transform: rotate(180deg); }
+
+body.hilal-dashboard .hm-nav-account {
+  position: absolute;
+  z-index: 80;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: max(100%, 232px);
+  padding: 8px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 16px;
+  background: var(--hm-surface);
+  box-shadow: var(--hm-shadow-popover);
+}
+
+body.hilal-dashboard .hm-nav-account[hidden] { display: none; }
+
+body.hilal-dashboard .hm-nav-account-who {
+  display: grid;
+  margin: 0;
+  padding: 6px 10px 8px;
+  gap: 2px;
+  border-bottom: 1px solid var(--hm-hairline);
+}
+
+body.hilal-dashboard .hm-nav-account-name {
+  overflow: hidden;
+  color: var(--hm-ink);
+  font-size: .84rem;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-nav-account-mail {
+  overflow: hidden;
+  color: var(--hm-copy);
+  font-size: .74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-nav-account-plan {
+  display: flex;
+  margin: 6px 0 2px;
+  padding: 5px 10px;
+  gap: 7px;
+  align-items: center;
+  color: var(--hm-apple-deep);
+  font-size: .74rem;
+  font-weight: 550;
+}
+
+body.hilal-dashboard .hm-nav-account form { display: block; }
+
+body.hilal-dashboard .hm-nav-account-row {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 11px;
+  background: none;
+  color: var(--hm-copy);
+  font-family: var(--hm-font-ui);
+  font-size: .82rem;
+  font-weight: 520;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 140ms linear, color 140ms linear;
+}
+
+body.hilal-dashboard .hm-nav-account-row:hover {
+  background: var(--hm-surface-soft);
+  color: var(--hm-ink);
+}
+
+body.hilal-dashboard .hm-nav-account-row.is-leave:hover {
+  background: var(--hm-danger-bg);
+  color: var(--hm-danger);
+}
+
+/* ── Minimized ─────────────────────────────────────────────────────────────── */
+
+@media (min-width: 901px) {
+  body.dashboard-body.hilal-dashboard.sidebar-collapsed { --sidebar: var(--hm-nav-min); }
+
+  body.hilal-dashboard.sidebar-collapsed .app-shell {
+    grid-template-columns: var(--hm-nav-min) minmax(0, 1fr);
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .hm-nav { padding-inline: 12px; }
+
+  body.hilal-dashboard.sidebar-collapsed .hm-nav-head {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  /* The symbol alone, standing on the same centre line as every icon chip below it and
+     centred in the head's own height. Both axes are stated here rather than left to the
+     old behaviour of one flex item happening to be the only one left in the row. */
+  body.hilal-dashboard.sidebar-collapsed .hm-nav-brand {
+    width: 100%;
+    justify-content: center;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .dashboard-logo-viewport {
+    width: 30px;
+    margin-inline: auto;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .hm-nav-toggle {
+    width: 44px;
+    margin-inline: auto;
+    padding: 0;
+    justify-content: center;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .hm-nav-group-label { opacity: 0; }
+
+  /* Not `display: none`. The name stays in the accessibility tree; only the pixels go
+     away. This is the whole reason the minimized menu is usable at all. */
+  body.hilal-dashboard.sidebar-collapsed :is(.hm-nav-text, .hm-nav-toggle-label, .hm-nav-user-copy, .hm-nav-user-go) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .hm-nav-group-label {
+    height: 8px;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .hm-nav-link {
+    width: 46px;
+    margin-inline: auto;
+    padding: 0;
+    justify-content: center;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .hm-nav-marker { width: 46px; left: 7px; }
+
+  body.hilal-dashboard.sidebar-collapsed .hm-nav-dot {
+    position: absolute;
+    top: 5px;
+    inset-inline-end: 5px;
+    margin: 0;
+  }
+
+  body.hilal-dashboard.sidebar-collapsed .hm-nav-user {
+    width: 46px;
+    margin-inline: auto;
+    padding: 5px;
+    justify-content: center;
+  }
+}
+
+/* ── The topbar ────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-top {
+  position: sticky;
+  top: var(--hm-shell-gap);
+  z-index: 50;
+  display: flex;
+  height: var(--hm-top-h);
+  align-items: center;
+  gap: 12px;
+  margin-bottom: var(--hm-shell-gap);
+  padding: 0 12px 0 14px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: rgba(255, 255, 255, .9);
+  box-shadow: var(--hm-shadow-xs);
+  backdrop-filter: blur(18px);
+}
+
+body.hilal-dashboard .hm-top-left {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The drawer button, for a small screen only.
+ *
+ * Written with *both* of its classes, and so is the rule below that brings it back at
+ * 900px. It used to be `.hm-top-menu` alone, which is exactly as specific as the shared
+ * `.hm-top-icon-btn` shape rule further down this file — and the shape rule comes later,
+ * so it won, and the button that opens the drawer sat in the topbar of every desktop
+ * page beside a menu that was already open.
+ *
+ * The rule this file works to now: **a rule that decides whether one control is on
+ * screen names the control and its shape class together.** Then it cannot be undone by
+ * something that only says what the shape looks like, whichever order they are read in.
+ * `tests/unit/test_invariant_dashboard_shell.py` resolves the cascade for every shell
+ * control in both shapes, so a fourth collision fails a test rather than shipping. */
+body.hilal-dashboard .hm-top-icon-btn.hm-top-menu { display: none; }
+
+/* Where you are. Two lines, both short, both plain words. */
+body.hilal-dashboard .hm-top-here {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+body.hilal-dashboard .hm-top-here-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--hm-apple-pale);
+  /* The one chamfer in the shell. `brand guide.md` §6: the cut identifies the brand and
+     appears at most once in a composition, so it is here — on the mark that says which
+     page you are on — and nowhere else in the menu or the bar. */
+  border-radius: 12px;
+  border-end-start-radius: 3px;
+  background: var(--hm-apple-soft);
+  color: var(--hm-apple-deep);
+}
+
+body.hilal-dashboard .hm-top-here-mark .icon { width: 19px; height: 19px; }
+
+body.hilal-dashboard .hm-top-here-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+body.hilal-dashboard .hm-top-here-group {
+  overflow: hidden;
+  color: var(--hm-copy);
+  font-size: .68rem;
+  font-weight: 550;
+  letter-spacing: .05em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-top-here-name {
+  overflow: hidden;
+  color: var(--hm-ink);
+  font-family: var(--hm-font-display);
+  font-size: 1.02rem;
+  font-weight: 500;
+  letter-spacing: -.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Search ────────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-top-search {
+  position: relative;
+  display: flex;
+  width: min(380px, 34vw);
+  margin-inline-start: auto;
+  align-items: center;
+}
+
+body.hilal-dashboard .hm-top-search-mark {
+  position: absolute;
+  inset-inline-start: 13px;
+  display: grid;
+  place-items: center;
+  color: var(--hm-muted);
+  pointer-events: none;
+  transition: color 160ms linear;
+}
+
+body.hilal-dashboard .hm-top-search-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 58px 0 38px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 12px;
+  background: var(--hm-surface-soft);
+  color: var(--hm-ink);
+  font-family: var(--hm-font-ui);
+  font-size: .84rem;
+  transition: background 160ms linear, border-color 160ms linear;
+}
+
+body.hilal-dashboard .hm-top-search-input::placeholder { color: var(--hm-muted); }
+
+body.hilal-dashboard .hm-top-search:focus-within .hm-top-search-input {
+  border-color: var(--hm-hairline-strong);
+  background: var(--hm-surface);
+}
+
+body.hilal-dashboard .hm-top-search:focus-within .hm-top-search-mark { color: var(--hm-apple-deep); }
+
+body.hilal-dashboard .hm-top-search-key {
+  position: absolute;
+  inset-inline-end: 8px;
+  padding: 3px 7px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 7px;
+  background: var(--hm-surface);
+  color: var(--hm-muted);
+  font-family: var(--hm-font-ui);
+  font-size: .66rem;
+  font-weight: 550;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+body.hilal-dashboard .hm-top-search-key:empty { display: none; }
+body.hilal-dashboard .hm-top-search:focus-within .hm-top-search-key { opacity: 0; }
+
+/* ── The right-hand side ───────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-top-right {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+body.hilal-dashboard .hm-top-standard {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 210px;
+  padding: 6px 11px;
+  border: 1px solid var(--hm-apple-pale);
+  border-radius: 999px;
+  background: var(--hm-apple-soft);
+  color: var(--hm-apple-deep);
+  font-size: .72rem;
+  font-weight: 550;
+}
+
+body.hilal-dashboard .hm-top-standard-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-top-standard-version {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  opacity: .85;
+}
+
+/* Every action the topbar draws, whichever page declared it. One shape. */
+body.hilal-dashboard .hm-top-action {
+  position: relative;
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: 12px;
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+  font-family: var(--hm-font-ui);
+  font-size: .82rem;
+  font-weight: 550;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 180ms cubic-bezier(.2, .75, .25, 1),
+    border-color 180ms cubic-bezier(.2, .75, .25, 1),
+    transform 180ms cubic-bezier(.2, .75, .25, 1);
+}
+
+body.hilal-dashboard .hm-top-action-mark { display: grid; place-items: center; }
+
+body.hilal-dashboard .hm-top-action:hover {
+  border-color: var(--hm-ink);
+  background: var(--hm-surface-soft);
+  transform: translateY(-1px);
+}
+
+body.hilal-dashboard .hm-top-action:active { transform: translateY(0); }
+
+/* The one loud thing in the bar. §9 keeps apple green for a single focal element, and
+   near-black text on it measures 12.98:1. */
+body.hilal-dashboard .hm-top-action.is-primary {
+  border-color: var(--hm-apple);
+  background: var(--hm-apple);
+  color: var(--hm-ink-strong);
+}
+
+body.hilal-dashboard .hm-top-action.is-primary:hover {
+  border-color: var(--hm-ink);
+  background: var(--hm-apple-pale);
+}
+
+body.hilal-dashboard .hm-top-icon-btn,
+body.hilal-dashboard .hm-nav-icon-btn {
+  position: relative;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 12px;
+  background: var(--hm-surface);
+  color: var(--hm-copy);
+  cursor: pointer;
+  transition:
+    background 180ms cubic-bezier(.2, .75, .25, 1),
+    border-color 180ms cubic-bezier(.2, .75, .25, 1),
+    color 180ms cubic-bezier(.2, .75, .25, 1);
+}
+
+body.hilal-dashboard :is(.hm-top-icon-btn, .hm-nav-icon-btn):hover {
+  border-color: var(--hm-apple-pale);
+  background: var(--hm-apple-soft);
+  color: var(--hm-apple-deep);
+}
+
+body.hilal-dashboard .hm-top-icon-btn[hidden] { display: none; }
+
+/* The topbar's own small labels. The bar does not scroll, so these can stay in the
+   flow of their button rather than being placed by script. */
+body.hilal-dashboard .hm-top-tip {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% + 8px);
+  inset-inline-end: 0;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: var(--hm-ink);
+  color: var(--hm-surface);
+  font-size: .74rem;
+  font-weight: 520;
+  white-space: nowrap;
+  box-shadow: var(--hm-shadow-popover);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 140ms linear, transform 180ms cubic-bezier(.2, .75, .25, 1);
+}
+
+body.hilal-dashboard :is(.hm-top-icon-btn, .hm-top-action):hover > .hm-top-tip,
+body.hilal-dashboard :is(.hm-top-icon-btn, .hm-top-action):focus-visible > .hm-top-tip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* An action that already shows its own name does not need a second copy of it. */
+body.hilal-dashboard .hm-top-action .hm-top-tip { display: none; }
+
+/* The page guide's launcher is one of these actions, so it is the same shape as the
+   rest — but it is never the loud one, and it is the quietest of the quiet ones. */
+body.hilal-dashboard .hm-top-action.hm-guide-launcher {
+  border-color: var(--hm-hairline);
+  color: var(--hm-copy);
+  font-weight: 520;
+}
+
+body.hilal-dashboard .hm-top-action.hm-guide-launcher:hover {
+  border-color: var(--hm-apple-pale);
+  background: var(--hm-apple-soft);
+  color: var(--hm-apple-deep);
+}
+
+/* The gap between the mark and the word belongs to the row, not to the word. The guide's
+   own stylesheet adds a start margin here, which would be a second gap on top of it. */
+body.hilal-dashboard .hm-guide-launcher .hm-guide-launcher-label { margin-inline-start: 0; }
+
+body.hilal-dashboard .hm-top-bell { position: relative; }
+
+body.hilal-dashboard .hm-top-bell .notification-count {
+  position: absolute;
+  top: -5px;
+  inset-inline-end: -5px;
+  display: grid;
+  min-width: 19px;
+  height: 19px;
+  place-items: center;
+  padding: 0 5px;
+  border: 2px solid var(--hm-surface);
+  border-radius: 999px;
+  background: var(--hm-ink);
+  color: var(--hm-surface);
+  font-size: .64rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Narrow screens ────────────────────────────────────────────────────────── */
+
+@media (max-width: 1180px) {
+  body.hilal-dashboard { --sidebar: 236px; }
+  body.hilal-dashboard .hm-top-search { width: min(280px, 26vw); }
+  body.hilal-dashboard .hm-top-standard { display: none; }
+}
+
+@media (max-width: 1020px) {
+  /* The action keeps its icon and drops its word, and the label the mouse lost comes
+     back as the flyout it already had. Nothing loses its name. */
+  body.hilal-dashboard .hm-top-action { width: 44px; padding: 0; justify-content: center; }
+  body.hilal-dashboard .hm-top-action-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  body.hilal-dashboard .hm-top-action .hm-top-tip { display: block; }
+}
+
+body.hilal-dashboard .sidebar-backdrop { display: none; }
+
+@media (max-width: 900px) {
+  body.hilal-dashboard .app-shell { display: block; padding: 10px; }
+
+  /* The drawer covers the page, so the page behind it is dimmed and cannot be reached
+     by a stray tap. Pressing it is one of the three ways out, beside the X and Escape. */
+  body.hilal-dashboard .sidebar-backdrop {
+    position: fixed;
+    z-index: 55;
+    inset: 0;
+    display: block;
+    background: rgba(43, 46, 53, .44);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 220ms cubic-bezier(.2, .75, .25, 1), visibility 220ms linear;
+  }
+
+  body.hilal-dashboard .sidebar-backdrop.is-open { opacity: 1; visibility: visible; }
+
+  body.hilal-dashboard .hm-nav {
+    position: fixed;
+    top: 10px;
+    bottom: 10px;
+    left: 10px;
+    width: min(300px, calc(100vw - 20px));
+    height: auto;
+    transform: translateX(calc(-100% - 20px));
+    transition: transform 260ms cubic-bezier(.2, .75, .25, 1);
+  }
+
+  body.hilal-dashboard .hm-nav.is-open { transform: none; }
+  body.hilal-dashboard .hm-nav-icon-btn.sidebar-close { display: grid; }
+  body.hilal-dashboard .hm-nav-toggle { display: none; }
+  body.hilal-dashboard .hm-top { top: 10px; }
+  body.hilal-dashboard .hm-top-icon-btn.hm-top-menu { display: grid; }
+  body.hilal-dashboard .hm-top-here-group { display: none; }
+
+  html[dir="rtl"] body.hilal-dashboard .hm-nav {
+    right: 10px;
+    left: auto;
+    transform: translateX(calc(100% + 20px));
+  }
+
+  html[dir="rtl"] body.hilal-dashboard .hm-nav.is-open { transform: none; }
+}
+
+@media (min-width: 901px) {
+  body.hilal-dashboard .hm-nav-icon-btn.sidebar-close { display: none; }
+}
+
+@media (max-width: 760px) {
+  body.hilal-dashboard .app-shell { padding: 8px; }
+  body.hilal-dashboard .hm-top {
+    top: 8px;
+    height: 60px;
+    margin-bottom: 10px;
+    padding: 0 8px;
+    border-radius: 16px;
+  }
+  /* The search box becomes a target that opens the market page's own search rather than
+     a field squeezed to nothing. */
+  body.hilal-dashboard .hm-top-search { width: 44px; margin-inline-start: auto; }
+  body.hilal-dashboard .hm-top-search-input {
+    padding: 0;
+    color: transparent;
+    cursor: pointer;
+  }
+  body.hilal-dashboard .hm-top-search-input::placeholder { color: transparent; }
+  body.hilal-dashboard .hm-top-search-mark { inset-inline-start: 0; width: 44px; }
+  body.hilal-dashboard .hm-top-search-key { display: none; }
+  body.hilal-dashboard .hm-top-here-mark { display: none; }
+  body.hilal-dashboard .app-content { padding-bottom: 24px; }
+}
+
+/* ── Right to left ─────────────────────────────────────────────────────────── */
+
+html[dir="rtl"] body.hilal-dashboard .hm-nav-toggle:hover .hm-nav-toggle-mark { transform: translateX(2px); }
+
+/* ── Less motion ───────────────────────────────────────────────────────────── */
+
+/* `brand guide.md` §18 asks for a reduced-motion form of everything. The interface is
+   identical; it simply arrives instead of travelling. The scripted parts do the same
+   through `hm-motion.js`, which places elements at their final keyframe. */
+@media (prefers-reduced-motion: reduce) {
+  body.hilal-dashboard .app-shell,
+  body.hilal-dashboard .hm-nav,
+  body.hilal-dashboard .hm-nav-link,
+  body.hilal-dashboard .hm-nav-icon,
+  body.hilal-dashboard .hm-nav-toggle,
+  body.hilal-dashboard .hm-nav-toggle-mark,
+  body.hilal-dashboard .hm-nav-user-go,
+  body.hilal-dashboard .hm-top-action,
+  body.hilal-dashboard .hm-top-tip,
+  body.hilal-dashboard .dashboard-logo-viewport,
+  body.hilal-dashboard :is(.hm-top-icon-btn, .hm-nav-icon-btn) { transition: none; }
+
+  body.hilal-dashboard .hm-nav-link:hover .hm-nav-icon,
+  body.hilal-dashboard .hm-nav-link:focus-visible .hm-nav-icon,
+  body.hilal-dashboard .hm-top-action:hover,
+  body.hilal-dashboard .hm-nav-toggle:hover .hm-nav-toggle-mark { transform: none; }
+
+  body.hilal-dashboard .hm-top-tip { transform: none; }
+}

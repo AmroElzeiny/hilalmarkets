@@ -111,7 +111,9 @@ def _guide_pages(base_url: str) -> list[tuple[str, str]]:
     """
 
     return [
-        (f"{base_url}/dashboard", "dashboard-home"),
+        # Main is the front page. `/dashboard` is the old Home page's address
+        # and redirects here, so this names the page a browser really lands on.
+        (f"{base_url}/main", "dashboard-today"),
         (f"{base_url}/dashboard/market", "screened-market"),
         (f"{base_url}/dashboard/strategies", "watch-plans"),
         (f"{base_url}/dashboard/strategies/new", "strategy-builder-monitor"),
@@ -255,7 +257,7 @@ def test_every_registered_guide_is_reachable_from_a_real_page(
     """A guide nobody can open is dead weight that still has to be maintained."""
 
     signup(page, base_url, unique_email("guide-reach"))
-    page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/main", wait_until="domcontentloaded")
     registered = set(_registry(page).keys())
     # The Passport lives under a dynamic asset slug, so it cannot appear in a static
     # route list. Its own test navigates to a real one.
@@ -273,7 +275,7 @@ def test_guide_copy_obeys_the_length_and_safety_rules(
     """Short titles, two sentences at most, and nothing the product cannot support."""
 
     signup(page, base_url, unique_email("guide-copy"))
-    page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/main", wait_until="domcontentloaded")
     registry = _registry(page)
 
     banned = re.compile(
@@ -307,7 +309,7 @@ def test_home_guide_runs_on_desktop_with_a_counter_and_a_real_hole(
 ) -> None:
     signup(page, base_url, unique_email("guide-home-desktop"))
     page.set_viewport_size(DESKTOP)
-    page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/main", wait_until="domcontentloaded")
 
     _start_guide(page)
     counter = _counter_text(page)
@@ -326,10 +328,10 @@ def test_home_guide_runs_on_desktop_with_a_counter_and_a_real_hole(
     assert_no_raw_traceback(page)
 
 
-def test_home_guide_runs_at_mobile_width(page: Page, base_url: str) -> None:
+def test_today_guide_runs_at_mobile_width(page: Page, base_url: str) -> None:
     signup(page, base_url, unique_email("guide-home-mobile"))
     page.set_viewport_size(MOBILE)
-    page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/main", wait_until="domcontentloaded")
 
     _start_guide(page)
     popover = page.locator("[data-hm-guide-popover]").bounding_box()
@@ -361,8 +363,8 @@ def test_a_collapsed_desktop_sidebar_is_expanded_and_then_restored(
 
     signup(page, base_url, unique_email("guide-sidebar-desktop"))
     page.set_viewport_size(DESKTOP)
-    page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
-    # Home opens its guide by itself for a new account, and the dimmed panels correctly
+    page.goto(f"{base_url}/main", wait_until="domcontentloaded")
+    # Main opens its guide by itself for a new account, and the dimmed panels correctly
     # block the page underneath. Put it away before touching the menu control.
     _close_any_open_guide(page)
     page.locator("[data-sidebar-collapse]").click()
@@ -392,8 +394,8 @@ def test_three_menu_steps_in_a_row_still_give_the_menu_back(
 
     signup(page, base_url, unique_email("guide-sidebar-run"))
     page.set_viewport_size(DESKTOP)
-    page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
-    # Home opens its guide by itself for a new account, and the dimmed panels correctly
+    page.goto(f"{base_url}/main", wait_until="domcontentloaded")
+    # Main opens its guide by itself for a new account, and the dimmed panels correctly
     # block the page underneath. Put it away before touching the menu control.
     _close_any_open_guide(page)
     page.locator("[data-sidebar-collapse]").click()
@@ -406,7 +408,7 @@ def test_three_menu_steps_in_a_row_still_give_the_menu_back(
             menu_steps += 1
         page.locator("[data-hm-guide-next]").click()
         page.wait_for_timeout(120)
-    assert _current_target_is_in_the_menu(page), "the last Home step points at the menu"
+    assert _current_target_is_in_the_menu(page), "the last Main step points at the menu"
     menu_steps += 1
     assert menu_steps >= 3, f"expected at least three menu steps, walked {menu_steps}"
 
@@ -422,7 +424,7 @@ def test_a_mobile_sidebar_target_is_opened_and_then_closed_again(
 ) -> None:
     signup(page, base_url, unique_email("guide-sidebar-mobile"))
     page.set_viewport_size(MOBILE)
-    page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/main", wait_until="domcontentloaded")
 
     sidebar = page.locator("[data-sidebar]")
     assert "is-open" not in (sidebar.get_attribute("class") or "")
@@ -918,7 +920,7 @@ def test_a_new_user_is_offered_the_home_guide_from_a_server_owned_signal(
 
     signup(page, base_url, unique_email("guide-newuser"))
     page.set_viewport_size(DESKTOP)
-    page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/main", wait_until="domcontentloaded")
 
     signal = page.locator("body").get_attribute("data-hm-guide-new-user")
     assert signal in {"true", "false"}, signal
@@ -941,13 +943,13 @@ def test_a_dismissed_invitation_stays_dismissed_but_the_launcher_does_not(
 ) -> None:
     signup(page, base_url, unique_email("guide-dismiss"))
     page.set_viewport_size(DESKTOP)
-    page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/main", wait_until="domcontentloaded")
     # The key carries the guide's version, so writing a literal `v1` stopped
-    # suppressing anything the moment the Home guide was revised — the test then
+    # suppressing anything the moment the Main guide was revised — the test then
     # measured an auto-started guide instead of a dismissed one. Read the version the
     # page is really running so this cannot drift again.
     page.evaluate(
-        "() => { const g = window.HilalMarketsGuide.registry['dashboard-home'];"
+        "() => { const g = window.HilalMarketsGuide.registry['dashboard-today'];"
         " window.localStorage.setItem(`hm-guide:${g.id}:v${g.version}`, 'skipped'); }"
     )
     page.reload(wait_until="domcontentloaded")
@@ -963,15 +965,15 @@ def test_a_new_guide_version_is_offered_again(page: Page, base_url: str) -> None
     """Completion keys carry the version, so an updated guide is not suppressed."""
 
     signup(page, base_url, unique_email("guide-version"))
-    page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
-    version = _registry(page)["dashboard-home"]["version"]
+    page.goto(f"{base_url}/main", wait_until="domcontentloaded")
+    version = _registry(page)["dashboard-today"]["version"]
     page.evaluate(
-        f"() => window.localStorage.setItem('hm-guide:dashboard-home:v{version - 1}', 'done')"
+        f"() => window.localStorage.setItem('hm-guide:dashboard-today:v{version - 1}', 'done')"
     )
     page.reload(wait_until="domcontentloaded")
     # The old key must not satisfy the current version.
     still_offered = page.evaluate(
-        f"() => window.localStorage.getItem('hm-guide:dashboard-home:v{version}') === null"
+        f"() => window.localStorage.getItem('hm-guide:dashboard-today:v{version}') === null"
     )
     assert still_offered, "an older completion key suppressed the current guide"
 
@@ -989,7 +991,7 @@ def test_registry_snapshot_is_written_for_the_report(
     """Persist what shipped, so the step list in the report is a measurement."""
 
     signup(page, base_url, unique_email("guide-snapshot"))
-    page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/main", wait_until="domcontentloaded")
     registry = _registry(page)
 
     output = repo_root / "reports" / "playwright" / "dashboard-guide"

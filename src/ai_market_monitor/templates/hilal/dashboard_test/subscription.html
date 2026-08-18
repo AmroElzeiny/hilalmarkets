@@ -1,0 +1,423 @@
+{% extends "hilal/base_dashboard.html" %}
+{% block page_styles_late %}
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260818-live-4">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260818-live-4">
+{% endblock %}
+{% block content %}
+
+{#- Your plan.
+
+    Three questions, in the order somebody actually asks them:
+
+      1. What do I have?          -> the plan, and what it lets me do
+      2. Am I running out of it?  -> how much of each allowance is gone
+      3. What would I get?        -> the other plans, and only then their prices
+
+    The live page opened with a price grid. That answers question three to somebody who
+    has not been told the answer to question one. -#}
+
+<div class="hm-t hm-s" data-subscription-root data-open-for="{{ open_for_plan }}">
+
+  <header class="t-head" data-hm-part="The page heading">
+    <div class="t-head-copy">
+      <p class="t-eyebrow"><span data-icon="billing" data-icon-class="icon-sm"></span>Your account</p>
+      <h1>Your plan</h1>
+    </div>
+    <a class="t-action" href="{{ support_path }}">
+      <span data-icon="support" data-icon-class="icon-sm"></span>Ask us about billing
+    </a>
+  </header>
+
+  {#- An unfinished payment is the one thing worth interrupting somebody about, because
+      it is the only state on this page they can fix in one press. -#}
+  {% if unfinished_payment %}
+  <div class="t-banner" data-tone="information" role="status" data-s-banner>
+    <span data-icon="clock" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      <strong>You started paying and did not finish</strong>
+      <p>{{ unfinished_payment.plan_name }}, {{ unfinished_payment.amount }}. Nothing has been charged yet.</p>
+      <a class="t-action" href="{{ unfinished_payment.resume_url }}">
+        <span data-icon="arrow" data-icon-class="icon-sm"></span>Finish paying
+      </a>
+    </div>
+  </div>
+  {% endif %}
+
+  <nav class="a-jump" aria-label="Jump to a part of this page" data-s-jump>
+    <a href="#s-now" data-s-jump-link><span data-icon="shield_check" data-icon-class="icon-sm"></span>What you have</a>
+    <a href="#s-plans" data-s-jump-link><span data-icon="layers" data-icon-class="icon-sm"></span>Other plans</a>
+    <a href="#s-payments" data-s-jump-link><span data-icon="history" data-icon-class="icon-sm"></span>Your payments</a>
+  </nav>
+
+  {#- 1. What you have. ---------------------------------------------------- -#}
+  <section class="a-section" id="s-now" data-hm-part="The plan you are on">
+    <div class="s-now">
+      <div class="s-now-top">
+        {#- The one chamfer on this page. brand guide.md section 6. -#}
+        <span class="s-now-mark" aria-hidden="true"><span data-icon="shield_check" data-icon-class="icon"></span></span>
+        <div class="s-now-copy">
+          <p class="t-eyebrow">You are on</p>
+          <h1>{{ entitlement.plan.name }}</h1>
+        </div>
+        <div class="s-now-actions">
+          <a class="t-action" href="#s-plans"><span data-icon="layers" data-icon-class="icon-sm"></span>See other plans</a>
+          {% if billing_enabled %}
+          <a class="t-action is-quiet" href="/dashboard/billing/portal"><span data-icon="external" data-icon-class="icon-sm"></span>Manage payment</a>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if allowances %}
+      <div class="s-allowances">
+        {% for row in allowances %}
+        <div class="s-allowance" data-at-limit="{{ 'true' if row.at_limit else 'false' }}" data-s-allowance>
+          <p class="s-allowance-top">
+            <span data-icon="{{ row.icon }}" data-icon-class="icon-sm"></span>{{ row.label }}
+          </p>
+          {% if row.used is not none %}
+            <p class="s-allowance-value t-figure"><span data-s-count data-count-to="{{ row.used }}">0</span> <span aria-hidden="true">/</span> <span class="sr-only">out of</span> {{ row.allowed }}</p>
+            {% if row.percent is not none %}
+            <div class="s-bar" role="img" aria-label="{{ row.used }} of {{ row.allowed }} used">
+              <span data-s-bar data-fill="{{ row.percent }}"></span>
+            </div>
+            {% endif %}
+            <p class="s-allowance-note">{{ 'You have used all of these. Pause one to start another.' if row.at_limit else 'Used so far.' }}</p>
+          {% else %}
+            <p class="s-allowance-value t-figure">{{ row.allowed }}</p>
+            <p class="s-allowance-note">What your plan allows.</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  {#- 2. The other plans. Price second, never first. ------------------------ -#}
+  <section class="a-section" id="s-plans" data-hm-part="Every plan">
+    <div class="a-section-head">
+      <p class="t-eyebrow"><span data-icon="layers" data-icon-class="icon-sm"></span>Choosing a plan</p>
+      <h2>What each plan gives you</h2>
+    </div>
+
+    <ul class="s-plans" role="list">
+      {% for plan in plan_cards %}
+      <li class="s-plan"
+          data-s-plan
+          data-plan="{{ plan.code }}"
+          data-current="{{ 'true' if plan.current else 'false' }}"
+          data-for-sale="{{ 'true' if plan.for_sale else 'false' }}"
+          {% if plan.current %}aria-current="true"{% endif %}>
+
+        <div class="s-plan-top">
+          <span class="a-mark" data-tone="{{ 'accent' if plan.current else 'neutral' }}" aria-hidden="true">
+            <span data-icon="{{ 'shield_check' if plan.current else 'layers' }}" data-icon-class="icon"></span>
+          </span>
+          <div>
+            <h3>{{ plan.name }}</h3>
+            {% if plan.current %}
+              <p class="a-state" data-tone="success"><span data-icon="check" data-icon-class="icon-sm"></span>Your plan</p>
+            {% elif not plan.for_sale %}
+              <p class="a-state" data-tone="neutral"><span data-icon="clock" data-icon-class="icon-sm"></span>{{ plan.coming_soon_label }}</p>
+            {% endif %}
+          </div>
+        </div>
+
+        {#- A plan nobody can buy shows a word where the number would be. A price beside
+            "Soon" reads as a charge somebody is about to face. -#}
+        <p class="s-price" data-for-sale="{{ 'true' if plan.for_sale else 'false' }}">
+          {% if not plan.for_sale %}
+            <strong>Not open yet</strong>
+          {% elif plan.is_free %}
+            <strong>Free</strong><span>and it stays free</span>
+          {% else %}
+            {% if plan.was_price %}<s aria-label="Was ${{ plan.was_price | int }} a month">${{ plan.was_price | int }}</s>{% endif %}
+            <strong>${{ plan.monthly_price | int }}</strong><span>a month</span>
+          {% endif %}
+        </p>
+
+        {% if plan.highlight and plan.for_sale %}
+        <p class="s-plan-highlight">
+          <span data-icon="spark" data-icon-class="icon-sm"></span>
+          <span>{{ plan.highlight }}</span>
+        </p>
+        {% endif %}
+
+        <ul class="s-features" role="list">
+          {% for feature in plan.features[:5] %}
+          <li><span data-icon="check" data-icon-class="icon-sm"></span><span>{{ feature }}</span></li>
+          {% endfor %}
+        </ul>
+
+        {#- Everything else lives behind a disclosure. The whole list on every card is
+            three walls of text side by side. -#}
+        {% if plan.features|length > 5 or plan.more_features %}
+        <details class="t-more">
+          <summary>
+            <span data-icon="chevron" data-icon-class="icon-sm"></span>
+            Everything in {{ plan.name }}
+            <span class="t-more-count">{{ (plan.features|length - 5 if plan.features|length > 5 else 0) + plan.more_features|length }} more</span>
+          </summary>
+          <div class="t-more-body">
+            <ul class="s-features" role="list">
+              {% for feature in plan.features[5:] %}
+              <li><span data-icon="check" data-icon-class="icon-sm"></span><span>{{ feature }}</span></li>
+              {% endfor %}
+              {% for feature in plan.more_features %}
+              <li><span data-icon="check" data-icon-class="icon-sm"></span><span>{{ feature }}</span></li>
+              {% endfor %}
+            </ul>
+          </div>
+        </details>
+        {% endif %}
+
+        <div class="s-plan-foot">
+          {% if plan.money_back and plan.buyable %}
+          <p class="s-money-back"><span data-icon="shield_check" data-icon-class="icon-sm"></span>{{ plan.money_back }}</p>
+          {% endif %}
+
+          {% if plan.current %}
+            <button class="t-action" type="button" disabled>
+              <span data-icon="check" data-icon-class="icon-sm"></span>This is your plan
+            </button>
+          {% elif plan.buyable %}
+            <button class="t-action is-primary"
+                    type="button"
+                    data-s-choose="{{ plan.code }}"
+                    data-plan-name="{{ plan.name }}"
+                    data-plan-price="{{ plan.monthly_price | int }}">
+              <span data-icon="arrow" data-icon-class="icon-sm"></span>Choose {{ plan.name }}
+            </button>
+          {% else %}
+            <button class="t-action" type="button" disabled>
+              <span data-icon="lock" data-icon-class="icon-sm"></span>Cannot be chosen yet
+            </button>
+            {% if plan.blocked_reason %}
+            <p class="s-blocked"><span data-icon="info" data-icon-class="icon-sm"></span><span>{{ plan.blocked_reason }}</span></p>
+            {% endif %}
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+
+    {#- The full table is useful and it is long. Behind a disclosure, so the page is not
+        a wall for the many people who only wanted the cards. -#}
+    <details class="t-more" data-s-compare>
+      <summary>
+        <span data-icon="chevron" data-icon-class="icon-sm"></span>
+        Put the plans side by side
+        <span class="t-more-count">{{ comparison_rows|length }} things compared</span>
+      </summary>
+      <div class="t-more-body">
+        <div class="s-compare-wrap">
+          <table class="s-compare">
+            <caption class="sr-only">Every plan compared, one row per thing</caption>
+            <thead>
+              <tr>
+                <th scope="col">What you get</th>
+                {% for header in comparison_headers %}<th scope="col">{{ header }}</th>{% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in comparison_rows %}
+              <tr>
+                <th scope="row">{{ row[0] }}</th>
+                {% for value in row[1:] %}<td>{{ value }}</td>{% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  {#- 3. Your payments. ---------------------------------------------------- -#}
+  <section class="a-section" id="s-payments" data-hm-part="Your payments">
+    <div class="a-section-head">
+      <p class="t-eyebrow"><span data-icon="history" data-icon-class="icon-sm"></span>Money</p>
+      <h2>Your payments</h2>
+    </div>
+
+    {% if payments %}
+    <ul class="s-payments" role="list">
+      {% for payment in payments %}
+      <li class="s-payment" data-s-payment>
+        <span class="a-mark" data-tone="{{ payment.tone }}" aria-hidden="true">
+          <span data-icon="{{ 'check' if payment.tone == 'success' else ('alert' if payment.tone == 'danger' else 'clock') }}" data-icon-class="icon"></span>
+        </span>
+        <div class="s-payment-copy">
+          <strong>{{ payment.plan_name }}</strong>
+          <span>{{ payment.when_ago }} &middot; {{ payment.method }}</span>
+        </div>
+        <p class="a-state" data-tone="{{ payment.tone }}">
+          <span data-icon="{{ 'check' if payment.tone == 'success' else ('alert' if payment.tone == 'danger' else 'clock') }}" data-icon-class="icon-sm"></span>
+          {{ payment.label }}
+        </p>
+        <span class="s-payment-amount">{{ payment.amount }}</span>
+        {% if payment.can_resume %}
+        <a class="t-action is-primary" href="{{ payment.resume_url }}"><span data-icon="arrow" data-icon-class="icon-sm"></span>Finish paying</a>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="t-state">
+      <span class="t-state-icon" aria-hidden="true"><span data-icon="billing" data-icon-class="icon"></span></span>
+      <h3>You have not paid for anything yet</h3>
+      <p>When you do, the payment and its receipt appear here.</p>
+    </div>
+    {% endif %}
+  </section>
+</div>
+
+{#- Paying. Three steps, in one popup, with the order in front of the person the whole
+    way through. The live popup was one scroll of fields with the price stated once at
+    the top, so the last thing somebody read before leaving the site was a postcode. -#}
+<dialog class="t-dialog s-checkout" data-s-dialog aria-labelledby="s-checkout-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <span class="t-eyebrow"><span data-icon="shield_check" data-icon-class="icon-sm"></span>Paying safely</span>
+        <h2 id="s-checkout-title">Set up your subscription</h2>
+        <p data-s-step-of>Step 1 of 3</p>
+      </div>
+      <button class="t-close" type="button" data-s-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+
+    <div class="t-dialog-body">
+      <ol class="s-steps" data-s-steps>
+        <li class="s-step" data-state="now" data-s-step="1">
+          <span class="s-step-dot" aria-hidden="true">1</span>
+          <span class="s-step-name">What you are buying</span>
+          <span class="s-step-line" aria-hidden="true"></span>
+        </li>
+        <li class="s-step" data-state="next" data-s-step="2">
+          <span class="s-step-dot" aria-hidden="true">2</span>
+          <span class="s-step-name">Who you are</span>
+          <span class="s-step-line" aria-hidden="true"></span>
+        </li>
+        <li class="s-step" data-state="next" data-s-step="3">
+          <span class="s-step-dot" aria-hidden="true">3</span>
+          <span class="s-step-name">How you pay</span>
+        </li>
+      </ol>
+
+      {#- The order stays on screen at every step. -#}
+      <div class="s-order" data-s-order>
+        <div class="s-order-copy">
+          <small>You are buying</small>
+          <strong data-s-order-plan>—</strong>
+        </div>
+        <span class="s-order-total" data-s-order-total>—</span>
+        <p class="s-order-when" data-s-order-when></p>
+      </div>
+
+      <form id="s-checkout-form" method="post" action="/dashboard/billing/checkout" data-s-form>
+        <input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}">
+        <input type="hidden" name="plan_code" value="" data-s-plan-code>
+        <input type="hidden" name="billing_cycle" value="monthly">
+        <input type="hidden" name="checkout_request_id" value="{{ checkout_request_id }}">
+
+        <section class="s-panel" data-s-panel="1">
+          <ul class="s-features" role="list" data-s-includes></ul>
+          <p class="s-safe">
+            <span data-icon="shield_check" data-icon-class="icon"></span>
+            <span data-s-refund>You can stop this at any time from this page.</span>
+          </p>
+        </section>
+
+        <section class="s-panel" data-s-panel="2" hidden>
+          <div class="s-fields">
+            <label class="s-field" data-s-field>
+              <span>First name</span>
+              <input type="text" name="first_name" value="{{ checkout_profile.first_name }}" maxlength="60" autocomplete="given-name" required>
+              <span class="s-field-wrong"><span data-icon="alert" data-icon-class="icon-sm"></span>Please write your first name.</span>
+            </label>
+            <label class="s-field" data-s-field>
+              <span>Last name</span>
+              <input type="text" name="last_name" value="{{ checkout_profile.last_name }}" maxlength="60" autocomplete="family-name" required>
+              <span class="s-field-wrong"><span data-icon="alert" data-icon-class="icon-sm"></span>Please write your last name.</span>
+            </label>
+            <label class="s-field is-wide">
+              <span>Your email</span>
+              <input type="email" value="{{ checkout_profile.email }}" autocomplete="email" readonly aria-readonly="true">
+              <small>The receipt goes here. It is the address on your account, so it cannot be changed on this page.</small>
+            </label>
+            <label class="s-field is-wide" data-s-field>
+              <span>Address</span>
+              <input type="text" name="address_line1" maxlength="200" autocomplete="address-line1" required>
+              <span class="s-field-wrong"><span data-icon="alert" data-icon-class="icon-sm"></span>Please write your address.</span>
+            </label>
+            <label class="s-field is-wide">
+              <span>Address, second line <em>if you need it</em></span>
+              <input type="text" name="address_line2" maxlength="200" autocomplete="address-line2">
+            </label>
+            <label class="s-field"><span>Town or city</span><input type="text" name="city" maxlength="100" autocomplete="address-level2"></label>
+            <label class="s-field"><span>State or region</span><input type="text" name="region" maxlength="100" autocomplete="address-level1"></label>
+            <label class="s-field"><span>Postcode</span><input type="text" name="postal_code" maxlength="24" autocomplete="postal-code"></label>
+            <label class="s-field" data-s-field>
+              <span>Country</span>
+              <input type="text" name="country" maxlength="80" autocomplete="country-name" required>
+              <span class="s-field-wrong"><span data-icon="alert" data-icon-class="icon-sm"></span>Please write your country.</span>
+            </label>
+          </div>
+          <p class="s-safe">
+            <span data-icon="info" data-icon-class="icon"></span>
+            <span>The payment company needs this to make your receipt. We do not use it for anything else.</span>
+          </p>
+        </section>
+
+        <section class="s-panel" data-s-panel="3" hidden>
+          <fieldset class="s-methods" data-s-methods>
+            <legend class="sr-only">Choose how to pay</legend>
+            <label class="s-method" data-s-method="card">
+              <input type="radio" name="payment_method" value="card">
+              <span class="s-method-copy">
+                <strong><span data-icon="billing" data-icon-class="icon-sm"></span>Card</strong>
+                <small>Handled by {{ 'Creem' if pay_methods.card == 'creem' else (pay_methods.card|title if pay_methods.card else 'our card company') }}.</small>
+              </span>
+            </label>
+            <label class="s-method" data-s-method="crypto">
+              <input type="radio" name="payment_method" value="crypto">
+              <span class="s-method-copy">
+                <strong><span data-icon="wallet" data-icon-class="icon-sm"></span>Crypto</strong>
+                <small>Handled by {{ 'NOWPayments' if pay_methods.crypto == 'nowpayments' else (pay_methods.crypto|title if pay_methods.crypto else 'our crypto company') }}.</small>
+              </span>
+            </label>
+          </fieldset>
+
+          <label class="s-agree" data-s-field>
+            <input type="checkbox" name="terms_accepted" value="true" required data-s-agree>
+            <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, the <a href="/privacy" target="_blank" rel="noopener">Privacy policy</a> and the <a href="/risk-disclosure" target="_blank" rel="noopener">Risk disclosure</a>, and to the price shown above.</span>
+          </label>
+
+          <p class="s-safe">
+            <span data-icon="shield_check" data-icon-class="icon"></span>
+            <span>You type your card or wallet details on the payment company's own page. Hilal Markets never sees them.</span>
+          </p>
+        </section>
+
+        <p class="a-said" role="status" aria-live="polite" tabindex="-1" data-s-said></p>
+      </form>
+    </div>
+
+    <footer class="t-dialog-foot">
+      <span class="t-foot-note" data-s-foot>Nothing is charged until the last step.</span>
+      <button class="t-action" type="button" data-s-back hidden><span data-icon="chevron_left" data-icon-class="icon-sm"></span>Back</button>
+      <button class="t-action is-primary" type="button" data-s-next>Next<span data-icon="chevron_right" data-icon-class="icon-sm"></span></button>
+      <button class="t-action is-primary" type="submit" form="s-checkout-form" data-s-pay hidden>
+        <span data-icon="shield_check" data-icon-class="icon-sm"></span><span data-s-pay-label>Go to the payment page</span>
+      </button>
+    </footer>
+  </div>
+</dialog>
+
+<script id="s-plan-facts" type="application/json">{{ plan_cards|tojson }}</script>
+{% endblock %}
+{% block page_scripts %}
+<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260818-live-4"></script>
+{% endblock %}

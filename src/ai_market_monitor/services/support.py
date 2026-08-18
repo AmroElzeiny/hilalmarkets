@@ -24,6 +24,28 @@ class SupportError(ValueError):
         self.code = code
 
 
+#: What a person is writing in about is what decides how quickly it is looked at.
+#:
+#: Somebody who was not told about a setup, who has a question about money, or who has
+#: hit something broken is waiting on us for something that is costing them. Everything
+#: else waits its turn.
+HIGH_PRIORITY_CATEGORIES = frozenset({"missing_alert", "billing", "bug_report"})
+
+
+def support_priority(category: str) -> str:
+    """How urgent a request is, from what it is about.
+
+    One owner. There are two ways into this product's support queue — this service and
+    the dashboard's own endpoint — and they had two different answers: the service
+    raised these three categories, and the endpoint stored every request as "normal"
+    whatever it said it was about. So a customer reporting that no message reached them
+    was queued behind a general question, and the rule that says otherwise was sitting
+    right here doing nothing.
+    """
+
+    return "high" if category in HIGH_PRIORITY_CATEGORIES else "normal"
+
+
 class SupportEscalationService:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -133,7 +155,7 @@ class SupportEscalationService:
             scan_job_id=scan_job_id,
         )
         context["source"] = source
-        priority = "high" if category in {"missing_alert", "billing", "bug_report"} else "normal"
+        priority = support_priority(category)
         ticket = SupportRequest(
             user_id=user_id,
             category=category,

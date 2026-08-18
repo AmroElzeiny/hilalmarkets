@@ -79,7 +79,9 @@ img, svg { display: block; max-width: 100%; }
   content: "";
 }
 .brain-auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 46px; }
-.brain-auth-brand .brain-logo { width: 52px; height: 52px; }
+/* The panel behind this is near-black and so is the symbol, so it is turned white the
+   same way the public footer does it — one logo file, never a second drawing. */
+.brain-auth-brand .brain-logo { width: 52px; height: 52px; filter: brightness(0) invert(1); }
 .brain-auth-brand strong { color: var(--hm-surface); font-family: var(--hm-font-display); font-size: 18px; font-weight: 500; text-transform: lowercase; }
 .brain-auth-visual h1 { max-width: 570px; margin: 4px 0 18px; color: var(--hm-surface); font-size: clamp(2.45rem, 5vw, 4.5rem); line-height: 1.02; }
 .brain-auth-visual > p:not(.brain-kicker) { max-width: 560px; color: rgba(255, 255, 255, .76); font-size: 1.02rem; }
@@ -703,7 +705,7 @@ tbody tr:hover { background: var(--hm-apple-soft); }
   background: var(--hm-apple-soft);
   box-shadow: inset 3px 0 0 var(--hm-apple);
 }
-.brain-plan-option > input:focus-visible + span { outline: 3px solid var(--hm-apple-soft); outline-offset: 2px; }
+.brain-plan-option > input:focus-visible + span { outline: var(--hm-focus-ring); outline-offset: 2px; box-shadow: var(--hm-focus-halo); }
 .brain-number-input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -988,4 +990,492 @@ html[dir="rtl"] .brain-plain-list li::before { right: 0; left: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition-duration: .01ms !important; }
+}
+
+/* ============================================================================
+   Depth, phone layout, Stats, and the quick decision on Cases.
+
+   Everything below was added when the System Brain was rebuilt to work on a phone and
+   to carry the Stats page. It is appended rather than woven in so the older rules stay
+   readable, and so the few phone rules that had to change are overridden in one place
+   where the reason for each is written down.
+   ============================================================================ */
+
+/* -- The space behind the page ---------------------------------------------
+   Four flat layers on different planes, turned by one very slow transform. It is a
+   background, not an illustration: low contrast, no flashing, nothing that looks like
+   market data, and the brand's own chamfered frame rather than a generic glow. The
+   global reduced-motion rule stops all of it. */
+.brain-orbit {
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  overflow: hidden;
+  perspective: 900px;
+  perspective-origin: 72% 18%;
+  pointer-events: none;
+}
+.brain-orbit > span { position: absolute; display: block; content: ""; }
+.brain-orbit-field {
+  inset: -20%;
+  background:
+    radial-gradient(60% 48% at 82% 4%, rgba(203, 250, 77, .18), transparent 62%),
+    radial-gradient(46% 40% at 8% 96%, rgba(203, 250, 77, .09), transparent 68%),
+    radial-gradient(38% 32% at 20% 8%, rgba(43, 46, 53, .05), transparent 70%);
+  transform: translateZ(-320px) scale(1.5);
+}
+.brain-orbit-dust {
+  inset: -30%;
+  opacity: .5;
+  background-image:
+    radial-gradient(circle, rgba(43, 46, 53, .16) .9px, transparent 1px),
+    radial-gradient(circle, rgba(203, 250, 77, .34) 1.1px, transparent 1.4px);
+  background-size: 132px 132px, 268px 268px;
+  background-position: 0 0, 46px 74px;
+  transform: translateZ(-180px) rotateX(58deg) scale(1.9);
+  transform-origin: 50% 30%;
+  animation: brain-drift 168s linear infinite;
+  /* The mask only needs opaque-versus-transparent, so it uses the ink token rather than
+     a new colour: a mask colour is still a colour, and the palette has no exceptions. */
+  mask-image: radial-gradient(70% 60% at 50% 34%, var(--hm-ink) 12%, transparent 78%);
+  -webkit-mask-image: radial-gradient(70% 60% at 50% 34%, var(--hm-ink) 12%, transparent 78%);
+}
+.brain-orbit-ring {
+  top: -14vw;
+  right: -12vw;
+  width: 54vw;
+  height: 54vw;
+  max-width: 900px;
+  max-height: 900px;
+  border: min(7vw, 116px) solid rgba(203, 250, 77, .13);
+  border-radius: 28% 0 28% 28%;
+  transform: translateZ(-90px) rotate(45deg);
+  animation: brain-orbit-turn 260s linear infinite;
+}
+.brain-orbit-ring-far {
+  top: auto;
+  right: auto;
+  bottom: -22vw;
+  left: -18vw;
+  width: 46vw;
+  height: 46vw;
+  border-width: min(5vw, 74px);
+  border-color: rgba(43, 46, 53, .05);
+  transform: translateZ(-260px) rotate(45deg);
+  animation-direction: reverse;
+  animation-duration: 340s;
+}
+@keyframes brain-orbit-turn {
+  from { transform: translateZ(-90px) rotate(45deg); }
+  to { transform: translateZ(-90px) rotate(405deg); }
+}
+@keyframes brain-drift {
+  from { background-position: 0 0, 46px 74px; }
+  to { background-position: 132px 264px, 314px 610px; }
+}
+/* The page sits on the field, so the old flat wash is no longer needed. */
+body::before { display: none; }
+
+/* -- The bar and drawer a phone gets --------------------------------------- */
+.brain-mobilebar {
+  position: sticky;
+  z-index: 30;
+  top: 0;
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hm-hairline);
+  background: rgba(255, 255, 255, .92);
+  backdrop-filter: blur(14px);
+}
+.brain-mobilebar-brand { display: flex; align-items: center; gap: 9px; text-decoration: none; }
+.brain-mobilebar-brand img { width: 30px; height: 30px; }
+.brain-mobilebar-brand strong { font-family: var(--hm-font-display); font-size: 15px; font-weight: 500; }
+.brain-mobilebar .brain-icon-button { margin-left: auto; }
+.brain-menu-toggle {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 12px;
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+  cursor: pointer;
+}
+.brain-scrim {
+  position: fixed;
+  z-index: 25;
+  inset: 0;
+  background: rgba(43, 46, 53, .45);
+}
+
+/* -- Stats ------------------------------------------------------------------ */
+.brain-stats-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.brain-stats-window { color: var(--hm-muted); font-size: 12px; }
+.brain-segmented {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 999px;
+  background: var(--hm-surface);
+}
+.brain-segmented a {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: var(--hm-copy);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background var(--hm-motion), color var(--hm-motion);
+}
+.brain-segmented a:hover { background: var(--hm-surface-soft); color: var(--hm-ink); }
+.brain-segmented a.active { background: var(--hm-ink); color: var(--hm-surface); }
+
+.brain-stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+.brain-stat-tile {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-height: 148px;
+  padding: 18px;
+  overflow: hidden;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface);
+  box-shadow: var(--hm-shadow-xs);
+  transition: transform var(--hm-motion), box-shadow var(--hm-motion), border-color var(--hm-motion);
+}
+.brain-stat-tile:hover { border-color: var(--hm-hairline-strong); box-shadow: var(--hm-shadow-md); transform: translateY(-2px); }
+.brain-stat-tile::after {
+  position: absolute;
+  right: -30px;
+  bottom: -40px;
+  width: 96px;
+  height: 96px;
+  border: 18px solid var(--hm-apple-soft);
+  border-radius: 30px 0 30px 30px;
+  transform: rotate(45deg);
+  content: "";
+}
+.brain-stat-label { color: var(--hm-muted); font-size: 11px; font-weight: 650; }
+.brain-stat-value {
+  font-family: var(--hm-font-display);
+  font-size: clamp(30px, 3.4vw, 46px);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: -.03em;
+  line-height: 1.02;
+}
+.brain-stat-change { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; }
+.brain-stat-change .icon { width: 14px; height: 14px; }
+.brain-stat-change.up { color: var(--hm-success); }
+.brain-stat-change.down { color: var(--hm-danger); }
+.brain-stat-change.flat { color: var(--hm-muted); }
+.brain-stat-tile small { color: var(--hm-muted); font-size: 11px; }
+
+.brain-tag-bar { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 18px; }
+.brain-tag-group-label { color: var(--hm-muted); font-size: 10px; font-weight: 650; letter-spacing: .05em; }
+.brain-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 999px;
+  background: var(--hm-surface);
+  color: var(--hm-copy);
+  font-size: 12px;
+  text-decoration: none;
+  transition: border-color var(--hm-motion), background var(--hm-motion), color var(--hm-motion);
+}
+.brain-tag b { color: var(--hm-muted); font-variant-numeric: tabular-nums; font-weight: 650; }
+.brain-tag:hover { border-color: var(--hm-hairline-strong); background: var(--hm-surface-soft); }
+.brain-tag.active { border-color: var(--hm-ink); background: var(--hm-ink); color: var(--hm-surface); }
+.brain-tag.active b { color: var(--hm-apple); }
+/* A tag that selects nothing stays on the page. An empty answer is information, and
+   hiding it makes the page look as if the tag does not exist. */
+.brain-tag.empty { opacity: .55; }
+
+.brain-stats-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, .9fr);
+  gap: 14px;
+  margin-top: 18px;
+}
+.brain-journey { display: grid; gap: 10px; margin: 4px 0 0; padding: 0; list-style: none; }
+.brain-journey li {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 1.6fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.brain-journey li > span:first-child { color: var(--hm-copy); }
+.brain-journey-bar { height: 9px; border-radius: 999px; background: var(--hm-surface-soft); }
+.brain-journey-bar b {
+  display: block;
+  width: var(--share, 0%);
+  height: 100%;
+  border-radius: 999px;
+  background: var(--hm-apple);
+  animation: brain-grow 620ms cubic-bezier(.2, .75, .25, 1) both;
+  transform-origin: left;
+}
+.brain-journey strong { font-variant-numeric: tabular-nums; }
+.brain-journey small { color: var(--hm-muted); min-width: 44px; text-align: right; }
+.brain-subhead { margin: 18px 0 8px; color: var(--hm-muted); font-size: 11px; font-weight: 650; }
+
+.brain-spark { display: flex; align-items: flex-end; gap: 3px; min-height: 132px; margin-top: 6px; }
+.brain-spark-bar {
+  flex: 1 1 0;
+  min-width: 3px;
+  /* A day with people on it is never a bar of zero height: an invisible bar reads as a
+     day that was not measured, which is a different fact. */
+  min-height: 3px;
+  height: var(--height, 0%);
+  border-radius: 4px 4px 2px 2px;
+  background: var(--hm-apple);
+  transition: background var(--hm-motion);
+}
+.brain-spark-bar:hover { background: var(--hm-apple-deep); }
+.brain-spark-axis { display: flex; justify-content: space-between; margin-top: 6px; color: var(--hm-muted); }
+
+.brain-visit-list { display: grid; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; }
+.brain-visit-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--hm-hairline);
+  font-size: 12px;
+}
+.brain-visit-list li:last-child { border-bottom: 0; padding-bottom: 0; }
+.brain-visit-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brain-visit-list small { grid-column: 2; color: var(--hm-muted); font-size: 11px; }
+.brain-measure-note { max-width: 760px; margin-top: 20px; color: var(--hm-muted); font-size: 12px; }
+
+/* -- Deciding several cases at once ---------------------------------------- */
+.brain-filter-drawer { margin-top: 14px; }
+.brain-filter-drawer > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 999px;
+  background: var(--hm-surface);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  list-style: none;
+}
+.brain-filter-drawer > summary::-webkit-details-marker { display: none; }
+.brain-filter-drawer[open] > summary { border-color: var(--hm-ink); background: var(--hm-ink); color: var(--hm-surface); }
+.brain-filter-drawer[open] > summary .icon { color: var(--hm-apple); }
+.brain-filter-drawer > form { margin-top: 12px; }
+
+.brain-bulk-bar {
+  position: sticky;
+  z-index: 14;
+  top: 132px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--hm-ink);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-ink);
+  box-shadow: var(--hm-shadow-md);
+  color: var(--hm-surface);
+}
+.brain-bulk-count { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; max-width: 220px; }
+.brain-bulk-count strong { font-family: var(--hm-font-display); font-size: 24px; font-variant-numeric: tabular-nums; }
+.brain-bulk-count span { color: rgba(255, 255, 255, .7); font-size: 11px; }
+/* Why Select all stopped where it did. Its own line under the count, and only ever on
+   screen when the ceiling actually bit. No `display` here on purpose, so the `hidden`
+   attribute the script sets is what decides whether it shows. */
+.brain-bulk-limit { flex-basis: 100%; color: var(--hm-apple); font-size: 11px; line-height: 1.5; }
+.brain-bulk-limit[hidden] { display: none; }
+.brain-bulk-reason {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .06);
+  color: var(--hm-surface);
+}
+.brain-bulk-reason::placeholder { color: rgba(255, 255, 255, .55); }
+.brain-bulk-reason:focus { border-color: var(--hm-apple); outline: none; }
+.brain-bulk-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.brain-bulk-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 15px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 620;
+}
+.brain-bulk-actions .approve { border-color: var(--hm-apple); background: var(--hm-apple); color: var(--hm-ink); }
+.brain-bulk-actions .danger { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); color: var(--hm-danger); }
+.brain-bulk-actions .brain-secondary-button { background: transparent; color: rgba(255, 255, 255, .8); border-color: rgba(255, 255, 255, .25); }
+.brain-bulk-actions button .icon { width: 15px; height: 15px; }
+
+.brain-undo-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 11px 14px;
+  border: 1px dashed var(--hm-hairline-strong);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface-soft);
+  font-size: 12px;
+}
+.brain-undo-bar span { display: inline-flex; align-items: center; gap: 8px; color: var(--hm-copy); }
+.brain-undo-bar .icon { width: 15px; height: 15px; color: var(--hm-muted); }
+
+.brain-select-cell { width: 42px; text-align: center; }
+.brain-select-cell input { width: 17px; height: 17px; accent-color: var(--hm-apple-deep); cursor: pointer; }
+tr.is-selected { background: var(--hm-apple-pale); }
+
+/* -- One review case ------------------------------------------------------- */
+.brain-criteria-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 4px 0 10px;
+}
+.brain-criteria-head h4 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; }
+.brain-criteria-head span[data-criteria-progress] {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--hm-surface-soft);
+  color: var(--hm-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+.brain-criteria-head span[data-criteria-progress][data-complete="true"] { background: var(--hm-apple-pale); color: var(--hm-success); }
+.brain-approve-all { display: inline-flex; align-items: center; gap: 7px; }
+.brain-approve-all .icon { width: 15px; height: 15px; }
+.brain-decision-reason { display: block; margin-top: 12px; }
+.brain-assignment-inline { margin-left: auto; }
+.brain-assignment-inline > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 11px;
+  list-style: none;
+}
+.brain-assignment-inline > summary::-webkit-details-marker { display: none; }
+.brain-assignment-inline form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-sm, 14px);
+  background: var(--hm-surface-soft);
+}
+.brain-assignment-inline form .wide { grid-column: 1 / -1; }
+
+/* -- Phones ----------------------------------------------------------------
+   The side menu used to become a horizontal strip of unlabelled icons across the top,
+   which is nine links with no readable name in the smallest space on the page. It is a
+   drawer now: the labels come back, the targets are full width, and the bar above it
+   says where you are. */
+@media (max-width: 1040px) {
+  .brain-stat-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .brain-stats-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .brain-mobilebar { display: flex; }
+  .brain-sidebar {
+    position: fixed;
+    z-index: 28;
+    inset: 0 auto 0 0;
+    width: min(290px, 84vw);
+    height: 100dvh;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 16px 12px;
+    border-width: 0 1px 0 0;
+    border-radius: 0;
+    background: var(--hm-surface);
+    box-shadow: var(--hm-shadow-popover);
+    transform: translateX(-102%);
+    /* Hidden, not merely moved. A drawer that is only pushed off-screen keeps seven
+       links in the tab order, so the first press of Tab on a phone lands on a menu
+       nobody can see. `visibility` takes them out of it and out of the reading order,
+       and the delay lets the slide finish before they go. */
+    visibility: hidden;
+    transition: transform 220ms cubic-bezier(.2, .75, .25, 1), visibility 0s linear 220ms;
+  }
+  body.brain-nav-open .brain-sidebar {
+    visibility: visible;
+    transform: translateX(0);
+    transition-delay: 0s;
+  }
+  body.brain-nav-open { overflow: hidden; }
+  .brain-brand { padding: 3px 7px 17px; border-bottom: 1px solid var(--hm-hairline); }
+  .brain-brand span { display: block; }
+  .brain-sidebar nav { display: grid; margin: 15px 0 0; overflow: visible; }
+  .brain-sidebar nav a { display: flex; flex: initial; width: auto; justify-content: flex-start; min-height: 46px; padding: 0 11px; }
+  .brain-sidebar nav span { display: block; }
+  .brain-sidebar-foot { display: grid; margin: auto 0 0; padding: 18px 7px 2px; }
+  .brain-sidebar-foot div { display: block; }
+  .brain-admin-dot { display: block; }
+  .brain-topbar { top: 62px; }
+
+  .brain-stat-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .brain-stat-tile { min-height: 118px; padding: 14px; }
+  .brain-stats-controls { gap: 8px; }
+  .brain-segmented { width: 100%; justify-content: space-between; }
+  .brain-segmented a { flex: 1 1 0; justify-content: center; padding: 0 8px; }
+  .brain-journey li { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .brain-journey-bar { grid-column: 1 / -1; grid-row: 2; }
+  .brain-orbit-ring { opacity: .7; }
+
+  /* The quick decision is the one thing that must not become a wall of controls on a
+     phone: the count, one line to say why, then the two buttons full width. */
+  .brain-bulk-bar { position: sticky; top: 54px; grid-template-columns: 1fr; }
+  .brain-bulk-actions button { flex: 1 1 auto; justify-content: center; }
+  .brain-assignment-inline { margin-left: 0; }
+  .brain-assignment-inline form { grid-template-columns: 1fr; }
+  .brain-criteria-head { align-items: flex-start; flex-direction: column; }
+  .brain-approve-all { width: 100%; justify-content: center; }
+}
+@media (max-width: 460px) {
+  .brain-stat-tiles { grid-template-columns: 1fr; }
+  .brain-mobilebar-brand strong { display: none; }
 }

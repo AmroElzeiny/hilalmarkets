@@ -12,6 +12,14 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.dashboard_paths import (
+    COMPLIANCE_CHANGES_PATH,
+    LIFECYCLES_PATH,
+    MARKET_PATH,
+    SETTINGS_PATH,
+    SUBSCRIPTION_PATH,
+    SUPPORT_PATH,
+)
 from ai_market_monitor.core.platforms import Platform
 from ai_market_monitor.core.security import opaque_token, token_digest
 from ai_market_monitor.db.models import (
@@ -699,12 +707,12 @@ class WhatsAppConversationService:
         self, connection: WhatsAppConnection, destination: str
     ) -> WhatsAppOutboundMessage:
         paths = {
-            "lifecycles": "/dashboard/opportunities",
-            "check": "/dashboard/market",
+            "lifecycles": LIFECYCLES_PATH,
+            "check": MARKET_PATH,
             "create": "/dashboard/strategies/new",
-            "settings": "/dashboard/settings",
-            "billing": "/dashboard/subscription",
-            "support": "/dashboard/support",
+            "settings": SETTINGS_PATH,
+            "billing": SUBSCRIPTION_PATH,
+            "support": SUPPORT_PATH,
             "dashboard": "/dashboard",
         }
         if destination == "monitors":
@@ -1010,9 +1018,9 @@ class WhatsAppDeliveryService:
             alert, public_base_url=str(self.settings.public_base_url)
         )
         dashboard_path = (
-            "/dashboard/opportunities?tab=compliance_changes"
+            COMPLIANCE_CHANGES_PATH
             if presentation.alert_type == "compliance"
-            else "/dashboard/opportunities"
+            else LIFECYCLES_PATH
         )
         dashboard_url = await DashboardLinkService(self.session, self.settings).create(
             user_id=connection.user_id,

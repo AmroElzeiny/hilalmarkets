@@ -1,0 +1,182 @@
+{% extends "hilal/base_dashboard.html" %}
+{% block page_styles_late %}
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260818-live-4">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260818-live-4">
+{% endblock %}
+{% block content %}
+
+{#- Getting help.
+
+    The order is the order somebody needs, not the order a form is easiest to build in:
+
+      1. Can I fix this myself?  -> four things people actually write in about
+      2. What is it about?       -> one press, and it sets the subject for them
+      3. Tell us                 -> the fewest questions that make it answerable
+      4. What did I already ask? -> their own words, read back
+
+    The live page opened with an empty "Subject" box. That asks somebody to summarise a
+    problem before they have described it, which is the hardest question on the page. -#}
+
+<div class="hm-t hm-h" data-support-root>
+
+  <header class="t-head" data-hm-part="The page heading">
+    <div class="t-head-copy">
+      <p class="t-eyebrow"><span data-icon="support" data-icon-class="icon-sm"></span>Your account</p>
+      <h1>Get help</h1>
+      <p class="t-lede">Most things below you can change yourself in a moment. If not, tell us and a person will answer by email.</p>
+    </div>
+  </header>
+
+  {#- 1. Answer it before asking for it. ----------------------------------- -#}
+  <section class="a-section" data-hm-part="Fix it yourself">
+    <div class="a-section-head">
+      <p class="t-eyebrow"><span data-icon="spark" data-icon-class="icon-sm"></span>Quickest first</p>
+      <h2>Things you can change yourself</h2>
+    </div>
+    <div class="h-help">
+      {% for item in self_help %}
+      <a class="h-help-card" href="{{ item.url }}" data-h-help>
+        <span class="a-mark" aria-hidden="true"><span data-icon="{{ item.icon }}" data-icon-class="icon"></span></span>
+        <strong>{{ item.title }}</strong>
+        <p>{{ item.detail }}</p>
+        <span class="h-help-go">{{ item.action }}<span data-icon="arrow" data-icon-class="icon-sm"></span></span>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+
+  {#- 2, 3. Telling us. ---------------------------------------------------- -#}
+  <section class="a-section" id="h-ask" data-hm-part="Send us a message">
+    <div class="a-section-head">
+      <p class="t-eyebrow"><span data-icon="chat" data-icon-class="icon-sm"></span>Still stuck</p>
+      <h2>Tell us what happened</h2>
+    </div>
+
+    <form class="h-form" id="h-support-form" data-h-form novalidate>
+      <fieldset class="h-ask">
+        <legend>What is it about?</legend>
+        <p class="h-ask-hint">Pick the closest one. It helps us send your message to the right person.</p>
+        <div class="h-topics">
+          {% for code, label, icon, hint in topics %}
+          <label class="h-topic" data-h-topic="{{ code }}">
+            <input type="radio" name="topic" value="{{ code }}" {{ 'checked' if loop.first else '' }}
+                   data-h-topic-input data-subject="{{ label }}">
+            <span class="a-mark" aria-hidden="true"><span data-icon="{{ icon }}" data-icon-class="icon"></span></span>
+            <span class="h-topic-copy">
+              <strong>{{ label }}</strong>
+              <small>{{ hint }}</small>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <div class="h-field" data-h-field="description">
+        <label for="h-description">What happened?</label>
+        <p class="h-field-hint" data-h-hint>Tell us what you saw, when, and what you expected instead. A few sentences is plenty.</p>
+        <textarea id="h-description" maxlength="5000" required
+                  placeholder="For example: I turned on Telegram messages on Tuesday and I still have not had one, even though my Watchlist found two coins."
+                  data-h-description></textarea>
+        <span class="h-count" data-h-count aria-hidden="true">0 / 5000</span>
+        <span class="h-field-wrong"><span data-icon="alert" data-icon-class="icon-sm"></span>Please tell us what happened, in a sentence or two.</span>
+      </div>
+
+      <div class="h-field" data-h-field="email">
+        <label for="h-email">Where should we reply?</label>
+        <input id="h-email" type="email" value="{{ support_email }}" required autocomplete="email" data-h-email>
+        <p class="h-field-hint">This is the address on your account. Change it here if you would rather we used another one.</p>
+        <span class="h-field-wrong"><span data-icon="alert" data-icon-class="icon-sm"></span>Please write an email address we can reply to.</span>
+      </div>
+
+      <div class="h-field">
+        <span id="h-pictures-label">Pictures, if they help</span>
+        {#- The picker lives inside its own label, so the label can carry the focus ring
+            for it. A visually hidden input keeps its keyboard focus but shows nothing
+            when it has it, which leaves a keyboard user with no idea where they are. -#}
+        <label class="h-drop" data-h-drop>
+          <span class="a-mark" aria-hidden="true"><span data-icon="upload" data-icon-class="icon"></span></span>
+          <span class="h-drop-copy">
+            <strong>Choose a picture, or drop one here</strong>
+            <small>Up to 3 pictures. PNG, JPEG or WebP, each under 5 MB.</small>
+          </span>
+          <input class="sr-only" id="h-screenshots" type="file" multiple
+                 accept="image/png,image/jpeg,image/webp" aria-labelledby="h-pictures-label" data-h-files>
+        </label>
+        <ul class="h-files" data-h-file-list></ul>
+      </div>
+
+      <div class="t-banner" data-tone="info">
+        <span data-icon="shield" data-icon-class="icon"></span>
+        <div class="t-banner-body">
+          <strong>Never send us a secret</strong>
+          <p>No passwords, no recovery phrases, no exchange keys. We will never ask you for one.</p>
+        </div>
+      </div>
+
+      <p class="a-said" role="status" aria-live="polite" tabindex="-1" data-h-said></p>
+
+      <div class="a-foot">
+        <p class="a-foot-note">
+          <span data-icon="info" data-icon-class="icon-sm"></span>
+          <span>We reply by email, usually within one working day. Your message also appears below so you can read it back.</span>
+        </p>
+        {#- The limit, before somebody meets it. The number comes from the one module
+            that enforces it, so this line cannot promise something different. -#}
+        <p class="a-foot-note" data-h-limit>
+          <span data-icon="scale" data-icon-class="icon-sm"></span>
+          <span>You can send {{ support_limits.per_email }} message{{ '' if support_limits.per_email == 1 else 's' }} an hour. To add to one you already sent, reply to our email instead.</span>
+        </p>
+        <button class="t-action is-primary" type="submit" data-h-send>
+          <span data-icon="send" data-icon-class="icon-sm"></span><span data-h-send-label>Send it</span>
+        </button>
+      </div>
+    </form>
+  </section>
+
+  {#- 4. What you already asked. ------------------------------------------- -#}
+  <section class="a-section" id="h-yours" data-hm-part="What you already asked">
+    <div class="a-section-head">
+      <p class="t-eyebrow"><span data-icon="history" data-icon-class="icon-sm"></span>Your messages</p>
+      <h2>What you have asked us</h2>
+    </div>
+
+    <ul class="h-tickets" data-h-tickets role="list">
+      {% for ticket in tickets %}
+      <li class="h-ticket" data-h-ticket>
+        <div class="h-ticket-top">
+          <strong>{{ ticket.topic }}</strong>
+          <p class="a-state" data-tone="{{ ticket.tone }}">
+            <span data-icon="{{ 'check' if ticket.tone == 'success' else ('clock' if ticket.tone == 'warning' else 'chat') }}" data-icon-class="icon-sm"></span>
+            {{ ticket.label }}
+          </p>
+        </div>
+        <p class="h-ticket-meta">
+          <span><span data-icon="clock" data-icon-class="icon-sm"></span><time datetime="{{ ticket.sent_iso }}" title="{{ ticket.sent_exact }}">{{ ticket.sent }}</time></span>
+          {% if ticket.attachment_count %}
+          <span><span data-icon="upload" data-icon-class="icon-sm"></span>{{ ticket.attachment_count }} picture{{ '' if ticket.attachment_count == 1 else 's' }}</span>
+          {% endif %}
+          <span>{{ ticket.meaning }}</span>
+        </p>
+        {#- Their own words, read back. The live page showed a subject line and a badge,
+            so nobody could see what they had actually asked. -#}
+        {% if ticket.what_you_said %}
+        <details class="t-more">
+          <summary><span data-icon="chevron" data-icon-class="icon-sm"></span>What you wrote</summary>
+          <div class="t-more-body"><p class="h-ticket-said">{{ ticket.what_you_said }}</p></div>
+        </details>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+
+    <div class="t-state" data-h-empty {{ 'hidden' if tickets else '' }}>
+      <span class="t-state-icon" aria-hidden="true"><span data-icon="chat" data-icon-class="icon"></span></span>
+      <h3>You have not asked us anything yet</h3>
+      <p>Anything you send appears here, with what you wrote and where it has got to.</p>
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block page_scripts %}
+<script type="module" src="{{ url_for('static', path='/hm-support-test.js') }}?v=20260818-live-4"></script>
+{% endblock %}

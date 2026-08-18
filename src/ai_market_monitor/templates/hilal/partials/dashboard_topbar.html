@@ -1,29 +1,94 @@
-<header class="topbar">
-  <div class="topbar-left">
-    <button class="btn btn-secondary btn-icon topbar-menu" type="button" data-open-sidebar data-hilal-open-sidebar aria-label="Open menu"><span data-icon="menu" data-icon-class="icon"></span></button>
-    <form class="topbar-search" action="{{ url_for('screened_market_page') }}" method="get" role="search">
-      <span data-icon="search"></span>
-      <input class="input" name="search" value="{{ request.query_params.get('search', '') }}" placeholder="Search screened assets..." aria-label="Search screened assets">
-      <input type="hidden" name="view" value="assets">
-      {% if page == 'screened_market' and selected_methodology_id is defined and selected_methodology_id %}<input type="hidden" name="methodology_id" value="{{ selected_methodology_id }}">{% endif %}
-      {% if page == 'screened_market' and selected_exchange is defined and selected_exchange %}<input type="hidden" name="exchange" value="{{ selected_exchange }}">{% endif %}
-    </form>
+{#- The topbar, on every signed-in page.
+
+    Four jobs, left to right:
+
+      1. open the menu on a small screen;
+      2. say which page you are on — the old bar never did, so a person arriving from a
+         link had to read the side menu to find out;
+      3. search;
+      4. do the things this page offers.
+
+    Job 4 is the important one structurally. Pages used to draw their own top-right
+    button inside their own heading, so the same action appeared with a different name,
+    a different size and a different focus ring depending on which page you were on.
+    A page now *declares* what belongs up here — `topbar_actions`, built in the router —
+    and this file draws every one of them the same way. -#}
+
+<header class="topbar hm-top" data-hm-shell-top>
+  <div class="topbar-left hm-top-left">
+    <button class="hm-top-icon-btn hm-top-menu topbar-menu" type="button"
+            data-open-sidebar data-hilal-open-sidebar aria-label="Open menu">
+      <span data-icon="menu" data-icon-class="icon"></span>
+    </button>
+
+    {#- Where you are. The icon is the same one the menu row carries, so the two read as
+        the same place rather than as two unrelated marks. -#}
+    <div class="hm-top-here">
+      <span class="hm-top-here-mark" aria-hidden="true">
+        <span data-icon="{{ page_identity.icon if page_identity else 'spark' }}" data-icon-class="icon"></span>
+      </span>
+      <span class="hm-top-here-copy">
+        {% if page_identity %}<span class="hm-top-here-group">{{ page_identity.group }}</span>{% endif %}
+        <span class="hm-top-here-name">{{ page_identity.label if page_identity else title }}</span>
+      </span>
+    </div>
   </div>
-  <div class="topbar-right">
-    {% if active_methodology is defined and active_methodology %}<span class="badge badge-eligible">{{ active_methodology.name }} | v{{ active_methodology.version }}</span>{% endif %}
-    <div class="topbar-notifications" data-notification-center>
-      <button class="btn btn-secondary btn-icon notification-center-trigger" type="button" aria-label="Open notifications" aria-haspopup="dialog" aria-expanded="false" data-notification-center-trigger>
+
+  <form class="topbar-search hm-top-search" action="{{ url_for('screened_market_page') }}" method="get" role="search" data-hm-top-search>
+    <span class="hm-top-search-mark" aria-hidden="true"><span data-icon="search" data-icon-class="icon-sm"></span></span>
+    <input class="input hm-top-search-input" name="search" value="{{ request.query_params.get('search', '') }}"
+           placeholder="Search coins" aria-label="Search screened coins" data-hm-top-search-input>
+    <input type="hidden" name="view" value="assets">
+    {#- Said in the bar rather than only in a help page, because a shortcut nobody can
+        see is a shortcut nobody uses. Hidden from readers: it is a picture of a key. -#}
+    <kbd class="hm-top-search-key" aria-hidden="true" data-hm-top-search-key></kbd>
+    {% if page == 'screened_market' and selected_methodology_id is defined and selected_methodology_id %}<input type="hidden" name="methodology_id" value="{{ selected_methodology_id }}">{% endif %}
+    {% if page == 'screened_market' and selected_exchange is defined and selected_exchange %}<input type="hidden" name="exchange" value="{{ selected_exchange }}">{% endif %}
+  </form>
+
+  <div class="topbar-right hm-top-right">
+    {% if active_methodology is defined and active_methodology %}
+    <span class="hm-top-standard" title="The screening standard in force">
+      <span data-icon="shield_check" data-icon-class="icon-sm"></span>
+      <span class="hm-top-standard-name">{{ active_methodology.name }}</span>
+      <span class="hm-top-standard-version">v{{ active_methodology.version }}</span>
+    </span>
+    {% endif %}
+
+    {#- What this page offers, drawn by the shared bar. -#}
+    {% for action in topbar_actions|default([]) %}
+    <a class="hm-top-action{{ ' is-primary' if action.kind == 'primary' else '' }}" href="{{ action.href }}" data-hm-top-action>
+      <span class="hm-top-action-mark" aria-hidden="true"><span data-icon="{{ action.icon }}" data-icon-class="icon-sm"></span></span>
+      <span class="hm-top-action-label">{{ action.label }}</span>
+      <span class="hm-top-tip" aria-hidden="true">{{ action.label }}</span>
+    </a>
+    {% endfor %}
+
+    {# One launcher for every dashboard page. The guide engine hides it when the current
+       page has no configured steps, so no template decides that for itself.
+
+       It keeps its word on a wide screen. This is the control a beginner needs most, and
+       an unlabelled circle is not something anybody presses on purpose. It collapses to
+       the mark when the bar runs out of room, like every other action up here. #}
+    <button class="hm-top-action hm-guide-launcher" type="button" data-hm-guide-launcher
+            aria-label="Guide this page" title="Guide this page" hidden>
+      <span class="hm-top-action-mark" aria-hidden="true"><span data-icon="guide" data-icon-class="icon-sm"></span></span>
+      <span class="hm-top-action-label hm-guide-launcher-label">Guide this page</span>
+      <span class="hm-top-tip" aria-hidden="true">Guide this page</span>
+    </button>
+
+    <div class="topbar-notifications hm-top-bell" data-notification-center>
+      <button class="hm-top-icon-btn notification-center-trigger" type="button"
+              aria-label="Open notifications" aria-haspopup="dialog" aria-expanded="false"
+              data-notification-center-trigger>
         <span data-icon="bell" data-icon-class="icon"></span>
         <span class="notification-count" data-notification-count {{ 'hidden' if not unread_notification_count else '' }}>{{ unread_notification_count if unread_notification_count < 100 else '99+' }}</span>
+        <span class="hm-top-tip" aria-hidden="true">Notifications</span>
       </button>
       <section class="notification-center-popover" role="dialog" aria-label="Recent notifications" hidden data-notification-center-popover>
-        <header><div><span class="kicker">Recent updates</span><h2>Notifications</h2></div><a href="{{ url_for('lifecycles_page') }}">View all</a></header>
+        <header><div><span class="kicker">Recent updates</span><h2>Notifications</h2></div><a href="{{ url_for('opportunities_page') }}">View all</a></header>
         <div class="notification-center-list" data-notification-center-list><div class="skeleton"></div><div class="skeleton"></div></div>
       </section>
     </div>
-    {# One launcher for every dashboard page. The guide engine hides it when the current
-       page has no configured steps, so no template decides that for itself. #}
-    <button class="btn btn-secondary btn-sm hm-guide-launcher" type="button" data-hm-guide-launcher aria-label="Guide this page" title="Guide this page" hidden><span data-icon="guide" data-icon-class="icon"></span><span class="hm-guide-launcher-label">Guide this page</span></button>
-    <a class="btn btn-primary btn-sm sidebar-create-quick" href="{{ url_for('new_strategy_builder_page') }}"><span data-icon="plus" data-icon-class="icon"></span>New Watchlist</a>
   </div>
 </header>

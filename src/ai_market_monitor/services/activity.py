@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.dashboard_paths import LIFECYCLES_PATH
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
@@ -219,7 +220,7 @@ class ActivityReadService:
                         f"{readiness_copy(float(setup.completion_score), setup.state)}. "
                         f"{presentation.explanation}"
                     ),
-                    evidence_reference=f"/dashboard/opportunities?setup={setup.id}",
+                    evidence_reference=f"{LIFECYCLES_PATH}?setup={setup.id}",
                     delivery_status=(
                         "sent" if setup.state == SetupLifecycleState.ALERT_SENT else None
                     ),
@@ -481,7 +482,7 @@ class ActivityReadService:
                     ),
                     title=f"Why didn't this alert happen? - {row.symbol}",
                     summary=row.conclusion,
-                    evidence_reference=f"/dashboard/opportunities?investigation={row.id}",
+                    evidence_reference=f"{LIFECYCLES_PATH}?investigation={row.id}",
                     delivery_status=(row.delivery_diagnostics or {}).get("status"),
                     requires_attention=row.status != "completed",
                 )

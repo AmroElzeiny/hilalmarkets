@@ -118,8 +118,10 @@ body.sidebar-collapsed .dash-nav-section { display: none; }
   color: var(--te-ink);
 }
 .screened-market-controls :is(input, select):focus-visible {
-  outline: 3px solid rgba(31, 139, 116, .2);
+  outline: var(--hm-focus-ring);
+  outline-offset: 2px;
   border-color: var(--te-brand);
+  box-shadow: var(--hm-focus-halo);
 }
 
 .market-status-filter {

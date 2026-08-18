@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
@@ -319,16 +320,13 @@ def _lifecycle_card(
         )
     asset_symbol = setup.symbol.partition("/")[0].upper()
     logo_symbol = asset.symbol.upper() if asset is not None else asset_symbol
-    logo_url = str((asset.provider_ids or {}).get("logo_url") or "").strip() if asset else ""
+    logo = asset_logo(logo_symbol, asset.provider_ids if asset is not None else None)
     return {
         "id": setup.id,
         "symbol": setup.symbol,
         "asset_symbol": logo_symbol,
-        "logo_module_url": (
-            "https://cdn.jsdelivr.net/npm/@web3icons/core@4.0.53/"
-            f"dist/svgs/tokens/branded/{logo_symbol}.svg.js"
-        ),
-        "logo_url": logo_url or None,
+        "logo_module_url": logo.module_url,
+        "logo_url": logo.image_url,
         "exchange": setup.exchange,
         "timeframe": setup.timeframe,
         "direction": setup.direction,

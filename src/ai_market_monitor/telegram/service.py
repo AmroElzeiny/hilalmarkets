@@ -8,6 +8,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.dashboard_paths import (
+    CONNECTIONS_PATH,
+    LIFECYCLES_PATH,
+    OPPORTUNITIES_PATH,
+    SETTINGS_PATH,
+    SUPPORT_PATH,
+)
 from ai_market_monitor.core.security import IdentityAssertionTokenService
 from ai_market_monitor.db.models import (
     Alert,
@@ -49,6 +56,7 @@ from ai_market_monitor.schemas.onboarding import (
 )
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
+from ai_market_monitor.services.alert_presentation import ACTION_LABELS
 from ai_market_monitor.services.billing import BillingError, BillingService
 from ai_market_monitor.services.interfaces import MarketDataProvider, RecentMarketPreviewer
 from ai_market_monitor.services.monitor_operations import (
@@ -82,6 +90,15 @@ from ai_market_monitor.telegram.types import (
     TelegramInboundMessage,
     TelegramOutboundMessage,
 )
+
+#: Where a "scan the market once" button really goes.
+#:
+#: It used to be ``/dashboard/scan-now``, which was one of the two addresses of the
+#: Trading Assistant page. That page has been removed, and a button inside a Telegram
+#: message lives for as long as the message does — so leaving them pointed at it would
+#: send people from months-old chats to a "not found". The one-time scan itself is
+#: unchanged: it is a mode of the builder, and this is the builder's own address.
+_ONE_TIME_SCAN_PATH = "/dashboard/strategies/new?mode=scanner"
 
 PRIMARY_MENU = [
     "📋 My Monitors",
@@ -568,7 +585,7 @@ class TelegramBotService:
                 "Lifecycles\n\nReplay is hidden. Use lifecycle cards for setup state, "
                 "missing conditions, proof context and chart evidence.",
                 buttons=[
-                    self._dashboard_button("Open Lifecycles", "/dashboard/opportunities"),
+                    self._dashboard_button("Open Lifecycles", LIFECYCLES_PATH),
                     TelegramButton("Support", "support:missing_alert"),
                     TelegramButton("Go Back", "back:previous"),
                 ],
@@ -877,9 +894,11 @@ class TelegramBotService:
             chat_id=chat_id,
             text=render_confirmed_alert(result),
             buttons=[
-                self._dashboard_button("🔄 View lifecycle", "/dashboard/opportunities"),
-                self._dashboard_button("📊 Dashboard"),
-                TelegramButton("🔕 Mute symbol", "mute_strategy"),
+                self._dashboard_button(
+                    ACTION_LABELS["opportunity"], OPPORTUNITIES_PATH
+                ),
+                self._dashboard_button(ACTION_LABELS["dashboard"]),
+                TelegramButton(ACTION_LABELS["mute"], "mute_strategy"),
             ],
             menu=[],
         )
@@ -891,9 +910,11 @@ class TelegramBotService:
             chat_id=chat_id,
             text=render_lifecycle_update(result),
             buttons=[
-                self._dashboard_button("🔄 View lifecycle", "/dashboard/opportunities"),
-                self._dashboard_button("📊 Dashboard"),
-                TelegramButton("🔕 Mute symbol", "mute_strategy"),
+                self._dashboard_button(
+                    ACTION_LABELS["opportunity"], OPPORTUNITIES_PATH
+                ),
+                self._dashboard_button(ACTION_LABELS["dashboard"]),
+                TelegramButton(ACTION_LABELS["mute"], "mute_strategy"),
             ],
             menu=[],
         )
@@ -1065,7 +1086,7 @@ class TelegramBotService:
             f"🔕 Muted {symbol} for this strategy. "
             "Future setups from this pair will not be delivered.",
             buttons=[
-                self._dashboard_button("🔄 Lifecycles", "/dashboard/opportunities"),
+                self._dashboard_button("🔄 Lifecycles", LIFECYCLES_PATH),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -1660,7 +1681,7 @@ class TelegramBotService:
                 "Quick Scan is ready, but this Telegram runtime does not have a market-data "
                 "provider attached. Open the dashboard Quick Scan page to run it.",
                 buttons=[
-                    self._dashboard_button("Open Quick Scan", "/dashboard/scan-now"),
+                    self._dashboard_button("Open Quick Scan", _ONE_TIME_SCAN_PATH),
                     TelegramButton("Go Back", "back:previous"),
                 ],
             )
@@ -1682,7 +1703,7 @@ class TelegramBotService:
                 f"Action needed: {escape(str(exc))}",
                 buttons=[
                     TelegramButton("Try Again", "quick_scan"),
-                    self._dashboard_button("Open Dashboard", "/dashboard/scan-now"),
+                    self._dashboard_button("Open Dashboard", _ONE_TIME_SCAN_PATH),
                     TelegramButton("Go Back", "back:previous"),
                 ],
             )
@@ -1695,7 +1716,7 @@ class TelegramBotService:
                 "Try a broader prompt or leave symbols unrestricted in Dashboard.",
                 buttons=[
                     TelegramButton("Run Again", "quick_scan"),
-                    self._dashboard_button("Open Dashboard", "/dashboard/scan-now"),
+                    self._dashboard_button("Open Dashboard", _ONE_TIME_SCAN_PATH),
                     TelegramButton("Go Back", "back:previous"),
                 ],
             )
@@ -1746,7 +1767,7 @@ class TelegramBotService:
             buttons=[
                 TelegramButton("Save as Monitor", "create_monitor"),
                 TelegramButton("Run Again", "quick_scan"),
-                self._dashboard_button("Open Dashboard", "/dashboard/scan-now"),
+                self._dashboard_button("Open Dashboard", _ONE_TIME_SCAN_PATH),
                 TelegramButton("Go Back", "back:previous"),
             ],
         )
@@ -2101,7 +2122,7 @@ class TelegramBotService:
             buttons=[
                 TelegramButton("Top Near-Misses", "near:top"),
                 TelegramButton("One Condition Remaining", "near:one_left"),
-                self._dashboard_button("Dashboard", "/dashboard/opportunities"),
+                self._dashboard_button("Dashboard", OPPORTUNITIES_PATH),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -2180,7 +2201,7 @@ class TelegramBotService:
                 TelegramButton("Describe New Condition", "scan:new"),
                 TelegramButton("Use Template", "scan:template"),
                 TelegramButton("Previous Scans", "scan:previous"),
-                self._dashboard_button("Open Dashboard", "/dashboard/scan-now"),
+                self._dashboard_button("Open Dashboard", _ONE_TIME_SCAN_PATH),
                 TelegramButton("Go Back", "back:previous"),
             ],
         )
@@ -2273,7 +2294,7 @@ class TelegramBotService:
                 TelegramButton("✅ Confirmed", "latest:confirmed"),
                 TelegramButton("❌ Invalidated", "latest:invalidated"),
                 TelegramButton("⌛ Expired", "latest:expired"),
-                self._dashboard_button("Dashboard", "/dashboard/opportunities"),
+                self._dashboard_button("Dashboard", OPPORTUNITIES_PATH),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -2629,10 +2650,18 @@ class TelegramBotService:
                 ],
             )
         if label == "Alert Channels":
+            # Gated on nothing, this used to say Telegram was the channel available
+            # "during private beta" — so it kept saying it after the beta ended. What
+            # is true either way is which channels exist, so that is what it says.
+            whatsapp = (
+                " WhatsApp is also available."
+                if self.settings.whatsapp_enabled
+                else ""
+            )
             return self._plain(
                 message,
-                "Alert Channels\n\nTelegram is the external notification channel available "
-                "during private beta. In-app records remain available in the dashboard.",
+                "Alert Channels\n\nTelegram is the external notification channel."
+                f"{whatsapp} In-app records remain available in the dashboard.",
                 buttons=self._back_buttons("dashboard:settings"),
             )
         if label == "Time Zone":
@@ -2994,7 +3023,7 @@ class TelegramBotService:
             callback,
             "Feedback recorded. I will not change your strategy without explicit approval.",
             buttons=[
-                self._dashboard_button("Lifecycles", "/dashboard/opportunities"),
+                self._dashboard_button("Lifecycles", LIFECYCLES_PATH),
                 self._dashboard_button("Dashboard"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
@@ -3571,17 +3600,17 @@ class TelegramBotService:
             "builder": "/dashboard/strategies/new",
             "create_monitor": "/dashboard/strategies/new",
             "monitors": "/dashboard/strategies/new#monitors",
-            "scan": "/dashboard/scan-now",
-            "near_miss": "/dashboard/opportunities",
-            "lifecycles": "/dashboard/opportunities",
-            "setups": "/dashboard/opportunities",
-            "alerts": "/dashboard/opportunities",
-            "settings": "/dashboard/settings",
-            "support": "/dashboard/support",
-            "connections": "/dashboard/connections",
+            "scan": _ONE_TIME_SCAN_PATH,
+            "near_miss": LIFECYCLES_PATH,
+            "lifecycles": LIFECYCLES_PATH,
+            "setups": LIFECYCLES_PATH,
+            "alerts": LIFECYCLES_PATH,
+            "settings": SETTINGS_PATH,
+            "support": SUPPORT_PATH,
+            "connections": CONNECTIONS_PATH,
             "performance": "/dashboard",
-            "setup_replay": "/dashboard/opportunities",
-            "why_no_alert": "/dashboard/opportunities",
+            "setup_replay": LIFECYCLES_PATH,
+            "why_no_alert": LIFECYCLES_PATH,
         }.get(page, "/dashboard")
 
     @staticmethod

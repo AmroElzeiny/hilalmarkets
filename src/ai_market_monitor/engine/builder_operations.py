@@ -7,13 +7,13 @@ the Builder reads fields the server itself drew. Both then hand
 ``AuthorizedPatchOperation`` list and every gate runs unchanged.
 
 Everything here fails closed. A value that is not one this mechanic offers is refused
-with a plain reason вЂ” never coerced to the nearest one it does offer, never clamped into
+with a plain reason — never coerced to the nearest one it does offer, never clamped into
 range, never silently dropped. A form that could substitute is a form that can build a
 rule nobody asked for, which is the same defect as a compiler that guesses.
 
 This module also reads in the other direction: :func:`describe_condition` turns a stored
 rule back into the fields that would rebuild it. That one function is why an edit made
-in the Builder and an edit made in chat produce the same card вЂ” there is one description
+in the Builder and an edit made in chat produce the same card — there is one description
 of what a rule *is*, not one per surface.
 """
 
@@ -60,7 +60,7 @@ class BuilderActionError(ValueError):
     """A Builder request the server will not turn into a change.
 
     Carries a code for the client and a sentence for the person. The sentence never
-    names a field path or an internal identifier вЂ” the reader is a beginner.
+    names a field path or an internal identifier — the reader is a beginner.
     """
 
     def __init__(self, code: str, message: str) -> None:
@@ -131,8 +131,8 @@ def mechanic_catalog(
     cannot is marked unavailable with a plain reason, so the Builder never offers a
     form whose every submission would be refused.
 
-    The check runs the real validators вЂ” the registry contract and the draft's own
-    semantic rules вЂ” so it cannot drift from what the mutation path enforces.
+    The check runs the real validators — the registry contract and the draft's own
+    semantic rules — so it cannot drift from what the mutation path enforces.
     """
 
     checked: list[BuilderMechanic] = []
@@ -288,7 +288,7 @@ def _read_choice(parameter: BuilderParameter, raw: Any) -> str:
             _CHOICE_CODES.get(parameter.name, "VALUE_NOT_OFFERED"),
             _CHOICE_MESSAGES.get(
                 parameter.name,
-                f"вЂњ{parameter.label}вЂќ must be one of the choices shown.",
+                f"“{parameter.label}” must be one of the choices shown.",
             ),
         )
     return value
@@ -298,31 +298,31 @@ def _read_number(parameter: BuilderParameter, raw: Any) -> float:
     if isinstance(raw, bool) or not isinstance(raw, int | float | str):
         raise BuilderActionError(
             "VALUE_NOT_A_NUMBER",
-            f"вЂњ{parameter.label}вЂќ needs a number.",
+            f"“{parameter.label}” needs a number.",
         )
     try:
         value = float(str(raw).strip())
     except ValueError as exc:
         raise BuilderActionError(
             "VALUE_NOT_A_NUMBER",
-            f"вЂњ{parameter.label}вЂќ needs a number.",
+            f"“{parameter.label}” needs a number.",
         ) from exc
     if parameter.kind == "integer" and value != int(value):
         raise BuilderActionError(
             "VALUE_NOT_A_WHOLE_NUMBER",
-            f"вЂњ{parameter.label}вЂќ needs a whole number.",
+            f"“{parameter.label}” needs a whole number.",
         )
     # Out of range is refused, never clamped. Clamping turns "RSI at least 999" into a
     # rule about 100 that the person never wrote.
     if parameter.minimum is not None and value < parameter.minimum:
         raise BuilderActionError(
             "VALUE_OUT_OF_RANGE",
-            f"вЂњ{parameter.label}вЂќ cannot be smaller than {parameter.minimum:g}.",
+            f"“{parameter.label}” cannot be smaller than {parameter.minimum:g}.",
         )
     if parameter.maximum is not None and value > parameter.maximum:
         raise BuilderActionError(
             "VALUE_OUT_OF_RANGE",
-            f"вЂњ{parameter.label}вЂќ cannot be larger than {parameter.maximum:g}.",
+            f"“{parameter.label}” cannot be larger than {parameter.maximum:g}.",
         )
     return value
 
@@ -348,7 +348,7 @@ def _read_values(mechanic: BuilderMechanic, values: dict[str, Any]) -> dict[str,
             if parameter.required and parameter.default is None:
                 raise BuilderActionError(
                     "VALUE_REQUIRED",
-                    f"вЂњ{parameter.label}вЂќ is needed before this rule can be saved.",
+                    f"“{parameter.label}” is needed before this rule can be saved.",
                 )
             if parameter.default is not None:
                 read[parameter.name] = parameter.default
@@ -541,7 +541,7 @@ def _build(
             payload["threshold"] = read["threshold"]
         # Only the capability's own registry fields go in its parameter bag. The
         # comparison, the side and the candle size belong to the rule, and most registry
-        # schemas refuse an unexpected key outright вЂ” so a stray one is not a cosmetic
+        # schemas refuse an unexpected key outright — so a stray one is not a cosmetic
         # problem, it makes every submission of that form fail.
         payload["capability_parameters"] = {
             name: value
@@ -653,7 +653,7 @@ def describe_condition(node: ConditionNodeV2) -> BuilderConditionView:
 
     A rule written by the assistant and a rule written in the Builder are the same
     object, so this reads both. When a rule uses something the Builder has no form for,
-    it is reported as not editable *with the reason* вЂ” never hidden, and never shown as
+    it is reported as not editable *with the reason* — never hidden, and never shown as
     an empty card the person could overwrite by accident.
     """
 
@@ -666,8 +666,8 @@ def describe_condition(node: ConditionNodeV2) -> BuilderConditionView:
     declared = {item.name for item in mechanic.parameters} if mechanic else set()
 
     # What the *person* chose. Deliberately not everything the node holds: a compiled
-    # rule also carries parameters the platform fills in itself вЂ” an open-to-close move
-    # records that it measures open against close вЂ” and treating those as choices made
+    # rule also carries parameters the platform fills in itself — an open-to-close move
+    # records that it measures open against close — and treating those as choices made
     # every assistant-written rule look like it used settings the form cannot show.
     carried: dict[str, Any] = {}
     if node.operator is not None:
@@ -779,7 +779,7 @@ def rebuild_tree(
     if join not in {"and", "or"}:
         raise BuilderActionError(
             "LOGIC_NOT_OFFERED",
-            "Rules can be joined with вЂњall of theseвЂќ or вЂњany of theseвЂќ.",
+            "Rules can be joined with “all of these” or “any of these”.",
         )
     children = [existing[node_id] for node_id in order]
     if len(children) == 1:
@@ -907,7 +907,7 @@ def _structural(build: Callable[[], ConditionNodeV2]) -> ConditionNodeV2:
     """Run a structural edit, reporting its refusal the way every Builder action does.
 
     ``builder_boolean`` raises its own error type because it knows nothing about the
-    Builder's request envelope. Translating here вЂ” once вЂ” keeps every refusal reaching
+    Builder's request envelope. Translating here — once — keeps every refusal reaching
     the client as the same shape, so a grouping that is too deep reads to the person
     exactly like any other refused change, with its own code and its own sentence.
     """

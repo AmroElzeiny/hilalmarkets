@@ -1,0 +1,14 @@
+{#- Back to the top, for the server-rendered public pages.
+
+    The same button the React pages draw (`BackToTop` in `components/SiteChrome.tsx`),
+    with the same class, the same wording and the same 700px threshold. Its look and its
+    place on the screen come from `.hm-to-top` in `hilalmarkets-public.css`, which both
+    halves of the site load — so the two cannot end up in different corners.
+
+    `hidden` until the script shows it: a button that cannot scroll anything is not a
+    button, and one that sits there doing nothing for a reader with no scripting is
+    worse than no button at all. -#}
+<button class="hm-to-top hm-no-print" type="button" data-hm-to-top data-shown="false" aria-hidden="true" tabindex="-1" hidden>
+  <span class="sr-only">Back to the top</span>
+  <span data-icon="arrow" data-icon-class="icon" aria-hidden="true"></span>
+</button>

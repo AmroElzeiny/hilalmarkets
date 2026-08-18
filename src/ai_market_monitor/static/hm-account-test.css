@@ -1,0 +1,1080 @@
+/* Design layer for the three account pages on the redesigned dashboard pages.
+ *
+ *   /dashboard/subscription   .hm-s
+ *   /dashboard/settings       .hm-g
+ *   /dashboard/support        .hm-h
+ *
+ * Everything shared with the rest of the path — the surface, the button, the popup
+ * shell, the switch, the status pill, the disclosure — comes from `hm-dashboard-test.css`
+ * and is not repeated here. Every colour, radius, shadow and space is a `--t-*` or
+ * `--hm-*` token. Nothing new is invented: no new brand colour, no second type family,
+ * no second spacing scale.
+ *
+ * `brand guide.md` sections 9 and 12: predominantly white, hierarchy from spacing and
+ * type before decoration, apple green as one focal accent rather than a wash.
+ */
+
+/* ── Shared by all three ─────────────────────────────────────────────────────
+ *
+ * A "section" here is one question the page answers. Each has a quiet heading and one
+ * card; a page is a short list of questions, not a scroll of panels.
+ */
+
+body.hilal-dashboard .hm-t .a-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-4);
+  scroll-margin-top: 96px;
+}
+
+body.hilal-dashboard .hm-t .a-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-1);
+}
+
+body.hilal-dashboard .hm-t .a-section-head h2 { color: var(--t-ink-strong); }
+
+/* Sticky jump links. A long account page needs a way back to the top level, and the
+   same control already exists on the Passport page as `.t-tabs`; this is that control
+   with its own hit area, used for in-page anchors. */
+body.hilal-dashboard .hm-t .a-jump {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  overflow-x: auto;
+  gap: var(--t-1);
+  padding: var(--t-2);
+  border: 1px solid var(--t-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .93);
+  backdrop-filter: blur(8px);
+  scrollbar-width: none;
+}
+
+body.hilal-dashboard .hm-t .a-jump::-webkit-scrollbar { display: none; }
+
+body.hilal-dashboard .hm-t .a-jump a {
+  display: inline-flex;
+  align-items: center;
+  /* 44px, not 40. This path's own rules ask for 44×44 on every control, and a jump
+     link is a control. */
+  min-height: 44px;
+  gap: var(--t-2);
+  padding: 0 var(--t-4);
+  border-radius: 999px;
+  color: var(--t-copy);
+  font-size: .85rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-t .a-jump a:hover { background: var(--t-quiet); color: var(--t-ink); }
+body.hilal-dashboard .hm-t .a-jump a[aria-current="true"] { background: var(--t-ink); color: var(--t-surface); }
+body.hilal-dashboard .hm-t .a-jump a .icon,
+body.hilal-dashboard .hm-t .a-jump a .icon-sm { width: 15px; height: 15px; }
+
+/* A rounded icon container. `brand guide.md` section 13 allows these; the tone is the
+   meaning, never decoration, and it is always beside a word that says the same thing. */
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--t-line);
+  border-radius: 13px;
+  background: var(--t-quiet);
+  color: var(--t-copy);
+  transition: transform var(--t-base) var(--t-ease), border-color var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-mark .icon { width: 20px; height: 20px; }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-mark[data-tone="success"] { border-color: var(--t-accent-pale); background: var(--t-accent-pale); color: var(--t-accent-text); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-mark[data-tone="warning"] { border-color: var(--hm-warning-bg); background: var(--hm-warning-bg); color: var(--hm-warning); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-mark[data-tone="danger"] { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); color: var(--hm-danger); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-mark[data-tone="accent"] { border-color: var(--hm-apple-deep); background: var(--t-accent); color: var(--t-ink-strong); }
+
+/* Colour, plus the word, plus an icon. Never one of the three on its own — WCAG 1.4.1
+   and `brand guide.md` section 10. */
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-state {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--t-2);
+  padding: var(--t-1) var(--t-3);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-state .icon,
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-state .icon-sm { flex: none; width: 14px; height: 14px; }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-state[data-tone="success"] { border-color: var(--t-accent-pale); background: var(--t-accent-pale); color: var(--t-accent-text); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-state[data-tone="warning"] { border-color: var(--hm-warning-bg); background: var(--hm-warning-bg); color: var(--hm-warning); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-state[data-tone="danger"] { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); color: var(--hm-danger); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-state[data-tone="neutral"] { border-color: var(--hm-neutral-bg); background: var(--hm-neutral-bg); color: var(--hm-neutral); }
+
+/* What the page just did, said once, where the person is looking. It is a live region
+   as well, so it is heard and not only seen. */
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-said {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  min-height: 24px;
+  color: var(--t-copy);
+  font-size: .82rem;
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-said:empty { display: none; }
+
+/* The last row of a card: the one action, and the sentence that qualifies it.
+   Side by side while there is room, stacked when there is not. */
+body.hilal-dashboard .hm-t .a-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-3);
+  padding-top: var(--t-4);
+  border-top: 1px solid var(--t-line);
+}
+
+body.hilal-dashboard .hm-t .a-foot > .t-action { flex: none; min-width: 160px; }
+
+body.hilal-dashboard .hm-t .a-foot-note {
+  display: flex;
+  flex: 1 1 260px;
+  align-items: flex-start;
+  gap: var(--t-2);
+  color: var(--t-copy);
+  font-size: .8rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .hm-t .a-foot-note .icon,
+body.hilal-dashboard .hm-t .a-foot-note .icon-sm { flex: none; width: 14px; height: 14px; margin-top: 2px; }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-said .icon,
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-said .icon-sm { width: 15px; height: 15px; }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-said[data-tone="success"] { color: var(--t-accent-text); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .a-said[data-tone="danger"] { color: var(--hm-danger); }
+
+/* ── Subscription: what you have now ─────────────────────────────────────────
+ *
+ * The first thing on the page, because it is the first question. The live page opened
+ * with a price grid, which answers "what would I buy" to somebody who has not been told
+ * what they already have.
+ */
+
+body.hilal-dashboard .hm-s .s-now {
+  display: grid;
+  gap: var(--t-5);
+  padding: var(--t-5);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-xl);
+  background: var(--t-surface);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.hilal-dashboard .hm-s .s-now-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-4);
+}
+
+body.hilal-dashboard .hm-s .s-now-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: var(--t-r-sm);
+  background: var(--t-ink);
+  color: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-s .s-now-mark .icon { width: 26px; height: 26px; color: var(--t-accent); }
+body.hilal-dashboard .hm-s .s-now-copy { display: flex; min-width: 220px; flex: 1; flex-direction: column; gap: var(--t-1); }
+body.hilal-dashboard .hm-s .s-now-copy h1 { font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2rem); }
+body.hilal-dashboard .hm-s .s-now-actions { display: flex; flex-wrap: wrap; gap: var(--t-2); }
+
+/* What the plan lets you do, and how much of it is gone. */
+body.hilal-dashboard .hm-s .s-allowances {
+  display: grid;
+  gap: var(--t-3);
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+body.hilal-dashboard .hm-s .s-allowance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-2);
+  padding: var(--t-3) var(--t-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard .hm-s .s-allowance-top {
+  display: flex;
+  align-items: center;
+  gap: var(--t-2);
+  color: var(--t-copy);
+  font-size: .8rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-s .s-allowance-top .icon,
+body.hilal-dashboard .hm-s .s-allowance-top .icon-sm { flex: none; width: 15px; height: 15px; }
+body.hilal-dashboard .hm-s .s-allowance-value { font-size: 1.35rem; }
+body.hilal-dashboard .hm-s .s-allowance-note { color: var(--t-copy); font-size: .76rem; }
+
+/* The bar is drawn only when both ends are real numbers. A track with no fill is a
+   picture of nothing, and the words above it already carry the fact. */
+body.hilal-dashboard .hm-s .s-bar {
+  overflow: hidden;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--hm-neutral-bg);
+}
+
+body.hilal-dashboard .hm-s .s-bar span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--hm-apple-deep);
+  transition: width var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-s .s-allowance[data-at-limit="true"] .s-bar span { background: var(--hm-warning); }
+
+/* ── Subscription: the plans ─────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-s .s-plans {
+  display: grid;
+  gap: var(--t-3);
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+body.hilal-dashboard .hm-s .s-plan {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-3);
+  padding: var(--t-5);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+  transition: border-color var(--t-base) var(--t-ease), box-shadow var(--t-base) var(--t-ease), transform var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-s .s-plan:hover,
+body.hilal-dashboard .hm-s .s-plan:focus-within {
+  border-color: var(--t-line-strong);
+  box-shadow: var(--hm-shadow-sm);
+  transform: translateY(-3px);
+}
+
+/* The plan somebody is already on is marked by a border and a word, never by colour
+   alone, and it is never the card that shouts loudest — there is nothing to sell them. */
+body.hilal-dashboard .hm-s .s-plan[data-current="true"] {
+  border-color: var(--t-ink);
+  box-shadow: inset 0 0 0 1px var(--t-ink);
+}
+
+body.hilal-dashboard .hm-s .s-plan[data-for-sale="false"] { background: var(--t-quiet); }
+
+body.hilal-dashboard .hm-s .s-plan-top { display: flex; align-items: center; gap: var(--t-3); }
+body.hilal-dashboard .hm-s .s-plan-top h3 { font-size: 1.1rem; }
+body.hilal-dashboard .hm-s .s-plan-who { color: var(--t-copy); font-size: .85rem; line-height: 1.6; }
+
+body.hilal-dashboard .hm-s .s-price { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--t-2); }
+body.hilal-dashboard .hm-s .s-price strong { font-family: var(--hm-font-display); font-size: 2rem; font-variant-numeric: tabular-nums; font-weight: 500; letter-spacing: -.02em; }
+body.hilal-dashboard .hm-s .s-price s { color: var(--t-copy); font-size: 1rem; font-variant-numeric: tabular-nums; }
+body.hilal-dashboard .hm-s .s-price span { color: var(--t-copy); font-size: .85rem; }
+/* A plan nobody can buy shows a word where the number would be, never a number. */
+body.hilal-dashboard .hm-s .s-price[data-for-sale="false"] strong { color: var(--t-copy); font-size: 1.2rem; }
+
+body.hilal-dashboard .hm-s .s-plan-highlight {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-2);
+  padding: var(--t-3);
+  border: 1px solid var(--t-accent-pale);
+  border-radius: var(--t-r-sm);
+  background: var(--t-accent-soft);
+  color: var(--t-ink-strong);
+  font-size: .85rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .hm-s .s-plan-highlight .icon { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--t-accent-text); }
+
+/* Scoped to the popup as well as the page.
+   A `<dialog>` is moved to the top layer and is not inside the page wrapper, so a rule
+   written as `.hm-s .s-features` matches nothing in there — and the same list that
+   reads as neat ticked lines on a card fell back to browser bullets with the tick
+   stacked above each line inside the checkout popup. */
+body.hilal-dashboard :is(.hm-s, dialog.t-dialog) .s-features { display: flex; flex-direction: column; gap: var(--t-2); margin: 0; padding: 0; list-style: none; }
+
+body.hilal-dashboard :is(.hm-s, dialog.t-dialog) .s-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-2);
+  color: var(--t-copy);
+  font-size: .85rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard :is(.hm-s, dialog.t-dialog) .s-features .icon,
+body.hilal-dashboard :is(.hm-s, dialog.t-dialog) .s-features .icon-sm { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--t-accent-text); }
+
+body.hilal-dashboard .hm-s .s-plan-foot { display: flex; flex-direction: column; gap: var(--t-2); margin-top: auto; padding-top: var(--t-3); border-top: 1px solid var(--t-line); }
+
+/* Why a button cannot be pressed, beside the button. "Disabled" on its own is a state,
+   not an answer: it tells nobody whether to wait, to change plan, or to give up. */
+body.hilal-dashboard .hm-s .s-blocked {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-2);
+  color: var(--t-copy);
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .hm-s .s-blocked .icon,
+body.hilal-dashboard .hm-s .s-blocked .icon-sm { flex: none; width: 14px; height: 14px; margin-top: 2px; }
+
+body.hilal-dashboard .hm-s .s-money-back { display: flex; align-items: center; gap: var(--t-2); color: var(--t-accent-text); font-size: .78rem; font-weight: 500; }
+body.hilal-dashboard .hm-s .s-money-back .icon,
+body.hilal-dashboard .hm-s .s-money-back .icon-sm { flex: none; width: 14px; height: 14px; }
+
+/* ── Subscription: comparison and payments ───────────────────────────────── */
+
+body.hilal-dashboard .hm-s .s-compare-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-s table.s-compare { width: 100%; border-collapse: collapse; font-size: .85rem; }
+
+body.hilal-dashboard .hm-s .s-compare thead th {
+  position: sticky;
+  top: 0;
+  padding: var(--t-3) var(--t-4);
+  border-bottom: 1px solid var(--t-line);
+  background: var(--t-quiet);
+  color: var(--t-copy);
+  font-size: .78rem;
+  font-weight: 500;
+  text-align: start;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-s .s-compare :where(td, th[scope="row"]) {
+  padding: var(--t-3) var(--t-4);
+  border-bottom: 1px solid var(--t-line);
+  text-align: start;
+  vertical-align: middle;
+}
+
+body.hilal-dashboard .hm-s .s-compare th[scope="row"] { font-weight: 500; }
+body.hilal-dashboard .hm-s .s-compare tbody tr { transition: background var(--t-fast) var(--t-ease); }
+body.hilal-dashboard .hm-s .s-compare tbody tr:hover { background: var(--t-quiet); }
+body.hilal-dashboard .hm-s .s-compare tbody tr:last-child :where(td, th) { border-bottom: 0; }
+
+body.hilal-dashboard .hm-s .s-payments { display: flex; flex-direction: column; gap: var(--t-2); margin: 0; padding: 0; list-style: none; }
+
+body.hilal-dashboard .hm-s .s-payment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-3);
+  padding: var(--t-3) var(--t-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-s .s-payment:hover { border-color: var(--t-line-strong); background: var(--t-quiet); }
+body.hilal-dashboard .hm-s .s-payment-copy { display: flex; min-width: 160px; flex: 1; flex-direction: column; gap: 2px; }
+body.hilal-dashboard .hm-s .s-payment-copy strong { font-family: var(--hm-font-display); font-size: .95rem; font-weight: 500; }
+body.hilal-dashboard .hm-s .s-payment-copy span { color: var(--t-copy); font-size: .8rem; }
+body.hilal-dashboard .hm-s .s-payment-amount { font-family: var(--hm-font-display); font-size: 1rem; font-variant-numeric: tabular-nums; font-weight: 500; white-space: nowrap; }
+
+/* ── Subscription: the checkout popup ────────────────────────────────────────
+ *
+ * One flow with three visible steps, and an order summary that never leaves the screen.
+ * The live popup was one long scroll of fields with the price stated once at the top,
+ * so the last thing a person saw before leaving the site was an address field.
+ */
+
+body.hilal-dashboard dialog.t-dialog.s-checkout { width: min(720px, calc(100vw - 32px)); }
+
+body.hilal-dashboard .s-steps {
+  display: flex;
+  align-items: center;
+  gap: var(--t-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+body.hilal-dashboard .s-step {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--t-2);
+  min-width: 0;
+}
+
+body.hilal-dashboard .s-step-dot {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: 999px;
+  background: var(--hm-surface);
+  color: var(--hm-copy);
+  font-family: var(--hm-font-display);
+  font-size: .78rem;
+  font-weight: 500;
+  transition: background var(--t-base) var(--t-ease), border-color var(--t-base) var(--t-ease), color var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .s-step-dot .icon { width: 14px; height: 14px; }
+body.hilal-dashboard .s-step-name { overflow: hidden; color: var(--hm-copy); font-size: .8rem; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+body.hilal-dashboard .s-step-line { flex: 1; height: 1px; min-width: 12px; background: var(--hm-hairline); }
+
+body.hilal-dashboard .s-step[data-state="now"] .s-step-dot { border-color: var(--hm-apple-deep); background: var(--hm-apple); color: var(--hm-ink-strong); }
+body.hilal-dashboard .s-step[data-state="now"] .s-step-name { color: var(--hm-ink-strong); }
+body.hilal-dashboard .s-step[data-state="done"] .s-step-dot { border-color: var(--hm-apple-deep); background: var(--hm-apple-soft); color: var(--hm-success); }
+
+body.hilal-dashboard .s-panel[hidden] { display: none; }
+body.hilal-dashboard .s-panel { display: flex; flex-direction: column; gap: var(--t-4); }
+
+/* The order, always visible, above whichever step is open. The exact amount and the
+   exact interval, never a summary of them. */
+body.hilal-dashboard .s-order {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-3);
+  padding: var(--t-4);
+  border: 1px solid var(--hm-apple-pale);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-apple-soft);
+}
+
+body.hilal-dashboard .s-order-copy { display: flex; min-width: 150px; flex: 1; flex-direction: column; gap: 2px; }
+body.hilal-dashboard .s-order-copy small { color: var(--hm-copy); font-size: .74rem; }
+body.hilal-dashboard .s-order-copy strong { font-family: var(--hm-font-display); font-size: 1rem; font-weight: 500; }
+body.hilal-dashboard .s-order-total { font-family: var(--hm-font-display); font-size: 1.6rem; font-variant-numeric: tabular-nums; font-weight: 500; letter-spacing: -.02em; }
+body.hilal-dashboard .s-order-when { flex-basis: 100%; margin: 0; color: var(--hm-copy); font-size: .8rem; }
+
+body.hilal-dashboard .s-fields { display: grid; gap: var(--t-3); grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+body.hilal-dashboard .s-field { display: flex; flex-direction: column; gap: 6px; }
+body.hilal-dashboard .s-field.is-wide { grid-column: 1 / -1; }
+body.hilal-dashboard .s-field > span { color: var(--hm-copy); font-size: .82rem; font-weight: 500; }
+body.hilal-dashboard .s-field > span em { color: var(--hm-copy); font-size: .76rem; font-style: normal; font-weight: 400; }
+
+body.hilal-dashboard .s-field input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--t-3);
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+  font: inherit;
+  font-size: .9rem;
+  transition: border-color var(--t-fast) var(--hm-motion);
+}
+
+body.hilal-dashboard .s-field input:hover { border-color: var(--hm-ink); }
+body.hilal-dashboard .s-field input[readonly] { background: var(--hm-surface-soft); color: var(--hm-copy); cursor: default; }
+body.hilal-dashboard .s-field input[readonly]:hover { border-color: var(--hm-hairline-strong); }
+body.hilal-dashboard .s-field small { color: var(--hm-copy); font-size: .74rem; }
+
+/* A field that is wrong says so beside itself, in words, and is marked for anyone who
+   cannot see the colour. */
+body.hilal-dashboard .s-field[data-wrong="true"] input { border-color: var(--hm-danger); background: var(--hm-danger-bg); }
+body.hilal-dashboard .s-field-wrong { display: none; align-items: center; gap: 5px; color: var(--hm-danger); font-size: .76rem; }
+body.hilal-dashboard .s-field[data-wrong="true"] .s-field-wrong { display: flex; }
+body.hilal-dashboard .s-field-wrong .icon { width: 13px; height: 13px; }
+
+body.hilal-dashboard .s-methods { display: grid; gap: var(--t-2); grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+
+body.hilal-dashboard .s-method {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-3);
+  min-height: 44px;
+  padding: var(--t-3);
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface);
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--hm-motion), background var(--t-fast) var(--hm-motion);
+}
+
+body.hilal-dashboard .s-method:hover { border-color: var(--hm-ink); background: var(--hm-surface-soft); }
+body.hilal-dashboard .s-method:has(input:checked) { border-color: var(--hm-apple-deep); background: var(--hm-apple-soft); }
+body.hilal-dashboard .s-method:has(input:focus-visible) { outline: 3px solid var(--hm-ink-strong); box-shadow: 0 0 0 6px var(--hm-apple); outline-offset: 3px; }
+body.hilal-dashboard .s-method:has(input:disabled) { cursor: not-allowed; background: var(--hm-surface-soft); opacity: .6; }
+body.hilal-dashboard .s-method input { width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--hm-apple-deep); }
+body.hilal-dashboard .s-method-copy { display: flex; flex-direction: column; gap: 2px; }
+body.hilal-dashboard .s-method-copy strong { display: flex; align-items: center; gap: 6px; font-family: var(--hm-font-display); font-size: .92rem; font-weight: 500; }
+body.hilal-dashboard .s-method-copy strong .icon { width: 16px; height: 16px; }
+body.hilal-dashboard .s-method-copy small { color: var(--hm-copy); font-size: .78rem; line-height: 1.5; }
+
+body.hilal-dashboard .s-agree {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-3);
+  padding: var(--t-3);
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface-soft);
+  cursor: pointer;
+}
+
+body.hilal-dashboard .s-agree input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--hm-apple-deep); }
+body.hilal-dashboard .s-agree span { color: var(--hm-copy); font-size: .82rem; line-height: 1.6; }
+body.hilal-dashboard .s-agree a { color: var(--hm-info); font-weight: 500; }
+
+body.hilal-dashboard .s-safe {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-2);
+  color: var(--hm-copy);
+  font-size: .78rem;
+  line-height: 1.55;
+}
+
+body.hilal-dashboard .s-safe .icon { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--hm-success); }
+
+/* ── Settings ────────────────────────────────────────────────────────────────
+ *
+ * Every control here saves on its own, the moment it is used. There is no Save button
+ * to forget, so the page must be loud about what it just did — that is `.g-saved`.
+ */
+
+body.hilal-dashboard .hm-g .g-groups { display: flex; flex-direction: column; gap: var(--t-6); }
+
+body.hilal-dashboard .hm-g .g-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-4);
+  padding: var(--t-5);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+  scroll-margin-top: 96px;
+}
+
+body.hilal-dashboard .hm-g .g-group-head { display: flex; align-items: flex-start; gap: var(--t-3); }
+body.hilal-dashboard .hm-g .g-group-head > div { display: flex; flex-direction: column; gap: var(--t-1); }
+body.hilal-dashboard .hm-g .g-group-head h2 { color: var(--t-ink-strong); font-size: 1.15rem; }
+body.hilal-dashboard .hm-g .g-group-head p { font-size: .875rem; }
+body.hilal-dashboard .hm-g .g-group-title { display: flex; align-items: center; gap: var(--t-2); }
+
+/* One setting. The name, then one line saying what changes for the person, then the
+   control. Never a bare label beside a box. */
+body.hilal-dashboard .hm-g .g-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--t-3) var(--t-5);
+  padding: var(--t-4) 0;
+  border-top: 1px solid var(--t-line);
+}
+
+body.hilal-dashboard .hm-g .g-row:first-of-type { border-top: 0; padding-top: 0; }
+
+/* A stacked row turns the main axis vertical, so two of the row's own properties have
+   to be turned off with it. `flex-wrap: wrap` down a column with no set height let the
+   browser hand the last item far more height than its content — a visible empty hole
+   under the hours — and `space-between` down a column would push items apart rather
+   than sit them one under the other. */
+body.hilal-dashboard .hm-g .g-row.is-stacked {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+body.hilal-dashboard .hm-g .g-row-copy { display: flex; min-width: 200px; max-width: 46ch; flex: 1; flex-direction: column; gap: 2px; }
+/* `flex: 1` means "take the spare width" in a row. Down a column it would mean "take
+   the spare height", which is never what a label wants. */
+body.hilal-dashboard .hm-g .g-row.is-stacked .g-row-copy { flex: none; }
+body.hilal-dashboard .hm-g .g-row-copy strong { color: var(--t-ink-strong); font-family: var(--hm-font-display); font-size: .95rem; font-weight: 500; }
+body.hilal-dashboard .hm-g .g-row-copy span { color: var(--t-copy); font-size: .82rem; line-height: 1.55; }
+body.hilal-dashboard .hm-g .g-row-control { display: flex; flex-wrap: wrap; align-items: center; gap: var(--t-2); }
+body.hilal-dashboard .hm-g .g-row-control.is-full { flex-basis: 100%; }
+
+/* A consequence a person should read before they act on it, not after. */
+body.hilal-dashboard .hm-g .g-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-2);
+  flex-basis: 100%;
+  padding: var(--t-2) var(--t-3);
+  border: 1px solid var(--hm-warning-bg);
+  border-radius: var(--t-r-sm);
+  background: var(--hm-warning-bg);
+  color: var(--hm-warning);
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .hm-g .g-warn .icon,
+body.hilal-dashboard .hm-g .g-warn .icon-sm { flex: none; width: 14px; height: 14px; margin-top: 2px; }
+
+body.hilal-dashboard .hm-g .g-switches { display: grid; flex-basis: 100%; gap: var(--t-2); grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+
+/* A choice out of a small closed set. A real radio underneath, so it is one arrow-key
+   group to a keyboard and one group to a screen reader. */
+body.hilal-dashboard .hm-g .g-picker { display: inline-flex; flex-wrap: wrap; gap: var(--t-1); padding: var(--t-1); border: 1px solid var(--t-line-strong); border-radius: 999px; background: var(--t-quiet); }
+body.hilal-dashboard .hm-g .g-picker legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+body.hilal-dashboard .hm-g .g-pick {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  gap: var(--t-2);
+  padding: 0 var(--t-4);
+  border-radius: 999px;
+  color: var(--t-copy);
+  cursor: pointer;
+  font-size: .85rem;
+  font-weight: 500;
+  transition: background var(--t-base) var(--t-ease), color var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-g .g-pick input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+body.hilal-dashboard .hm-g .g-pick:hover { color: var(--t-ink); }
+body.hilal-dashboard .hm-g .g-pick:has(input:checked) { background: var(--t-surface); color: var(--t-ink-strong); box-shadow: var(--hm-shadow-xs); }
+body.hilal-dashboard .hm-g .g-pick:has(input:focus-visible) { outline: 3px solid var(--hm-ink-strong); box-shadow: 0 0 0 6px var(--hm-apple); outline-offset: 2px; }
+body.hilal-dashboard .hm-g .g-pick .icon,
+body.hilal-dashboard .hm-g .g-pick .icon-sm { width: 15px; height: 15px; }
+
+/* A way of being told, or an exchange: a picture, a name, and a tick. */
+body.hilal-dashboard .hm-g .g-choices { display: grid; flex-basis: 100%; gap: var(--t-2); grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+
+body.hilal-dashboard .hm-g .g-choice {
+  display: flex;
+  align-items: center;
+  min-height: 56px;
+  gap: var(--t-3);
+  padding: var(--t-3);
+  border: 1px solid var(--t-line-strong);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease), transform var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-g .g-choice:hover { border-color: var(--t-ink); background: var(--t-quiet); transform: translateY(-1px); }
+body.hilal-dashboard .hm-g .g-choice[aria-pressed="true"] { border-color: var(--t-accent); background: var(--t-accent-soft); }
+body.hilal-dashboard .hm-g .g-choice[disabled] { cursor: not-allowed; background: var(--t-quiet); opacity: .72; transform: none; }
+body.hilal-dashboard .hm-g .g-choice[data-busy="true"] { cursor: progress; opacity: .72; }
+
+body.hilal-dashboard .hm-g .g-choice-icon { display: grid; flex: none; place-items: center; width: 34px; height: 34px; overflow: hidden; border-radius: 10px; background: var(--t-quiet); color: var(--t-copy); }
+body.hilal-dashboard .hm-g .g-choice[aria-pressed="true"] .g-choice-icon { background: var(--t-surface); color: var(--t-ink); }
+body.hilal-dashboard .hm-g .g-choice-icon .icon { width: 18px; height: 18px; }
+body.hilal-dashboard .hm-g .g-choice-icon img { width: 20px; height: 20px; object-fit: contain; }
+body.hilal-dashboard .hm-g .g-choice-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 1px; text-align: start; }
+body.hilal-dashboard .hm-g .g-choice-copy strong { color: var(--t-ink-strong); font-family: var(--hm-font-display); font-size: .9rem; font-weight: 500; }
+body.hilal-dashboard .hm-g .g-choice-copy small { color: var(--t-copy); font-size: .76rem; line-height: 1.45; }
+
+/* The tick is a second signal beside the border colour, and it is drawn in ink rather
+   than in apple green: `brand guide.md` section 10 keeps the brand accent and product
+   meaning apart. */
+body.hilal-dashboard .hm-g .g-choice-tick { display: grid; flex: none; place-items: center; width: 22px; height: 22px; border: 1px solid var(--t-line-strong); border-radius: 999px; color: transparent; transition: background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease), border-color var(--t-fast) var(--t-ease); }
+body.hilal-dashboard .hm-g .g-choice[aria-pressed="true"] .g-choice-tick { border-color: var(--t-ink); background: var(--t-ink); color: var(--t-surface); }
+body.hilal-dashboard .hm-g .g-choice-tick .icon { width: 13px; height: 13px; }
+
+/* A number a person types, with its unit attached so the unit is never guessed. */
+body.hilal-dashboard .hm-g .g-number { display: inline-flex; align-items: center; min-height: 44px; gap: var(--t-1); padding: 0 var(--t-3); border: 1px solid var(--t-line-strong); border-radius: 999px; background: var(--t-surface); transition: border-color var(--t-fast) var(--t-ease); }
+body.hilal-dashboard .hm-g .g-number:hover { border-color: var(--t-ink); }
+body.hilal-dashboard .hm-g .g-number:focus-within { outline: 3px solid var(--hm-ink-strong); box-shadow: 0 0 0 6px var(--hm-apple); outline-offset: 2px; }
+body.hilal-dashboard .hm-g .g-number input { width: 5ch; border: 0; background: transparent; color: var(--t-ink); font: inherit; font-family: var(--hm-font-display); font-size: .95rem; font-variant-numeric: tabular-nums; font-weight: 500; text-align: end; }
+/* The ring is drawn on the wrapper above, so the input inside must not draw a second
+   one. Important because the site-wide indicator is now important too — without this
+   the field would show two rings, one inside the other. */
+body.hilal-dashboard .hm-g .g-number input:focus-visible { outline: none !important; box-shadow: none !important; }
+body.hilal-dashboard .hm-g .g-number span { color: var(--t-copy); font-size: .82rem; }
+
+body.hilal-dashboard .hm-g .g-select { display: inline-flex; align-items: center; min-height: 44px; gap: var(--t-2); padding: 0 var(--t-3); border: 1px solid var(--t-line-strong); border-radius: 999px; background: var(--t-surface); transition: border-color var(--t-fast) var(--t-ease); }
+body.hilal-dashboard .hm-g .g-select:hover { border-color: var(--t-ink); }
+body.hilal-dashboard .hm-g .g-select .icon,
+body.hilal-dashboard .hm-g .g-select .icon-sm { flex: none; width: 15px; height: 15px; color: var(--t-copy); }
+body.hilal-dashboard .hm-g .g-select select { min-width: 12ch; max-width: 34ch; border: 0; background: transparent; color: var(--t-ink); cursor: pointer; font: inherit; font-size: .88rem; font-weight: 500; }
+
+/* ── Settings: the week and the day ──────────────────────────────────────── */
+
+body.hilal-dashboard .hm-g .g-week { display: flex; flex-wrap: wrap; gap: var(--t-2); }
+
+body.hilal-dashboard .hm-g .g-day {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  min-height: 44px;
+  border: 1px solid var(--t-line-strong);
+  border-radius: var(--t-r-sm);
+  background: var(--t-surface);
+  color: var(--t-copy);
+  cursor: pointer;
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 500;
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-g .g-day:hover { border-color: var(--t-ink); background: var(--t-quiet); }
+body.hilal-dashboard .hm-g .g-day[aria-pressed="true"] { border-color: var(--t-ink); background: var(--t-ink); color: var(--t-surface); }
+body.hilal-dashboard .hm-g .g-week[data-every-day="true"] .g-day { cursor: not-allowed; opacity: .45; }
+
+body.hilal-dashboard .hm-g .g-hours { display: flex; flex-direction: column; gap: var(--t-3); }
+
+body.hilal-dashboard .hm-g .g-part {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-2) var(--t-3);
+  padding: var(--t-3);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+}
+
+/* `flex: none` on purpose. It is also a `.t-action`, which is `flex: 1` so that a row
+   of buttons shares its width evenly — and here that made the name of a part of the day
+   as wide as all six of its hours put together.
+   `.t-action` is named in the selector to win the tie: the shared rule reaches it
+   through an `:is()` that includes `dialog.t-dialog`, and an `:is()` takes the
+   specificity of its strongest argument, so a plainer selector loses to it. */
+body.hilal-dashboard .hm-g .t-action.g-part-name { display: inline-flex; flex: none; align-items: center; justify-content: flex-start; gap: var(--t-2); min-width: 136px; color: var(--t-ink-strong); font-size: .85rem; font-weight: 500; }
+body.hilal-dashboard .hm-g .g-part-name .icon,
+body.hilal-dashboard .hm-g .g-part-name .icon-sm { width: 15px; height: 15px; color: var(--t-copy); }
+body.hilal-dashboard .hm-g .g-part-hours { display: flex; flex: 1; flex-wrap: wrap; gap: var(--t-1); }
+
+body.hilal-dashboard .hm-g .g-hour {
+  min-width: 52px;
+  /* 44px, like every other control on this path. Twenty-four of these at 32px each was
+     a row of targets a thumb cannot hit, and "there are a lot of them" is not a reason
+     to make each one harder to press. */
+  min-height: 44px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--t-r-sm);
+  background: var(--t-surface);
+  color: var(--t-copy);
+  cursor: pointer;
+  font: inherit;
+  font-size: .74rem;
+  font-variant-numeric: tabular-nums;
+  transition: background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-g .g-hour:hover { border-color: var(--t-line-strong); }
+body.hilal-dashboard .hm-g .g-hour[aria-pressed="true"] { background: var(--hm-apple-deep); color: #fff; }
+
+/* Every hour off is a real state and the page has to say so out loud, because silence
+   is exactly what it produces. */
+body.hilal-dashboard .hm-g .g-hours-note { display: flex; align-items: center; gap: var(--t-2); color: var(--t-copy); font-size: .8rem; }
+body.hilal-dashboard .hm-g .g-hours-note[data-tone="warning"] { color: var(--hm-warning); }
+body.hilal-dashboard .hm-g .g-hours-note .icon,
+body.hilal-dashboard .hm-g .g-hours-note .icon-sm { flex: none; width: 15px; height: 15px; }
+
+/* ── Settings: silenced coins ────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-g .g-mute { display: flex; flex-basis: 100%; flex-direction: column; gap: var(--t-3); }
+body.hilal-dashboard .hm-g .g-mute-add { display: flex; flex-wrap: wrap; gap: var(--t-2); }
+
+body.hilal-dashboard .hm-g .g-mute-add input {
+  min-width: 180px;
+  min-height: 44px;
+  flex: 1;
+  padding: 0 var(--t-4);
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-surface);
+  color: var(--t-ink);
+  font: inherit;
+  font-size: .9rem;
+  text-transform: uppercase;
+}
+
+body.hilal-dashboard .hm-g .g-mute-add input::placeholder { color: var(--t-copy); text-transform: none; }
+body.hilal-dashboard .hm-g .g-chips { display: flex; flex-wrap: wrap; gap: var(--t-2); margin: 0; padding: 0; list-style: none; }
+
+/* The chip is as tall as its own remove button, so taking a coin back out is a full
+   44×44 target rather than a small cross inside a small pill. */
+body.hilal-dashboard .hm-g .g-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  gap: var(--t-1);
+  padding: 0 0 0 var(--t-4);
+  overflow: hidden;
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-quiet);
+  font-family: var(--hm-font-display);
+  font-size: .85rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-g .g-chip button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--t-copy);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-g .g-chip button:hover { background: var(--hm-danger-bg); color: var(--hm-danger); }
+body.hilal-dashboard .hm-g .g-chip button .icon { width: 13px; height: 13px; }
+body.hilal-dashboard .hm-g .g-chip-empty { color: var(--t-copy); font-size: .82rem; }
+
+/* ── Settings: the saving state ──────────────────────────────────────────────
+ *
+ * With no Save button, "did that work?" has to be answered every single time. It sits
+ * at the top of the page, it never covers anything, and it says one of three things:
+ * saving, saved, or "nothing was saved".
+ */
+
+body.hilal-dashboard .hm-g .g-saved {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-3);
+  padding: var(--t-3) var(--t-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: rgba(255, 255, 255, .95);
+  backdrop-filter: blur(8px);
+  transition: border-color var(--t-base) var(--t-ease), background var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-g .g-saved[data-state="saving"] { border-color: var(--hm-hairline-strong); }
+body.hilal-dashboard .hm-g .g-saved[data-state="saved"] { border-color: var(--t-accent-pale); background: var(--hm-apple-soft); }
+body.hilal-dashboard .hm-g .g-saved[data-state="failed"] { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); }
+body.hilal-dashboard .hm-g .g-saved-icon { display: grid; flex: none; place-items: center; width: 26px; height: 26px; color: var(--t-copy); }
+body.hilal-dashboard .hm-g .g-saved[data-state="saved"] .g-saved-icon { color: var(--t-accent-text); }
+body.hilal-dashboard .hm-g .g-saved[data-state="failed"] .g-saved-icon { color: var(--hm-danger); }
+body.hilal-dashboard .hm-g .g-saved-icon .icon { width: 18px; height: 18px; }
+body.hilal-dashboard .hm-g .g-saved-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+body.hilal-dashboard .hm-g .g-saved-copy strong { color: var(--t-ink-strong); font-size: .88rem; }
+body.hilal-dashboard .hm-g .g-saved-copy span { color: var(--t-copy); font-size: .78rem; }
+body.hilal-dashboard .hm-g .g-saved[data-state="failed"] .g-saved-copy strong { color: var(--hm-danger); }
+
+/* The dot turns only while a save is really in flight. It stops the moment it lands:
+   the movement is the state, not decoration. */
+body.hilal-dashboard .hm-g .g-saved[data-state="saving"] .g-saved-icon .icon { animation: g-turn 900ms linear infinite; }
+
+@keyframes g-turn { to { transform: rotate(360deg); } }
+
+/* ── Support ─────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-h .h-help { display: grid; gap: var(--t-3); grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+
+body.hilal-dashboard .hm-h .h-help-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-2);
+  padding: var(--t-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color var(--t-base) var(--t-ease), box-shadow var(--t-base) var(--t-ease), transform var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-h .h-help-card:hover {
+  border-color: var(--t-line-strong);
+  box-shadow: var(--hm-shadow-xs);
+  transform: translateY(-2px);
+}
+
+body.hilal-dashboard .hm-h .h-help-card:hover .a-mark { border-color: var(--t-ink); transform: scale(1.06); }
+body.hilal-dashboard .hm-h .h-help-card strong { color: var(--t-ink-strong); font-family: var(--hm-font-display); font-size: .95rem; font-weight: 500; }
+body.hilal-dashboard .hm-h .h-help-card p { font-size: .82rem; }
+body.hilal-dashboard .hm-h .h-help-go { display: inline-flex; align-items: center; gap: var(--t-1); margin-top: auto; color: var(--t-accent-text); font-size: .82rem; font-weight: 500; }
+body.hilal-dashboard .hm-h .h-help-go .icon,
+body.hilal-dashboard .hm-h .h-help-go .icon-sm { width: 14px; height: 14px; transition: transform var(--t-fast) var(--t-ease); }
+body.hilal-dashboard .hm-h .h-help-card:hover .h-help-go .icon { transform: translateX(3px); }
+
+body.hilal-dashboard .hm-h .h-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-5);
+  padding: var(--t-5);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-h .h-ask { display: flex; flex-direction: column; gap: var(--t-3); border: 0; margin: 0; padding: 0; }
+body.hilal-dashboard .hm-h .h-ask legend { padding: 0; color: var(--t-ink-strong); font-family: var(--hm-font-display); font-size: .95rem; font-weight: 500; }
+body.hilal-dashboard .hm-h .h-ask-hint { color: var(--t-copy); font-size: .82rem; }
+
+body.hilal-dashboard .hm-h .h-topics { display: grid; gap: var(--t-2); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+
+body.hilal-dashboard .hm-h .h-topic {
+  display: flex;
+  align-items: flex-start;
+  min-height: 56px;
+  gap: var(--t-3);
+  padding: var(--t-3);
+  border: 1px solid var(--t-line-strong);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease), transform var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-h .h-topic:hover { border-color: var(--t-ink); background: var(--t-quiet); transform: translateY(-1px); }
+body.hilal-dashboard .hm-h .h-topic:has(input:checked) { border-color: var(--t-accent); background: var(--t-accent-soft); }
+body.hilal-dashboard .hm-h .h-topic:has(input:focus-visible) { outline: 3px solid var(--hm-ink-strong); box-shadow: 0 0 0 6px var(--hm-apple); outline-offset: 2px; }
+body.hilal-dashboard .hm-h .h-topic input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+body.hilal-dashboard .hm-h .h-topic-copy { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+body.hilal-dashboard .hm-h .h-topic-copy strong { color: var(--t-ink-strong); font-family: var(--hm-font-display); font-size: .9rem; font-weight: 500; }
+body.hilal-dashboard .hm-h .h-topic-copy small { color: var(--t-copy); font-size: .78rem; line-height: 1.45; }
+
+body.hilal-dashboard .hm-h .h-field { display: flex; flex-direction: column; gap: 6px; }
+body.hilal-dashboard .hm-h .h-field > label { color: var(--t-ink-strong); font-size: .88rem; font-weight: 500; }
+body.hilal-dashboard .hm-h .h-field-hint { color: var(--t-copy); font-size: .78rem; }
+
+body.hilal-dashboard .hm-h :where(.h-field input, .h-field textarea) {
+  width: 100%;
+  padding: 12px var(--t-4);
+  border: 1px solid var(--t-line-strong);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  color: var(--t-ink);
+  font: inherit;
+  font-size: .92rem;
+  transition: border-color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-h .h-field input { min-height: 44px; padding-block: 0; border-radius: 999px; }
+body.hilal-dashboard .hm-h .h-field textarea { min-height: 150px; line-height: 1.6; resize: vertical; }
+body.hilal-dashboard .hm-h :where(.h-field input, .h-field textarea):hover { border-color: var(--t-ink); }
+body.hilal-dashboard .hm-h .h-field[data-wrong="true"] :where(input, textarea) { border-color: var(--hm-danger); background: var(--hm-danger-bg); }
+body.hilal-dashboard .hm-h .h-field-wrong { display: none; align-items: center; gap: 5px; color: var(--hm-danger); font-size: .78rem; }
+body.hilal-dashboard .hm-h .h-field[data-wrong="true"] .h-field-wrong { display: flex; }
+body.hilal-dashboard .hm-h .h-field-wrong .icon { width: 13px; height: 13px; }
+body.hilal-dashboard .hm-h .h-count { align-self: flex-end; color: var(--t-copy); font-size: .74rem; font-variant-numeric: tabular-nums; }
+
+/* Pictures. The limits are stated before somebody meets them, and every chosen file can
+   be taken back out — the live page listed the names as plain text with no way to
+   remove one short of starting again. */
+body.hilal-dashboard .hm-h .h-drop {
+  display: flex;
+  align-items: center;
+  gap: var(--t-3);
+  min-height: 76px;
+  padding: var(--t-3) var(--t-4);
+  border: 1px dashed var(--t-line-strong);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-h .h-drop:hover { border-color: var(--t-ink); background: var(--t-surface); }
+/* The picker itself is invisible, so the label wears its focus ring. Without this a
+   keyboard user tabs onto the control and nothing at all appears to happen. */
+body.hilal-dashboard .hm-h .h-drop:has(input:focus-visible) { outline: 3px solid var(--hm-ink-strong); box-shadow: 0 0 0 6px var(--hm-apple); outline-offset: 3px; }
+body.hilal-dashboard .hm-h .h-drop[data-over="true"] { border-color: var(--hm-apple-deep); background: var(--hm-apple-soft); }
+body.hilal-dashboard .hm-h .h-drop-copy { display: flex; flex-direction: column; gap: 1px; }
+body.hilal-dashboard .hm-h .h-drop-copy strong { color: var(--t-ink-strong); font-size: .88rem; font-weight: 500; }
+body.hilal-dashboard .hm-h .h-drop-copy small { color: var(--t-copy); font-size: .76rem; }
+
+body.hilal-dashboard .hm-h .h-files { display: flex; flex-direction: column; gap: var(--t-2); margin: 0; padding: 0; list-style: none; }
+body.hilal-dashboard .hm-h .h-files:empty { display: none; }
+
+body.hilal-dashboard .hm-h .h-file {
+  display: flex;
+  align-items: center;
+  gap: var(--t-3);
+  padding: var(--t-2) var(--t-2) var(--t-2) var(--t-3);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-h .h-file img { width: 40px; height: 40px; flex: none; border: 1px solid var(--t-line); border-radius: 10px; object-fit: cover; }
+body.hilal-dashboard .hm-h .h-file-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+body.hilal-dashboard .hm-h .h-file-copy strong { overflow: hidden; font-size: .85rem; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+body.hilal-dashboard .hm-h .h-file-copy small { color: var(--t-copy); font-size: .74rem; }
+
+body.hilal-dashboard .hm-h .h-tickets { display: flex; flex-direction: column; gap: var(--t-2); margin: 0; padding: 0; list-style: none; }
+
+body.hilal-dashboard .hm-h .h-ticket {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-2);
+  padding: var(--t-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  transition: border-color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-h .h-ticket:hover { border-color: var(--t-line-strong); }
+body.hilal-dashboard .hm-h .h-ticket-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--t-2) var(--t-3); }
+body.hilal-dashboard .hm-h .h-ticket-top strong { flex: 1; min-width: 160px; font-family: var(--hm-font-display); font-size: .95rem; font-weight: 500; }
+body.hilal-dashboard .hm-h .h-ticket-meta { display: flex; flex-wrap: wrap; gap: var(--t-1) var(--t-3); color: var(--t-copy); font-size: .76rem; }
+body.hilal-dashboard .hm-h .h-ticket-meta span { display: inline-flex; align-items: center; gap: var(--t-1); }
+body.hilal-dashboard .hm-h .h-ticket-meta .icon,
+body.hilal-dashboard .hm-h .h-ticket-meta .icon-sm { width: 13px; height: 13px; }
+body.hilal-dashboard .hm-h .h-ticket-said { margin: 0; color: var(--t-copy); font-size: .85rem; line-height: 1.6; white-space: pre-line; }
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  body.hilal-dashboard .hm-s .s-now { padding: var(--t-4); }
+  body.hilal-dashboard .hm-s .s-plan { padding: var(--t-4); }
+  body.hilal-dashboard .hm-g .g-group { padding: var(--t-4); }
+  body.hilal-dashboard .hm-h .h-form { padding: var(--t-4); }
+  body.hilal-dashboard .hm-s .s-plans,
+  body.hilal-dashboard .hm-h .h-help { grid-template-columns: 1fr; }
+  body.hilal-dashboard .hm-g .g-row { align-items: stretch; flex-direction: column; }
+  /* The step names take more room than a phone has. The numbered dots and the "step 2
+     of 3" line below them carry the same fact in less space. */
+  body.hilal-dashboard .s-step-name { display: none; }
+  body.hilal-dashboard .hm-g .g-day { flex: 1; width: auto; min-width: 44px; }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  body.hilal-dashboard .hm-g .g-saved[data-state="saving"] .g-saved-icon .icon { animation: none; }
+  body.hilal-dashboard .hm-s .s-bar span { transition: none; }
+  body.hilal-dashboard :where(.hm-s .s-plan, .hm-h .h-help-card, .hm-g .g-choice, .hm-h .h-topic):hover { transform: none; }
+  body.hilal-dashboard .hm-h .h-help-card:hover .a-mark { transform: none; }
+  body.hilal-dashboard .hm-h .h-help-card:hover .h-help-go .icon { transform: none; }
+}

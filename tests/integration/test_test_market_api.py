@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from ai_market_monitor.api.dependencies import get_market_data_provider
+from ai_market_monitor.core.csrf import csrf_token
 from ai_market_monitor.db.models import ShariaMethodology, User
 from ai_market_monitor.db.models.enums import ShariaAssetStatus, ShariaMethodologyStatus
 from ai_market_monitor.schemas.sharia import (
@@ -74,7 +75,10 @@ async def test_retired_test_market_route_stays_unavailable(test_context):
     assert page.status_code == 200
     assert "/api/v1/sharia/test-market" not in page.text
     assert "Test methodology only" not in page.text
-    assert "data-passport-quick-dialog" in page.text
+    # The market page carries a Passport popup, so a coin can be read without leaving the
+    # list. It is the redesigned one — there is only one market page now, and the older
+    # page's `data-passport-quick-dialog` went with it.
+    assert "data-passport-dialog" in page.text
 
 
 async def test_development_methodology_is_never_selectable_over_approved_methodology(
@@ -174,7 +178,7 @@ async def test_development_methodology_is_never_selectable_over_approved_methodo
     assert "Development Test route" not in test_page.text
     assert malaysia_page.status_code == 200
     assert 'data-endpoint="/api/v1/sharia/market-quotes"' in malaysia_page.text
-    assert "live-market-table" in malaysia_page.text
+    assert 'class="t-table"' in malaysia_page.text
     assert str(assessment.id) not in malaysia_page.text
     assert malaysia_quotes.status_code == 200
     malaysia_payload = malaysia_quotes.json()
@@ -221,24 +225,28 @@ async def test_active_methodology_without_publications_has_clear_readiness_state
         f"/dashboard/market?methodology_id={methodology.id}&view=assets"
     )
     settings_page = await test_context["client"].get("/dashboard/settings")
-    saved = await test_context["client"].post(
-        "/dashboard/settings",
-        data={
+    # Settings saves one control at a time through its own endpoint. The whole-form POST
+    # belonged to an older page that is gone; see `test_dashboard_test_settings.py`.
+    async with test_context["session_factory"]() as session:
+        chooser = await session.scalar(select(User))
+        token = csrf_token(test_context["settings"], chooser.id)
+    saved = await test_context["client"].put(
+        "/api/v1/dashboard/preferences/settings",
+        json={
             "timezone": "UTC",
             "default_sharia_methodology_id": str(methodology.id),
         },
-        follow_redirects=False,
+        headers={"X-CSRF-Token": token},
     )
     default_market = await test_context["client"].get("/dashboard/market?view=assets")
 
     assert page.status_code == 200
-    assert "No Halal Assets are available yet." in page.text
+    assert "No coin has passed this standard yet" in page.text
     assert "Open governance reviews" not in page.text
-    assert "live-market-table" in page.text
+    assert 'class="t-table"' in page.text
     assert settings_page.status_code == 200
     assert "Empty SC Malaysia test" not in settings_page.text
-    assert saved.status_code == 303
-    assert "settings_saved" in saved.headers["location"]
+    assert saved.status_code == 200, saved.text
     assert default_market.status_code == 200
     assert "Empty SC Malaysia test" in default_market.text
 
@@ -250,18 +258,26 @@ async def test_saved_assets_are_consolidated_into_market_while_scanner_stays_dis
 
     watchlists = await test_context["client"].get("/dashboard/watchlists")
     saved_assets = await test_context["client"].get("/dashboard/saved-assets")
+    # Trading Assistant was removed and both of its addresses answer 404. The one-time
+    # scan itself is unchanged — it is a mode of the builder, and that is where the
+    # buttons that used to come through here point now.
     scanner = await test_context["client"].get(
         "/dashboard/check-market",
         follow_redirects=False,
     )
+    builder_scanner = await test_context["client"].get(
+        "/dashboard/strategies/new?mode=scanner"
+    )
 
     assert watchlists.status_code == 200
-    assert ">Watchlists<" in watchlists.text
+    # The page is called Monitors now, in the menu and in its own heading.
+    assert "<h1>Monitors</h1>" in watchlists.text
     assert saved_assets.status_code == 303
     assert saved_assets.headers["location"] == "/dashboard/market?saved_assets=1"
     market = await test_context["client"].get(saved_assets.headers["location"])
     assert market.status_code == 200
     assert "Halal Assets" in market.text
-    assert "data-saved-assets-dialog" in market.text
-    assert scanner.status_code == 303
-    assert scanner.headers["location"] == "/dashboard/strategies/new?mode=scanner"
+    # Favorites, in one included dialog, is where a person's kept coins live now.
+    assert "data-favorites-dialog" in market.text
+    assert scanner.status_code == 404
+    assert builder_scanner.status_code == 200

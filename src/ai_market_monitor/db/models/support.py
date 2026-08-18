@@ -78,6 +78,36 @@ class SupportRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class SupportIntakeRecord(UUIDPrimaryKeyMixin, Base):
+    """One row for every support message this product accepted, from any door.
+
+    Two doors take support messages: the public ``/contact`` form and the dashboard's
+    own support form. The quota is a property of the *person*, not of the door, so a
+    ledger both doors write to is the only way "two messages per email" can mean two
+    and not four. ``services/support_intake.py`` is the one thing that reads or writes
+    it.
+
+    Nothing here identifies anybody. The address and the browser session are stored as
+    salted hashes, so the ledger can count without becoming a second copy of the
+    personal data that already lives in the message itself.
+    """
+
+    __tablename__ = "support_intake_records"
+    __table_args__ = (
+        Index("ix_support_intake_email", "email_hash", "accepted_at"),
+        Index("ix_support_intake_client", "client_hash", "accepted_at"),
+        # The flood ceiling counts every row in the window regardless of who sent it,
+        # so it needs the time column on its own.
+        Index("ix_support_intake_accepted", "accepted_at"),
+    )
+
+    #: Which form the message came through: ``contact`` or ``dashboard``.
+    door: Mapped[str] = mapped_column(String(32), nullable=False)
+    email_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    client_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Incident(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "incidents"
     __table_args__ = (

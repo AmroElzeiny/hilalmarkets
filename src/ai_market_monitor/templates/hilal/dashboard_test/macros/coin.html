@@ -1,0 +1,21 @@
+{#- The coin logo for the redesigned dashboard pages.
+
+    Nothing is decided here any more. This used to build the catalogue address itself
+    from a version pinned in this file, which was one of four hand-typed copies of it,
+    and it fell back to that address whenever the record carried no `logo_module_url` —
+    a fallback that quietly disagreed with the server about which coins have a picture.
+
+    Both addresses now arrive resolved from `core/asset_logos.py`, and the markup is the
+    product-wide macro. This exists only to keep `.t-logo` in one place.
+-#}
+
+{%- from "hilal/macros/coin_logo.html" import coin_logo -%}
+
+{%- macro logo(symbol, identity=none, extra_class='') -%}
+{{ coin_logo(
+     symbol,
+     module_url=(identity.logo_module_url if identity else none),
+     image_url=(identity.logo_url if identity else none),
+     class=('t-logo ' ~ extra_class)|trim,
+   ) }}
+{%- endmacro -%}

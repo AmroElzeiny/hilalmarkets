@@ -136,7 +136,9 @@ async def test_verified_static_payment_activates_once_and_emails_once(test_conte
         if row.get("purpose") == "payment_success"
     ]
     assert len(payment_messages) == 1
-    assert payment_messages[0]["subject"] == "Your HilalMarkets Monitor plan is active"
+    # "Hilal Markets" with the space: the name in prose, per `brand guide.md` section 4
+    # and `core/copy_rules.py`, which enforces it.
+    assert payment_messages[0]["subject"] == "Your Hilal Markets Monitor plan is active"
     assert "Create a Watchlist" in payment_messages[0]["body"]
     assert "Hilal Markets provides screening" in payment_messages[0]["body"]
 

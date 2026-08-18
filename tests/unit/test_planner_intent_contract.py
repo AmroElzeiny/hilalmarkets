@@ -7,11 +7,17 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from ai_market_monitor.engine.capability_shortlist import CapabilityShortlist, ShortlistCandidate
+from ai_market_monitor.engine.capabilities import CAPABILITIES
+from ai_market_monitor.engine.capability_shortlist import (
+    CapabilityShortlist,
+    ShortlistCandidate,
+    build_capability_shortlist,
+)
 from ai_market_monitor.engine.planner_intent_compiler import (
     _OPERATION_KIND,
     IntentCompileError,
     SemanticIntentOutcome,
+    _capability_implied_comparator,
     _repair_value_is_grounded,
     apply_repair_deltas,
     compile_planner_intents,
@@ -38,6 +44,7 @@ from ai_market_monitor.schemas.planner_intent import (
     compact_json_schema,
     schema_complexity,
 )
+from ai_market_monitor.schemas.strategy import Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import StrategyDraftV2
 from ai_market_monitor.services.setup_chat_agent import (
     _classify_plan_failure,
@@ -1104,3 +1111,219 @@ def test_repair_timeframe_role_cannot_swap() -> None:
         references=PlannerReferenceContext(),
         replacement_kind=typed.kind,
     )
+
+
+# A pattern-match capability (a liquidity sweep, a candle shape, a market-structure
+# break, ...) is a yes/no question with no numeric comparison in it anywhere. The
+# planner correctly leaves `comparator` unset for these -- there is nothing in "price
+# swept the previous daily low" for a trader to compare with gt/lt/gte/lte. The
+# compiler used to demand one anyway, for every capability alike, and refuse the whole
+# turn with an internal-error envelope when the model (correctly) did not invent one.
+# These assert the fix as a rule over the whole registry, not just the reported case:
+# every boolean-shaped capability must resolve an implied comparator, and every
+# capability that genuinely needs one must still require it from the trader.
+_BOOLEAN_ONLY_CAPABILITY_KEYS = tuple(
+    sorted(
+        capability.key
+        for capability in CAPABILITIES
+        if capability.operand_kind in {"price_action", "candle_pattern"}
+        and set(capability.supported_comparators) <= {"is_true", "is_false"}
+    )
+)
+
+_NUMERIC_PRICE_ACTION_KEYS = (
+    "level_strength_score",
+    "level_distance_percent",
+    "dynamic_trendline",
+    "percent_change_lookback",
+)
+
+
+def test_boolean_only_registry_slice_is_not_accidentally_empty() -> None:
+    """Guards the two parametrized tests below against a silently-empty fixture.
+
+    A typo in the filter above (e.g. a stale operand_kind spelling) would make both
+    tests trivially pass with zero cases and no one would notice.
+    """
+
+    assert len(_BOOLEAN_ONLY_CAPABILITY_KEYS) > 100
+    for key in _NUMERIC_PRICE_ACTION_KEYS:
+        assert key not in _BOOLEAN_ONLY_CAPABILITY_KEYS
+
+
+@pytest.mark.parametrize("capability_key", _BOOLEAN_ONLY_CAPABILITY_KEYS)
+def test_capability_implied_comparator_covers_every_boolean_pattern_capability(
+    capability_key: str,
+) -> None:
+    """Every registered pattern-match capability gets a usable implied comparator.
+
+    Parametrized over the live registry rather than a hand-picked sample, so a new
+    price_action/candle_pattern capability added later is covered automatically: it
+    either declares is_true/is_false (and this test passes without being touched) or
+    it declares real numeric comparators (and it simply does not appear in this list).
+    """
+
+    implied = _capability_implied_comparator(capability_key)
+    assert implied is not None, f"{capability_key} has no implied comparator"
+    assert implied.value in {"is_true", "is_false"}
+
+
+@pytest.mark.parametrize(
+    "capability_key",
+    (
+        "ema_crossover",
+        "price_above_ema",
+        *_NUMERIC_PRICE_ACTION_KEYS,
+    ),
+)
+def test_capability_implied_comparator_is_none_when_a_comparison_is_required(
+    capability_key: str,
+) -> None:
+    """A capability that supports a real comparison never gets one invented for it.
+
+    RSI/EMA-style indicators and the handful of price_action capabilities that return
+    a measured value (a percent, a distance, a score) must still make the trader state
+    gt/gte/lt/lte -- silently defaulting those to is_true would monitor a different,
+    unstated condition.
+    """
+
+    assert _capability_implied_comparator(capability_key) is None
+
+
+def test_unknown_capability_key_has_no_implied_comparator() -> None:
+    assert _capability_implied_comparator("not_a_real_capability") is None
+    assert _capability_implied_comparator(None) is None
+
+
+def test_sweep_condition_without_a_stated_comparator_compiles_deterministically() -> None:
+    """The exact reported failure: 'sweeps previous daily low' with no comparator.
+
+    Reproduces the live planner's own output for this request -- capability_key
+    resolved correctly, trigger_timeframe normalized to 1m, comparator left unset
+    because a sweep is not a comparison -- and asserts the compiler now accepts it
+    instead of raising the internal-error envelope the user actually saw.
+    """
+
+    message = "Inform me when a coin sweeps previous daily low on the 1 minute chart"
+    envelope = _envelope(
+        message,
+        {
+            "action": "add_condition",
+            "condition": {
+                "capability_key": "previous_daily_low_sweep",
+                "trigger_timeframe": "1m",
+                "capability_parameters": [{"name": "timeframe", "string_value": "1m"}],
+            },
+        },
+    )
+    compiled = compile_planner_intents(
+        envelope,
+        draft=StrategyDraftV2(),
+        message=message,
+        source_turn_id="turn-sweep-no-comparator",
+        shortlist=build_capability_shortlist(message),
+    )
+    condition = compiled.plan.operations[0].condition
+    assert condition is not None
+    assert condition.capability_key == "previous_daily_low_sweep"
+    assert condition.operator == Comparator.IS_TRUE
+
+
+def test_candle_pattern_condition_without_a_stated_comparator_compiles() -> None:
+    """The same fix, for the other boolean-shaped kind: a candle pattern, not a sweep."""
+
+    message = "Tell me when there is a bullish engulfing candle on the 15 minute chart"
+    envelope = _envelope(
+        message,
+        {
+            "action": "add_condition",
+            "condition": {
+                "capability_key": "bullish_engulfing",
+                # The word "bullish" in the text grounds this role independently of the
+                # comparator question this test is about; omitting it would fail on an
+                # unrelated semantic-omission check before ever reaching the compiler
+                # code this fix touches.
+                "movement_direction": "up",
+                "trigger_timeframe": "15m",
+            },
+        },
+    )
+    compiled = compile_planner_intents(
+        envelope,
+        draft=StrategyDraftV2(),
+        message=message,
+        source_turn_id="turn-candle-no-comparator",
+        shortlist=build_capability_shortlist(message),
+    )
+    condition = compiled.plan.operations[0].condition
+    assert condition is not None
+    assert condition.operator == Comparator.IS_TRUE
+
+
+def test_capability_condition_that_needs_a_comparator_still_asks_for_one() -> None:
+    """The carved-out numeric exception must not silently regress to is_true.
+
+    percent_change_lookback shares operand_kind="price_action" with the sweep and
+    candle-pattern capabilities above, but it measures a percentage: "up 5%" is not a
+    yes/no pattern, so leaving the comparator unstated must still fail closed exactly
+    as it did before this fix.
+    """
+
+    message = "Find coins up 5% today"
+    envelope = _envelope(
+        message,
+        {
+            "action": "add_condition",
+            "condition": {
+                "capability_key": "percent_change_lookback",
+                # "up" grounds this role independently of the comparator question this
+                # test is about; see the equivalent note in the candle-pattern test above.
+                "movement_direction": "up",
+                "trigger_timeframe": "15m",
+                "threshold": 5,
+            },
+        },
+    )
+    with pytest.raises(IntentCompileError) as failure:
+        compile_planner_intents(
+            envelope,
+            draft=StrategyDraftV2(),
+            message=message,
+            source_turn_id="turn-percent-no-comparator",
+            shortlist=build_capability_shortlist(message),
+        )
+    assert failure.value.code == "INTENT_INCOMPLETE"
+    assert failure.value.target_path == "condition.comparator"
+
+
+def test_non_capability_formula_without_a_stated_comparator_still_asks_for_one() -> None:
+    """The fix is scoped to capability_key conditions; the formula path is unchanged.
+
+    A plain percentage-change rule (formula_key set, no capability_key) has always
+    required the trader's own comparator, and still must -- there is no capability
+    record to consult for it, and none should be invented.
+    """
+
+    message = "Alert on a 2% move"
+    envelope = _envelope(
+        message,
+        {
+            "action": "add_condition",
+            "condition": {
+                "formula_key": "close_to_close_percentage",
+                "movement_direction": "up",
+                "threshold": 2,
+                "unit": "percent",
+                "trigger_timeframe": "15m",
+            },
+        },
+    )
+    with pytest.raises(IntentCompileError) as failure:
+        compile_planner_intents(
+            envelope,
+            draft=StrategyDraftV2(),
+            message=message,
+            source_turn_id="turn-formula-no-comparator",
+        )
+    assert failure.value.code == "INTENT_INCOMPLETE"
+    assert failure.value.target_path == "condition.comparator"

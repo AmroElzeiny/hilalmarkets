@@ -8,6 +8,7 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.api.request_guards import client_fingerprint
 from ai_market_monitor.api.route_security import public_api
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
@@ -23,6 +24,10 @@ from ai_market_monitor.services.public_forms import (
     PublicFormsService,
     issue_public_forms_csrf,
     public_forms_csrf_matches,
+)
+from ai_market_monitor.services.support_intake import (
+    SupportIntakeGuard,
+    support_intake_limits,
 )
 
 router = APIRouter(prefix="/public-forms", tags=["public-forms"])
@@ -50,10 +55,19 @@ async def public_forms_bootstrap(
         samesite="lax",
         path="/",
     )
+    limits = support_intake_limits(settings)
     return {
         "csrf_token": token,
         "waitlist_endpoint": "/api/v1/public-forms/waitlist",
         "contact_endpoint": "/api/v1/public-forms/contact",
+        # The page states the limit before somebody writes a message, rather than after
+        # they have written one and pressed Send. The numbers come from the server so the
+        # page can never advertise a limit different from the one being enforced.
+        "contact_limits": {
+            "per_email": limits.per_email,
+            "per_client": limits.per_client,
+            "window_hours": round(limits.window_hours, 2),
+        },
     }
 
 
@@ -115,14 +129,40 @@ async def submit_contact(
 ) -> ContactSubmissionResponse:
     _require_public_form_request(request, settings, x_csrf_token)
     service = PublicFormsService(session, settings)
+    guard = SupportIntakeGuard(session, settings)
+    fingerprint = client_fingerprint(request, settings)
+
+    # Asked before anything is written or sent. A refused message must cost nothing:
+    # no row, no office email, no provider call.
+    existing = await service.find_contact_by_idempotency_key(payload.idempotency_key)
+    if existing is None:
+        decision = await guard.check(
+            email=str(payload.email),
+            client_fingerprint=fingerprint,
+        )
+        if not decision.allowed:
+            raise HTTPException(
+                status_code=429,
+                headers={"Retry-After": str(max(1, decision.retry_after_seconds))},
+                detail={"code": decision.code, "message": decision.message()},
+            )
+
     try:
-        submission, _ = await service.submit_contact(payload)
+        submission, created = await service.submit_contact(payload)
     except PublicFormConflict as exc:
         await session.rollback()
         raise HTTPException(
             status_code=409,
             detail={"code": "idempotency_conflict", "message": str(exc)},
         ) from exc
+    # A retry of the same message is the same message. Counting it again would spend a
+    # person's allowance on a flaky network rather than on a second question.
+    if created:
+        await guard.record(
+            door="contact",
+            email=str(payload.email),
+            client_fingerprint=fingerprint,
+        )
     await session.commit()
     await service.process_contact_due(submission_id=submission.id, limit=1)
     if await service.contact_delivery_status(submission.id) != "sent":
@@ -133,9 +173,19 @@ async def submit_contact(
                 "message": "We could not send your message just now. Please try again.",
             },
         )
+    remaining = await guard.check(
+        email=str(payload.email),
+        client_fingerprint=fingerprint,
+    )
     return ContactSubmissionResponse(
         status="sent",
         message="Your message was sent successfully.",
+        # The stricter of the two personal allowances, because that is the one the
+        # person will actually meet next.
+        remaining_messages=min(
+            remaining.remaining_for_email, remaining.remaining_for_client
+        ),
+        window_hours=round(guard.limits.window_hours, 2),
     )
 
 

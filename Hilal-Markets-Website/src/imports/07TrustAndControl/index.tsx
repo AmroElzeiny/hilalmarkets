@@ -1,7 +1,7 @@
 function Flow() {
   return (
     <div className="content-stretch flex items-start overflow-clip px-[16px] py-[10px] relative rounded-[999px] shrink-0" data-name="Flow 1">
-      <p className="[word-break:break-word] font-['Onest:Medium',sans-serif] font-medium leading-[1.5] relative shrink-0 text-[13px] text-white whitespace-nowrap">AI chatbot structures</p>
+      <p className="[word-break:break-word] font-['Onest:Medium',sans-serif] font-medium leading-[1.5] relative shrink-0 text-[13px] text-white whitespace-nowrap">You approve the logic</p>
     </div>
   );
 }
@@ -106,7 +106,7 @@ function TrustCard1() {
       <div className="content-stretch flex flex-col gap-[14px] items-start overflow-clip p-[24px] relative rounded-[inherit] size-full">
         <Top1 />
         <p className="[word-break:break-word] font-['Geometria:Medium',sans-serif] leading-[1.18] not-italic relative shrink-0 text-[#2b2e35] text-[24px] tracking-[-0.48px] w-[340px]">Every strategy rule stays visible</p>
-        <p className="[word-break:break-word] font-['Onest:Regular',sans-serif] font-normal leading-[1.5] relative shrink-0 text-[#68717d] text-[14px] w-[340px]">The AI chatbot helps structure your idea, but you review and approve the logic before monitoring begins.</p>
+        <p className="[word-break:break-word] font-['Onest:Regular',sans-serif] font-normal leading-[1.5] relative shrink-0 text-[#68717d] text-[14px] w-[340px]">The canvas and the assistant help shape your idea. You review and approve the logic before monitoring begins.</p>
         <Proof1 />
       </div>
       <div aria-hidden className="absolute border border-[#dce3ea] border-solid inset-0 pointer-events-none rounded-[22px]" />

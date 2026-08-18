@@ -1,0 +1,108 @@
+{#- The Passport quick view.
+    It answers three questions in order — what is the result, why, and what it does
+    not cover — and keeps every long explanation behind a disclosure so the popup is
+    never a wall of text. The create-a-watchlist action is deliberately absent. -#}
+<dialog class="t-dialog t-passport-dialog" data-passport-dialog aria-labelledby="t-pq-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div class="t-pq-hero">
+        <span class="t-logo" data-pq-logo>--</span>
+        <div>
+          <p class="t-eyebrow"><span data-icon="passport" data-icon-class="icon-sm"></span>Shariah Evidence Passport</p>
+          <h2 id="t-pq-title" data-pq-name>Loading</h2>
+          <p data-pq-identity></p>
+        </div>
+      </div>
+      <button class="t-close" type="button" data-passport-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+
+    <div class="t-dialog-body">
+      <div class="t-pq-skeleton" data-pq-loading aria-live="polite">
+        <span class="sr-only">Loading the evidence</span>
+        <i></i><i></i><i></i><i></i>
+      </div>
+
+      <div class="t-banner" data-tone="error" data-pq-error hidden role="alert">
+        <span data-icon="alert" data-icon-class="icon"></span>
+        <div class="t-banner-body">
+          <strong>The evidence could not be loaded</strong>
+          <p data-pq-error-message>No status or source was guessed.</p>
+          <button class="t-action" type="button" data-pq-retry><span data-icon="refresh" data-icon-class="icon-sm"></span>Try again</button>
+        </div>
+      </div>
+
+      <div data-pq-content hidden>
+        <div class="t-banner" data-tone="info" data-pq-history hidden role="status">
+          <span data-icon="history" data-icon-class="icon"></span>
+          <div class="t-banner-body"><strong>This is an older version</strong><p data-pq-history-copy></p></div>
+        </div>
+
+        {#- The answer first, in one sentence, with its own icon and colour. -#}
+        <div class="t-pq-answer" data-pq-answer data-tone="neutral">
+          <span class="t-pill" data-pq-status data-tone="neutral"><span data-pq-status-icon></span><span data-pq-status-text></span></span>
+          <p data-pq-meaning></p>
+        </div>
+
+        <div class="t-facts">
+          <div><small>Standard used</small><strong data-pq-methodology>--</strong></div>
+          <div><small>Decision made</small><strong data-pq-decision>--</strong></div>
+          <div><small>Published</small><strong data-pq-published>--</strong></div>
+          <div><small>Next source check</small><strong data-pq-next-scan>Not scheduled</strong></div>
+        </div>
+
+        <section>
+          <h3>Why</h3>
+          <ul class="t-reasons" data-pq-reasons></ul>
+        </section>
+
+        <div class="t-banner" data-pq-qualification hidden>
+          <span data-icon="alert" data-icon-class="icon"></span>
+          <div class="t-banner-body"><strong>One condition applies</strong><p data-pq-qualification-text></p></div>
+        </div>
+
+        <section>
+          <h3>What this does and does not cover</h3>
+          <div class="t-uses" data-pq-uses></div>
+        </section>
+
+        <details class="t-more" data-pq-more hidden>
+          <summary>
+            <span data-icon="book" data-icon-class="icon-sm"></span>
+            Other published standards
+            <span class="t-more-count" data-pq-more-count></span>
+            <span data-icon="chevron" data-icon-class="icon"></span>
+          </summary>
+          <div class="t-more-body" data-pq-methodologies></div>
+        </details>
+
+        <details class="t-more">
+          <summary>
+            <span data-icon="info" data-icon-class="icon-sm"></span>
+            What this result is not
+            <span data-icon="chevron" data-icon-class="icon"></span>
+          </summary>
+          <div class="t-more-body">
+            <p>This is a screening result for the coin itself, under one published standard, on one date. It is not a universal religious ruling, and it is not approval of every way the coin can be used.</p>
+            <p>Lending, leverage, derivatives, third-party yield and wrapped versions are each reviewed separately. The list above shows which of them this result covers.</p>
+            <p data-pq-restriction hidden></p>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <footer class="t-dialog-foot">
+      <span class="t-foot-note" data-pq-freshness></span>
+      <button class="t-action" type="button" data-pq-copy style="flex:0 0 auto;">
+        <span data-icon="copy" data-icon-class="icon-sm"></span>Copy reference
+      </button>
+      <a class="t-action" data-pq-source href="#" target="_blank" rel="noopener" hidden style="flex:0 0 auto;">
+        <span data-icon="external" data-icon-class="icon-sm"></span>Official source
+      </a>
+      <a class="t-action is-primary" data-pq-full href="#" style="flex:0 0 auto;">
+        <span data-icon="passport" data-icon-class="icon-sm"></span>Open the full Passport
+      </a>
+    </footer>
+  </div>
+</dialog>

@@ -4,8 +4,8 @@ from copy import deepcopy
 from typing import Any
 
 from ai_market_monitor.engine.capabilities import CapabilitySpec
+from ai_market_monitor.schemas.strategy import UNARY_COMPARATORS
 
-UNARY_COMPARATORS = {"is_true", "is_false"}
 MOVING_AVERAGE_KEYS = {
     "weighted_moving_average",
     "hull_moving_average",
@@ -71,6 +71,21 @@ def condition_template(
             **parameters,
         }
     comparator = capability.default_comparator
+    if comparator not in capability.supported_comparators:
+        # This used to pick a replacement comparison — "gte" if the capability allowed
+        # it. That silently turned every yes/no rule whose allowed list had drifted
+        # numeric into `>= 0`, which is true of every number, so 149 rules quietly
+        # matched everything instead of the event they named.
+        #
+        # `_resolve_comparison` in the registry now settles both facts together, so
+        # reaching here means a capability was built some other way and is broken.
+        # CLAUDE.md: never substitute a nearest comparator, never fall back to a
+        # default. A refused reading keeps the mistake visible.
+        raise ValueError(
+            f"capability {capability.key!r} says its comparison is "
+            f"{comparator!r} but does not allow it ({capability.supported_comparators!r}). "
+            "No comparison is chosen in its place."
+        )
     left_kind = capability.operand_kind or {
         "market_filter": "market_metric",
         "risk": "risk_metric",
@@ -126,12 +141,15 @@ def condition_template(
         )
         comparator = "crosses_above"
     elif comparator not in UNARY_COMPARATORS:
-        right = {
-            "kind": "constant",
-            "value": (
-                capability.default_threshold if capability.default_threshold is not None else 0
-            ),
-        }
+        # The registry now leaves a measured capability's level unset rather than
+        # carrying the bare `True` it used to inherit, so most of these arrive as None.
+        # A starting template still needs a number in the box; the zero is a visible
+        # placeholder for a person to replace, never a level the compiler accepts on
+        # its own — `missingOn` and the Builder's own validation both treat an
+        # unanswered level as unanswered.
+        declared = capability.default_threshold
+        is_real_number = isinstance(declared, int | float) and not isinstance(declared, bool)
+        right = {"kind": "constant", "value": declared if is_real_number else 0}
 
     condition_type = capability.condition_type
     if condition_type == "market_filter":

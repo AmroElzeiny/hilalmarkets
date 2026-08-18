@@ -17,6 +17,7 @@ from ai_market_monitor.core.security import (
     verify_password,
 )
 from ai_market_monitor.db.models import (
+    AccountEmailDelivery,
     DashboardPreference,
     EmailAuthChallenge,
     PendingEmailSignup,
@@ -298,6 +299,21 @@ class WebAuthService:
             )
         )
         pending.consumed_at = now
+        # The welcome. Queued rather than sent here, so a mail provider having a bad
+        # minute cannot fail the sign-up itself — the account is made either way and the
+        # email follows. `event_key` is the account, so it can only ever be sent once.
+        self.session.add(
+            AccountEmailDelivery(
+                user_id=user.id,
+                recipient=normalized,
+                template_kind="signup_welcome",
+                event_key=f"signup_welcome:{user.id}",
+                payload_redacted={"first_name": pending.first_name or ""},
+                status="pending",
+                # This table has no automatic timestamp, and the outbox orders by it.
+                created_at=now,
+            )
+        )
         await self.session.flush()
         if is_configured_admin:
             await grant_owner_governance_roles(

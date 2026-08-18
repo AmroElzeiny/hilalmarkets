@@ -1,412 +1,571 @@
-import type { ReactNode } from 'react'
+/**
+ * Privacy and Terms — one page that reads two documents.
+ *
+ * The page this replaces was nineteen white cards of unbroken legal prose with a list
+ * of links beside them. Everything that was wrong with it comes down to one thing: it
+ * was written to be complete and not to be read.
+ *
+ * What changed, and why each change is not decoration:
+ *
+ * - **Two reading modes.** *Plain summary* shows one or two sentences per section, and
+ *   is what opens first. *Full text* opens every clause. A beginner gets a page they can
+ *   finish; a lawyer gets every word; neither is asked to be the other.
+ * - **The list beside it now knows where you are.** It marks the section being read,
+ *   with a bar and a weight change as well as a colour, and a line shows how much of the
+ *   document is left. Before this, twenty links all looked identical however far you had
+ *   read.
+ * - **You can search it.** Nineteen sections is more than anybody scans.
+ * - **The date is on the page.** The old text said "the Last updated date changes when
+ *   this policy is revised" — and no date was shown anywhere. It pointed at something
+ *   that did not exist.
+ * - **It prints.** A legal document people cannot keep a copy of is a worse legal
+ *   document. Printing opens every clause, whatever was open on screen.
+ * - **The waitlist band is gone.** Asking somebody to sign up for something else, in the
+ *   middle of reading what they are agreeing to, is the wrong thing to do on this page.
+ *   Where it stood there are now links to the documents that go with this one.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Icon, IconBadge } from '../components/Icon'
+import {
+  jumpTo,
+  useReadingProgress,
+  useScrollSpy,
+  useTilt,
+} from '../components/interactions'
 import { Reveal } from '../components/Reveal'
-import { SiteFooter, SiteNav } from '../components/SiteChrome'
-import { WaitlistBand } from '../components/WaitlistBand'
-
-type LegalKind = 'privacy' | 'terms'
-
-type LegalSection = {
-  id: string
-  title: string
-  content: ReactNode
-}
+import { BackToTop, SiteFooter, SiteNav } from '../components/SiteChrome'
+import {
+  cookiesDocument,
+  privacyDocument,
+  termsDocument,
+  type LegalDocument,
+  type LegalKind,
+  type LegalSection,
+} from '../legal/documents'
+import { DURATION, move, moveEach, whenSeen } from '../motion'
 
 const FALLBACK_EMAIL = 'office@hilalmarkets.com'
 
-function BulletList({ children }: { children: ReactNode }) {
-  return <ul className="mt-4 grid gap-3 text-[15px] leading-[1.7] text-[#50555e]">{children}</ul>
+/**
+ * Marks the section a jump landed on.
+ *
+ * After the page moves, twenty identical white cards look the same and the eye has to
+ * find the right one. A brief ring says "this is the one you asked for" and then gets
+ * out of the way. It is the only movement on this page that is not an entrance, and it
+ * exists because losing your place is the actual problem with a long document.
+ */
+function markArrival(id: string): void {
+  const node = document.getElementById(id)
+  if (!node) return
+  void move(
+    node,
+    { boxShadow: ['0 0 0 0 rgba(85,113,42,0)', '0 0 0 4px rgba(85,113,42,0.32)', '0 0 0 0 rgba(85,113,42,0)'] },
+    { duration: DURATION.slow * 2 },
+  ).then(() => node.style.removeProperty('box-shadow'))
 }
 
-function Bullet({ children }: { children: ReactNode }) {
+/** Roughly how long the full text takes to read, from its own word count. */
+function readingMinutes(document_: LegalDocument): number {
+  const words = document_.sections.reduce(
+    (total, section) => total + section.short.split(/\s+/).length + 110,
+    0,
+  )
+  return Math.max(2, Math.round(words / 200))
+}
+
+/* -------------------------------------------------------------------------- */
+/*  One section                                                                */
+/* -------------------------------------------------------------------------- */
+function Section({
+  section,
+  index,
+  expanded,
+  onToggle,
+}: {
+  section: LegalSection
+  index: number
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const bodyId = `${section.id}-full`
   return (
-    <li className="flex gap-3">
-      <span className="mt-[9px] size-1.5 shrink-0 rounded-full bg-[#63716c]" aria-hidden="true" />
-      <span>{children}</span>
+    <article id={section.id} className="hm-legal-section hm-card p-5 sm:p-7">
+      <div className="flex items-start gap-3.5">
+        <IconBadge name={section.icon} />
+        <div className="min-w-0 flex-1">
+          <p className="text-[12px] font-semibold uppercase tracking-[0.09em] text-ink-soft tnum">
+            Section {index + 1}
+          </p>
+          <h2 className="mt-1 font-display text-[22px] font-medium leading-[1.2] tracking-[-0.02em] text-ink outline-none sm:text-[25px]">
+            {section.title}
+          </h2>
+        </div>
+      </div>
+
+      {/* The plain sentence comes first, always. Somebody can read only these and
+          still know what they agreed to. */}
+      <div className="hm-inshort mt-4">
+        <Icon name="spark" className="mt-0.5 size-4 shrink-0 text-[#55712a]" />
+        <span>
+          <strong className="font-semibold">In short: </strong>
+          {section.short}
+        </span>
+      </div>
+
+      <button
+        type="button"
+        className="hm-disclose mt-3"
+        aria-expanded={expanded}
+        aria-controls={bodyId}
+        onClick={onToggle}
+      >
+        {expanded ? 'Hide the full wording' : 'Read the full wording'}
+        <Icon name="chevron" className="size-4" />
+      </button>
+
+      <div id={bodyId} className="hm-collapse" data-open={expanded} role="region" aria-label={`${section.title}, full wording`}>
+        <div>
+          <div className="hm-legal-body pt-2">{section.body}</div>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/*  The page                                                                   */
+/* -------------------------------------------------------------------------- */
+export default function LegalPage({ kind }: { kind: LegalKind }) {
+  const config = window.HilalMarketsRuntimeConfig?.legal ?? {}
+  // Privacy and cookies are both about what is held about a person, so both go to the
+  // privacy address; the Terms are about the agreement, so they go to support.
+  const email =
+    (kind === 'terms' ? config.supportEmail : config.privacyEmail) || FALLBACK_EMAIL
+  const document_ = useMemo(() => {
+    if (kind === 'privacy') return privacyDocument(email)
+    if (kind === 'cookies') return cookiesDocument(email)
+    return termsDocument(email)
+  }, [email, kind])
+
+  const [mode, setMode] = useState<'summary' | 'full'>('summary')
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set())
+  const [query, setQuery] = useState('')
+  const [copied, setCopied] = useState(false)
+  const listRef = useRef<HTMLDivElement>(null)
+  const highlightsRef = useRef<HTMLUListElement>(null)
+
+  const ids = useMemo(() => document_.sections.map((section) => section.id), [document_])
+  const active = useScrollSpy(ids)
+  const progress = useReadingProgress()
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return document_.sections
+    return document_.sections.filter(
+      (section) =>
+        section.title.toLowerCase().includes(needle) ||
+        section.short.toLowerCase().includes(needle),
+    )
+  }, [document_, query])
+
+  // Switching to Full text opens every clause; switching back closes them. The two
+  // modes are one control, so they must not leave half the page in the other state.
+  const setReadingMode = useCallback(
+    (next: 'summary' | 'full') => {
+      setMode(next)
+      setOpenSections(next === 'full' ? new Set(ids) : new Set())
+    },
+    [ids],
+  )
+
+  // A deep link must land on an open clause. Somebody sent /terms#billing is being
+  // sent to the wording, not to the summary of it.
+  useEffect(() => {
+    const target = window.location.hash.slice(1)
+    if (!target || !ids.includes(target)) return
+    setOpenSections((current) => new Set(current).add(target))
+    window.setTimeout(() => {
+      jumpTo(target)
+      markArrival(target)
+    }, 60)
+  }, [ids])
+
+  // The four summary cards arrive one after another, which is the brand's own reading
+  // of motion: a calm sequence that says "these belong together" rather than four
+  // things appearing at once. `stagger` comes from the animation library.
+  useEffect(
+    () =>
+      whenSeen(highlightsRef.current, () => {
+        const cards = Array.from(
+          highlightsRef.current?.querySelectorAll<HTMLElement>('li') ?? [],
+        )
+        void moveEach(
+          cards,
+          { opacity: [0, 1], transform: ['translateY(12px)', 'translateY(0)'] },
+          { duration: DURATION.base, stagger: 0.07 },
+        )
+      }),
+    [],
+  )
+
+  // The rail scrolls itself, so the section being read stays in view rather than
+  // sliding off the top of a list twenty items long.
+  useEffect(() => {
+    const link = listRef.current?.querySelector<HTMLElement>(`[data-rail="${active}"]`)
+    link?.scrollIntoView({ block: 'nearest' })
+  }, [active])
+
+  function toggle(id: string) {
+    setOpenSections((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function copyLink() {
+    const address = `${window.location.origin}${window.location.pathname}${active ? `#${active}` : ''}`
+    try {
+      await navigator.clipboard.writeText(address)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2200)
+    } catch {
+      // Copying can be refused by the browser. Saying nothing would look like it
+      // worked, so the address goes in the bar instead and the person can copy it.
+      window.location.hash = active
+    }
+  }
+
+  const minutes = readingMinutes(document_)
+
+  return (
+    <div className="hm-page min-h-screen bg-canvas text-ink">
+      <SiteNav />
+      <main id="top" tabIndex={-1} className="outline-none">
+        {/* ---- Opening ---------------------------------------------------- */}
+        <section className="relative overflow-hidden pt-32 pb-8 sm:pt-36">
+          <div className="hm-aura hm-aura--cool left-1/2 top-0 h-[420px] w-[860px] -translate-x-1/2" aria-hidden="true" />
+          <div className="hm-shell">
+            <Reveal>
+              <p className="hm-eyebrow">
+                <Icon name={kind === 'cookies' ? 'cookie' : 'scale'} className="size-4" />
+                {kind === 'privacy' ? 'Your data' : kind === 'cookies' ? 'Your browser' : 'The rules'}
+              </p>
+              <h1 className="mt-5 font-display text-[38px] leading-[1.04] tracking-[-0.035em] text-ink sm:text-[52px]">
+                {document_.title}
+              </h1>
+              <p className="mt-4 max-w-[62ch] text-[17px] leading-[1.65] text-[#4a505a]">
+                {document_.lede}
+              </p>
+
+              {/* Facts about the document itself, which the old page did not show at
+                  all — including the date its own text refers to. */}
+              <dl className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2 text-[13.5px] text-ink-soft">
+                {[
+                  { icon: 'calendar' as const, label: 'Last updated', value: document_.updated },
+                  { icon: 'version' as const, label: 'Version', value: document_.version },
+                  { icon: 'clock' as const, label: 'Reading time', value: `about ${minutes} minutes` },
+                  {
+                    icon: 'list' as const,
+                    label: 'Sections',
+                    value: String(document_.sections.length),
+                  },
+                ].map((fact) => (
+                  <div key={fact.label} className="flex items-center gap-1.5">
+                    <Icon name={fact.icon} className="size-4 text-[#5c646e]" />
+                    <dt className="sr-only">{fact.label}</dt>
+                    <dd>
+                      <span className="text-ink-soft">{fact.label}: </span>
+                      <span className="font-semibold text-ink tnum">{fact.value}</span>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </Reveal>
+
+            {/* ---- The whole document in four lines ------------------------ */}
+            <ul ref={highlightsRef} className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {document_.highlights.map((item) => (
+                <HighlightCard key={item.label} {...item} />
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        {/* ---- Reading controls -------------------------------------------- */}
+        <section className="hm-no-print pb-6">
+          <div className="hm-shell">
+            <Reveal delay={40}>
+              <div className="hm-card flex flex-wrap items-center gap-3 p-3 sm:p-4">
+                <div className="hm-segment" role="group" aria-label="How much to show">
+                  <button
+                    type="button"
+                    aria-pressed={mode === 'summary'}
+                    onClick={() => setReadingMode('summary')}
+                  >
+                    <Icon name="list" className="size-4" />
+                    Plain summary
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={mode === 'full'}
+                    onClick={() => setReadingMode('full')}
+                  >
+                    <Icon name="file_text" className="size-4" />
+                    Full text
+                  </button>
+                </div>
+
+                <div className="relative min-w-[200px] flex-1">
+                  <label className="sr-only" htmlFor="legal-search">
+                    Search this document
+                  </label>
+                  <Icon
+                    name="search"
+                    className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-[#5c646e]"
+                  />
+                  <input
+                    id="legal-search"
+                    type="search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search, e.g. delete my data"
+                    className="hm-input !py-2.5 !pl-11 !text-[14.5px]"
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <button type="button" className="hm-btn hm-btn--quiet hm-btn--sm" onClick={copyLink}>
+                    <Icon name={copied ? 'check' : 'link'} className="size-4" />
+                    {copied ? 'Link copied' : 'Copy link'}
+                  </button>
+                  <button
+                    type="button"
+                    className="hm-btn hm-btn--quiet hm-btn--sm"
+                    onClick={() => window.print()}
+                  >
+                    <Icon name="printer" className="size-4" />
+                    Print
+                  </button>
+                </div>
+              </div>
+            </Reveal>
+
+            <p className="mt-3 flex items-start gap-2 text-[13px] leading-[1.55] text-ink-soft">
+              <Icon name="info" className="mt-0.5 size-4 shrink-0 text-[#55712a]" />
+              <span>
+                The <strong className="font-semibold text-ink">In short</strong> line is a
+                plain summary to help you read. The full wording under it is the part that
+                applies.
+              </span>
+            </p>
+          </div>
+        </section>
+
+        {/* ---- Rail and sections ------------------------------------------- */}
+        <section className="pb-16">
+          <div className="hm-shell">
+            <div className="grid gap-7 lg:grid-cols-[264px_minmax(0,1fr)] lg:items-start">
+              {/* -- The rail -- */}
+              <nav className="hm-rail hm-no-print hidden lg:flex" aria-label={`${document_.title} sections`}>
+                <div className="hm-card flex min-h-0 flex-col p-3">
+                  <div className="px-2 pb-3">
+                    <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
+                      On this page
+                    </p>
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <div className="hm-rail-progress flex-1">
+                        <span style={{ width: `${Math.round(progress * 100)}%` }} />
+                      </div>
+                      <span className="text-[12px] font-semibold text-ink-soft tnum">
+                        {Math.round(progress * 100)}%
+                      </span>
+                    </div>
+                  </div>
+                  <div ref={listRef} className="hm-rail-list">
+                    {document_.sections.map((section, index) => (
+                      <a
+                        key={section.id}
+                        href={`#${section.id}`}
+                        data-rail={section.id}
+                        aria-current={active === section.id ? 'true' : undefined}
+                        className="hm-rail-link"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          setOpenSections((current) => new Set(current).add(section.id))
+                          window.history.replaceState(null, '', `#${section.id}`)
+                          jumpTo(section.id)
+                          markArrival(section.id)
+                        }}
+                      >
+                        <span className="w-4 shrink-0 text-[12px] font-semibold text-ink-soft tnum">
+                          {index + 1}
+                        </span>
+                        <span className="min-w-0">{section.title}</span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              </nav>
+
+              {/* -- The sections -- */}
+              <div>
+                <div aria-live="polite" className="sr-only">
+                  {query.trim()
+                    ? `${visible.length} section${visible.length === 1 ? '' : 's'} match your search.`
+                    : ''}
+                </div>
+
+                {visible.length === 0 ? (
+                  <div className="hm-card flex items-center gap-3 p-6">
+                    <IconBadge name="search" size="sm" />
+                    <p className="text-[15px] text-[#4a505a]">
+                      No section mentions &ldquo;{query.trim()}&rdquo;. Try a simpler word, or{' '}
+                      <a href="/contact" className="font-semibold text-ink underline underline-offset-4">
+                        ask us directly
+                      </a>
+                      .
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4">
+                    {visible.map((section) => (
+                      <Reveal key={section.id}>
+                        <Section
+                          section={section}
+                          index={document_.sections.indexOf(section)}
+                          expanded={openSections.has(section.id)}
+                          onToggle={() => toggle(section.id)}
+                        />
+                      </Reveal>
+                    ))}
+                  </div>
+                )}
+
+                {/* -- Where the waitlist band used to be -- */}
+                <Reveal>
+                  <div className="hm-card mt-6 p-5 sm:p-7">
+                    <div className="flex items-center gap-3">
+                      <IconBadge name="layers" tone="apple" />
+                      <h2 className="font-display text-[21px] font-medium tracking-[-0.02em] text-ink">
+                        The rest of the paperwork
+                      </h2>
+                    </div>
+                    <p className="mt-2 text-[14.5px] leading-[1.6] text-[#4a505a]">
+                      These four documents go together. Each one is short and says one thing.
+                    </p>
+                    <ul className="mt-4 grid gap-2.5 sm:grid-cols-2">
+                      {[
+                        {
+                          href: '/privacy',
+                          icon: 'shield' as const,
+                          label: 'Privacy Policy',
+                          note: 'What we hold, and what you can ask for.',
+                        },
+                        {
+                          href: '/terms',
+                          icon: 'scale' as const,
+                          label: 'Terms of Use',
+                          note: 'The rules for using the service.',
+                        },
+                        {
+                          href: '/cookies',
+                          icon: 'cookie' as const,
+                          label: 'Cookie Policy',
+                          note: 'What is stored in your browser, and why.',
+                        },
+                        {
+                          href: '/risk-disclosure',
+                          icon: 'alert' as const,
+                          label: 'Risk Disclosure',
+                          note: 'What can go wrong in crypto markets.',
+                        },
+                      ]
+                        .filter((item) => item.href !== window.location.pathname)
+                        .map((item) => (
+                          <RelatedCard key={item.href} {...item} />
+                        ))}
+                    </ul>
+                    <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-[#e4e9ee] pt-5">
+                      <a href="/contact" className="hm-btn hm-btn--primary hm-btn--sm">
+                        <Icon name="chat" className="size-4" />
+                        Ask us about this
+                      </a>
+                      <p className="text-[13.5px] text-ink-soft">
+                        If any part of this page is unclear, that is our problem to fix.
+                      </p>
+                    </div>
+                  </div>
+                </Reveal>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <BackToTop />
+
+      <SiteFooter />
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+function HighlightCard({
+  icon,
+  label,
+  note,
+}: {
+  icon: LegalDocument['highlights'][number]['icon']
+  label: string
+  note: string
+}) {
+  const tilt = useTilt<HTMLLIElement>()
+  return (
+    <li
+      ref={tilt.ref}
+      onPointerMove={tilt.onPointerMove}
+      onPointerLeave={tilt.onPointerLeave}
+      className="hm-tilt hm-card flex gap-3 p-4"
+    >
+      <IconBadge name={icon} tone="apple" size="sm" />
+      <div className="min-w-0">
+        <p className="text-[14.5px] font-semibold leading-[1.35] text-ink">{label}</p>
+        <p className="mt-1 text-[13px] leading-[1.5] text-ink-soft">{note}</p>
+      </div>
     </li>
   )
 }
 
-function Paragraph({ children }: { children: ReactNode }) {
-  return <p className="mt-4 text-[15px] leading-[1.75] text-[#50555e]">{children}</p>
-}
-
-function PrivacyContact({ email }: { email: string }) {
+function RelatedCard({
+  href,
+  icon,
+  label,
+  note,
+}: {
+  href: string
+  icon: LegalDocument['highlights'][number]['icon']
+  label: string
+  note: string
+}) {
+  const tilt = useTilt<HTMLAnchorElement>()
   return (
-    <a
-      className="font-medium text-[#2b2e35] underline decoration-[#63716c]/40 underline-offset-4"
-      href={`mailto:${email}`}
-    >
-      {email}
-    </a>
-  )
-}
-
-function privacySections(privacyEmail: string): LegalSection[] {
-  return [
-    {
-      id: 'scope',
-      title: '1. Scope and status',
-      content: (
-        <>
-          <Paragraph>
-            This Privacy Policy explains how Hilal Markets handles personal information when you visit our public pages, join the waitlist, contact us, or ask for support. It also covers the use of an invited private-beta account: building Watchlists, reviewing Shariah-screening evidence, and receiving alerts.
-          </Paragraph>
-          <Paragraph>
-            The service is currently in private beta. Accounts are not open to the public: they are issued only to people Hilal Markets has invited from the waitlist, so the account sections below apply to invited users. Features and data practices may develop as the beta progresses. Material changes will be reflected in an updated policy and, where required, brought to your attention before they take effect.
-          </Paragraph>
-        </>
-      ),
-    },
-    {
-      id: 'controller',
-      title: '2. Who is responsible',
-      content: (
-        <Paragraph>
-          Hilal Markets is responsible for the personal information handled through this service.
-          Privacy questions and rights requests may be sent to <PrivacyContact email={privacyEmail} />.
-        </Paragraph>
-      ),
-    },
-    {
-      id: 'information',
-      title: '3. Information we collect',
-      content: (
-        <BulletList>
-          <Bullet><strong>Waitlist and contact details:</strong> email address, message title, message content, submission time, source page, and optional first-touch campaign details. Country may be recorded from a trusted edge-provider country header; we do not ask your browser to disclose precise location.</Bullet>
-          <Bullet><strong>Account and security information (invited private-beta users only):</strong> name, email, password hash, verification and recovery records, session data, consent choices, security events, and audit records.</Bullet>
-          <Bullet><strong>Product information:</strong> Screened Watchlist selections, Watchlist descriptions and approved rules, strategy versions, scans, setup lifecycles, alert evidence, settings, and notification preferences.</Bullet>
-          <Bullet><strong>Shariah-evidence interactions:</strong> methodologies and Passport versions viewed or attached to evaluations. AI may support factual research, but it does not issue Shariah decisions.</Bullet>
-          <Bullet><strong>Communications:</strong> support requests, public-assistant feedback, delivery status, and connected-channel identifiers needed to send requested notifications.</Bullet>
-          <Bullet><strong>Technical information:</strong> timestamps, page paths, browser or device category, security logs, provider errors, and limited diagnostics needed to operate and protect the service.</Bullet>
-          <Bullet><strong>Optional analytics and advertising measurement:</strong> consented page views, section views, CTA interactions, normalized form outcomes, referrer, and campaign parameters. We do not send your email, password, message text, strategy text, or other form values to Google Analytics, Meta Pixel, or X Pixel.</Bullet>
-        </BulletList>
-      ),
-    },
-    {
-      id: 'sources',
-      title: '4. Where information comes from',
-      content: (
-        <Paragraph>
-          Most information comes directly from you. We may also receive limited records from authentication, email, analytics, messaging, market-data, infrastructure, and security providers when they perform services on our behalf. Market and Shariah evidence can come from published third-party sources, but these records are not treated as your personal financial holdings.
-        </Paragraph>
-      ),
-    },
-    {
-      id: 'purposes',
-      title: '5. Why we use information',
-      content: (
-        <BulletList>
-          <Bullet>Provide accounts, approved Watchlists, market monitoring, evidence Passports, lifecycle records, alerts, and support.</Bullet>
-          <Bullet>Verify identity, preserve immutable approvals and evidence, prevent abuse, investigate incidents, and maintain service integrity.</Bullet>
-          <Bullet>Respond to waitlist and contact requests and deliver communications you asked to receive.</Bullet>
-          <Bullet>Understand consented public-site usage and improve product reliability and usability.</Bullet>
-          <Bullet>Meet legal, regulatory, accounting, dispute, and security obligations that apply to us.</Bullet>
-        </BulletList>
-      ),
-    },
-    {
-      id: 'legal-bases',
-      title: '6. Legal bases',
-      content: (
-        <Paragraph>
-          Depending on your location and the activity, processing may rely on your consent, steps taken at your request, performance of our agreement, legitimate interests in operating and securing the service, or compliance with law. Optional analytics and marketing technologies remain off until the relevant consent is granted, and consent can be changed later.
-        </Paragraph>
-      ),
-    },
-    {
-      id: 'ai',
-      title: '7. AI-assisted features',
-      content: (
-        <>
-          <Paragraph>
-            AI helps interpret user-authored monitoring ideas, explain product information, and support bounded factual research. Executable strategy logic is validated by deterministic services, and you must review and approve material strategy changes. AI cannot activate a Watchlist, execute a trade, or issue a Shariah ruling on its own.
-          </Paragraph>
-          <Paragraph>
-            Relevant conversation context and structured product state may be sent to configured AI providers when an AI feature is used. We limit tools and data to the current task, apply ownership checks, and do not intentionally send passwords, authentication codes, exchange credentials, or unrelated account data.
-          </Paragraph>
-        </>
-      ),
-    },
-    {
-      id: 'cookies',
-      title: '8. Cookies, analytics, and marketing',
-      content: (
-        <>
-          <Paragraph>
-            Essential storage supports security and core page behavior. Functional storage may remember preferences you choose. Google Analytics can load only after Analytics consent. Meta Pixel and X Pixel can load only after Marketing consent. Denied consent is the default where supported.
-          </Paragraph>
-          <Paragraph>
-            Waitlist submission works independently of optional analytics. A successful server-confirmed signup may produce a consented lead event without the submitted email or other personal form content. Failed or duplicate submissions do not create a new conversion event.
-          </Paragraph>
-        </>
-      ),
-    },
-    {
-      id: 'sharing',
-      title: '9. Sharing and service providers',
-      content: (
-        <Paragraph>
-          We may share only the information needed with providers that support hosting, databases, email, authentication, AI, market data, analytics, security, and connected notification channels. We may also disclose information when required by law, to protect users or the service, or as part of a properly governed business reorganization. We do not sell personal information. Provider access does not authorize them to use private product data for unrelated purposes.
-        </Paragraph>
-      ),
-    },
-    {
-      id: 'transfers',
-      title: '10. International transfers',
-      content: (
-        <Paragraph>
-          Service providers may process information in countries different from your own. Where transfer safeguards are legally required, we use an appropriate mechanism and assess relevant provider protections. You may contact us for more information about safeguards relevant to your personal information.
-        </Paragraph>
-      ),
-    },
-    {
-      id: 'retention',
-      title: '11. Retention',
-      content: (
-        <Paragraph>
-          We keep information only as long as needed for the purpose collected, account operation, immutable strategy and alert evidence, security, support, legal obligations, and dispute handling. Retention periods differ by record. Bounded technical logs and detailed evaluation data may expire sooner, while approved strategy versions, Passport history, alert proof, and related audit records may be retained longer to preserve an accurate historical record. Data may be de-identified or deleted when no longer needed.
-        </Paragraph>
-      ),
-    },
-    {
-      id: 'security',
-      title: '12. Security',
-      content: (
-        <Paragraph>
-          We use access controls, authentication, server-side authorization, encryption in transit, audit logging, redaction, rate limiting, idempotency, and fail-closed product boundaries appropriate to the service. No method is completely secure. Please use a unique password and never submit passwords, wallet secrets, access codes, or exchange API keys through public forms or chat.
-        </Paragraph>
-      ),
-    },
-    {
-      id: 'choices',
-      title: '13. Your choices and rights',
-      content: (
-        <BulletList>
-          <Bullet>Change optional cookie and analytics choices through the preference controls.</Bullet>
-          <Bullet>Update available account and notification settings or disconnect supported channels.</Bullet>
-          <Bullet>Ask to access, correct, delete, restrict, or export personal information where applicable.</Bullet>
-          <Bullet>Object to certain processing or withdraw consent without affecting processing already completed lawfully.</Bullet>
-          <Bullet>Complain to a competent data-protection authority where that right applies.</Bullet>
-        </BulletList>
-      ),
-    },
-    {
-      id: 'children',
-      title: '14. Children',
-      content: <Paragraph>Hilal Markets is not intended for children. Do not use the service if you are under 18 or below the minimum age required to enter a binding agreement where you live.</Paragraph>,
-    },
-    {
-      id: 'contact',
-      title: '15. Contact and updates',
-      content: (
-        <Paragraph>
-          For privacy questions or rights requests, email <PrivacyContact email={privacyEmail} />. We may ask for information needed to verify a request and protect the account. The Last updated date changes when this policy is revised.
-        </Paragraph>
-      ),
-    },
-  ]
-}
-
-function termsSections(supportEmail: string): LegalSection[] {
-  return [
-    {
-      id: 'agreement',
-      title: '1. Agreement and provider',
-      content: (
-        <>
-          <Paragraph>These Terms govern access to Hilal Markets and its public pages, private-beta product, research tools, Watchlists, evidence Passports, monitoring, alerts, and related services. Accounts are not open to the public during the private beta: they are created only for people Hilal Markets has invited from the waitlist. By using the public pages, or by using an account issued to you, you agree to these Terms and the related Privacy Policy, Cookie Policy, and Risk Disclosure.</Paragraph>
-          <Paragraph>Hilal Markets provides the service described in these Terms. Questions about the service or these Terms may be sent to <PrivacyContact email={supportEmail} />.</Paragraph>
-        </>
-      ),
-    },
-    {
-      id: 'eligibility',
-      title: '2. Eligibility and accounts',
-      content: (
-        <BulletList>
-          <Bullet>You must be at least 18 and legally able to enter this agreement.</Bullet>
-          <Bullet>Accounts are issued by invitation during the private beta. The rules below apply to invited users from the moment an account is issued to them.</Bullet>
-          <Bullet>Account information must be accurate and kept current.</Bullet>
-          <Bullet>You are responsible for protecting credentials and promptly reporting suspected unauthorized access.</Bullet>
-          <Bullet>You may not share an account to avoid security, access, or entitlement limits.</Bullet>
-        </BulletList>
-      ),
-    },
-    {
-      id: 'service',
-      title: '3. What Hilal Markets provides',
-      content: <Paragraph>Hilal Markets is an explainable crypto spot research and monitoring platform. It can help you review Shariah-screening evidence, translate your own setup into measurable rules, run a one-time market check, continuously monitor an approved Watchlist, follow setup lifecycles, and receive evidence-backed notifications. Private-beta scope, supported assets, providers, and channels may be limited.</Paragraph>,
-    },
-    {
-      id: 'boundaries',
-      title: '4. Important product boundaries',
-      content: (
-        <BulletList>
-          <Bullet>Hilal Markets is not an exchange, broker, custodian, investment adviser, portfolio manager, or trade-execution service.</Bullet>
-          <Bullet>It does not hold funds, connect exchange trading credentials, or place trades.</Bullet>
-          <Bullet>Monitoring results and alerts are not personalized buy or sell recommendations and do not promise profit or prevent loss.</Bullet>
-          <Bullet>AI can assist with explanation and structure, but cannot silently approve rules, activate Watchlists, or make authoritative market or Shariah decisions.</Bullet>
-          <Bullet>You remain responsible for reviewing every strategy, decision, transaction, and legal or religious obligation relevant to you.</Bullet>
-        </BulletList>
-      ),
-    },
-    {
-      id: 'shariah',
-      title: '5. Shariah screening and evidence',
-      content: <Paragraph>Shariah statuses are based on the identified methodology, reviewed evidence, asset identity, scope, qualifications, and published Passport version. Status can change as evidence or methodology changes. A status is not a personal fatwa, does not guarantee agreement among scholars, and does not automatically cover every possible use of an asset. Qualifications, disputed matters, stale evidence, market availability, and methodology limits should be reviewed before relying on a status.</Paragraph>,
-    },
-    {
-      id: 'plans',
-      title: '6. Watchlists, Scanner, and AI',
-      content: (
-        <>
-          <Paragraph>You provide the monitoring idea. Hilal Markets may ask clarifying questions, match approved capabilities, and compile a deterministic rule set for your review. You must resolve critical ambiguity and explicitly approve executable mechanics before activation. An approved live version is not silently changed; revisions create traceable versions and require renewed approval.</Paragraph>
-          <Paragraph>Check the Market Now is a one-time scan and does not create persistent alerts unless you convert and approve the tested configuration as a Watchlist. Custom capabilities remain bounded by provider, validation, certification, quarantine, and approval controls.</Paragraph>
-        </>
-      ),
-    },
-    {
-      id: 'data',
-      title: '7. Market data and evidence limitations',
-      content: <Paragraph>Prices, candles, indicators, asset mappings, source documents, and provider status may be delayed, corrected, incomplete, stale, unavailable, or inconsistent. Hilal Markets uses provider attribution and fail-closed controls where required, but cannot guarantee uninterrupted or error-free third-party data. Historical previews and examples do not predict future behavior or performance.</Paragraph>,
-    },
-    {
-      id: 'alerts',
-      title: '8. Alerts and availability',
-      content: <Paragraph>Alerts depend on approved rules, market data, worker availability, provider limits, cooldowns, exclusions, account settings, and connected notification channels. Alerts can be delayed, suppressed, duplicated by external providers, or fail to arrive. The dashboard and immutable proof records are the authoritative record where available. You should not rely on Hilal Markets for urgent, safety-critical, or time-guaranteed communications.</Paragraph>,
-    },
-    {
-      id: 'acceptable-use',
-      title: '9. Acceptable use',
-      content: (
-        <BulletList>
-          <Bullet>Do not probe other accounts, evade access controls or limits, scrape protected data, or interfere with service operation.</Bullet>
-          <Bullet>Do not submit malware, prompt injection intended to escape product boundaries, unlawful content, or credentials and secrets the service does not request.</Bullet>
-          <Bullet>Do not misrepresent alerts, Passports, evidence, or Hilal Markets branding as guaranteed advice, a personal ruling, or an endorsement.</Bullet>
-          <Bullet>Do not use the service to violate law, third-party rights, exchange terms, sanctions, or market-integrity rules.</Bullet>
-        </BulletList>
-      ),
-    },
-    {
-      id: 'content',
-      title: '10. Your content and privacy',
-      content: <Paragraph>You retain responsibility for setup descriptions, Watchlist names, rules, support messages, and other content you submit. You grant us the limited permission needed to host, process, validate, display, and transmit that content to provide and secure the service. We do not acquire ownership of your private strategies. Personal information is handled under the Privacy Policy.</Paragraph>,
-    },
-    {
-      id: 'ownership',
-      title: '11. Hilal Markets materials',
-      content: <Paragraph>The product, software, branding, design, documentation, curated methodology presentation, and non-user content are owned by Hilal Markets or its licensors and protected by applicable law. These Terms provide a limited, revocable, non-transferable right to use the service; they do not transfer intellectual-property ownership.</Paragraph>,
-    },
-    {
-      id: 'third-parties',
-      title: '12. Third-party services',
-      content: <Paragraph>The service may depend on exchanges, market-data providers, official source sites, AI providers, messaging channels, analytics providers, cloud infrastructure, and email services. Their own terms and privacy practices may apply. A link, integration, or cited source does not imply control or endorsement by Hilal Markets.</Paragraph>,
-    },
-    {
-      id: 'beta',
-      title: '13. Private-beta changes',
-      content: <Paragraph>During private beta, functionality may be introduced, restricted, repaired, or withdrawn as reliability and safety are evaluated. We may set participation limits, suspend unstable capabilities, reset non-essential test data, or end beta access. We will not use a product change to silently alter an approved strategy version or historical evidence record.</Paragraph>,
-    },
-    {
-      id: 'billing',
-      title: '14. Plans and billing',
-      content: <Paragraph>Paid access is not offered to the public during the private beta. No plan or price is published, no checkout is available, and nothing is charged for use of the service in this period. If paid access is introduced later, the checkout must disclose the price, currency, access period, renewal behavior, plan limits, cancellation behavior, and applicable refund terms before payment, and no charge may be made without that disclosure and your payment. Provider capability and verified payment state control entitlement; these Terms do not invent automatic renewal.</Paragraph>,
-    },
-    {
-      id: 'suspension',
-      title: '15. Suspension and termination',
-      content: <Paragraph>You may stop using the service at any time. We may restrict or suspend access to protect users, evidence integrity, providers, security, or legal compliance, or when these Terms are materially breached. Where practical, we will explain the reason and available next step. Records that must remain immutable for security, evidence, legal, or dispute purposes may be retained as described in the Privacy Policy.</Paragraph>,
-    },
-    {
-      id: 'risk',
-      title: '16. Risk and disclaimers',
-      content: <Paragraph>Crypto assets are volatile and can lose substantial value. Screening eligibility, historical behavior, lifecycle readiness, condition matches, alerts, AI explanations, and provider data do not establish suitability or future results. To the extent permitted by law, the service is provided on an as-available basis without guarantees of uninterrupted availability, market accuracy, alert timing, profitability, or agreement among Shariah authorities.</Paragraph>,
-    },
-    {
-      id: 'liability',
-      title: '17. Responsibility and liability',
-      content: <Paragraph>You are responsible for decisions made using the service and for verifying information appropriate to your circumstances. To the extent permitted by applicable law, Hilal Markets is not responsible for indirect, incidental, special, or consequential loss arising from use of, or inability to use, the service or third-party data and delivery providers. Nothing in these Terms excludes rights or liability that cannot lawfully be excluded.</Paragraph>,
-    },
-    {
-      id: 'law',
-      title: '18. Disputes and mandatory rights',
-      content: <Paragraph>If a concern arises, please contact us first at <PrivacyContact email={supportEmail} /> so we can try to resolve it directly. Any mandatory consumer protections, statutory rights, and jurisdictional rules that apply to you remain unaffected by these Terms.</Paragraph>,
-    },
-    {
-      id: 'changes',
-      title: '19. Changes and contact',
-      content: <Paragraph>We may update these Terms as the private beta and legal framework develop. Material changes will be communicated where required. Questions can be sent to <PrivacyContact email={supportEmail} />.</Paragraph>,
-    },
-  ]
-}
-
-export default function LegalPage({ kind }: { kind: LegalKind }) {
-  const config = window.HilalMarketsRuntimeConfig?.legal ?? {}
-  const email = (kind === 'privacy' ? config.privacyEmail : config.supportEmail) || FALLBACK_EMAIL
-  const isPrivacy = kind === 'privacy'
-  const sections = isPrivacy
-    ? privacySections(email)
-    : termsSections(email)
-  const highlights = isPrivacy
-    ? ['Consent before optional analytics', 'No form content in ad analytics', 'Clear choices and requests']
-    : ['Research and monitoring only', 'No trade execution', 'You approve executable changes']
-
-  return (
-    <div className="min-h-screen bg-canvas text-ink">
-      <SiteNav />
-      <main className="overflow-hidden pt-32 sm:pt-36">
-        <section className="relative mx-auto max-w-[1200px] px-5 pb-14 pt-6 sm:pb-20">
-          <div className="pointer-events-none absolute left-1/2 top-[-100px] -z-10 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-white/80 blur-3xl" aria-hidden="true" />
-          <Reveal>
-            <div className="max-w-[840px]">
-              <p className="text-[13px] font-medium text-[#55712a]">Legal and product transparency</p>
-              <h1 className="mt-4 font-display text-[38px] font-medium leading-[1.04] tracking-[-0.035em] text-[#2b2e35] sm:text-[54px]">
-                {isPrivacy ? 'Privacy Policy' : 'Terms of Use'}
-              </h1>
-              <p className="max-w-[720px] pt-4 text-[17px] leading-[1.7] text-[#50555e]">
-                {isPrivacy
-                  ? 'A plain-language record of what Hilal Markets collects, why it is needed, and the choices that remain with you.'
-                  : 'The practical rules and boundaries for using Hilal Markets during private beta.'}
-              </p>
-              <div className="mt-7 flex flex-wrap gap-2">
-                {highlights.map((item) => (
-                  <span key={item} className="rounded-full border border-[#d9dfe4] bg-white px-4 py-2 text-[13px] text-[#2b2e35] shadow-[0_12px_28px_-24px_rgba(43,46,53,0.55)]">
-                    {item}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </Reveal>
-        </section>
-
-        <section className="mx-auto grid max-w-[1200px] gap-8 px-5 py-14 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start lg:py-20">
-          <Reveal className="lg:sticky lg:top-28">
-            <nav aria-label={`${isPrivacy ? 'Privacy Policy' : 'Terms of Use'} sections`} className="rounded-[24px] border border-[#e1e5ea] bg-white p-4 shadow-[0_26px_60px_-50px_rgba(43,46,53,0.6)]">
-              <p className="px-3 pb-3 text-[12px] font-medium text-[#63716c]">On this page</p>
-              <div className="max-h-[52vh] space-y-1 overflow-y-auto pr-1 lg:max-h-[62vh]">
-                {sections.map((section) => (
-                  <a key={section.id} href={`#${section.id}`} className="block rounded-[12px] px-3 py-2.5 text-[13px] leading-snug text-[#50555e] transition-colors hover:bg-[#f5f8fb] hover:text-[#2b2e35] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#63716c]">
-                    {section.title}
-                  </a>
-                ))}
-              </div>
-            </nav>
-          </Reveal>
-
-          <div className="space-y-5">
-            {sections.map((section, index) => (
-              <Reveal key={section.id} delay={Math.min(index * 25, 175)}>
-                <article id={section.id} className="scroll-mt-28 rounded-[24px] border border-[#e1e5ea] bg-white p-6 shadow-[0_24px_60px_-50px_rgba(43,46,53,0.55)] sm:p-8">
-                  <h2 className="font-display text-[23px] font-medium tracking-[-0.02em] text-[#2b2e35] sm:text-[27px]">{section.title}</h2>
-                  {section.content}
-                </article>
-              </Reveal>
-            ))}
-          </div>
-        </section>
-        <WaitlistBand location={isPrivacy ? 'privacy_footer' : 'terms_footer'} />
-      </main>
-      <SiteFooter />
-    </div>
+    <li>
+      <a
+        ref={tilt.ref}
+        href={href}
+        onPointerMove={tilt.onPointerMove}
+        onPointerLeave={tilt.onPointerLeave}
+        className="hm-tilt flex items-center gap-3 rounded-[16px] border border-[#dbe1e7] bg-white p-3.5 hover:bg-[#fbfcfd]"
+      >
+        <Icon name={icon} className="size-5 shrink-0 text-[#55712a]" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[14.5px] font-semibold text-ink">{label}</span>
+          <span className="block text-[12.5px] leading-[1.45] text-ink-soft">{note}</span>
+        </span>
+        <Icon name="chevron_right" className="size-4 shrink-0 text-[#5c646e]" />
+      </a>
+    </li>
   )
 }

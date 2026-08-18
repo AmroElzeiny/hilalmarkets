@@ -1,0 +1,966 @@
+/* Design layer for `/main`.
+ *
+ * Built on top of `hm-dashboard-test.css`, which this page loads first. Every colour,
+ * radius, shadow, spacing step and typeface below comes from a token already declared
+ * in `hilalmarkets-brand.css` and `hilalmarkets-fonts.css`. Nothing new is invented:
+ * no new brand colour, no second type family, no second spacing scale.
+ *
+ * ── Contrast ──────────────────────────────────────────────────────────────────
+ *
+ * The brief asks for contrast well above the standard, so the floor on this page is
+ * WCAG **AAA**: 7:1 for normal text, 4.5:1 for large text. Every value below was
+ * measured, and `tests/browser/test_main_dashboard_e2e.py` measures them again against
+ * what the browser really paints.
+ *
+ *   #202329 on #ffffff .......... 15.74:1   ink, every heading and figure
+ *   #50555e on #ffffff ...........  7.50:1   body copy
+ *   --hm-muted on #ffffff ........  5.55:1   still not used for text on this page
+ *   #ffffff on #202329 .......... 15.74:1   the band
+ *   #d0d6de on #202329 .......... 10.76:1   the band's quiet copy
+ *   #cbfa4d on #202329 .......... 12.98:1   the accent, finally readable
+ *   #202329 on #cbfa4d .......... 12.98:1   the primary action
+ *   #202329 on a status tint ..... ~14:1    every pill
+ *   #46551b on #ffffff ...........  8.15:1   the accessible green, for marks and rings
+ *
+ * The rule that makes this hold: **semantic colour never carries the small text.**
+ * A pill is a tinted background with near-black words and a coloured icon, so the
+ * meaning is in three signals at once and the contrast is 14:1 rather than 4.9:1.
+ * `brand guide.md` section 10 asks for exactly that — never colour alone.
+ *
+ * ── Motion ────────────────────────────────────────────────────────────────────
+ *
+ * Transitions live here; anything sequenced or measured lives in `hm-main.js`, on the
+ * shared Motion One layer. Both honour `prefers-reduced-motion`, and the block at the
+ * end of this file is the CSS half of that promise.
+ */
+
+body.hilal-dashboard .hm-main {
+  /* Named aliases with intent, over the brand tokens. A rule says "the loud surface",
+     never a hex value that would then be free to drift from the brand file. */
+  --m-ink: var(--hm-ink-strong);
+  --m-copy: var(--hm-copy);
+  --m-line: var(--hm-hairline);
+  --m-line-strong: var(--hm-hairline-strong);
+  /* The one border colour that carries meaning, and therefore clears 3:1 (6.17:1). */
+  --m-edge: var(--hm-neutral);
+  --m-surface: var(--hm-surface);
+  --m-quiet: var(--hm-surface-soft);
+  --m-loud: var(--hm-ink-strong);
+  --m-loud-copy: var(--hm-hairline-strong);
+  --m-accent: var(--hm-apple);
+  --m-accent-pale: var(--hm-apple-pale);
+  --m-accent-soft: var(--hm-apple-soft);
+  --m-mark: var(--hm-success);
+
+  gap: var(--t-5);
+}
+
+/* ── Focus, on this page and in its popup ─────────────────────────────────────
+   Two rings, not one. The near-black inner ring is visible on every light surface
+   (15.7:1) and the apple halo behind it is visible on near-black. One indicator that
+   works on both, rather than a colour that only works on one of them. */
+/* Important, so it can outrank the blanket rule in `hilalmarkets-brand.css` — which is
+   itself important, because a decorative shadow would otherwise erase the halo. Between
+   two important declarations, ordinary specificity decides, and these are far more
+   specific. */
+body.hilal-dashboard .hm-main :where(a, button, [tabindex]):focus-visible,
+body.hilal-dashboard dialog.m-explain :where(a, button, [tabindex]):focus-visible {
+  outline: 3px solid var(--hm-ink-strong) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px var(--hm-apple) !important;
+}
+
+body.hilal-dashboard .hm-main .m-now :where(a, button):focus-visible {
+  outline-color: var(--hm-apple) !important;
+  box-shadow: 0 0 0 6px var(--hm-ink-strong) !important;
+}
+
+/* ── 1. The band ──────────────────────────────────────────────────────────────
+   `brand guide.md` section 9 allows near-black for a single high-contrast card, and
+   section 12 asks for one strong focal element per section. This is that element and
+   there is only one of it. */
+
+body.hilal-dashboard .hm-main .m-now {
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--t-5);
+  padding: var(--t-6);
+  border-radius: var(--hm-radius-xl);
+  background: var(--m-loud);
+  box-shadow: var(--hm-shadow-md);
+}
+
+body.hilal-dashboard .hm-main .m-now-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1 1 420px;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--t-3);
+}
+
+body.hilal-dashboard .hm-main .m-now-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  margin: 0;
+  color: var(--m-loud-copy);
+  font-size: .8rem;
+  font-weight: 500;
+}
+
+/* The live mark. A single dot, and a ring that expands once when the page settles —
+   never a loop. `brand guide.md` section 15 rules out movement that repeats without
+   meaning, and a heartbeat on a dashboard is the definition of that. */
+body.hilal-dashboard .hm-main .m-live {
+  position: relative;
+  display: inline-grid;
+  width: 10px;
+  height: 10px;
+  place-items: center;
+}
+
+body.hilal-dashboard .hm-main .m-live i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--m-accent);
+}
+
+body.hilal-dashboard .hm-main .m-live::after {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--m-accent);
+  border-radius: 999px;
+  content: "";
+  opacity: 0;
+}
+
+body.hilal-dashboard .hm-main .m-now[data-settled="true"] .m-live::after {
+  animation: m-ping 1.1s var(--hm-motion) 1 both;
+}
+
+@keyframes m-ping {
+  from { opacity: .9; transform: scale(1); }
+  to { opacity: 0; transform: scale(3.2); }
+}
+
+body.hilal-dashboard .hm-main .m-now h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--t-3);
+  color: var(--hm-surface);
+  font-size: clamp(1.5rem, 1.1rem + 1.5vw, 2.15rem);
+  line-height: 1.15;
+}
+
+body.hilal-dashboard .hm-main .m-now-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--hm-radius-sm);
+  background: var(--m-accent);
+  color: var(--hm-ink-strong);
+}
+
+body.hilal-dashboard .hm-main .m-now-icon .icon { width: 22px; height: 22px; }
+
+body.hilal-dashboard .hm-main .m-now[data-tone="warning"] .m-now-icon { background: var(--hm-warning-bg); }
+body.hilal-dashboard .hm-main .m-now[data-tone="neutral"] .m-now-icon { background: var(--hm-hairline-strong); }
+
+body.hilal-dashboard .hm-main .m-now-detail {
+  max-width: 62ch;
+  color: var(--m-loud-copy);
+  font-size: 1rem;
+}
+
+body.hilal-dashboard .hm-main .m-now-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-2);
+  margin-top: var(--t-2);
+}
+
+/* The seal. The page's one chamfer, on the standard everything else rests on.
+   Near-black on apple green measures 12.98:1. */
+body.hilal-dashboard .hm-main .m-seal {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  flex: none;
+  max-width: 260px;
+  min-width: 164px;
+  justify-items: start;
+  gap: var(--t-1);
+  padding: var(--t-4) var(--t-5);
+  border-radius: var(--hm-radius-sm);
+  background: var(--m-accent);
+  color: var(--hm-ink-strong);
+}
+
+body.hilal-dashboard .hm-main .m-seal-icon {
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--t-1);
+  color: var(--hm-ink-strong);
+}
+
+body.hilal-dashboard .hm-main .m-seal-icon .icon { width: 22px; height: 22px; }
+
+body.hilal-dashboard .hm-main .m-seal-label {
+  font-size: .74rem;
+  font-weight: 500;
+  opacity: .85;
+}
+
+body.hilal-dashboard .hm-main .m-seal-name {
+  overflow-wrap: anywhere;
+  font-family: var(--hm-font-display);
+  font-size: .98rem;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-main .m-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--t-2);
+  /* WCAG 2.2 target size. Every pressable thing on this page clears 44px. */
+  min-height: 44px;
+  padding: 0 var(--t-5);
+  border: 1px solid var(--m-accent);
+  border-radius: 999px;
+  background: var(--m-accent);
+  color: var(--hm-ink-strong);
+  cursor: pointer;
+  font: inherit;
+  font-size: .9rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: transform var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease), border-color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-main .m-cta .icon-sm { width: 16px; height: 16px; transition: transform var(--t-fast) var(--t-ease); }
+body.hilal-dashboard .hm-main .m-cta:hover { background: var(--hm-apple-pale); transform: translateY(-2px); }
+body.hilal-dashboard .hm-main .m-cta:hover .icon-sm { transform: translateX(3px); }
+body.hilal-dashboard .hm-main .m-cta:active { transform: translateY(0); }
+
+body.hilal-dashboard .hm-main .m-cta.is-quiet {
+  border-color: var(--hm-hairline-strong);
+  background: transparent;
+  color: var(--hm-surface);
+}
+
+body.hilal-dashboard .hm-main .m-cta.is-quiet:hover {
+  border-color: var(--m-accent);
+  background: rgba(203, 250, 77, .14);
+  color: var(--hm-surface);
+}
+
+/* Outside the band the quiet action sits on white, so it takes ink rather than paper. */
+body.hilal-dashboard .hm-main .t-card .m-cta.is-quiet,
+body.hilal-dashboard .hm-main .m-empty .m-cta.is-quiet {
+  border-color: var(--m-edge);
+  color: var(--m-ink);
+}
+
+body.hilal-dashboard .hm-main .t-card .m-cta.is-quiet:hover {
+  border-color: var(--m-ink);
+  background: var(--m-accent-soft);
+  color: var(--m-ink);
+}
+
+body.hilal-dashboard .hm-main .m-cta.is-small { padding: 0 var(--t-4); font-size: .85rem; }
+
+body.hilal-dashboard .hm-main .m-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  min-height: 44px;
+  padding: 0 var(--t-2);
+  border-radius: var(--hm-radius-sm);
+  color: var(--m-ink);
+  font-size: .875rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-main .m-link .icon-sm { width: 15px; height: 15px; transition: transform var(--t-fast) var(--t-ease); }
+body.hilal-dashboard .hm-main .m-link:hover { background: var(--m-accent-soft); }
+body.hilal-dashboard .hm-main .m-link:hover .icon-sm { transform: translateX(3px); }
+
+/* ── 2. The tiles ─────────────────────────────────────────────────────────────
+   Each tile is one question, one number, one destination. The whole card is the link,
+   so the target is the card rather than the four words inside it. */
+
+body.hilal-dashboard .hm-main .m-tiles {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: var(--t-4);
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  list-style: none;
+}
+
+body.hilal-dashboard .hm-main .m-tile {
+  position: relative;
+  border: 1px solid var(--m-line);
+  border-radius: var(--hm-radius-lg);
+  background: var(--m-surface);
+  transition: border-color var(--t-fast) var(--t-ease), box-shadow var(--t-base) var(--t-ease), transform var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-main .m-tile:hover {
+  border-color: var(--m-edge);
+  box-shadow: var(--hm-shadow-sm);
+  transform: translateY(-3px);
+}
+
+body.hilal-dashboard .hm-main .m-tile:has(.m-tile-link:focus-visible) {
+  border-color: var(--m-edge);
+}
+
+/* A column, not a grid, so the arrow can be pushed to the bottom of whichever tile is
+   tallest. With `align-content: start` the arrows sat at four different heights,
+   following however far each meaning line happened to wrap. */
+body.hilal-dashboard .hm-main .m-tile-link {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  gap: var(--t-1);
+  padding: var(--t-5) var(--t-5) var(--t-4);
+  border-radius: inherit;
+  color: var(--m-ink);
+  text-decoration: none;
+}
+
+body.hilal-dashboard .hm-main .m-tile-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: var(--t-2);
+  border: 1px solid var(--m-line);
+  border-radius: var(--hm-radius-sm);
+  background: var(--m-quiet);
+  color: var(--m-ink);
+  transition: background var(--t-base) var(--t-ease), border-color var(--t-base) var(--t-ease), transform var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-main .m-tile-icon .icon { width: 20px; height: 20px; }
+
+/* The one green moment per tile, and only on hover: the accent points at where the
+   press will go rather than colouring the card at rest. */
+body.hilal-dashboard .hm-main .m-tile:hover .m-tile-icon {
+  border-color: var(--m-accent);
+  background: var(--m-accent);
+  transform: rotate(-4deg) scale(1.06);
+}
+
+body.hilal-dashboard .hm-main .m-tile-figure {
+  color: var(--m-ink);
+  font-size: 2.4rem;
+  line-height: 1;
+}
+
+body.hilal-dashboard .hm-main .m-tile[data-tone="neutral"] .m-tile-figure { color: var(--m-copy); }
+
+body.hilal-dashboard .hm-main .m-tile-unit {
+  color: var(--m-copy);
+  font-size: .8rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-main .m-tile-question {
+  margin-top: var(--t-2);
+  color: var(--m-ink);
+  font-family: var(--hm-font-display);
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+/* The question and its "what does this mean" trigger, on one line: the icon sits
+   beside the words it explains rather than as a paragraph under them. */
+body.hilal-dashboard .hm-main .m-tile-question-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: var(--t-2);
+}
+
+body.hilal-dashboard .hm-main .m-tile-question-row .m-tile-question { margin-top: 0; }
+
+body.hilal-dashboard .hm-main .m-tile-question-row .t-info { margin-top: 3px; }
+
+body.hilal-dashboard .hm-main .m-tile-go {
+  display: inline-flex;
+  align-items: center;
+  margin-top: auto;
+  padding-top: var(--t-3);
+  color: var(--m-copy);
+  transition: transform var(--t-base) var(--t-ease), color var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-main .m-tile-go .icon-sm { width: 16px; height: 16px; }
+body.hilal-dashboard .hm-main .m-tile:hover .m-tile-go { color: var(--m-ink); transform: translateX(5px); }
+
+/* "What does this mean" — a real button, 44px so the touch target still clears
+   WCAG 2.2, aligned to the same line as the tile's own icon above it. The visible
+   circle painted on hover is smaller than the target: `::before` carries it, so the
+   44px hit area stays invisible until it is actually needed. */
+body.hilal-dashboard .hm-main .m-tile-explain {
+  position: absolute;
+  z-index: 2;
+  top: calc(var(--t-5) - 1px);
+  inset-inline-end: var(--t-2);
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--m-copy);
+  cursor: pointer;
+}
+
+body.hilal-dashboard .hm-main .m-tile-explain::before {
+  position: absolute;
+  z-index: -1;
+  inset: 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  content: "";
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-main .m-tile-explain .icon-sm { width: 17px; height: 17px; }
+
+body.hilal-dashboard .hm-main .m-tile-explain:hover::before,
+body.hilal-dashboard .hm-main .m-tile-explain:focus-visible::before {
+  border-color: var(--m-edge);
+  background: var(--m-surface);
+}
+
+body.hilal-dashboard .hm-main .m-tile-explain:hover,
+body.hilal-dashboard .hm-main .m-tile-explain:focus-visible {
+  color: var(--m-ink);
+}
+
+/* ── Layout ───────────────────────────────────────────────────────────────────
+   Two columns where there is room, one column where there is not. `minmax(0, …)` on
+   both tracks so a long coin name cannot push the grid wider than the viewport. */
+
+body.hilal-dashboard .hm-main .m-split {
+  display: grid;
+  gap: var(--t-4);
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+body.hilal-dashboard .hm-main .m-col {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--t-4);
+}
+
+body.hilal-dashboard .hm-main .t-card { padding: var(--t-5); }
+
+body.hilal-dashboard .hm-main .m-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--t-3);
+  margin-bottom: var(--t-4);
+}
+
+body.hilal-dashboard .hm-main .m-panel-head h2 { margin-top: 2px; color: var(--m-ink); }
+
+/* ── 3. Closest to ready ──────────────────────────────────────────────────────
+   The ring is a count of a person's own rules that are true. It is painted in the
+   accessible green (8.15:1 on white), never in the bright accent, because a mark that
+   carries meaning has to be visible — and bright apple green measures 1.21:1 here. */
+
+body.hilal-dashboard .hm-main .m-closest-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--t-5);
+}
+
+body.hilal-dashboard .hm-main .m-ring {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 132px;
+  height: 132px;
+}
+
+body.hilal-dashboard .hm-main .m-ring svg {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  /* An `<svg>` with no fill declared computes to black, which is not a colour in this
+     product's palette. The circles inside it set their own fill; the canvas sets none. */
+  fill: none;
+  transform: rotate(-90deg);
+}
+
+body.hilal-dashboard .hm-main .m-ring circle {
+  fill: none;
+  stroke-width: 9;
+  stroke-linecap: round;
+}
+
+body.hilal-dashboard .hm-main .m-ring-track { stroke: var(--hm-neutral-bg); }
+body.hilal-dashboard .hm-main .m-ring-fill { stroke: var(--m-mark); }
+
+body.hilal-dashboard .hm-main .m-ring-coin {
+  display: grid;
+  overflow: hidden;
+  width: 74px;
+  height: 74px;
+  place-items: center;
+  border: 1px solid var(--m-line);
+  border-radius: 999px;
+  background: var(--m-surface);
+  color: var(--m-ink);
+  font-family: var(--hm-font-display);
+  font-size: .95rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-main .m-ring-coin img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+
+body.hilal-dashboard .hm-main .m-closest-copy {
+  display: flex;
+  flex: 1 1 300px;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--t-3);
+}
+
+/* Status: a tinted background, near-black words and a coloured icon. Three signals,
+   and ~14:1 rather than the 4.9:1 a coloured word on a tint would have given. */
+body.hilal-dashboard .hm-main .m-state,
+body.hilal-dashboard .hm-main .m-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  align-self: flex-start;
+  padding: 5px var(--t-3);
+  border: 1px solid var(--m-line-strong);
+  border-radius: 999px;
+  background: var(--hm-neutral-bg);
+  color: var(--hm-ink-strong);
+  font-size: .82rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-main :where(.m-state, .m-pill) .icon-sm { width: 15px; height: 15px; flex: none; }
+
+body.hilal-dashboard .hm-main :where(.m-state, .m-pill)[data-tone="success"] { border-color: var(--hm-apple-pale); background: var(--hm-apple-pale); }
+body.hilal-dashboard .hm-main :where(.m-state, .m-pill)[data-tone="success"] .icon-sm { color: var(--m-mark); }
+body.hilal-dashboard .hm-main :where(.m-state, .m-pill)[data-tone="warning"] { border-color: var(--hm-warning-bg); background: var(--hm-warning-bg); }
+body.hilal-dashboard .hm-main :where(.m-state, .m-pill)[data-tone="warning"] .icon-sm { color: var(--hm-warning); }
+body.hilal-dashboard .hm-main :where(.m-state, .m-pill)[data-tone="danger"] { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); }
+body.hilal-dashboard .hm-main :where(.m-state, .m-pill)[data-tone="danger"] .icon-sm { color: var(--hm-danger); }
+body.hilal-dashboard .hm-main :where(.m-state, .m-pill)[data-tone="neutral"] .icon-sm { color: var(--m-copy); }
+
+/* A pill that is really a link is a target, so it takes the target size rather than the
+   label size. 34px was four short of the 44 every other pressable thing here clears. */
+body.hilal-dashboard .hm-main .m-pill.is-action {
+  min-height: 44px;
+  padding-inline: var(--t-4);
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-main .m-pill.is-action:hover { border-color: var(--m-edge); background: var(--m-accent-soft); }
+
+body.hilal-dashboard .hm-main .m-checks {
+  color: var(--m-ink);
+  font-family: var(--hm-font-display);
+  font-size: 1.05rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-main .m-facts {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  gap: var(--t-2) var(--t-5);
+}
+
+body.hilal-dashboard .hm-main .m-facts > div { display: flex; flex-direction: column; gap: 2px; }
+body.hilal-dashboard .hm-main .m-facts dt { color: var(--m-copy); font-size: .74rem; }
+body.hilal-dashboard .hm-main .m-facts dd { margin: 0; color: var(--m-ink); font-size: .86rem; font-weight: 500; }
+
+/* Same family, same rule as `.m-flag`: the fill and the clock icon carry the tone, so
+   the coloured starting edge was a third mark saying it a third time. */
+body.hilal-dashboard .hm-main .m-waiting {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-2);
+  padding: var(--t-3);
+  border: 1px solid var(--m-line);
+  border-radius: var(--hm-radius-sm);
+  background: var(--m-quiet);
+  color: var(--m-copy);
+  font-size: .87rem;
+}
+
+body.hilal-dashboard .hm-main .m-waiting .icon-sm { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--hm-warning); }
+body.hilal-dashboard .hm-main .m-waiting strong { color: var(--m-ink); }
+
+body.hilal-dashboard .hm-main .m-closest-actions { display: flex; flex-wrap: wrap; gap: var(--t-2); }
+
+/* ── Coin chips ───────────────────────────────────────────────────────────────
+   Pictures rather than a table. The logo is the coin's own stored picture, resolved by
+   the one owner every other surface uses; the letters behind it are what a coin with
+   no picture anywhere is supposed to look like, not a failure state. */
+
+body.hilal-dashboard .hm-main .m-coins-note { margin-bottom: var(--t-3); color: var(--m-copy); font-size: .85rem; }
+
+body.hilal-dashboard .hm-main .m-chips {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  gap: var(--t-2);
+  list-style: none;
+}
+
+body.hilal-dashboard .hm-main .m-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  min-height: 44px;
+  padding: var(--t-1) var(--t-4) var(--t-1) var(--t-1);
+  border: 1px solid var(--m-line);
+  border-radius: 999px;
+  background: var(--m-surface);
+  color: var(--m-ink);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color var(--t-fast) var(--t-ease), box-shadow var(--t-fast) var(--t-ease), transform var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-main .m-chip:hover {
+  border-color: var(--m-edge);
+  box-shadow: var(--hm-shadow-xs);
+  transform: translateY(-2px);
+}
+
+body.hilal-dashboard .hm-main .m-chip-logo {
+  display: grid;
+  overflow: hidden;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--m-quiet);
+  color: var(--m-ink);
+  font-family: var(--hm-font-display);
+  font-size: .62rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-main .m-chip-logo img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+
+body.hilal-dashboard .hm-main .m-chip-text { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
+body.hilal-dashboard .hm-main .m-chip-coin { color: var(--m-ink); font-family: var(--hm-font-display); font-size: .92rem; font-weight: 500; }
+
+body.hilal-dashboard .hm-main .m-chip-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--m-copy);
+  font-size: .72rem;
+}
+
+body.hilal-dashboard .hm-main .m-chip-status .icon-sm { width: 12px; height: 12px; }
+body.hilal-dashboard .hm-main .m-chip[data-tone="success"] .m-chip-status .icon-sm { color: var(--m-mark); }
+body.hilal-dashboard .hm-main .m-chip[data-tone="warning"] .m-chip-status .icon-sm { color: var(--hm-warning); }
+
+/* ── Your monitors ────────────────────────────────────────────────────────────── */
+
+/* No coloured bar on the starting edge of these boxes.
+ *
+ * It was a second way of saying the same thing: the box is already filled with the tone,
+ * and it already carries the icon and the word for it, which is what `brand guide.md`
+ * §10 actually asks for — never colour alone. The bar added a third mark and made a
+ * quiet panel read as an error banner. Removed here for the whole family of status
+ * boxes on this page, not only the two that were pointed at, so the page keeps one
+ * visual language rather than two. */
+body.hilal-dashboard .hm-main .m-flag {
+  display: flex;
+  align-items: center;
+  gap: var(--t-2);
+  margin-bottom: var(--t-3);
+  padding: var(--t-2) var(--t-3);
+  border: 1px solid var(--hm-warning-bg);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-warning-bg);
+  color: var(--hm-ink-strong);
+  font-size: .85rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-main .m-flag .icon-sm { width: 15px; height: 15px; flex: none; color: var(--hm-warning); }
+
+body.hilal-dashboard .hm-main .m-list-rows {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: var(--t-2);
+  list-style: none;
+}
+
+/* The same rule as `.m-flag` above: no coloured starting edge. Each row already carries
+   a pill with the tone's own icon and its own word, so nothing is lost by removing it.
+   `data-tone` stays on the row because the pill inside reads it. */
+body.hilal-dashboard .hm-main .m-list-row {
+  border: 1px solid var(--m-line);
+  border-radius: var(--hm-radius-sm);
+  background: var(--m-surface);
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease), transform var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-main .m-list-row:hover {
+  border-color: var(--m-edge);
+  background: var(--m-quiet);
+  transform: translateX(3px);
+}
+
+body.hilal-dashboard .hm-main .m-list-link {
+  display: grid;
+  gap: var(--t-2);
+  padding: var(--t-3);
+  border-radius: inherit;
+  color: var(--m-ink);
+  text-decoration: none;
+}
+
+body.hilal-dashboard .hm-main .m-list-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--t-2);
+}
+
+body.hilal-dashboard .hm-main .m-list-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--m-ink);
+  font-family: var(--hm-font-display);
+  font-size: .98rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-main .m-list-detail { color: var(--m-copy); font-size: .84rem; line-height: 1.5; }
+
+body.hilal-dashboard .hm-main .m-list-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-2) var(--t-4);
+}
+
+body.hilal-dashboard .hm-main .m-list-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--m-copy);
+  font-size: .78rem;
+}
+
+body.hilal-dashboard .hm-main .m-list-meta .icon-sm { width: 13px; height: 13px; }
+
+/* ── Delivery ─────────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-main .m-channels {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: var(--t-1);
+  list-style: none;
+}
+
+body.hilal-dashboard .hm-main .m-channel {
+  display: flex;
+  align-items: center;
+  gap: var(--t-3);
+  padding: var(--t-2) 0;
+  border-bottom: 1px solid var(--m-line);
+}
+
+body.hilal-dashboard .hm-main .m-channel:last-child { border-bottom: 0; }
+
+body.hilal-dashboard .hm-main .m-channel-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--m-line);
+  border-radius: var(--hm-radius-sm);
+  background: var(--m-quiet);
+  color: var(--m-ink);
+}
+
+body.hilal-dashboard .hm-main .m-channel[data-ready="true"] .m-channel-icon { border-color: var(--hm-apple-pale); background: var(--hm-apple-pale); }
+body.hilal-dashboard .hm-main .m-channel-icon .icon { width: 18px; height: 18px; }
+
+body.hilal-dashboard .hm-main .m-channel-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 1px; }
+body.hilal-dashboard .hm-main .m-channel-name { color: var(--m-ink); font-size: .9rem; font-weight: 500; }
+body.hilal-dashboard .hm-main .m-channel-detail { color: var(--m-copy); font-size: .78rem; line-height: 1.45; }
+
+/* ── Empty states ─────────────────────────────────────────────────────────────
+   A screen with nothing on it says why, and gives exactly one next thing to do.
+   `brand guide.md` section 3: explain, never leave a person guessing. */
+
+body.hilal-dashboard .hm-main .m-empty {
+  display: grid;
+  justify-items: start;
+  gap: var(--t-2);
+  padding: var(--t-5);
+  border: 1px dashed var(--m-line-strong);
+  border-radius: var(--hm-radius-md);
+  background: var(--m-quiet);
+}
+
+body.hilal-dashboard .hm-main .m-empty p { color: var(--m-copy); font-size: .88rem; }
+body.hilal-dashboard .hm-main .m-empty strong { color: var(--m-ink); font-size: .95rem; }
+body.hilal-dashboard .hm-main .m-empty .m-cta { margin-top: var(--t-2); }
+
+body.hilal-dashboard .hm-main .m-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-neutral-bg);
+  color: var(--m-ink);
+}
+
+body.hilal-dashboard .hm-main .m-empty-icon .icon { width: 20px; height: 20px; }
+
+/* ── The boundary line ────────────────────────────────────────────────────────
+   What this product does not do, said once, at the bottom, where it belongs. */
+
+body.hilal-dashboard .hm-main .m-boundary {
+  display: flex;
+  align-items: center;
+  gap: var(--t-2);
+  padding: var(--t-3) var(--t-4);
+  border: 1px solid var(--m-line);
+  border-radius: var(--hm-radius-md);
+  background: var(--m-quiet);
+  color: var(--m-copy);
+  font-size: .82rem;
+}
+
+body.hilal-dashboard .hm-main .m-boundary .icon-sm { width: 15px; height: 15px; flex: none; color: var(--m-copy); }
+
+/* ── The explain popup ────────────────────────────────────────────────────────
+   Short points, never a paragraph. The explanation is one key press from the tile and
+   never sits on the page as text somebody has to read past. */
+
+body.hilal-dashboard dialog.m-explain { width: min(460px, calc(100vw - 32px)); }
+
+body.hilal-dashboard dialog.m-explain .m-explain-points {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: var(--hm-radius-sm);
+  list-style: none;
+}
+
+body.hilal-dashboard dialog.m-explain .m-explain-points li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--hm-copy);
+  font-size: .92rem;
+  line-height: 1.55;
+}
+
+body.hilal-dashboard dialog.m-explain .m-explain-points li::before {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: var(--hm-success);
+  content: "";
+}
+
+/* ── Narrower screens ─────────────────────────────────────────────────────────
+   The page has to work at 320px and at 200% zoom with no sideways scrolling. */
+
+@media (max-width: 1080px) {
+  body.hilal-dashboard .hm-main .m-split { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 640px) {
+  body.hilal-dashboard .hm-main .m-now { padding: var(--t-5); }
+  body.hilal-dashboard .hm-main .m-now::before { width: 190px; height: 190px; }
+  /* The seal spans the band on a phone. `max-width` from the wide layout would leave it
+     as a stub floating in the corner. */
+  body.hilal-dashboard .hm-main .m-seal { width: 100%; max-width: none; }
+  body.hilal-dashboard .hm-main .m-now-actions .m-cta { flex: 1 1 auto; }
+  body.hilal-dashboard .hm-main .m-tiles { grid-template-columns: minmax(0, 1fr); }
+  body.hilal-dashboard .hm-main .t-card { padding: var(--t-4); }
+  body.hilal-dashboard .hm-main .m-ring { width: 104px; height: 104px; }
+  body.hilal-dashboard .hm-main .m-ring-coin { width: 58px; height: 58px; }
+  body.hilal-dashboard .hm-main .m-chips { flex-direction: column; }
+  body.hilal-dashboard .hm-main .m-chip { width: 100%; }
+}
+
+@media (max-width: 380px) {
+  body.hilal-dashboard .hm-main .m-now h1 { flex-wrap: wrap; }
+  body.hilal-dashboard .hm-main .m-tile-figure { font-size: 2rem; }
+  body.hilal-dashboard .hm-main .m-seal-figure { font-size: 2.4rem; }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────────
+   Everything arrives, nothing moves. The scripted half of this promise is in
+   `hm-motion.js`, which places elements at their final keyframe instead of animating
+   them, so the page is never missing something because motion was switched off. */
+
+@media (prefers-reduced-motion: reduce) {
+  body.hilal-dashboard .hm-main .m-now[data-settled="true"] .m-live::after { animation: none; }
+
+  body.hilal-dashboard .hm-main :where(.m-tile, .m-chip, .m-cta, .m-list-row):hover {
+    transform: none;
+  }
+
+  body.hilal-dashboard .hm-main :where(.m-tile:hover .m-tile-icon, .m-tile:hover .m-tile-go, .m-cta:hover .icon-sm, .m-link:hover .icon-sm) {
+    transform: none;
+  }
+}

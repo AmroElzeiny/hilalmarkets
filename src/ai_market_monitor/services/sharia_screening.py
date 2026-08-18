@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.asset_logos import stored_logo_url
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     AssetShariaAssessment,
@@ -817,8 +818,10 @@ class ShariaScreeningService:
         passport = dict(assessment.evidence_snapshot or {})
         factual_profile = dict(passport.get("hilalmarkets_factual_information_profile") or {})
         identity = dict(factual_profile.get("canonical_asset_identity") or {})
-        provider_ids = dict(identity.get("provider_ids") or {})
-        logo_url = str(provider_ids.get("logo_url") or "").strip() or None
+        # Read through the one owner. Reading the key directly here accepted a plain
+        # `http` or relative value that the browser then blocks, showing a broken
+        # picture where the letter monogram would have been readable.
+        logo_url = stored_logo_url(identity.get("provider_ids"))
         return AssetAssessmentSummary(
             id=assessment.id,
             canonical_asset=assessment.canonical_asset,

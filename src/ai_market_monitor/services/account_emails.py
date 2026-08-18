@@ -98,16 +98,22 @@ class AccountEmailOutboxService:
         return result
 
     def _render(self, delivery: AccountEmailDelivery) -> BrandedEmail:
-        if delivery.template_kind != "access_changed":
-            raise ValueError("Unsupported account email template.")
         payload = dict(delivery.payload_redacted or {})
-        ends_at = _optional_datetime(payload.get("ends_at"))
-        return HilalMarketsEmailRenderer(self.settings).access_changed(
-            first_name=str(payload.get("first_name") or "there"),
-            plan_name=str(payload.get("plan_name") or "Hilal Markets access"),
-            duration_label=str(payload.get("duration_label") or "Not specified"),
-            ends_at_label=_utc_label(ends_at) if ends_at else None,
-        )
+        renderer = HilalMarketsEmailRenderer(self.settings)
+        if delivery.template_kind == "signup_welcome":
+            return renderer.signup_welcome(
+                first_name=str(payload.get("first_name") or ""),
+                email=delivery.recipient,
+            )
+        if delivery.template_kind == "access_changed":
+            ends_at = _optional_datetime(payload.get("ends_at"))
+            return renderer.access_changed(
+                first_name=str(payload.get("first_name") or "there"),
+                plan_name=str(payload.get("plan_name") or "Hilal Markets access"),
+                duration_label=str(payload.get("duration_label") or "Not specified"),
+                ends_at_label=_utc_label(ends_at) if ends_at else None,
+            )
+        raise ValueError("Unsupported account email template.")
 
 
 def _optional_datetime(value: object) -> datetime | None:

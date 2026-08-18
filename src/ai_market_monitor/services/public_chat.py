@@ -50,6 +50,7 @@ from ai_market_monitor.schemas.public_chat import (
     PublicSupportStage,
 )
 from ai_market_monitor.services.agent_control import AgentResponsesClient
+from ai_market_monitor.services.email_branding import plain_text_block
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
 from ai_market_monitor.services.notion_knowledge import NotionKnowledgeService
 from ai_market_monitor.services.public_support_ai import (
@@ -457,7 +458,7 @@ class PublicKnowledgeService:
             )
         return PublicKnowledgeEntry(
             source_id="beta:account-access:v1",
-            title="Private-beta account and dashboard access",
+            title="Account and dashboard access",
             answer=(
                 "Create or sign in to a Hilal Markets account through the Dashboard entry. "
                 "Email verification protects account ownership. Password recovery, account "
@@ -474,6 +475,32 @@ class PublicKnowledgeService:
                 "dashboard access",
             ),
         )
+
+    def _channel_summary(self) -> str:
+        """The delivery channels this stage offers, written as a readable list.
+
+        Taken from the stage's own ``offered_channels`` and from whether WhatsApp is
+        actually switched on, so the assistant can neither name a channel the product
+        does not offer nor leave out one it does. Every other surface reads the same
+        two facts; this is the only place they are turned into a sentence.
+        """
+
+        names = {"in_app": "the app", "telegram": "Telegram", "whatsapp": "WhatsApp"}
+        offered = set(self.settings.stage_exposure.offered_channels)
+        # The stage says a channel is *permitted*. WhatsApp also has to be configured
+        # and working, which is a separate switch — permitted is not the same as ready.
+        if self.settings.whatsapp_enabled:
+            offered.add("whatsapp")
+        else:
+            offered.discard("whatsapp")
+        ordered = [
+            names[key] for key in ("in_app", "telegram", "whatsapp") if key in offered
+        ]
+        if not ordered:
+            return "the app"
+        if len(ordered) == 1:
+            return ordered[0]
+        return f"{', '.join(ordered[:-1])} and {ordered[-1]}"
 
     def _entries(self) -> tuple[PublicKnowledgeEntry, ...]:
         entries: list[PublicKnowledgeEntry] = [
@@ -540,12 +567,17 @@ class PublicKnowledgeService:
                 route_id="help",
                 keywords=("compliance change", "status change", "hold", "restoration"),
             ),
+            # Which channels exist is the stage's answer, not this file's. It used to be
+            # the sentence "The private beta supports in-app notifications and Telegram.
+            # WhatsApp and billing are disabled for the initial beta" — written into the
+            # entry itself and gated on nothing, so it went on telling visitors the
+            # product was a beta with billing switched off after both had changed.
             PublicKnowledgeEntry(
                 source_id="beta:channel-state:v1",
-                title="Private-beta notification channel availability",
+                title="Where notifications are delivered",
                 answer=(
-                    "The private beta supports in-app notifications and Telegram. WhatsApp and "
-                    "billing are disabled for the initial beta, and Discord is retired."
+                    f"Hilal Markets delivers notifications through {self._channel_summary()}. "
+                    "Discord is retired."
                 ),
                 route_id="features",
                 keywords=("telegram", "whatsapp", "discord", "notification channel"),
@@ -649,15 +681,18 @@ class PublicKnowledgeService:
                 "authoritative catalog for limits and provider-accurate renewal terms."
             )
         else:
+            # Open, but checkout is switched off. That is a billing state, not a stage,
+            # so it is described as one — it used to say "the private beta is free and
+            # invite-only", which contradicted the open stage it was being shown in.
             pricing_answer = (
-                "The private beta is free and invite-only. Paid checkout is disabled until "
-                "provider sandbox validation and an explicit production enablement are complete."
+                "Hilal Markets is free to start. Paid checkout is temporarily unavailable, "
+                "so no plan can be bought right now. The free plan is unaffected."
             )
         entries.extend(
             (
                 PublicKnowledgeEntry(
                     source_id="plan-catalog:public",
-                    title="How much does Hilal Markets cost during private beta?",
+                    title="How much does Hilal Markets cost?",
                     answer=pricing_answer,
                     route_id=pricing_route,
                     keywords=("price", "pricing", "cost", "free", "plan", "beta", "trial"),
@@ -665,16 +700,19 @@ class PublicKnowledgeService:
                 PublicKnowledgeEntry(
                     source_id="beta-channels:v1",
                     title="Which notification channels are available?",
-                    answer="The private beta supports in-app and Telegram notifications.",
+                    answer=(
+                        f"Hilal Markets delivers notifications through {self._channel_summary()}."
+                    ),
                     route_id="features",
                     keywords=("telegram", "notification", "alert", "channel"),
                 ),
                 PublicKnowledgeEntry(
                     source_id="beta-scope:v1",
-                    title="Which markets are in the private beta?",
+                    title="Which markets are supported?",
                     answer=(
-                        "The initial private beta is limited to BTC, ETH, and SOL on Binance "
-                        "spot under one disclosed active screening methodology."
+                        "Crypto spot markets on Binance, limited to the screened assets under "
+                        "the disclosed active screening methodology. Other asset classes are "
+                        "added only once they can be screened to the same standard."
                     ),
                     route_id="how_it_works",
                     keywords=(
@@ -1883,12 +1921,10 @@ class PublicChatService:
                 f"AI answer metadata: {support_metadata}\n\n"
                 f"Inquiry:\n{inquiry.details}\n"
             )
-        escaped = html.escape(text).replace("\n", "<br>")
-        html_body = (
-            '<div style="font-family:Arial,sans-serif;line-height:1.55;color:#2b2e35">'
-            f"{escaped}</div>"
-        )
-        return subject, text, html_body
+        # The layout is owned by `email_branding`, not written here. This email used to
+        # ask for Arial, so the one message a person receives after asking for help was
+        # the only one in the product set in a face the brand does not use.
+        return subject, text, plain_text_block(text)
 
     def _hash(self, value: str) -> str:
         return hmac.new(

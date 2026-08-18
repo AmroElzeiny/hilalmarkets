@@ -352,10 +352,11 @@ async def test_dashboard_analytics_coverage_uses_scan_jobs(test_context):
     assert payload["coverage_percentage"] == 80
     assert payload["deterministic"] is True
 
-    dashboard = await test_context["client"].get("/dashboard")
+    # Read on Home, which replaced the counting front page this used to open.
+    dashboard = await test_context["client"].get("/home")
     assert dashboard.status_code == 200
     assert "Coverage score" not in dashboard.text
-    assert "Eligible screened assets" in dashboard.text
+    assert "Coins you can watch" in dashboard.text
 
 
 async def test_dashboard_strategy_template_is_persisted(test_context):
@@ -580,7 +581,9 @@ async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_contex
         await session.commit()
         setup_id = setup.id
 
-    page = await test_context["client"].get("/dashboard/opportunities")
+    # Evidence and Activity, which keeps its own address. Opportunities answers a
+    # different question and cannot show a lifecycle chart.
+    page = await test_context["client"].get("/dashboard/lifecycles")
     assert page.status_code == 200
     assert "What is closest right now?" in page.text
     assert "SOL/USDT" in page.text
@@ -684,7 +687,7 @@ async def test_dashboard_lifecycle_cards_chart_and_saved_annotations(test_contex
         f"/api/v1/dashboard/lifecycles/{setup_id}/mute"
     )
     assert muted.status_code == 200
-    muted_page = await test_context["client"].get("/dashboard/opportunities")
+    muted_page = await test_context["client"].get("/dashboard/lifecycles")
     assert "SOL/USDT" not in muted_page.text
     async with test_context["session_factory"]() as session:
         assert await session.scalar(select(func.count(ChartSnapshot.id))) == 2
@@ -745,26 +748,43 @@ async def test_dashboard_scan_prompt_interpret_understands_breakout(test_context
     assert payload["strategy"]["risk"]["enabled"] is False
 
 
+async def _save_settings(test_context, **choices):
+    """Save through the one endpoint that saves settings.
+
+    There used to be two: a whole-form `POST /dashboard/settings` belonging to the older
+    Settings page, and this. That page and its handler were removed together, so a
+    control can no longer be written by a route that has not been told today's rules.
+    """
+
+    from ai_market_monitor.db.models import User
+
+    async with test_context["session_factory"]() as session:
+        account = await session.scalar(select(User))
+        token = csrf_token(test_context["settings"], account.id)
+    return await test_context["client"].put(
+        "/api/v1/dashboard/preferences/settings",
+        json=choices,
+        headers={"X-CSRF-Token": token},
+    )
+
+
 async def test_dashboard_settings_persist_alert_schedule_without_theme_field(test_context):
     await _signup(test_context, "dashboard-settings@example.com")
 
-    response = await test_context["client"].post(
-        "/dashboard/settings",
-        data={
-            "timezone": "Europe/Moscow",
-            "near_miss_enabled": "true",
-            "near_miss_threshold": "82",
-            "maximum_alerts_per_hour": "7",
-            "maximum_alerts_per_day": "120",
-            "alert_channels": ["telegram"],
-            "providers": ["binance", "bybit"],
-            "alert_days": ["Monday", "Friday"],
-            "alert_hours": ["09:00", "21:00"],
-        },
-        follow_redirects=False,
+    response = await _save_settings(
+        test_context,
+        timezone="Europe/Moscow",
+        near_miss_enabled=True,
+        near_miss_threshold=82,
+        maximum_alerts_per_hour=7,
+        maximum_alerts_per_day=120,
+        alert_channels=["telegram"],
+        providers=["binance", "bybit"],
+        alert_days=["Monday", "Friday"],
+        alert_hours=["09:00", "21:00"],
     )
 
-    assert response.status_code == 303
+    assert response.status_code == 200, response.text
     async with test_context["session_factory"]() as session:
         preference = await session.scalar(select(DashboardPreference))
         assert preference is not None
@@ -784,13 +804,11 @@ async def test_dashboard_settings_persist_alert_schedule_without_theme_field(tes
 async def test_dashboard_settings_allow_external_channels_to_be_deselected(test_context):
     await _signup(test_context, "dashboard-in-app-only@example.com")
 
-    response = await test_context["client"].post(
-        "/dashboard/settings",
-        data={"timezone": "UTC", "providers": ["bybit"]},
-        follow_redirects=False,
+    response = await _save_settings(
+        test_context, timezone="UTC", providers=["bybit"], alert_channels=[]
     )
 
-    assert response.status_code == 303
+    assert response.status_code == 200, response.text
     async with test_context["session_factory"]() as session:
         preference = await session.scalar(select(DashboardPreference))
         assert preference is not None
@@ -829,7 +847,19 @@ async def test_dashboard_disconnect_telegram_removes_backend_connection(test_con
         session.add_all([connection, identity, conversation])
         await session.commit()
 
-    response = await test_context["client"].delete("/api/v1/dashboard/integrations/telegram")
+    # Unlinking needs the form token, like every other write on the Connections page.
+    # It is the most destructive of them — the connection, the sign-in identity and the
+    # bot conversation all go, and none of them come back — and it was the one endpoint
+    # that read no token at all.
+    refused = await test_context["client"].delete("/api/v1/dashboard/integrations/telegram")
+    assert refused.status_code == 403
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(select(TelegramConnection)) is not None
+
+    response = await test_context["client"].delete(
+        "/api/v1/dashboard/integrations/telegram",
+        headers={"X-CSRF-Token": csrf_token(test_context["settings"], user)},
+    )
 
     assert response.status_code == 200
     assert response.json()["telegram"] is None
@@ -1345,9 +1375,24 @@ async def test_historical_replay_is_hidden_and_inaccessible(test_context):
 async def test_dashboard_support_ticket_api_creates_thread_message(test_context):
     await _signup(test_context, "dashboard-support@example.com")
     test_context["settings"].email_test_outbox.clear()
+    async with test_context["session_factory"]() as session:
+        support_user_id = await session.scalar(
+            select(UserIdentity.user_id).where(UserIdentity.provider == IdentityProvider.EMAIL)
+        )
+        assert support_user_id is not None
+
+    # A request with no form token writes nothing. This route creates a row, stores
+    # uploaded files and sends two emails, so a session cookie on its own must never be
+    # enough — that is the shape a cross-site request exploits.
+    unguarded = await test_context["client"].post(
+        "/api/v1/dashboard/support/tickets",
+        json={"subject": "No token", "description": "Should not be stored."},
+    )
+    assert unguarded.status_code == 403
 
     response = await test_context["client"].post(
         "/api/v1/dashboard/support/tickets",
+        headers={"X-CSRF-Token": csrf_token(test_context["settings"], support_user_id)},
         json={
             "email": "dashboard-support@example.com",
             "subject": "Missing SOL alert",
@@ -1383,7 +1428,7 @@ async def test_dashboard_support_ticket_api_creates_thread_message(test_context)
     assert len(outbox) == 1
     assert outbox[0]["purpose"] == "support_ticket"
     assert outbox[0]["recipient"] == test_context["settings"].support_inbox_email
-    assert outbox[0]["subject"] == "HilalMarkets support ticket: Missing SOL alert"
+    assert outbox[0]["subject"] == "Hilal Markets support ticket: Missing SOL alert"
     assert "dashboard-support@example.com" in outbox[0]["body"]
     assert "Please investigate the 15m candle." in outbox[0]["body"]
     assert outbox[0]["attachments"][0]["filename"] == "screenshot-1.png"
@@ -1420,39 +1465,38 @@ async def test_advanced_dashboard_pages_render(test_context):
     await _signup(test_context, "dashboard-pages@example.com")
 
     for path, expected in [
-        ("/dashboard/strategies/new", "Market Assistant"),
-        ("/dashboard/strategies/new", "AI Sheet"),
+        ("/dashboard/strategies/new", "Market assistant"),
+        ("/dashboard/strategies/new", "AI sheet"),
         ("/dashboard/strategies/new", "Preview mechanics"),
         ("/dashboard/strategies/new", "Visual Strategy Canvas"),
         ("/dashboard/strategies/new", "Search condition library"),
         ("/dashboard/strategies/new", "Monitor Overview"),
         ("/dashboard/strategies/new", "Proof &amp; Review"),
         ("/dashboard/strategies/new", "Six-Month High Breakout"),
-        ("/dashboard/integrations", "Notifications"),
-        ("/dashboard/opportunities", "What is closest right now?"),
+        # `/dashboard/integrations` is the older name for Connections and 308s to it, so
+        # this follows the redirect the way a browser would.
+        ("/dashboard/integrations", "Connections"),
+        ("/dashboard/lifecycles", "What is closest right now?"),
         ("/dashboard/settings", "America/New_York"),
-        ("/dashboard/settings", 'data-schedule-options="hours"'),
+        ("/dashboard/settings", 'data-g-set="alert_hours"'),
     ]:
-        response = await test_context["client"].get(path)
-        assert response.status_code == 200
-        assert expected in response.text
+        response = await test_context["client"].get(path, follow_redirects=True)
+        assert response.status_code == 200, path
+        assert expected in response.text, path
 
-    dashboard = await test_context["client"].get("/dashboard")
+    # The front page. It was `/dashboard`; that page is deleted and its address takes a
+    # person here, so what the shell must carry is checked on Home.
+    dashboard = await test_context["client"].get("/home")
+    assert dashboard.status_code == 200
     assert "Alerts & Proof" not in dashboard.text
     assert "Latest Setups" not in dashboard.text
     assert "Strategy Cockpit" not in dashboard.text
     assert "Coverage score" not in dashboard.text
-    # "Watchlist" is the Favorites list; the thing being created here is a Watchlist.
-    # `scripts/check_release_invariants.py` enforces that vocabulary.
-    assert "Create your first Watchlist" in dashboard.text
+    assert "Let us set up your first monitor." in dashboard.text
     assert "data-open-sidebar" in dashboard.text
     assert "data-close-sidebar" in dashboard.text
-    assert "sidebar-create-quick" in dashboard.text
     assert 'action="/logout"' in dashboard.text
     assert "data-theme-toggle" not in dashboard.text
-    assert "What is forming now" in dashboard.text
-    assert "Latest alert proof" in dashboard.text
-    assert "Notification channels" in dashboard.text
     assert "Screening policy" not in dashboard.text
     assert "analytics-coverage-panel" not in dashboard.text
     assert "Import or clone" not in dashboard.text

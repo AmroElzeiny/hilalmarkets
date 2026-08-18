@@ -1,20 +1,43 @@
+{# One case list, used on the Inbox and on Cases.
+
+   `select_mode` is the only difference between them: the Cases page can tick rows and
+   decide several at once, the Inbox is a read-only look at what needs attention. The
+   markup is shared so a column added to one is never missing from the other. #}
+{% set select_mode = select_mode | default(false) %}
 <div class="brain-table-wrap brain-attention-table">
-  <table data-testid="system-brain-case-table">
+  <table data-testid="system-brain-case-table" {% if select_mode %}data-case-table{% endif %}>
     <thead>
       <tr>
+        {% if select_mode %}
+        <th class="brain-select-cell">
+          <input type="checkbox" data-select-all aria-label="Select every case shown">
+        </th>
+        {% endif %}
         <th>Priority</th>
-        <th>Asset or case</th>
-        <th>Review reason</th>
+        <th>Case</th>
+        <th>Why</th>
         <th>State</th>
         <th>Evidence</th>
-        <th>Waiting / SLA</th>
+        <th>Waiting</th>
         <th>Reviewer</th>
-        <th>Next action</th>
+        <th>Next</th>
       </tr>
     </thead>
     <tbody>
       {% for item in data.recent_cases %}
-      <tr>
+      <tr {% if select_mode %}data-case-row{% endif %}>
+        {% if select_mode %}
+        <td class="brain-select-cell">
+          <input
+            type="checkbox"
+            name="case_id"
+            value="{{ item.id }}"
+            form="bulk-decision-form"
+            data-case-select
+            aria-label="Select {{ item.reference }}"
+          >
+        </td>
+        {% endif %}
         <td><span class="brain-status risk-{{ item.priority }}">{{ item.priority }}</span></td>
         <td>
           <strong>{{ item.asset_name }} <small>{{ item.symbol }}</small></strong>
@@ -42,7 +65,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="brain-empty">No cases require action in this view. The latest recorded checks found no matching work.</td></tr>
+      <tr><td colspan="{{ 9 if select_mode else 8 }}" class="brain-empty">Nothing needs action here.</td></tr>
       {% endfor %}
     </tbody>
   </table>

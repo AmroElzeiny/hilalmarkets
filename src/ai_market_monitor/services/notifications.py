@@ -17,7 +17,9 @@ from ai_market_monitor.db.models.enums import (
     DeliveryStatus,
 )
 from ai_market_monitor.schemas.strategy import StrategyDefinition
+from ai_market_monitor.services.alert_emails import alert_email_address
 from ai_market_monitor.services.alert_presentation import AlertPresentation
+from ai_market_monitor.services.email_delivery import email_delivery_available
 from ai_market_monitor.services.notification_preferences import NotificationPreferenceService
 from ai_market_monitor.services.trials import TrialLifecycleService
 from ai_market_monitor.telegram.adapter import TelegramDeliveryError, TelegramHttpAdapter
@@ -77,6 +79,10 @@ class NotificationDispatcher:
             delivery = await self._enqueue_whatsapp(alert)
             if delivery is not None:
                 deliveries.append(delivery)
+        if DeliveryChannel.EMAIL in requested:
+            delivery = await self._enqueue_email(alert)
+            if delivery is not None:
+                deliveries.append(delivery)
         if DeliveryChannel.WEB in requested:
             deliveries.append(
                 await self._enqueue_one(
@@ -132,6 +138,10 @@ class NotificationDispatcher:
             delivery = await self._enqueue_whatsapp(alert)
             if delivery is not None:
                 deliveries.append(delivery)
+        if DeliveryChannel.EMAIL in requested:
+            delivery = await self._enqueue_email(alert)
+            if delivery is not None:
+                deliveries.append(delivery)
         if DeliveryChannel.WEB in requested:
             deliveries.append(
                 await self._enqueue_one(
@@ -142,6 +152,22 @@ class NotificationDispatcher:
             )
         await self.session.flush()
         return deliveries
+
+    async def _enqueue_email(self, alert: Alert) -> AlertDelivery | None:
+        """Queue one alert for the address on the account.
+
+        Two things have to be true, and both are asked of their owner rather than
+        answered here: the platform must be able to send email at all, and the account
+        must have an address. Queueing without either would put a row in the table that
+        nothing can ever deliver and nothing will ever clear.
+        """
+
+        if not email_delivery_available(self.settings):
+            return None
+        recipient = await alert_email_address(self.session, alert.user_id)
+        if not recipient:
+            return None
+        return await self._enqueue_one(alert, DeliveryChannel.EMAIL, f"email:{recipient}")
 
     async def _enqueue_whatsapp(self, alert: Alert) -> AlertDelivery | None:
         if not self.settings.whatsapp_enabled:

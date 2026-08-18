@@ -82,7 +82,7 @@ async def test_system_brain_renders_live_sharia_governance_workspace(test_contex
 
     assert dashboard.status_code == 200
     assert dashboard.headers["cache-control"] == "no-store, max-age=0"
-    assert "Needs Attention" in dashboard.text
+    assert "Needs attention" in dashboard.text
     assert "Ask System Brain" in dashboard.text
     assert 'data-testid="system-brain-assistant"' in dashboard.text
     assert 'href="/dashboard/system-brain/cases"' in dashboard.text
@@ -497,7 +497,14 @@ async def test_review_action_enforces_admin_csrf_state_and_audit(test_context):
     headers = {"X-User-ID": str(admin.id)}
     detail = await test_context["client"].get(f"/system-brain/reviews/{case_id}", headers=headers)
     assert detail.status_code == 200
-    assert "Dismiss false positive" in detail.text
+    # The action, not its label. The button is called "False alarm" on the page now, and
+    # a test that pinned the words would fail on a wording change while a test that
+    # pinned the wrong action would pass on a broken one.
+    assert 'value="dismiss_false_positive"' in detail.text
+    # The one-click path for "every condition was met" is on the page, and it is a plain
+    # button: it fills the form in, it never submits it, so the reviewer still decides.
+    assert "data-approve-all" in detail.text
+    assert 'type="button"' in detail.text.split("data-approve-all", 1)[0].rsplit("<button", 1)[1]
     csrf = re.search(r'name="csrf_token" value="([a-f0-9]+)"', detail.text)
     assert csrf is not None
     form = {

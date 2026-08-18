@@ -63,8 +63,12 @@ async def list_plans(
         "billing_enabled": settings.billing_enabled,
         "provider": billing.provider.provider_name,
         "provider_capabilities": asdict(capabilities),
+        # `disabled` used to be `disabled_private_beta`. It reports that billing is
+        # switched off, which is a billing state and has nothing to do with the launch
+        # stage — the old name tied the two together and kept naming a beta the product
+        # has left.
         "billing_mode": (
-            "disabled_private_beta"
+            "disabled"
             if not settings.billing_enabled
             else (
                 "monthly_auto_renewal"
@@ -137,7 +141,7 @@ async def create_checkout(
             status_code=409,
             detail={
                 "code": "billing_disabled",
-                "message": "Paid checkout is disabled during the private beta.",
+                "message": "Paid checkout is currently unavailable.",
             },
         )
     base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")
@@ -172,7 +176,7 @@ async def create_portal(
             status_code=409,
             detail={
                 "code": "billing_disabled",
-                "message": "The billing portal is unavailable during the private beta.",
+                "message": "The billing portal is currently unavailable.",
             },
         )
     base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")

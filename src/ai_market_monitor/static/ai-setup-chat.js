@@ -968,6 +968,33 @@
     return (builderContract?.mechanics || []).find((item) => item.key === key) || null;
   }
 
+  //: The only actions the open rule form itself sends.
+  //:
+  //: Finishing one of these means the form has done its job, so it closes. Every other
+  //: action came from somewhere else on the page and has no business closing it — see
+  //: `closeRuleFormAfter` below.
+  const RULE_FORM_ACTIONS = new Set(["add_condition", "update_condition"]);
+
+  /**
+   * Should the rule form close now that `action` has come back from the server?
+   *
+   * Only when the form sent it, or when the rule the form is editing has just been
+   * deleted from under it.
+   *
+   * This used to be an unconditional `openRuleForm = null` after every action, and the
+   * bug it caused is one a person hits by being quick: choosing a coin list starts a
+   * request that also re-reads the universe options, so it is in flight for a while. Open
+   * the rule form during that window — which is the natural next thing to do — and the
+   * older request lands, clears the form, and the half-filled rule disappears with no
+   * message. It looked like a flaky test; it is a real thing that happens to a person
+   * who does not wait.
+   */
+  function closeRuleFormAfter(action, extra) {
+    if (!openRuleForm) return false;
+    if (RULE_FORM_ACTIONS.has(action)) return true;
+    return action === "remove_condition" && extra.node_id === openRuleForm.nodeId;
+  }
+
   async function sendBuilderAction(action, extra = {}) {
     if (loading || !chat) return;
     clearError();
@@ -980,7 +1007,7 @@
     setLoading(true, builderActionLabel(action));
     try {
       chat = await send();
-      openRuleForm = null;
+      if (closeRuleFormAfter(action, extra)) openRuleForm = null;
       render();
       // The selected list and method live on the draft this action just changed, so the
       // options are re-read rather than assumed. Assuming would leave the previous

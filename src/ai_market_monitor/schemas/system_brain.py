@@ -59,7 +59,21 @@ class SystemBrainAssistantResponse(BaseModel):
     reasoning_effort: str
 
 
-AdminConversationSource = Literal["authenticated_setup_chat", "public_site_chat"]
+#: The two assistants a customer actually talks to.
+#:
+#: ``public_site_chat`` is the support assistant on the public site; ``dashboard_hilal_agent``
+#: is Hilal, the assistant inside the signed-in dashboard. The Setup Chat used to be the
+#: third source here. It is a strategy-building tool rather than a conversation with
+#: somebody, and reading it in the same list made the support log mostly not-support.
+AdminConversationSource = Literal["public_site_chat", "dashboard_hilal_agent"]
+
+#: What each source is called on screen. One owner: the filter menu, the conversation
+#: rows and the agent's own tool description all read this, so a source cannot be called
+#: two different things in two places.
+CONVERSATION_SOURCE_LABELS: dict[str, str] = {
+    "public_site_chat": "Support AI",
+    "dashboard_hilal_agent": "Hilal Agent",
+}
 
 
 class AdminConversationSummary(BaseModel):

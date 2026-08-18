@@ -1,6 +1,7 @@
 {% extends "hilal/base_dashboard.html" %}
+{% from "hilal/macros/coin_logo.html" import coin_logo_block %}
 {% block page_styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260805-y5-5">
+<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260818-live-4">
 {% endblock %}
 {% block content %}
 {% macro monitor_filter() %}
@@ -87,7 +88,7 @@
         <article class="watch-plan-card lifecycle-card" data-lifecycle-card="{{ item.id }}" data-lifecycle-state="{{ item.state }}" data-lifecycle-score="{{ item.completion_score }}" data-lifecycle-changed="{{ item.last_evaluated_at.isoformat() if item.last_evaluated_at else '' }}">
           <div class="watch-plan-top">
             <div class="coin">
-              <div class="coin-logo"{% if item.logo_module_url %} data-asset-logo-module="{{ item.logo_module_url }}" data-asset-logo-symbol="{{ item.asset_symbol }}"{% if item.logo_url %} data-asset-logo-url="{{ item.logo_url }}"{% endif %}{% endif %}>{{ item.asset_symbol[:3] }}</div>
+              {{ coin_logo_block(item.asset_symbol, module_url=item.logo_module_url, image_url=item.logo_url, decorative=true) }}
               <div><span class="kicker">{{ item.strategy_name }} | Version {{ item.strategy_version_number }}</span><h3>{{ item.symbol }}</h3><p>{{ item.exchange }} | {{ item.timeframe }} | {{ item.direction }}</p></div>
             </div>
             <div class="row"><span class="badge badge-qualified">{{ item.state_label }}</span><span class="badge badge-neutral">{{ item.readiness_label }}</span></div>
@@ -117,4 +118,4 @@
     being fetched nothing else on the page could run, so a slow or unreachable source left
     this page loading for ever with no message. Deferred scripts still run in order, so
     dashboard.js keeps seeing the chart library, and the page finishes loading either way. -#}
-{% block page_scripts %}{% if settings.chart_library_cdn_url %}<script src="{{ settings.chart_library_cdn_url }}" defer></script>{% endif %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260805-y5-5" defer></script>{% endblock %}
+{% block page_scripts %}{% if settings.chart_library_cdn_url %}<script src="{{ settings.chart_library_cdn_url }}" defer></script>{% endif %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260818-live-4" defer></script>{% endblock %}

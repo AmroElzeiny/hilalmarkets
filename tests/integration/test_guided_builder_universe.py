@@ -1,7 +1,7 @@
 """Choosing coins and a screening method, with no assistant and no hard-coded ids.
 
-The Builder had the *actions* for these вЂ” ``select_watchlist``, ``select_methodology``,
-``set_explicit_assets`` вЂ” but nothing told it what the legal answers were. A client with
+The Builder had the *actions* for these — ``select_watchlist``, ``select_methodology``,
+``set_explicit_assets`` — but nothing told it what the legal answers were. A client with
 no list of choices either hard-codes them, which puts a Sharia decision in JavaScript, or
 asks the assistant, which is the AI-only dependency the Builder exists to remove.
 
@@ -79,7 +79,7 @@ async def test_only_active_screening_methods_are_offered(test_context) -> None:
     """A draft method is not approved and an archived one is withdrawn.
 
     Offering either would let somebody monitor under a ruling the platform does not
-    stand behind вЂ” a Sharia status the governance process never granted.
+    stand behind — a Sharia status the governance process never granted.
     """
 
     user = await _user(test_context)

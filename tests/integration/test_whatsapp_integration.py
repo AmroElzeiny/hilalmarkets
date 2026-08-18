@@ -545,7 +545,7 @@ async def test_webhook_processor_completes_link_sends_confirmation_and_redacts_b
 
         assert result == "processed"
         assert isinstance(adapter.messages[0], WhatsAppSessionText)
-        assert "connected to HilalMarkets" in adapter.messages[0].body
+        assert "connected to Hilal Markets" in adapter.messages[0].body
         assert adapter.read_ids == ["wamid.link-1"]
         assert receipt.payload_redacted["processed"] is True
         assert raw_token not in json.dumps(receipt.payload_redacted)

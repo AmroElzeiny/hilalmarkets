@@ -7,7 +7,30 @@ from typing import Any
 from uuid import UUID
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.services.email_branding import HilalMarketsEmailRenderer
+from ai_market_monitor.services.email_branding import (
+    HilalMarketsEmailRenderer,
+    plain_text_block,
+)
+
+
+def email_delivery_available(settings: Settings) -> bool:
+    """Whether this platform can actually put an email in front of somebody right now.
+
+    One owner for the question, because two places need it and they must never disagree:
+    `offered_channels` decides whether to *offer* email as a way of being told, and the
+    delivery service decides whether to *try*. Offering a channel that nothing sends is
+    a promise the product cannot keep — the person turns it on, sees it saved, and then
+    hears nothing, with no error anywhere.
+
+    ``memory`` counts as available on purpose: it is the adapter the test suite and the
+    local environment use, and it does deliver — into an outbox that can be read.
+    """
+
+    if settings.email_adapter == "memory":
+        return True
+    return settings.email_adapter == "smtp" and bool(
+        settings.smtp_host and settings.smtp_from_email
+    )
 
 
 class EmailDeliveryError(RuntimeError):
@@ -101,11 +124,9 @@ class AuthEmailService:
         html_body = HilalMarketsEmailRenderer(self.settings).ensure_shell(
             subject=email_subject,
             preheader=f"Support ticket {ticket_id} was created.",
-            html_body=(
-                '<div style="color:#50555e;font-size:14px;line-height:1.7;'
-                'white-space:pre-wrap">'
-                f"{_escape_email_text(body)}</div>"
-            ),
+            # The third of three places that laid out an already-written message by
+            # hand. They disagreed about the typeface and the size; now they cannot.
+            html_body=plain_text_block(body),
         )
         if self.settings.email_adapter == "memory":
             self.settings.email_test_outbox.append(

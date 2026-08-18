@@ -1,5 +1,7 @@
+import { useEffect, useRef, useState } from 'react'
 import { CheckIcon, StatusPill } from './brand'
-import { TrackedCta } from './Tracking'
+import { Icon, type IconName } from './Icon'
+import { DURATION, move, moveEach, whenSeen } from '../motion'
 
 /* Coin glyphs (simple vector marks, not the exaggerated crypto clichés the
    brand forbids) */
@@ -34,40 +36,139 @@ function Sparkline() {
   )
 }
 
+/* -------------------------------------------------------------------------- */
+/*  The canvas                                                                 */
+/* -------------------------------------------------------------------------- */
+/**
+ * How a rule is actually built in the product, shown as four connected blocks.
+ *
+ * This panel used to be a chat bubble: a sentence typed at an assistant, with a button
+ * under it. That was the wrong picture in two ways. It showed the product as a place
+ * you talk to rather than a place you build in — the canvas is how a rule is put
+ * together — and a wall of prose is the one thing a beginner cannot read at a glance.
+ *
+ * So it is blocks now, and the rule reads top to bottom: which coin, what has to
+ * happen, what has to happen after that, what you get. Four short lines, no sentence
+ * longer than five words, and the numbers that matter — the 5% — carried on a pill of
+ * their own rather than buried in prose.
+ *
+ * The connectors draw themselves once, when the panel is first seen, in the order the
+ * rule is read. That is the brand's own use of motion: a left-to-right — here
+ * top-to-bottom — product flow that explains a relationship. It runs once and stops.
+ * With reduced motion asked for, every block and every line is simply already there.
+ */
+type Block = {
+  id: string
+  icon: IconName
+  label: string
+  value?: string
+  tone: 'asset' | 'rule' | 'alert'
+}
+
+const BLOCKS: Block[] = [
+  { id: 'asset', icon: 'market', label: 'BTC/USDT', value: 'Screened', tone: 'asset' },
+  { id: 'sweep', icon: 'chart', label: 'Dips below yesterday’s low', tone: 'rule' },
+  { id: 'recover', icon: 'refresh', label: 'Then recovers', value: '5%', tone: 'rule' },
+  { id: 'alert', icon: 'bell', label: 'Tell me straight away', tone: 'alert' },
+]
+
+function StrategyCanvas() {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [active, setActive] = useState<string | null>(null)
+
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    return whenSeen(root, () => {
+      const blocks = Array.from(root.querySelectorAll<HTMLElement>('[data-canvas-block]'))
+      void moveEach(
+        blocks,
+        { opacity: [0, 1], transform: ['translateY(10px)', 'translateY(0)'] },
+        { duration: DURATION.base, stagger: 0.11 },
+      )
+      const lines = Array.from(root.querySelectorAll<SVGPathElement>('[data-canvas-line]'))
+      lines.forEach((line, index) => {
+        // The line is drawn by shrinking its own dash gap to nothing. The length is
+        // measured from the path rather than written down, so the value cannot fall
+        // out of step with the geometry above it.
+        const length = line.getTotalLength()
+        line.style.strokeDasharray = String(length)
+        void move(
+          line as unknown as HTMLElement,
+          { strokeDashoffset: [length, 0] },
+          { duration: DURATION.slow, delay: 0.18 + index * 0.11 },
+        )
+      })
+    })
+  }, [])
+
+  return (
+    <div ref={rootRef} className="hm-canvas" data-name="Strategy canvas">
+      {/* The canvas surface: a dotted field, which is what the builder itself looks
+          like. It is a ground, so it is quiet and carries no meaning. */}
+      <div className="hm-canvas-grid" aria-hidden="true" />
+
+      <ol className="hm-canvas-flow">
+        {BLOCKS.map((block, index) => (
+          <li key={block.id}>
+            <div
+              data-canvas-block
+              data-tone={block.tone}
+              data-active={active === block.id}
+              className="hm-canvas-block"
+              onPointerEnter={() => setActive(block.id)}
+              onPointerLeave={() => setActive(null)}
+            >
+              <span className="hm-canvas-block-mark">
+                <Icon name={block.icon} className="size-[15px]" />
+              </span>
+              <span className="hm-canvas-block-label">{block.label}</span>
+              {block.value && <span className="hm-canvas-block-value tnum">{block.value}</span>}
+            </div>
+
+            {index < BLOCKS.length - 1 && (
+              <svg className="hm-canvas-link" viewBox="0 0 24 26" fill="none" aria-hidden="true">
+                <path
+                  data-canvas-line
+                  d="M12 1v24"
+                  stroke="#b8c2ce"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                />
+              </svg>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
 /**
  * The hero illustration, at every screen size.
  *
- * It used to be hidden below the small breakpoint, so a phone met the hero with words
- * only. It is the same three panels everywhere; only the shape of the grid changes:
+ * It is the same three panels everywhere; only the shape of the grid changes:
  *
  *   phone   one column, page gutter matched to the hero text (15px)
- *   tablet  two columns — watchlist beside the prompt, the three states in a row below
+ *   tablet  two columns — watchlist beside the canvas, the three states in a row below
  *   desktop the original three columns
  *
  * Nothing inside a panel is removed or swapped per size, so the phone shows the whole
  * story rather than a cut-down version of it.
  *
- * Every size keeps a side margin. The desktop row used to be a fixed 1180px box with no
- * padding, so on a screen between 1024 and 1180 wide the cards touched both edges. The
- * box is 1228 wide with a 24px gutter instead: the same 1180 of content on a wide screen,
- * and a margin that survives on a narrow laptop.
- *
- * The two-column arrangement starts at 900px, not at Tailwind's 768px `md`. The rest
- * of the page collapses to a single column below 900 — that is the
- * `@media (max-width: 899px)` block in index.css, which every other row obeys. While
- * the hero used `md` it alone stood two-across between 768 and 899 while everything
- * under it was full width, so on a tablet the first thing a visitor saw was the one
- * row that did not line up.
+ * The two-column arrangement starts at 900px, not at Tailwind's 768px `md`, because the
+ * rest of the page collapses to a single column below 900 — the
+ * `@media (max-width: 899px)` block in index.css, which every other row obeys.
  */
 export function HeroFlow() {
   return (
     <div className="relative mx-auto grid w-full max-w-[560px] items-stretch gap-3 px-[15px] sm:max-w-[820px] sm:gap-4 sm:px-5 min-[900px]:grid-cols-2 lg:max-w-[1228px] lg:grid-cols-[1fr_1.15fr_1fr] lg:gap-3 lg:px-6" data-name="Hero flow">
-{/* Panel 1 — screened watchlist */}
+      {/* Panel 1 — screened watchlist */}
       <div className="rounded-[22px] border border-hairline bg-surface p-4 shadow-[0_18px_40px_-28px_rgba(43,46,53,0.35)]">
         <div className="space-y-2.5">
           {[
-            { s: 'ETH', pair: 'ETH/USDT', muted: true },
-            { s: 'LTC', pair: 'LTC/USDT', muted: false },
+            { s: 'ETH', pair: 'ETH/USDT' },
+            { s: 'LTC', pair: 'LTC/USDT' },
           ].map((r) => (
             <div
               key={r.pair}
@@ -107,48 +208,28 @@ export function HeroFlow() {
         </div>
       </div>
 
-      {/* Panel 2 — describe what to watch */}
+      {/* Panel 2 — the canvas a rule is built on */}
       <div className="rounded-[22px] border border-[#c8cdd5] bg-surface p-4 sm:p-5">
-        {/* The mark and the pill keep their size on a narrow phone; only the sentence
-            between them gives way and wraps, so the row never squashes the label. */}
         <div className="flex items-center gap-2">
           <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-apple text-ink">
-            <svg viewBox="0 0 14 14" className="size-3.5" fill="none" aria-hidden="true">
-              <path d="M7 1v12M1 7h12" stroke="#2b2e35" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
+            <Icon name="workflow" className="size-3.5" />
           </span>
-          <p className="text-[13px] font-bold text-ink">Describe what you want to watch</p>
-          <span className="ml-auto shrink-0 rounded-full bg-[#edf1f4] px-2.5 py-1 text-[9px] font-bold text-[#656b74]">
+          <p className="text-[13px] font-bold text-ink">Build it on the canvas</p>
+          <span className="ml-auto shrink-0 rounded-full bg-[#edf1f4] px-2.5 py-1 text-[9px] font-bold text-[#5c646e]">
             screened only
           </span>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-hairline bg-[#f2f5f7] p-3.5 sm:p-4">
-          <div className="flex gap-2.5">
-            <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-ink text-[11px] font-bold text-white">
-              you
-            </span>
-            <p className="text-[13.5px] font-semibold leading-relaxed text-ink">
-              Alert me when a screened coin sweeps yesterday's low and recovers 5%.
-            </p>
-          </div>
-        </div>
+        <StrategyCanvas />
 
-        {/* The illustration sits inside the hero, so its button is a real link like any
-            other. It goes to the waitlist: while the product is invite-only, nothing on
-            this page may open an account. */}
-        <TrackedCta analyticsName="join_waitlist" analyticsLocation="hero_flow" href="#waitlist" className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-apple px-4 py-2 text-[12px] font-bold text-[#263018] transition-transform hover:-translate-y-0.5">
-          Join the waitlist
-          <svg viewBox="0 0 12 12" className="size-3" fill="none" aria-hidden="true">
-            <path d="M2 6h8M6 2l4 4-4 4" stroke="#263018" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </TrackedCta>
+        <p className="mt-3.5 flex items-center gap-1.5 text-[11.5px] text-[#5c646e]">
+          <Icon name="check" className="size-3.5 shrink-0 text-[#55712a]" />
+          You approve the rule before anything is watched.
+        </p>
       </div>
 
       {/* Panel 3 — monitoring states. Three cards: stacked on a phone, a row across the
-          full width on a tablet, back to a column beside the other panels on a desktop.
-          The tablet arrangement starts at 900px, the same width the rest of the page
-          stops being a single column. */}
+          full width on a tablet, back to a column beside the other panels on a desktop. */}
       <div className="flex flex-col gap-2.5 min-[900px]:col-span-2 min-[900px]:grid min-[900px]:grid-cols-3 min-[900px]:gap-3 lg:col-span-1 lg:flex lg:flex-col lg:gap-2.5">
         <div className="rounded-2xl border border-hairline bg-surface p-3.5">
           <StatusPill tone="blue" dot>forming</StatusPill>

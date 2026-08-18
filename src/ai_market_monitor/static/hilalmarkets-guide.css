@@ -75,7 +75,9 @@
   display: block;
   font-size: 0.75rem;
   letter-spacing: 0.02em;
-  color: var(--hm-muted, #7a8089);
+  /* The fallback has to be the same value the token now holds. #7a8089 measured
+     3.98:1 and would have kept failing wherever the token was not in scope. */
+  color: var(--hm-muted, #63696f);
   margin-bottom: 6px;
 }
 
@@ -140,7 +142,9 @@
 .hm-guide-btn-quiet {
   border-color: transparent;
   background: transparent;
-  color: var(--hm-muted, #7a8089);
+  /* The fallback has to be the same value the token now holds. #7a8089 measured
+     3.98:1 and would have kept failing wherever the token was not in scope. */
+  color: var(--hm-muted, #63696f);
   padding: 0 10px;
 }
 

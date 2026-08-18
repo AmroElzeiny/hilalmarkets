@@ -21,6 +21,31 @@ from ai_market_monitor.core.launch_stage import (
 )
 from ai_market_monitor.observability.metrics import MetricRetentionPolicy
 
+#: Every rate-limited scope in the product, named once.
+#:
+#: There used to be two lists: the rules in ``api/request_guards.py`` and a hand-written
+#: set inside the settings validator. Adding a scope to one and not the other stopped the
+#: application booting with a message that named neither — which is what happened the
+#: first time a new public endpoint was given a ceiling. Both read this now, and
+#: ``tests/unit/test_invariant_site_stats.py`` fails if they ever drift apart again.
+RATE_LIMIT_SCOPES: tuple[str, ...] = (
+    "authentication",
+    "ai_chat",
+    "market_check",
+    "checkout",
+    "portal",
+    "support",
+    "passport_report",
+    "telegram_test",
+    "whatsapp_test",
+    "public_chat",
+    "public_inquiry",
+    "public_waitlist",
+    "public_contact",
+    "site_analytics",
+    "admin_mutation",
+)
+
 WHATSAPP_TEMPLATE_EVENTS = frozenset(
     {
         "connection_confirmation",
@@ -207,6 +232,10 @@ class Settings(BaseSettings):
             "public_inquiry": {"limit": 5, "window_seconds": 3600},
             "public_waitlist": {"limit": 5, "window_seconds": 3600},
             "public_contact": {"limit": 5, "window_seconds": 3600},
+            # A visit beacon is tiny and frequent: one when the page opens, one every
+            # fifteen seconds while somebody reads, one when they leave. The ceiling is
+            # what one browser can honestly produce, not what a form submission costs.
+            "site_analytics": {"limit": 120, "window_seconds": 60},
             "admin_mutation": {"limit": 30, "window_seconds": 60},
         }
     )
@@ -532,6 +561,10 @@ class Settings(BaseSettings):
     auth_code_max_attempts: int = Field(default=5, ge=1, le=10)
     auth_test_fixed_code: str | None = None
     email_test_outbox: list[dict[str, Any]] = Field(default_factory=list, exclude=True)
+    #: First-party visit counting on the public site: how many people, how long they
+    #: stayed, and what they did next. Writes no cookie and stores no address, so it does
+    #: not depend on the cookie banner. Off makes the collector accept and discard.
+    site_visit_measurement_enabled: bool = True
     public_chat_enabled: bool = True
     public_chat_ai_enabled: bool = False
     public_chat_inquiry_email: str = "office@hilalmarkets.com"
@@ -568,6 +601,44 @@ class Settings(BaseSettings):
     public_chat_notion_max_characters: int = Field(default=12000, ge=1000, le=50000)
     public_chat_notion_max_file_bytes: int = Field(default=262144, ge=1024, le=2_000_000)
     public_forms_enabled: bool = True
+    # -- Hilal, the assistant inside the dashboard ------------------------------
+    #
+    # A different assistant from the one on the public site, on purpose. That one
+    # answers a visitor who has no account; this one answers a signed-in customer about
+    # their own listings, Passports, methodologies and plan. Different knowledge,
+    # different limits, different storage, so neither can drift into the other's job.
+    #
+    # It explains what is recorded. It never builds a strategy and never gives
+    # financial advice — see `services/hilal_chat_agent.py`, which refuses both.
+    hilal_chat_enabled: bool = True
+    #: Falls back to `openai_model` when unset, like every other assistant here.
+    hilal_chat_ai_model: str | None = None
+    hilal_chat_ai_reasoning_effort: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh"
+    ] = "low"
+    hilal_chat_ai_timeout_seconds: int = Field(default=30, ge=3, le=120)
+    hilal_chat_ai_max_output_tokens: int = Field(default=900, ge=256, le=2400)
+    hilal_chat_ai_max_estimated_cost_usd_per_turn: float = Field(
+        default=0.02,
+        gt=0,
+        le=1,
+    )
+    hilal_chat_ai_provider_attempts: int = Field(default=2, ge=1, le=3)
+    hilal_chat_ai_circuit_failure_threshold: int = Field(default=5, ge=1, le=20)
+    hilal_chat_ai_circuit_reset_seconds: int = Field(default=60, ge=10, le=900)
+    hilal_chat_ai_max_history_messages: int = Field(default=16, ge=2, le=40)
+    hilal_chat_message_max_length: int = Field(default=800, ge=100, le=4000)
+    hilal_chat_comment_max_length: int = Field(default=2000, ge=100, le=8000)
+    #: What one person may spend on Hilal in a 24-hour cycle, in US dollars. The cycle
+    #: is the UTC day, so it resets at 00:00 UTC — `ai_budget.day_window` decides that,
+    #: and it is the only thing that decides it.
+    hilal_chat_free_daily_usd: float = Field(default=0.10, gt=0, le=100)
+    #: How much more a paying subscriber gets. Five times the free allowance.
+    hilal_chat_paid_daily_multiplier: int = Field(default=5, ge=1, le=100)
+    #: How many evidence rows one turn may carry. A bound, so a large account cannot
+    #: quietly turn one question into an expensive one.
+    hilal_chat_max_evidence_assets: int = Field(default=24, ge=1, le=200)
+    hilal_chat_retention_days: int = Field(default=365, ge=7, le=3650)
     # -- Durable operational measurements ---------------------------------------
     #
     # Measurements are held in memory for speed and written down periodically, so
@@ -605,7 +676,11 @@ class Settings(BaseSettings):
     #: advertised routes, calls to action, pricing and checkout exposure, offered
     #: channels, and what the public assistant may claim. See
     #: `core/launch_stage.py`, which holds the exposure table and the legal moves.
-    launch_stage: LaunchStage = LaunchStage.PUBLIC_WAITLIST
+    #
+    # Hilal Markets is open to the public. The default is the stage the product is
+    # actually in, so a deployment that sets neither variable serves the live site
+    # rather than a waitlist for a product anybody can already open an account on.
+    launch_stage: LaunchStage = LaunchStage.PUBLIC_LAUNCH
     # The emergency ceiling, kept as an environment variable on purpose.
     #
     # It is no longer an independent authority: no surface reads it directly any
@@ -613,9 +688,24 @@ class Settings(BaseSettings):
     # What it still does is cap exposure. While it is true the product can be no more
     # open than `public_waitlist`, whatever LAUNCH_STAGE says, so one variable can
     # pull the site back without a deploy. It only ever narrows.
-    public_waitlist_mode: bool = True
+    #
+    # Off by default now that the product has launched. Left in place because the one
+    # thing it is for — pulling the public site back without a deploy — is needed more
+    # after a launch than before one.
+    public_waitlist_mode: bool = False
     contact_form_sender_email: str = "office@hilalmarkets.com"
     contact_form_recipient_email: str = "office@hilalmarkets.com"
+    # How many support messages are accepted, and from whom.
+    #
+    # One rule for both doors — the public /contact form and the dashboard's support
+    # form — enforced by `services/support_intake.py`. The first two are what one
+    # person may send; the third is the flood ceiling that stops a crowd of fresh
+    # addresses doing what one address cannot. All three are counted over the same
+    # window.
+    support_intake_max_per_email: int = Field(default=2, ge=1, le=100)
+    support_intake_max_per_client: int = Field(default=2, ge=1, le=100)
+    support_intake_max_per_hour: int = Field(default=20, ge=1, le=10_000)
+    support_intake_window_seconds: int = Field(default=3600, ge=60, le=86_400)
     public_form_email_max_attempts: int = Field(default=5, ge=1, le=20)
     public_form_email_retry_minutes: int = Field(default=15, ge=1, le=1440)
     public_form_delivery_claim_timeout_minutes: int = Field(default=10, ge=1, le=120)
@@ -785,29 +875,25 @@ class Settings(BaseSettings):
             raise ValueError("SHARIA_AI_ENRICHMENT_OFFICIAL_SOURCES_ONLY must remain true")
         if self.sharia_ai_enrichment_store_as_external_reason:
             raise ValueError("SHARIA_AI_ENRICHMENT_STORE_AS_EXTERNAL_REASON must remain false")
-        required_rate_limits = {
-            "authentication",
-            "ai_chat",
-            "market_check",
-            "checkout",
-            "portal",
-            "support",
-            "passport_report",
-            "telegram_test",
-            "whatsapp_test",
-            "public_chat",
-            "public_inquiry",
-            "public_waitlist",
-            "public_contact",
-            "admin_mutation",
-        }
-        if set(self.api_rate_limits) != required_rate_limits:
+        if set(self.api_rate_limits) != set(RATE_LIMIT_SCOPES):
             raise ValueError("API_RATE_LIMITS must define exactly the supported security scopes")
         for scope, values in self.api_rate_limits.items():
             if set(values) != {"limit", "window_seconds"}:
                 raise ValueError(f"API rate limit {scope} has an invalid shape")
             if values["limit"] < 1 or values["window_seconds"] < 1:
                 raise ValueError(f"API rate limit {scope} must use positive values")
+        # A per-person allowance above the whole-product ceiling is not a stricter
+        # setting, it is an incoherent one: the first person through the door would use
+        # up everybody's allowance. Refused at startup rather than discovered by the
+        # second customer of the hour.
+        if self.support_intake_max_per_email > self.support_intake_max_per_hour:
+            raise ValueError(
+                "SUPPORT_INTAKE_MAX_PER_EMAIL cannot exceed SUPPORT_INTAKE_MAX_PER_HOUR"
+            )
+        if self.support_intake_max_per_client > self.support_intake_max_per_hour:
+            raise ValueError(
+                "SUPPORT_INTAKE_MAX_PER_CLIENT cannot exceed SUPPORT_INTAKE_MAX_PER_HOUR"
+            )
         if self.whatsapp_graph_api_version and not re.fullmatch(
             r"v[1-9]\d*\.\d+", self.whatsapp_graph_api_version
         ):

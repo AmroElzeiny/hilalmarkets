@@ -1,7 +1,7 @@
 <nav class="public-nav" aria-label="Primary navigation">
   <div class="public-nav-inner">
     <a class="logo" href="{{ url_for('public_home') }}" aria-label="Hilal Markets home">
-      <img src="{{ url_for('static', path='/hilalmarkets-logo-mark.svg') }}" alt="Hilal Markets logo">
+      <img src="{{ url_for('static', path='/hilal-markets-symbol.svg') }}" alt="Hilal Markets logo">
       <span>Hilal Markets<small>Halal-conscious market monitoring</small></span>
     </a>
     <div class="public-links" id="public-navigation">
@@ -11,12 +11,16 @@
       {# Hilal Markets is invite-only while the private beta runs. In that state the
          header offers the waitlist and nothing else: an account cannot be opened from
          a public page, so a "Sign in" or "Start free" button would lead nowhere useful. #}
+      {#- `signin_url` and `signup_url` rather than `url_for`, because these two leave the
+          marketing site for the product. When the product has its own hostname they are
+          absolute and land on it; when it does not, they are the same plain paths
+          `url_for` produced. See `app_link` in `api/routers/public.py`. -#}
       <div class="public-mobile-actions">
         {% if waitlist_mode %}
         <a class="btn btn-primary" href="{{ waitlist_url }}">Join the waitlist</a>
         {% else %}
-        <a class="btn btn-secondary" href="{{ url_for('signin_page') }}">Sign in</a>
-        <a class="btn btn-primary" href="{{ url_for('signup_page') }}">Start free</a>
+        <a class="btn btn-secondary" href="{{ signin_url }}">Sign in</a>
+        <a class="btn btn-primary" href="{{ signup_url }}">Start free</a>
         {% endif %}
       </div>
     </div>
@@ -24,8 +28,8 @@
       {% if waitlist_mode %}
       <a class="btn btn-primary public-desktop-action" href="{{ waitlist_url }}"><span data-icon="arrow" data-icon-class="icon"></span>Join the waitlist</a>
       {% else %}
-      <a class="btn btn-secondary public-desktop-action" href="{{ url_for('signin_page') }}"><span data-icon="user" data-icon-class="icon"></span>Sign in</a>
-      <a class="btn btn-primary public-desktop-action" href="{{ url_for('signup_page') }}"><span data-icon="arrow" data-icon-class="icon"></span>Start free</a>
+      <a class="btn btn-secondary public-desktop-action" href="{{ signin_url }}"><span data-icon="user" data-icon-class="icon"></span>Sign in</a>
+      <a class="btn btn-primary public-desktop-action" href="{{ signup_url }}"><span data-icon="arrow" data-icon-class="icon"></span>Start free</a>
       {% endif %}
       <button class="btn btn-secondary btn-icon mobile-menu" type="button" data-public-menu aria-label="Open navigation" aria-controls="public-navigation" aria-expanded="false"><span data-icon="menu" data-icon-class="icon"></span></button>
     </div>

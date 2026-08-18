@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -28,7 +29,8 @@ from ai_market_monitor.schemas.strategy import (
     StrategyDefinition,
     StrategyDirection,
 )
-from tests.factories import candle_sets, load_strategy, market
+from ai_market_monitor.services.interfaces import Candle
+from tests.factories import candle_sets, candles, load_strategy, market
 
 
 def test_identical_market_data_produces_identical_proofs():
@@ -665,3 +667,124 @@ async def test_alert_fatigue_guard_cools_down_same_symbol_only(test_context):
             daily_alert_budget=None,
         )
         assert other_decision.allowed is True
+
+
+def _with_peak(series: list[Candle], index: int, high: float) -> None:
+    base = series[index]
+    series[index] = Candle(
+        timestamp=base.timestamp,
+        open=100,
+        high=high,
+        low=99,
+        close=100,
+        volume=1000,
+        is_closed=True,
+    )
+
+
+def _monotonic_baseline() -> list[Candle]:
+    # Strictly increasing by a tiny step so no two candles ever tie for "highest in
+    # this window" -- a flat baseline would make every candle its own false swing
+    # high, since `_swings` treats a tie as a match.
+    start = datetime(2026, 6, 1, tzinfo=UTC)
+    series = candles(30, start=start, minutes=15, close=100, volume=1000)
+    for index, candle in enumerate(series):
+        series[index] = Candle(
+            timestamp=candle.timestamp,
+            open=100,
+            high=100.0 + index * 0.0001,
+            low=99,
+            close=100,
+            volume=1000,
+            is_closed=True,
+        )
+    return series
+
+
+def test_higher_high_reads_confirmed_swing_points_not_a_same_candle_breakout():
+    """evaluator.py used to carry its own copy of higher_high/higher_low/lower_high/
+    lower_low: "is the very last candle a new N-period extreme," a same-candle
+    breakout check. That silently shadowed price_action.py's real definition -- the
+    latest confirmed swing point compared with the one before it -- for every
+    capability sharing these operand names (higher_high, higher_low, lower_high,
+    lower_low, and daily/weekly/monthly_high_low, which reuse higher_high).
+
+    This builds a series where the two definitions disagree: the last candle is not
+    a new high at all (the old check would say False), but two earlier, properly
+    confirmed swing highs rise from one to the next (the real "higher high" is True).
+    """
+
+    series = _monotonic_baseline()
+    _with_peak(series, 10, 105)  # earlier confirmed swing high
+    _with_peak(series, 16, 108)  # later confirmed swing high, higher than the last
+
+    operand = Operand(kind=OperandKind.PRICE_ACTION, name="higher_high", parameters={})
+    assert StrategyRuleEngine._price_action(operand, series) is True
+
+    # Swap which peak is higher and the reading flips -- proof this genuinely reads
+    # the swing comparison, not some other coincidental path to the same answer.
+    swapped = _monotonic_baseline()
+    _with_peak(swapped, 10, 108)
+    _with_peak(swapped, 16, 105)
+    assert StrategyRuleEngine._price_action(operand, swapped) is False
+
+
+def test_lower_low_reads_confirmed_swing_points_not_a_same_candle_breakout():
+    """Same fix, the down side: lower_low compares confirmed swing lows."""
+
+    start = datetime(2026, 6, 1, tzinfo=UTC)
+    series = candles(30, start=start, minutes=15, close=100, volume=1000)
+    for index, candle in enumerate(series):
+        series[index] = Candle(
+            timestamp=candle.timestamp,
+            open=100,
+            high=101,
+            low=100.0 - index * 0.0001,
+            close=100,
+            volume=1000,
+            is_closed=True,
+        )
+
+    def _trough(target: list[Candle], index: int, low: float) -> None:
+        base = target[index]
+        target[index] = Candle(
+            timestamp=base.timestamp,
+            open=100,
+            high=101,
+            low=low,
+            close=100,
+            volume=1000,
+            is_closed=True,
+        )
+
+    _trough(series, 10, 95)  # earlier confirmed swing low
+    _trough(series, 16, 92)  # later confirmed swing low, lower than the one before it
+
+    operand = Operand(kind=OperandKind.PRICE_ACTION, name="lower_low", parameters={})
+    assert StrategyRuleEngine._price_action(operand, series) is True
+
+    swapped = list(series)
+    _trough(swapped, 10, 92)
+    _trough(swapped, 16, 95)
+    assert StrategyRuleEngine._price_action(operand, swapped) is False
+
+
+def test_higher_high_family_evaluates_identically_to_evaluate_price_action():
+    """The two implementations must no longer be able to disagree, by construction.
+
+    evaluator.py no longer has its own copy of these four names; it falls through to
+    `evaluate_price_action`. This pins that down for every name in the family so a
+    future re-introduction of a shadowing branch is caught immediately.
+    """
+
+    from ai_market_monitor.engine.price_action import evaluate_price_action
+
+    series = _monotonic_baseline()
+    _with_peak(series, 10, 105)
+    _with_peak(series, 16, 108)
+
+    for name in ("higher_high", "higher_low", "lower_high", "lower_low"):
+        operand = Operand(kind=OperandKind.PRICE_ACTION, name=name, parameters={})
+        assert StrategyRuleEngine._price_action(operand, series) == evaluate_price_action(
+            name, series, {}
+        )

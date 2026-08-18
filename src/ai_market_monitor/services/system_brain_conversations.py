@@ -8,20 +8,20 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import String, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.db.models import (
-    AISetupChatMessage,
-    AISetupChatSession,
-    AIUsageEvent,
     AuditEvent,
     CustomerConversationEvent,
+    HilalChatConversation,
+    HilalChatMessage,
+    HilalChatMessageReport,
+    HilalChatRating,
     PublicChatAnswerEvent,
     PublicChatConversation,
     PublicChatMessage,
     PublicChatTurn,
-    SetupChatTurn,
     User,
     UserIdentity,
 )
@@ -33,10 +33,7 @@ from ai_market_monitor.schemas.system_brain import (
     AdminConversationSummary,
     AdminConversationTimeline,
 )
-from ai_market_monitor.services.system_brain_privacy import (
-    redact_customer_text,
-    safe_telemetry,
-)
+from ai_market_monitor.services.system_brain_privacy import redact_customer_text
 
 
 class AdminConversationNotFound(LookupError):
@@ -67,9 +64,9 @@ class AdminConversationExplorer:
         limit = max(1, min(limit, 100))
         cursor_at, cursor_id = _decode_cursor(cursor)
         candidates: list[AdminConversationSummary] = []
-        if source in {None, "authenticated_setup_chat"}:
+        if source in {None, "dashboard_hilal_agent"}:
             candidates.extend(
-                await self._setup_summaries(
+                await self._hilal_summaries(
                     search=search,
                     lifecycle=lifecycle,
                     error_only=error_only,
@@ -134,8 +131,8 @@ class AdminConversationExplorer:
         reason = access_reason.strip()
         if len(reason) < 3:
             raise ValueError("An access reason or category is required.")
-        if source == "authenticated_setup_chat":
-            result = await self._setup_timeline(conversation_id)
+        if source == "dashboard_hilal_agent":
+            result = await self._hilal_timeline(conversation_id)
         else:
             result = await self._public_timeline(conversation_id)
         self.session.add(
@@ -182,43 +179,45 @@ class AdminConversationExplorer:
             for row in rows
         ]
 
-    async def _setup_summaries(self, **filters: Any) -> list[AdminConversationSummary]:
-        statement = select(AISetupChatSession).order_by(AISetupChatSession.updated_at.desc())
+    async def _hilal_summaries(self, **filters: Any) -> list[AdminConversationSummary]:
+        """Conversations with Hilal, the assistant inside the signed-in dashboard.
+
+        One row per person, for ever: Hilal keeps one running conversation rather than a
+        session per visit, so "last message" is what orders this list and the message
+        count is the whole history.
+        """
+
+        now = datetime.now(UTC)
+        statement = select(HilalChatConversation).order_by(
+            HilalChatConversation.updated_at.desc()
+        )
         statement = _date_filters(
             statement,
-            AISetupChatSession.created_at,
+            HilalChatConversation.created_at,
             filters.get("date_from"),
             filters.get("date_to"),
         )
-        lifecycle = filters.get("lifecycle")
         if filters.get("conversation_id"):
-            statement = statement.where(AISetupChatSession.id == filters["conversation_id"])
-        if lifecycle:
-            statement = statement.where(AISetupChatSession.status == lifecycle)
+            statement = statement.where(HilalChatConversation.id == filters["conversation_id"])
         identity = filters.get("identity")
         if identity == "anonymous":
+            # Hilal only ever answers a signed-in customer, so this filter selects
+            # nothing rather than quietly selecting everybody.
             return []
-        approval_state = filters.get("approval_state")
-        if approval_state == "approved":
-            statement = statement.where(AISetupChatSession.approved_at.is_not(None))
-        elif approval_state == "unapproved":
-            statement = statement.where(AISetupChatSession.approved_at.is_(None))
         search = str(filters.get("search") or "").strip()
         if search:
             user_ids = await self._matching_user_ids(search)
-            message_match = select(AISetupChatMessage.id).where(
-                AISetupChatMessage.session_id == AISetupChatSession.id,
-                AISetupChatMessage.content.ilike(f"%{_escape_like(search)}%", escape="\\"),
+            message_match = select(HilalChatMessage.id).where(
+                HilalChatMessage.conversation_id == HilalChatConversation.id,
+                HilalChatMessage.retain_until > now,
+                HilalChatMessage.content.ilike(f"%{_escape_like(search)}%", escape="\\"),
             )
-            clauses = [
-                AISetupChatSession.title.ilike(f"%{_escape_like(search)}%", escape="\\"),
-                AISetupChatSession.id.cast(String).ilike(f"%{search}%"),
-                message_match.exists(),
-            ]
+            clauses: list[Any] = [message_match.exists()]
             with suppress(ValueError):
-                clauses.append(AISetupChatSession.user_id == UUID(search))
+                clauses.append(HilalChatConversation.id == UUID(search))
+                clauses.append(HilalChatConversation.user_id == UUID(search))
             if user_ids:
-                clauses.append(AISetupChatSession.user_id.in_(user_ids))
+                clauses.append(HilalChatConversation.user_id.in_(user_ids))
             statement = statement.where(or_(*clauses))
         rows = list(
             (
@@ -227,52 +226,39 @@ class AdminConversationExplorer:
         )
         users, identities = await self._user_maps({item.user_id for item in rows})
         chat_ids = {item.id for item in rows}
-        failures: dict[UUID, SetupChatTurn] = {}
-        if chat_ids:
-            failure_rows = list(
-                (
-                    await self.session.scalars(
-                        select(SetupChatTurn)
-                        .where(
-                            SetupChatTurn.chat_session_id.in_(chat_ids),
-                            SetupChatTurn.failure_code.is_not(None),
-                        )
-                        .order_by(
-                            SetupChatTurn.chat_session_id,
-                            SetupChatTurn.updated_at.desc(),
-                        )
-                    )
-                ).all()
-            )
-            for row in failure_rows:
-                failures.setdefault(row.chat_session_id, row)
         message_counts = {
             row[0]: int(row[1])
             for row in (
                 await self.session.execute(
-                    select(AISetupChatMessage.session_id, func.count(AISetupChatMessage.id))
-                    .where(AISetupChatMessage.session_id.in_(chat_ids))
-                    .group_by(AISetupChatMessage.session_id)
+                    select(HilalChatMessage.conversation_id, func.count(HilalChatMessage.id))
+                    .where(
+                        HilalChatMessage.conversation_id.in_(chat_ids),
+                        HilalChatMessage.retain_until > now,
+                    )
+                    .group_by(HilalChatMessage.conversation_id)
                 )
             ).all()
         }
         last_sequence = (
             select(
-                AISetupChatMessage.session_id.label("session_id"),
-                func.max(AISetupChatMessage.sequence).label("sequence"),
+                HilalChatMessage.conversation_id.label("conversation_id"),
+                func.max(HilalChatMessage.sequence).label("sequence"),
             )
-            .where(AISetupChatMessage.session_id.in_(chat_ids))
-            .group_by(AISetupChatMessage.session_id)
+            .where(
+                HilalChatMessage.conversation_id.in_(chat_ids),
+                HilalChatMessage.retain_until > now,
+            )
+            .group_by(HilalChatMessage.conversation_id)
             .subquery()
         )
         last_messages = {
-            row.session_id: row
+            row.conversation_id: row
             for row in (
                 await self.session.scalars(
-                    select(AISetupChatMessage).join(
+                    select(HilalChatMessage).join(
                         last_sequence,
-                        (AISetupChatMessage.session_id == last_sequence.c.session_id)
-                        & (AISetupChatMessage.sequence == last_sequence.c.sequence),
+                        (HilalChatMessage.conversation_id == last_sequence.c.conversation_id)
+                        & (HilalChatMessage.sequence == last_sequence.c.sequence),
                     )
                 )
             ).all()
@@ -282,28 +268,68 @@ class AdminConversationExplorer:
             for row in (
                 await self.session.execute(
                     select(
-                        AIUsageEvent.chat_session_id,
-                        func.coalesce(func.sum(AIUsageEvent.estimated_cost_usd), 0),
+                        HilalChatMessage.conversation_id,
+                        func.coalesce(func.sum(HilalChatMessage.estimated_cost_usd), 0),
                     )
-                    .where(AIUsageEvent.chat_session_id.in_(chat_ids))
-                    .group_by(AIUsageEvent.chat_session_id)
+                    .where(HilalChatMessage.conversation_id.in_(chat_ids))
+                    .group_by(HilalChatMessage.conversation_id)
+                )
+            ).all()
+        }
+        # "Somebody said this answer was wrong" is the only failure this assistant has.
+        # There is no failed-turn table for it, so a reported answer is what `has_error`
+        # means here — and the Errors-only filter selects exactly those conversations.
+        reported = {
+            row[0]: str(row[1])
+            for row in (
+                await self.session.execute(
+                    select(
+                        HilalChatMessageReport.conversation_id,
+                        func.min(HilalChatMessageReport.reason),
+                    )
+                    .where(HilalChatMessageReport.conversation_id.in_(chat_ids))
+                    .group_by(HilalChatMessageReport.conversation_id)
+                )
+            ).all()
+        }
+        ratings = {
+            row[0]: int(row[1])
+            for row in (
+                await self.session.execute(
+                    select(
+                        HilalChatRating.conversation_id,
+                        func.max(HilalChatRating.stars),
+                    )
+                    .where(HilalChatRating.conversation_id.in_(chat_ids))
+                    .group_by(HilalChatRating.conversation_id)
                 )
             ).all()
         }
         unread_ids = await self._unread_ids(chat_ids, int(filters.get("seen_event_id") or 0))
+        lifecycle = str(filters.get("lifecycle") or "").strip().casefold()
+        approval_state = filters.get("approval_state")
         summaries: list[AdminConversationSummary] = []
         for item in rows:
-            failed = failures.get(item.id)
-            if filters.get("error_only") and failed is None:
+            report_reason = reported.get(item.id)
+            if filters.get("error_only") and report_reason is None:
                 continue
             last = last_messages.get(item.id)
+            stage = (last.mode if last else "no_messages").casefold()
+            if lifecycle and lifecycle not in stage:
+                continue
+            if approval_state in {"approved", "unapproved"}:
+                # Nothing in a Hilal conversation is approved or unapproved: this
+                # assistant answers questions, it does not gate anything. The filter
+                # selects nothing rather than pretending a state exists.
+                continue
             user = users.get(item.user_id)
             deleted = user is not None and user.status == UserStatus.DELETED
             email = None if deleted else identities.get(item.user_id)
+            stars = ratings.get(item.id)
             summaries.append(
                 AdminConversationSummary(
                     conversation_id=item.id,
-                    source_type="authenticated_setup_chat",
+                    source_type="dashboard_hilal_agent",
                     user_id=None if deleted else item.user_id,
                     user_email=email,
                     display_name=(
@@ -318,19 +344,21 @@ class AdminConversationExplorer:
                     anonymous=False,
                     created_at=item.created_at,
                     updated_at=item.updated_at,
-                    last_message_at=last.created_at if last else None,
-                    message_count=message_counts.get(item.id, 0),
-                    title_or_topic=item.title,
-                    lifecycle_or_stage=item.status,
+                    last_message_at=item.last_message_at or (last.created_at if last else None),
+                    message_count=message_counts.get(item.id, item.message_count),
+                    title_or_topic=(
+                        f"Rated {stars}/5" if stars else "Dashboard help"
+                    ),
+                    lifecycle_or_stage=stage,
                     last_message_excerpt=(
                         None
                         if deleted or last is None
                         else redact_customer_text(last.content, limit=180)
                     ),
-                    has_error=failed is not None,
-                    last_error_code=failed.failure_code if failed else None,
-                    approval_state="approved" if item.approved_at else "unapproved",
-                    model=(failed.planner_model if failed else None),
+                    has_error=report_reason is not None,
+                    last_error_code=report_reason,
+                    approval_state=None,
+                    model=last.model if last else None,
                     estimated_ai_cost=costs.get(item.id, Decimal("0")),
                     unread=item.id in unread_ids,
                 )
@@ -508,94 +536,93 @@ class AdminConversationExplorer:
             )
         return summaries
 
-    async def _setup_timeline(self, conversation_id: UUID) -> AdminConversationTimeline:
-        chat = await self.session.get(AISetupChatSession, conversation_id)
+    async def _hilal_timeline(self, conversation_id: UUID) -> AdminConversationTimeline:
+        chat = await self.session.get(HilalChatConversation, conversation_id)
+        now = datetime.now(UTC)
         if chat is None:
             raise AdminConversationNotFound(str(conversation_id))
-        page = await self._setup_summaries(
+        page = await self._hilal_summaries(
             conversation_id=conversation_id, limit=1, seen_event_id=0
         )
         summary = next((item for item in page if item.conversation_id == conversation_id), None)
         if summary is None:
-            summary = await self._setup_summary_direct(chat)
+            raise AdminConversationNotFound(str(conversation_id))
         user = await self.session.get(User, chat.user_id)
         deleted = user is not None and user.status == UserStatus.DELETED
         rows = list(
             (
                 await self.session.scalars(
-                    select(AISetupChatMessage)
-                    .where(AISetupChatMessage.session_id == conversation_id)
-                    .order_by(AISetupChatMessage.sequence.asc())
+                    select(HilalChatMessage)
+                    .where(
+                        HilalChatMessage.conversation_id == conversation_id,
+                        HilalChatMessage.retain_until > now,
+                    )
+                    .order_by(HilalChatMessage.sequence.asc())
                     .limit(1000)
                 )
             ).all()
         )
-        turns = list(
-            (
+        reports = {
+            row.message_id: row
+            for row in (
                 await self.session.scalars(
-                    select(SetupChatTurn)
-                    .where(SetupChatTurn.chat_session_id == conversation_id)
-                    .order_by(SetupChatTurn.created_at.asc())
+                    select(HilalChatMessageReport).where(
+                        HilalChatMessageReport.conversation_id == conversation_id
+                    )
                 )
             ).all()
-        )
-        by_message: dict[UUID, SetupChatTurn] = {}
-        for persisted_turn in turns:
-            if persisted_turn.source_message_id:
-                by_message[persisted_turn.source_message_id] = persisted_turn
-            if persisted_turn.assistant_message_id:
-                by_message[persisted_turn.assistant_message_id] = persisted_turn
-        messages = []
-        for row in rows:
-            matching_turn = by_message.get(row.id)
-            telemetry = safe_telemetry(matching_turn.telemetry_json if matching_turn else None)
-            messages.append(
-                AdminConversationMessage(
-                    message_id=row.id,
-                    sequence=row.sequence,
-                    role="user" if row.role == "user" else "assistant",
-                    message_type=row.message_type,
-                    content=(
-                        "[Content unavailable after account deletion]"
-                        if deleted
-                        else redact_customer_text(row.content)
-                    ),
-                    created_at=row.created_at,
-                    lifecycle=matching_turn.status if matching_turn else None,
-                    error_code=matching_turn.failure_code if matching_turn else None,
-                    model=matching_turn.planner_model if matching_turn else None,
-                    latency_ms=_int_or_none(
-                        telemetry.get("turn_duration_ms") or telemetry.get("latency_ms")
-                    ),
-                    input_tokens=_int_or_none(telemetry.get("input_tokens")),
-                    output_tokens=_int_or_none(telemetry.get("output_tokens")),
-                    reasoning_tokens=_int_or_none(telemetry.get("reasoning_tokens")),
-                    estimated_cost_usd=_decimal_or_none(telemetry.get("estimated_cost_usd")),
-                )
+        }
+        messages = [
+            AdminConversationMessage(
+                message_id=row.id,
+                sequence=row.sequence,
+                role="user" if row.role == "user" else "assistant",
+                # Hilal records what kind of answer it gave — grounded, refusal, or a
+                # question back. That is the message type an admin needs to see.
+                message_type=row.mode.casefold(),
+                content=(
+                    "[Content unavailable after account deletion]"
+                    if deleted
+                    else redact_customer_text(row.content)
+                ),
+                created_at=row.created_at,
+                lifecycle=row.page,
+                error_code=(reports[row.id].reason if row.id in reports else None),
+                model=row.model,
+                latency_ms=row.latency_ms or None,
+                input_tokens=row.input_tokens or None,
+                output_tokens=row.output_tokens or None,
+                estimated_cost_usd=row.estimated_cost_usd,
             )
-        events = await self._timeline_events(conversation_id)
+            for row in rows
+        ]
+        # A conversation older than the retention window keeps its counters but not its
+        # words. Saying so is the honest answer; reconstructing the text is not.
+        complete = len(rows) >= chat.message_count
         return AdminConversationTimeline(
             summary=summary,
             messages=messages,
-            lifecycle_events=events,
-            telemetry_available=bool(turns),
-            transcript_complete=True,
-            related_links=[
-                {
-                    "label": "Customer",
-                    "href": f"/dashboard/system-brain/users?user_id={chat.user_id}",
-                },
-                *(
-                    [
-                        {
-                            "label": "Approved strategy",
-                            "href": f"/dashboard/strategies/{chat.approved_strategy_id}",
-                        }
-                    ]
-                    if chat.approved_strategy_id
-                    else []
-                ),
-            ],
+            lifecycle_events=await self._timeline_events(conversation_id),
+            telemetry_available=any(row.model for row in rows),
+            transcript_complete=complete,
+            transcript_limitation=(
+                None
+                if complete
+                else (
+                    "Some messages in this conversation have passed their retention date "
+                    "and were removed. Nothing was reconstructed from the counters."
+                )
+            ),
+            related_links=(
+                [
+                    {
+                        "label": "Customer",
+                        "href": f"/dashboard/system-brain/users?user_id={chat.user_id}",
+                    }
+                ]
+                if not deleted
+                else []
+            ),
         )
 
     async def _public_timeline(self, conversation_id: UUID) -> AdminConversationTimeline:
@@ -675,13 +702,6 @@ class AdminConversationExplorer:
                 else []
             ),
         )
-
-    async def _setup_summary_direct(self, chat: AISetupChatSession) -> AdminConversationSummary:
-        rows = await self._setup_summaries(conversation_id=chat.id, limit=1, seen_event_id=0)
-        found = next((item for item in rows if item.conversation_id == chat.id), None)
-        if found is None:
-            raise AdminConversationNotFound(str(chat.id))
-        return found
 
     async def _public_summary_direct(
         self, chat: PublicChatConversation

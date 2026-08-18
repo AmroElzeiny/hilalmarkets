@@ -371,6 +371,7 @@ class AlertType(StrEnum):
 class DeliveryChannel(StrEnum):
     TELEGRAM = "telegram"
     WHATSAPP = "whatsapp"
+    EMAIL = "email"
     DISCORD = "discord"
     WEB = "web"
 

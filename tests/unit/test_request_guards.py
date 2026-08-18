@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from starlette.requests import Request
 
 from ai_market_monitor.api.request_guards import (
-    _request_fingerprint,
+    client_fingerprint,
     matching_rate_limit_rule,
     same_origin_failure,
 )
@@ -130,4 +130,4 @@ def test_deployed_rate_limit_identity_does_not_trust_user_header() -> None:
         headers=[(b"x-user-id", b"attacker-selected-two")],
     )
 
-    assert _request_fingerprint(first, settings) == _request_fingerprint(second, settings)
+    assert client_fingerprint(first, settings) == client_fingerprint(second, settings)

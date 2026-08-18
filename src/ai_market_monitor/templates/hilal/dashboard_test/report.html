@@ -1,0 +1,221 @@
+{% extends "hilal/base_dashboard.html" %}
+{% import "hilal/dashboard_test/macros/tone.html" as tone %}
+{% import "hilal/dashboard_test/macros/coin.html" as coin %}
+{% set status_tone = tone.asset_tone(passport.assessment.status.value) %}
+{% set asset_symbol = passport.identity.symbol if passport.identity else passport.assessment.canonical_asset %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260818-live-4">{% endblock %}
+{% block content %}
+
+{#- The Passport as one complete record, for printing or for handing to someone else.
+    Nothing here is behind a disclosure: a printed page cannot be expanded. It is the
+    same read model as the Passport page, laid out flat. -#}
+<div class="hm-t t-report" data-report-page>
+
+  <div class="t-asset-actions t-no-print" style="border-top:0;padding-top:0;">
+    <a class="t-action" href="{{ market_base_path }}/{{ passport.assessment.canonical_asset|lower }}"><span data-icon="chevron_left" data-icon-class="icon-sm"></span>Back to the Passport</a>
+    <button class="t-action is-primary" type="button" data-print style="flex:0 0 auto;"><span data-icon="printer" data-icon-class="icon-sm"></span>Print or save as PDF</button>
+    <button class="t-action" type="button" data-copy-link style="flex:0 0 auto;"><span data-icon="link" data-icon-class="icon-sm"></span>Copy the link</button>
+  </div>
+
+  <header class="t-report-head">
+    <div class="t-head-copy">
+      <p class="t-eyebrow">{{ coin.logo(asset_symbol, passport.identity) }}<span data-icon="passport" data-icon-class="icon-sm"></span>Hilal Markets &middot; Shariah Evidence report</p>
+      <h1>{{ passport.identity.name if passport.identity else passport.assessment.asset_name or passport.assessment.canonical_asset }} ({{ asset_symbol }})</h1>
+      <p>{{ passport.assessment.methodology_name }} v{{ passport.assessment.methodology_version }}{% if passport.passport_version %} &middot; Passport version {{ passport.passport_version }}{% endif %}</p>
+    </div>
+    <div class="t-head-copy" style="align-items:flex-start;">
+      {{ tone.chip(status_tone, passport.assessment.status_label) }}
+      <p class="t-foot-note">Printed from Hilal Markets. Evidence last checked {{ passport.last_verified_at|short_dt(user.timezone) if passport.last_verified_at else passport.assessment.reviewed_at|short_dt(user.timezone) }}.</p>
+    </div>
+  </header>
+
+  {% if passport.historical.is_historical %}
+  <div class="t-banner" data-tone="info">
+    <span data-icon="history" data-icon-class="icon"></span>
+    <div class="t-banner-body"><strong>This is an older version</strong><p>Kept exactly as it stood{% if passport.historical.event_time %} on {{ passport.historical.event_time|short_dt(user.timezone) }}{% endif %}. Today's result is {{ passport.historical.current_status.value|replace('_', ' ') if passport.historical.current_status else 'not published' }}.</p></div>
+  </div>
+  {% endif %}
+
+  <section class="t-report-block">
+    <h2>1. The result</h2>
+    <p>{{ passport.why_this_status }}</p>
+    <table>
+      <tbody>
+        <tr><th scope="row">Result</th><td>{{ passport.assessment.status_label }}</td></tr>
+        <tr><th scope="row">Standard used</th><td>{{ passport.assessment.methodology_name }} v{{ passport.assessment.methodology_version }}</td></tr>
+        <tr><th scope="row">Decision made</th><td>{{ passport.decision_date|short_dt(user.timezone) if passport.decision_date else 'Not recorded' }}</td></tr>
+        <tr><th scope="row">Published</th><td>{{ passport.publication_date|short_dt(user.timezone) if passport.publication_date else 'Not recorded' }}</td></tr>
+        <tr><th scope="row">Evidence last checked</th><td>{{ passport.last_verified_at|short_dt(user.timezone) if passport.last_verified_at else passport.assessment.reviewed_at|short_dt(user.timezone) }}</td></tr>
+        <tr><th scope="row">Evidence expires</th><td>{{ passport.evidence_expires_at|short_dt(user.timezone) if passport.evidence_expires_at else 'Not recorded' }}</td></tr>
+        <tr><th scope="row">Next source check</th><td>{{ passport.next_source_scan_at|short_dt(user.timezone) if passport.next_source_scan_at else 'Not scheduled' }}</td></tr>
+      </tbody>
+    </table>
+    {% if passport.main_qualification %}<p><strong>Condition that applies:</strong> {{ passport.main_qualification }}</p>{% endif %}
+    <p class="t-foot-note">This is a screening result for the coin itself, under the one standard named above, on the date named above. It is not a universal religious ruling and it is not approval of every way the coin can be used.</p>
+  </section>
+
+  <section class="t-report-block">
+    <h2>2. Why</h2>
+    <ul class="t-reasons">
+      {% for reason in passport.main_reasons %}
+      <li><span data-icon="check" data-icon-class="icon-sm"></span><span>{{ reason }}</span></li>
+      {% else %}
+      <li><span data-icon="info" data-icon-class="icon-sm"></span><span>No short reason was kept with this record.</span></li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="t-report-block">
+    <h2>3. What this covers</h2>
+    <table>
+      <thead><tr><th scope="col">Use</th><th scope="col">Covered?</th><th scope="col">Reason and scope</th><th scope="col">Checked</th></tr></thead>
+      <tbody>
+        {% for use in passport.use_coverage %}
+        <tr>
+          <td>{{ use.label }}</td>
+          <td>{{ tone.humanize(use.status) }}</td>
+          <td>{{ use.reason }}{% if use.scope %}<br><em>Scope: {{ use.scope }}</em>{% endif %}{% if use.supporting_reference %}<br><em>{{ use.supporting_reference }}</em>{% endif %}</td>
+          <td>{{ use.last_verified_at|short_dt(user.timezone) if use.last_verified_at else 'Not recorded' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">No separate use decisions were kept for this record.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="t-report-block">
+    <h2>4. Which coin exactly</h2>
+    {% if passport.identity %}
+    <table>
+      <tbody>
+        <tr><th scope="row">Official name</th><td>{{ passport.identity.name }}</td></tr>
+        <tr><th scope="row">Symbol</th><td>{{ passport.identity.symbol }}</td></tr>
+        <tr><th scope="row">Network</th><td>{{ passport.identity.network or 'Not recorded' }}</td></tr>
+        <tr><th scope="row">Type</th><td>{% if passport.identity.native_asset %}Native coin{% elif passport.identity.native_asset == false %}Token{% else %}{{ tone.humanize(passport.identity.asset_type) }}{% endif %}</td></tr>
+        <tr><th scope="row">Identity state</th><td>{{ tone.humanize(passport.identity.identity_state) }}</td></tr>
+        <tr><th scope="row">Identity checked</th><td>{{ passport.identity.identity_verified_at|short_dt(user.timezone) if passport.identity.identity_verified_at else 'Date not kept' }}</td></tr>
+        {% for network, address in (passport.identity.contract_addresses or {}).items() %}
+        <tr><th scope="row">Contract on {{ network }}</th><td class="t-code">{{ address }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <h3>Where it trades</h3>
+    <table>
+      <thead><tr><th scope="col">Exchange</th><th scope="col">Market</th><th scope="col">Type</th><th scope="col">Trading now?</th></tr></thead>
+      <tbody>
+        {% for market in passport.identity.exchange_markets %}
+        <tr><td>{{ market.exchange|capitalize }}</td><td>{{ market.market_symbol }}</td><td>{{ market.market_type }}</td><td>{{ 'Yes' if market.is_active else 'No' }}</td></tr>
+        {% else %}
+        <tr><td colspan="4">No checked spot market is recorded on a supported exchange.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="t-foot-note">Whether an exchange lists a coin is separate from whether it passed the review.</p>
+    {% else %}
+    <p>Identity details are not available for this version. Hilal Markets does not invent which coin a ticker refers to.</p>
+    {% endif %}
+  </section>
+
+  <section class="t-report-block">
+    <h2>5. Rule by rule</h2>
+    <table>
+      <thead><tr><th scope="col">Rule</th><th scope="col">Outcome</th><th scope="col">Reviewer explanation</th><th scope="col">Evidence and gaps</th></tr></thead>
+      <tbody>
+        {% for criterion in passport.criteria %}
+        <tr>
+          <td>{{ criterion.label }}</td>
+          <td>{{ tone.humanize(criterion.outcome) }}</td>
+          <td>{{ criterion.reviewer_explanation or 'No explanation was added.' }}</td>
+          <td>
+            {% if criterion.evidence %}{{ criterion.evidence|join(' · ') }}{% endif %}
+            {% if criterion.known_gaps %}<br><em>Still missing: {{ criterion.known_gaps|join(' · ') }}</em>{% endif %}
+            {% if criterion.contradictions %}<br><em>Sources disagree: {{ criterion.contradictions|join(' · ') }}</em>{% endif %}
+            {% if not criterion.evidence and not criterion.known_gaps and not criterion.contradictions %}Not recorded{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">This record did not keep rule-by-rule decisions. Nothing was reconstructed to fill the gap.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="t-report-block">
+    <h2>6. Sources</h2>
+    <table>
+      <thead><tr><th scope="col">Source</th><th scope="col">Publisher</th><th scope="col">Available?</th><th scope="col">Taken</th><th scope="col">Saved copy and fingerprint</th></tr></thead>
+      <tbody>
+        {% for source in passport.evidence_details %}
+        <tr>
+          <td>{{ source.title }}{% if source.source_url %}<br><span class="t-code">{{ source.source_url }}</span>{% endif %}<br>{{ source.evidence_summary }}</td>
+          <td>{{ source.publisher }}</td>
+          <td>{{ tone.humanize(source.availability) }}</td>
+          <td>{{ source.retrieved_at|short_dt(user.timezone) }}{% if source.published_at %}<br><em>published {{ source.published_at|short_dt(user.timezone) }}</em>{% endif %}</td>
+          <td><span class="t-code">{{ source.snapshot_id or 'Older record' }}</span><br><span class="t-code">{{ source.content_hash or 'Fingerprint not kept' }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5">The exact sources for this version are not available. No other source was substituted in their place.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="t-foot-note">A live link can change after this report was printed. The saved copy and its fingerprint cannot.</p>
+  </section>
+
+  <section class="t-report-block">
+    <h2>7. Decision and history</h2>
+    {% if passport.decision_record %}
+    <table>
+      <tbody>
+        <tr><th scope="row">Decision</th><td>{{ tone.humanize(passport.decision_record.decision) }}</td></tr>
+        <tr><th scope="row">Who decided</th><td>{{ tone.humanize(passport.decision_record.actor_role) }}</td></tr>
+        <tr><th scope="row">When</th><td>{{ passport.decision_record.decided_at|short_dt(user.timezone) if passport.decision_record.decided_at else 'Not recorded' }}</td></tr>
+        <tr><th scope="row">Published</th><td>{{ passport.decision_record.published_at|short_dt(user.timezone) if passport.decision_record.published_at else 'Not published' }}</td></tr>
+        <tr><th scope="row">Reason</th><td>{{ passport.decision_record.reason }}</td></tr>
+        {% if passport.decision_record.qualifications %}<tr><th scope="row">Conditions</th><td>{{ passport.decision_record.qualifications|join(' · ') }}</td></tr>{% endif %}
+        <tr><th scope="row">Integrity fingerprint</th><td class="t-code">{{ passport.decision_record.integrity_hash or 'Not kept for this older version' }}</td></tr>
+      </tbody>
+    </table>
+    {% else %}
+    <p>A structured record of the human decision was not kept for this version. The published result and its date still stand.</p>
+    {% endif %}
+
+    {% if passport.timeline %}
+    <table>
+      <thead><tr><th scope="col">When</th><th scope="col">What happened</th><th scope="col">Who</th><th scope="col">Change</th></tr></thead>
+      <tbody>
+        {% for event in passport.timeline %}
+        <tr>
+          <td>{{ event.occurred_at|short_dt(user.timezone) }}</td>
+          <td>{{ tone.humanize(event.action) }}<br>{{ event.reason }}</td>
+          <td>{{ event.actor }}</td>
+          <td>{% if event.previous_state or event.new_state %}{{ event.previous_state or 'start' }} &rarr; {{ event.new_state or 'no change' }}{% else %}Not recorded{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+
+  {% if passport.methodology_references|length > 1 %}
+  <section class="t-report-block">
+    <h2>8. Other standards</h2>
+    <p>Each standard reaches its own result. Nothing is averaged and no combined score is created.</p>
+    <table>
+      <thead><tr><th scope="col">Standard</th><th scope="col">Result</th><th scope="col">Reviewed</th></tr></thead>
+      <tbody>
+        {% for reference in passport.methodology_references %}
+        <tr><td>{{ reference.methodology_name }}</td><td>{{ reference.status_label }}</td><td>{{ reference.review_date|short_dt(user.timezone) if reference.review_date else 'Not recorded' }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  <footer class="t-report-block">
+    <p class="t-foot-note">Hilal Markets does not execute trades and does not give buy or sell advice. A screening result can change when new evidence is published. Check the live Passport at {{ market_base_path }}/{{ passport.assessment.canonical_asset|lower }} for the current result.</p>
+  </footer>
+</div>
+{% endblock %}
+
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20260818-live-4"></script>{% endblock %}

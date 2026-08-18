@@ -10,7 +10,7 @@ from ai_market_monitor.engine.quality import (
     market_coverage_score,
 )
 from ai_market_monitor.schemas.strategy import StrategyDefinition
-from ai_market_monitor.services.alert_presentation import AlertPresentation
+from ai_market_monitor.services.alert_presentation import ACTION_LABELS, AlertPresentation
 from ai_market_monitor.strategy_cockpit import (
     forecast_from_structure,
     schema_diff,
@@ -192,7 +192,16 @@ def test_compact_alert_actions_include_feedback_replay_and_improvement():
     )
     labels = {action.label for action in presentation.actions}
 
-    assert labels == {"🔄 View lifecycle", "📊 Dashboard", "🔕 Mute symbol"}
+    # Plain words, and no emoji. These labels are what a person presses in a chat *and*
+    # what they click in an email, so they follow the same rules as everything else the
+    # product writes: no pictograph, and no word from inside the machine.
+    assert labels == set(
+        ACTION_LABELS[key] for key in ("opportunity", "dashboard", "mute")
+    )
+    assert not any(
+        character in "".join(labels) for character in "🔄📊🔕"
+    ), "an alert button label carries an emoji"
+    assert "lifecycle" not in " ".join(labels).lower()
     assert any(action.action_id == f"mute_symbol:{alert_id}" for action in presentation.actions)
 
 

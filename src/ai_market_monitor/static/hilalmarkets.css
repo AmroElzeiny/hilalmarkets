@@ -29,6 +29,11 @@
   --sidebar:272px;
   --max:1220px;
   --ease:cubic-bezier(.22,1,.36,1);
+  /* The focus indicator. `hilalmarkets-brand.css` owns it; this is the copy the public
+     pages get, because they load this file and never load that one. The two must stay
+     identical — `test_invariant_focus_visibility.py` fails the build if they drift. */
+  --hm-focus-ring: 3px solid #202329;
+  --hm-focus-halo: 0 0 0 6px #cbfa4d;
 }
 *{box-sizing:border-box}
 .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
@@ -40,7 +45,10 @@ body.no-scroll{overflow:hidden}
 a{color:inherit;text-decoration:none}
 button,input,select,textarea{font:inherit}
 button{color:inherit}
-:where(a,button,input,select,textarea,summary):focus-visible{outline:3px solid rgba(31,139,116,.34);outline-offset:3px}
+/* `!important` deliberately: the halo is a box-shadow and this selector has no
+   specificity, so any component with its own shadow silently removed it. See the same
+   note in hilalmarkets-brand.css. */
+:where(a,button,input,select,textarea,summary):focus-visible{outline:var(--hm-focus-ring)!important;outline-offset:2px;box-shadow:var(--hm-focus-halo)!important}
 img,svg{display:block;max-width:100%}
 body:not(.hm-react-site) :is(h1,h2,h3,h4,p){margin-top:0}
 body:not(.hm-react-site) :is(h1,h2,h3,h4){font-family:var(--hm-font-display);line-height:1.08;letter-spacing:-.035em}
@@ -337,31 +345,10 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 
 /* Dashboard shell */
 .app-body{background:#f4f6f3}
-.app-shell{min-height:100vh;display:grid;grid-template-columns:var(--sidebar) minmax(0,1fr)}
-.sidebar{position:sticky;top:0;height:100vh;padding:18px 15px;background:#fff;border-right:1px solid var(--line);z-index:60;display:flex;flex-direction:column;overflow-y:auto}
-.sidebar-head{display:flex;align-items:center;justify-content:space-between;padding:4px 7px 18px}
-.sidebar-close{display:none}
-.sidebar-collapse{display:flex;align-items:center;gap:9px;width:100%;min-height:38px;margin:0 0 16px;padding:0 12px;border:1px solid var(--line);border-radius:11px;background:var(--ivory-2);color:var(--muted);font-size:.76rem;font-weight:700;cursor:pointer}.sidebar-collapse>.icon-sm{transition:transform .2s}
-.nav-group{margin-bottom:20px}
-.nav-label{font-size:.67rem;letter-spacing:.13em;text-transform:uppercase;color:#89948f;font-weight:800;padding:0 12px 7px}
-.nav-item{display:flex;align-items:center;gap:11px;min-height:43px;padding:0 12px;border-radius:12px;color:#53605b;font-size:.86rem;font-weight:650;margin:2px 0;position:relative;transition:.2s}
-.nav-item:hover{background:var(--emerald-50);color:var(--emerald-800)}
-.nav-item.is-active{background:var(--emerald-800);color:#fff;box-shadow:0 10px 24px rgba(15,92,77,.22)}
-.nav-item .nav-count{margin-left:auto;min-width:22px;height:22px;border-radius:999px;display:grid;place-items:center;background:#edf2f0;font-size:.68rem;color:#596660}
-.nav-item.is-active .nav-count{background:rgba(255,255,255,.17);color:#fff}
-.sidebar-spacer{flex:1}
-.sidebar-profile{border:1px solid var(--line);border-radius:16px;padding:12px;display:flex;align-items:center;gap:10px;background:var(--ivory-2)}
-.sidebar-profile .meta{min-width:0}
-.sidebar-profile strong,.sidebar-profile small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sidebar-profile small{font-size:.7rem;color:var(--muted)}
-.sidebar-backdrop{display:none}
-.app-main{min-width:0}
-.topbar{height:78px;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:0 28px;border-bottom:1px solid var(--line);background:rgba(247,244,236,.88);backdrop-filter:blur(16px);position:sticky;top:0;z-index:50}
-.topbar-left,.topbar-right{display:flex;align-items:center;gap:12px}
-.topbar-search{width:min(360px,32vw);position:relative}
-.topbar-search .input{padding-left:42px;background:#fff}
-.topbar-search .icon{position:absolute;left:14px;top:14px;color:#7b8782}
-.topbar-menu{display:none}
+/* The dashboard shell used to be described here as well as in hilalmarkets-dashboard-v2.css
+   and again in the .sidebar-collapsed block further down this file. Three descriptions of
+   one menu, and the collapsed one used display:none on the link labels, which takes them
+   out of the accessibility tree. The shell has one owner now: hm-shell.css. */
 .topbar-notifications{position:relative}.notification-center-trigger{position:relative}.notification-count{position:absolute;right:-5px;top:-5px;display:grid;place-items:center;min-width:20px;height:20px;padding:0 5px;border:2px solid var(--ivory);border-radius:999px;background:var(--red);color:#fff;font-size:.62rem;font-weight:800}.notification-center-popover{position:absolute;right:0;top:calc(100% + 12px);width:min(420px,calc(100vw - 24px));max-height:min(620px,calc(100dvh - 100px));padding:16px;border:1px solid var(--line);border-radius:19px;background:#fff;box-shadow:var(--shadow-lg);overflow:auto}.notification-center-popover[hidden]{display:none}.notification-center-popover>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:2px 2px 12px;border-bottom:1px solid var(--line)}.notification-center-popover h2{margin:2px 0 0;font-size:1.2rem}.notification-center-popover>header>a{color:var(--emerald-700);font-size:.78rem;font-weight:750}.notification-center-list{display:grid}.notification-center-item{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;padding:12px 2px;border-bottom:1px solid var(--line);transition:background .2s}.notification-center-item:last-child{border-bottom:0}.notification-center-item:hover{background:var(--emerald-50)}.notification-center-item .icon-box{width:37px;height:37px;border-radius:11px}.notification-center-item>span:last-child{display:grid;gap:2px;min-width:0}.notification-center-item strong,.notification-center-item small,.notification-center-item time{overflow:hidden;text-overflow:ellipsis}.notification-center-item small{color:var(--muted);font-size:.75rem}.notification-center-item time{color:#8a9691;font-size:.66rem}.notification-center-empty{padding:30px 10px;text-align:center;color:var(--muted)}
 .app-content{padding:30px;max-width:1500px;margin:auto}
 .page-header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:26px}
@@ -596,22 +583,15 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .toast{position:fixed;right:22px;bottom:22px;z-index:200;background:var(--ink);color:#fff;padding:13px 17px;border-radius:13px;box-shadow:var(--shadow);transform:translateY(30px);opacity:0;pointer-events:none;transition:.25s var(--ease);max-width:370px}
 .toast.is-visible{transform:translateY(0);opacity:1}
 .web-notification-stack{position:fixed;right:22px;bottom:22px;z-index:190;display:grid;gap:10px;width:min(380px,calc(100vw - 28px));pointer-events:none}.web-notification-popup{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;padding:14px;border:1px solid #c9ded6;border-radius:17px;background:#fff;box-shadow:var(--shadow);opacity:0;transform:translateY(18px);transition:opacity .24s var(--ease),transform .24s var(--ease);pointer-events:auto}.web-notification-popup.is-visible{opacity:1;transform:none}.web-notification-popup.is-leaving{opacity:0;transform:translateY(12px)}.web-notification-popup>span:nth-child(2){display:grid}.web-notification-popup small{color:var(--muted)}.web-notification-popup>button{align-self:start;width:30px;height:30px;display:grid;place-items:center;padding:0;border:0;border-radius:9px;background:transparent;color:var(--muted);cursor:pointer}.web-notification-popup.is-forming{border-color:#e4cf9f;background:#fffaf0}
-.sidebar-collapsed{--sidebar:84px}.sidebar-collapsed .sidebar{padding-inline:11px}.sidebar-collapsed .sidebar-head{justify-content:center}.sidebar-collapsed .logo span,.sidebar-collapsed .nav-label,.sidebar-collapsed .nav-item>span:last-child,.sidebar-collapsed .sidebar-profile .meta,.sidebar-collapsed .sidebar-profile form,.sidebar-collapsed .sidebar-collapse>span:last-child{display:none}.sidebar-collapsed .nav-item{justify-content:center;padding:0}.sidebar-collapsed .sidebar-profile{justify-content:center;padding:10px}.sidebar-collapsed .sidebar-collapse{justify-content:center;padding:0}
-.sidebar-collapsed .sidebar-collapse>.icon-sm{transform:scaleX(-1)}
 
 /* Logical-direction support keeps the same dashboard hierarchy in Arabic. */
-html[dir="rtl"] .sidebar{border-right:0;border-left:1px solid var(--line)}
 html[dir="rtl"] .nav-item .nav-count{margin-left:0;margin-right:auto}
-html[dir="rtl"] .topbar-search .input{padding-left:14px;padding-right:42px}
-html[dir="rtl"] .topbar-search .icon{left:auto;right:14px}
 html[dir="rtl"] .notification-count{right:auto;left:-5px}
 html[dir="rtl"] .notification-center-popover{right:auto;left:0}
 html[dir="rtl"] .web-notification-stack,
 html[dir="rtl"] .toast{right:auto;left:22px}
 html[dir="rtl"] .select{background-position:18px 21px,13px 21px;padding-inline-end:14px;padding-inline-start:38px}
 html[dir="rtl"] .investigation-timeline>div:not(:last-child)::before{left:auto;right:5px}
-html[dir="rtl"] .sidebar-collapse>.icon-sm{transform:scaleX(-1)}
-html[dir="rtl"] .sidebar-collapsed .sidebar-collapse>.icon-sm{transform:none}
 .reveal{opacity:0;transform:translateY(26px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
 .reveal.is-visible{opacity:1;transform:none}
 .placeholder-note{padding:10px 12px;border:1px dashed #b8c9c3;border-radius:11px;background:#fafcfb;color:#64716c;font-size:.74rem}
@@ -634,11 +614,6 @@ html[dir="rtl"] .sidebar-collapsed .sidebar-collapse>.icon-sm{transform:none}
 }
 @media(max-width:900px){
   .public-links{display:none}.public-links.is-open{position:absolute;display:grid;top:calc(100% + 10px);left:12px;right:12px;padding:10px;border:1px solid var(--line);border-radius:16px;background:var(--white);box-shadow:var(--shadow-lg)}.public-links.is-open a{padding:12px 14px}.mobile-menu{display:inline-flex}
-  .app-shell{display:block}.sidebar{position:fixed;left:0;top:0;width:290px;transform:translateX(-105%);transition:transform .3s var(--ease);box-shadow:var(--shadow-lg)}
-  .sidebar.is-open{transform:none}.sidebar-close{display:inline-flex}
-  .sidebar-collapse{display:none}
-  .sidebar-backdrop{position:fixed;inset:0;background:rgba(7,31,27,.42);z-index:55}.sidebar-backdrop.is-open{display:block}
-  .topbar-menu{display:inline-flex}.topbar-search{width:min(330px,55vw)}
   .app-content{padding:24px 18px}
   .auth-shell{grid-template-columns:1fr}.auth-brand{display:none}
   .onboarding-shell{grid-template-columns:1fr}.onboarding-side{padding:22px}.step-list{grid-template-columns:repeat(4,1fr);margin-top:20px}.step-item{justify-content:center}.step-item span:last-child{display:none}
@@ -646,8 +621,6 @@ html[dir="rtl"] .sidebar-collapsed .sidebar-collapse>.icon-sm{transform:none}
   .settings-layout{grid-template-columns:1fr}
   .integrations-grid{grid-template-columns:1fr}.integration-summary-grid{grid-template-columns:1fr}
   .home-start-card{align-items:flex-start;flex-direction:column}.home-start-actions{justify-items:start}
-  html[dir="rtl"] .sidebar{left:auto;right:0;transform:translateX(105%)}
-  html[dir="rtl"] .sidebar.is-open{transform:none}
 }
 @media(max-width:700px){
   .container{width:min(calc(100% - 28px),var(--max))}
@@ -667,8 +640,7 @@ html[dir="rtl"] .sidebar-collapsed .sidebar-collapse>.icon-sm{transform:none}
   .checkout-heading .btn{margin-top:14px}.checkout-limit-grid{grid-template-columns:1fr}.checkout-review-card,.checkout-action-card{padding:20px}.checkout-facts div{display:grid;gap:3px}.checkout-facts dd{text-align:left}.billing-result-actions{display:grid}.billing-result-actions .btn{width:100%}
   .stat-grid{grid-template-columns:1fr 1fr}
   .quick-actions{grid-template-columns:1fr}
-  .topbar{padding:0 14px}.topbar-search{display:none}
-  .sidebar-create-quick{display:none}.notification-center-popover{position:fixed;left:12px;right:12px;top:72px;width:auto;max-height:calc(100dvh - 88px)}
+  .notification-center-popover{position:fixed;left:12px;right:12px;top:72px;width:auto;max-height:calc(100dvh - 88px)}
   html[dir="rtl"] .notification-center-popover{left:12px;right:12px}
   .health-strip{grid-template-columns:1fr}
   .journey{overflow:auto;grid-template-columns:repeat(5,105px);padding-bottom:8px}
@@ -745,10 +717,13 @@ body.hilal-dashboard .observability-view-toggle{
   background:var(--white);
   color:var(--ink);
 }
+/* The shared ring, unchanged. These three used to repaint it at 25% opacity, which
+   measures 1.25:1 against the surface behind them — a ring nobody can see. */
 body.hilal-dashboard .monitor-filter-trigger:focus-visible,
 body.hilal-dashboard .observability-view-toggle:focus-visible,
 body.hilal-dashboard .monitor-filter-menu a:focus-visible{
-  outline-color:rgba(31,139,116,.25);
+  outline:var(--hm-focus-ring);
+  box-shadow:var(--hm-focus-halo);
 }
 body.hilal-dashboard .monitor-filter-menu{
   border-color:var(--line);
@@ -906,10 +881,17 @@ html[dir="rtl"] body.hilal-dashboard .readiness-candidate.state-invalidated{bord
 .live-market-scroll::-webkit-scrollbar-thumb{border:2px solid var(--emerald-50);border-radius:999px;background:var(--emerald-600)}
 .live-market-table{min-width:880px}
 .live-market-head,.live-market-row{display:grid;grid-template-columns:minmax(220px,1.5fr) 115px 130px 130px 90px 120px 152px;align-items:center;gap:12px}
-.live-market-head{position:sticky;z-index:4;top:0;padding:11px 20px;background:rgba(251,250,246,.97);border-bottom:1px solid var(--line);color:var(--muted);font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em;backdrop-filter:blur(10px)}
-.live-market-row{min-height:72px;padding:10px 20px;border-bottom:1px solid var(--line);transition:background-color .18s ease,opacity .18s ease}
+/* Column headers. `brand guide.md` section 11 forbids ALL CAPS, and --muted measures
+   3.98:1 on this background, which is under the 4.5:1 that text this size needs. */
+.live-market-head{position:sticky;z-index:4;top:0;padding:11px 20px;background:rgba(251,250,246,.97);border-bottom:1px solid var(--line);color:var(--hm-copy);font-size:.75rem;font-weight:600;letter-spacing:.02em;backdrop-filter:blur(10px)}
+.live-market-row{min-height:72px;padding:10px 20px;border-bottom:1px solid var(--line);transition:background-color .18s ease}
 .live-market-row:hover{background:var(--emerald-50)}
-.live-market-row.is-unavailable{opacity:.58}
+/* A row whose quote could not be read. This used to fade the whole row to 58%
+   opacity, which faded the Shariah status too — and a missing price says nothing
+   about a published review — while pushing every value under the contrast floor.
+   The row keeps full contrast; only the quote cells are marked. */
+.live-market-row.is-unavailable{background:var(--hm-surface-soft)}
+.live-market-row.is-unavailable :where(.live-quote,.live-change){color:var(--hm-copy)}
 .live-asset{display:flex;align-items:center;gap:11px;min-width:0}
 .live-asset>span:last-child{min-width:0}
 .live-asset strong,.live-asset small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

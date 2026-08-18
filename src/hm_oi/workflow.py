@@ -165,11 +165,23 @@ def run_pytest(
     "4 failed, 4 passed" line that :func:`parse_pytest_output` reads. A red run then
     parses as zero failures, which reads as green — the one mistake this module must
     never make.
+
+    ``encoding="utf-8", errors="replace"`` is explicit rather than left to
+    ``text=True``'s default, because that default is the OS locale codepage, not UTF-8.
+    This product's own test corpus carries Arabic, Egyptian Arabic and Arabizi text; a
+    Windows codepage that cannot represent it turns a passing suite into an unhandled
+    ``UnicodeDecodeError`` inside the subprocess reader thread instead of a parsed result.
     """
 
     command = [python, "-m", "pytest", *selection, "-p", "no:randomly"]
     result = subprocess.run(
-        command, cwd=str(cwd), capture_output=True, text=True, timeout=timeout
+        command,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
     )
     return parse_pytest_output(
         " ".join(command), result.returncode, (result.stdout or "") + (result.stderr or "")

@@ -4,15 +4,16 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import func, select
 
 from ai_market_monitor.db.models import (
     AgentRun,
     AgentToolCall,
-    AISetupChatMessage,
-    AISetupChatSession,
     AuditEvent,
     CustomerConversationEvent,
+    HilalChatConversation,
+    HilalChatMessage,
     PublicChatConversation,
     PublicChatMessage,
     PublicChatTurn,
@@ -291,9 +292,28 @@ async def test_every_registered_read_tool_returns_a_bounded_evidence_envelope(
             assert len(result.evidence_refs) <= 100
 
 
+def _hilal_message(conversation_id, sequence, role, content, created_at, **extra):
+    return HilalChatMessage(
+        conversation_id=conversation_id,
+        sequence=sequence,
+        role=role,
+        content=content,
+        created_at=created_at,
+        retain_until=created_at + timedelta(days=90),
+        **extra,
+    )
+
+
 async def test_customer_conversation_explorer_uses_exact_messages_identity_and_audit(
     test_context,
 ):
+    """The log carries both assistants a customer talks to, and only those.
+
+    The Setup Chat used to be listed here as well. It is a strategy-building tool, not a
+    conversation with somebody, and reading it in a support log made most of the log not
+    support. The two sources now are the public Support AI and Hilal in the dashboard.
+    """
+
     now = datetime.now(UTC)
     async with test_context["session_factory"]() as session:
         admin = User(display_name="Admin", role=UserRole.ADMIN)
@@ -311,7 +331,7 @@ async def test_customer_conversation_explorer_uses_exact_messages_identity_and_a
                 is_primary=True,
             )
         )
-        setup = AISetupChatSession(user_id=customer.id, title="Momentum watch")
+        hilal = HilalChatConversation(user_id=customer.id, message_count=2)
         public = PublicChatConversation(
             session_key_hash="a" * 64,
             user_id=None,
@@ -320,25 +340,20 @@ async def test_customer_conversation_explorer_uses_exact_messages_identity_and_a
             message_count=2,
             expires_at=now + timedelta(days=2),
         )
-        session.add_all([setup, public])
+        session.add_all([hilal, public])
         await session.flush()
         session.add_all(
             [
-                AISetupChatMessage(
-                    session_id=setup.id,
-                    sequence=1,
-                    role="user",
-                    content="Use RSI; API_KEY=must-not-leak",
-                    payload={},
-                    created_at=now,
+                _hilal_message(
+                    hilal.id, 1, "user", "Use RSI; API_KEY=must-not-leak", now
                 ),
-                AISetupChatMessage(
-                    session_id=setup.id,
-                    sequence=2,
-                    role="assistant",
-                    content="I need one timeframe.",
-                    payload={},
-                    created_at=now + timedelta(seconds=1),
+                _hilal_message(
+                    hilal.id,
+                    2,
+                    "assistant",
+                    "Here is where to find that.",
+                    now + timedelta(seconds=1),
+                    model="gpt-5.4-nano",
                 ),
                 PublicChatMessage(
                     conversation_id=public.id,
@@ -361,11 +376,11 @@ async def test_customer_conversation_explorer_uses_exact_messages_identity_and_a
         await session.commit()
         explorer = AdminConversationExplorer(session)
         page = await explorer.list_conversations(limit=20)
-        setup_summary = next(item for item in page.items if item.conversation_id == setup.id)
+        hilal_summary = next(item for item in page.items if item.conversation_id == hilal.id)
         public_summary = next(item for item in page.items if item.conversation_id == public.id)
         timeline = await explorer.conversation(
-            setup.id,
-            source="authenticated_setup_chat",
+            hilal.id,
+            source="dashboard_hilal_agent",
             admin_user_id=admin.id,
             access_reason="Quality review",
             request_id="request-test",
@@ -375,11 +390,16 @@ async def test_customer_conversation_explorer_uses_exact_messages_identity_and_a
         audit = await session.scalar(
             select(AuditEvent).where(
                 AuditEvent.action == "system_brain.customer_conversation.view",
-                AuditEvent.target_id == str(setup.id),
+                AuditEvent.target_id == str(hilal.id),
             )
         )
 
-    assert setup_summary.user_email == "Trader@Example.com"
+    # Both assistants appear, and each row says which one it was.
+    assert {item.source_type for item in page.items} == {
+        "public_site_chat",
+        "dashboard_hilal_agent",
+    }
+    assert hilal_summary.user_email == "Trader@Example.com"
     assert public_summary.anonymous is True
     assert public_summary.user_email is None
     assert [item.sequence for item in timeline.messages] == [1, 2]
@@ -387,6 +407,32 @@ async def test_customer_conversation_explorer_uses_exact_messages_identity_and_a
     assert "[REDACTED]" in timeline.messages[0].content
     assert audit is not None
     assert audit.metadata_redacted["access_reason"] == "Quality review"
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["public_site_chat", "dashboard_hilal_agent"],
+)
+async def test_every_source_the_log_offers_is_a_source_it_can_read(test_context, source):
+    """A filter the page offers must select something the explorer really knows.
+
+    The two used to disagree: the menu offered a source, the tool that reads them kept
+    its own hand-written list, and a name in one and not the other silently returned an
+    empty page. Both now read `CONVERSATION_SOURCE_LABELS`, so this walks every source
+    in that list rather than the two somebody remembered.
+    """
+
+    from ai_market_monitor.schemas.system_brain import CONVERSATION_SOURCE_LABELS
+    from ai_market_monitor.services.system_brain_tools import _source_filter
+
+    assert source in CONVERSATION_SOURCE_LABELS
+    assert _source_filter(source) == source
+    assert _source_filter("authenticated_setup_chat") is None
+    async with test_context["session_factory"]() as session:
+        page = await AdminConversationExplorer(session).list_conversations(
+            source=source, limit=5
+        )
+    assert page.items == []
 
 
 async def test_deleted_customer_content_is_not_exposed(test_context):
@@ -399,23 +445,14 @@ async def test_deleted_customer_content_is_not_exposed(test_context):
         )
         session.add_all([admin, deleted])
         await session.flush()
-        setup = AISetupChatSession(user_id=deleted.id)
-        session.add(setup)
+        hilal = HilalChatConversation(user_id=deleted.id, message_count=1)
+        session.add(hilal)
         await session.flush()
-        session.add(
-            AISetupChatMessage(
-                session_id=setup.id,
-                sequence=1,
-                role="user",
-                content="private deleted content",
-                payload={},
-                created_at=now,
-            )
-        )
+        session.add(_hilal_message(hilal.id, 1, "user", "private deleted content", now))
         await session.commit()
         timeline = await AdminConversationExplorer(session).conversation(
-            setup.id,
-            source="authenticated_setup_chat",
+            hilal.id,
+            source="dashboard_hilal_agent",
             admin_user_id=admin.id,
             access_reason="Deletion verification",
             request_id=None,
@@ -493,33 +530,29 @@ async def test_public_chat_persists_exact_future_transcript_once(test_context):
 
 
 async def test_conversation_cursor_pages_do_not_duplicate_or_omit(test_context):
+    now = datetime.now(UTC)
     async with test_context["session_factory"]() as session:
-        customer = User(display_name="Trader")
-        session.add(customer)
-        await session.flush()
         for index in range(7):
-            chat = AISetupChatSession(user_id=customer.id, title=f"Chat {index}")
-            chat.updated_at = datetime.now(UTC) + timedelta(seconds=index)
+            customer = User(display_name=f"Trader {index}")
+            session.add(customer)
+            await session.flush()
+            # Hilal keeps one conversation per person, for ever, so seven conversations
+            # means seven people rather than seven sessions for one.
+            chat = HilalChatConversation(user_id=customer.id, message_count=1)
+            chat.updated_at = now + timedelta(seconds=index)
             session.add(chat)
             await session.flush()
             session.add(
-                AISetupChatMessage(
-                    session_id=chat.id,
-                    sequence=1,
-                    role="user",
-                    content=f"message {index}",
-                    payload={},
-                    created_at=chat.updated_at,
-                )
+                _hilal_message(chat.id, 1, "user", f"message {index}", chat.updated_at)
             )
         await session.commit()
         explorer = AdminConversationExplorer(session)
-        first = await explorer.list_conversations(source="authenticated_setup_chat", limit=3)
+        first = await explorer.list_conversations(source="dashboard_hilal_agent", limit=3)
         second = await explorer.list_conversations(
-            source="authenticated_setup_chat", limit=3, cursor=first.next_cursor
+            source="dashboard_hilal_agent", limit=3, cursor=first.next_cursor
         )
         third = await explorer.list_conversations(
-            source="authenticated_setup_chat", limit=3, cursor=second.next_cursor
+            source="dashboard_hilal_agent", limit=3, cursor=second.next_cursor
         )
 
     ids = [item.conversation_id for page in (first, second, third) for item in page.items]

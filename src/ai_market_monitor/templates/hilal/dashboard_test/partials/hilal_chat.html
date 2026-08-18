@@ -1,0 +1,211 @@
+{#- Hilal, the assistant that lives in the corner of every redesigned dashboard page.
+
+    Almost nothing is written here. The transcript, the state of the button, the words
+    on a locked box and the allowance all come from the server, so the page cannot show
+    a different answer from the one the server would give. What is here is the frame and
+    the copy around it.
+
+    Two things this file deliberately does *not* contain: any Islamic greeting, which
+    Hilal writes itself as language rather than reading off a template (rule G9), and
+    any claim about what Hilal can do that the server does not enforce. -#}
+
+<div class="hm-hilal" data-hilal
+     data-status-url="/api/v1/dashboard/hilal/status"
+     data-history-url="/api/v1/dashboard/hilal/history"
+     data-message-url="/api/v1/dashboard/hilal/message"
+     data-report-url="/api/v1/dashboard/hilal/report"
+     data-rating-url="/api/v1/dashboard/hilal/rating"
+     data-billing-url="/dashboard/billing"
+     data-max-length="{{ settings.hilal_chat_message_max_length }}">
+
+  {#- The tag above the button.
+
+      It says three things a plain chat bubble in a corner cannot: who this is, that it
+      is software rather than a person waiting, and that it can already see the screen
+      you are on — which is true, and is what `hm-page-context.js` sends with every
+      message.
+
+      The line is longer than its box on purpose, and it travels. That is the one moving
+      thing in the shell that repeats, and it repeats for a reason: the movement is what
+      makes the rest of a sentence that does not fit readable at all. It stops the moment
+      a pointer or the keyboard reaches this corner, and it never starts for anybody who
+      has asked for less motion — for them the box shows the beginning of the line and
+      the whole sentence is the button's own name below.
+
+      `aria-hidden` because every word of it is repeated in that name. A screen reader
+      that read both would hear the same sentence twice, and the second time in pieces. -#}
+  <div class="hilal-tag" data-hilal-tag aria-hidden="true">
+    <span class="hilal-tag-run" data-hilal-tag-run>
+      <span class="hilal-tag-line">Hilal — your AI assistant · sees the page you are on · here to help as you go</span>
+      <span class="hilal-tag-line">Hilal — your AI assistant · sees the page you are on · here to help as you go</span>
+    </span>
+  </div>
+
+  {#- The button. It is a real toggle: `aria-expanded` says whether the window is
+      open, and `data-state` carries what it is doing, which the stylesheet turns into
+      a look and the label below turns into words. -#}
+  <button class="hilal-orb" type="button" data-hilal-open
+          aria-expanded="false" aria-controls="hilal-window"
+          aria-label="Open Hilal, your AI assistant. It sees the page you are on and helps as you go.">
+    <span class="hilal-orb-ring" aria-hidden="true"></span>
+    <span class="hilal-orb-face" aria-hidden="true">
+      <span data-icon="spark" data-icon-class="icon"></span>
+    </span>
+    <span class="hilal-orb-badge" data-hilal-badge hidden aria-hidden="true"></span>
+  </button>
+
+  <div class="hilal-window" id="hilal-window" data-hilal-window role="dialog"
+       aria-modal="false" aria-labelledby="hilal-title" hidden>
+
+    <header class="hilal-head">
+      <span class="hilal-head-mark" aria-hidden="true"><span data-icon="spark" data-icon-class="icon"></span></span>
+      <span class="hilal-head-copy">
+        <span class="hilal-head-name">
+          <strong id="hilal-title">Hilal</strong>
+          {#- Said in the frame rather than only in a sentence Hilal writes, so it is
+              true of every answer and cannot be forgotten in one. -#}
+          <span class="hilal-beta">Beta</span>
+        </span>
+        <span class="hilal-head-note" data-hilal-note
+              data-rest-note="Here to help — I can get things wrong">Here to help — I can get things wrong</span>
+      </span>
+      <span class="hilal-head-acts">
+        <button class="hilal-icon-btn" type="button" data-hilal-report-open
+                aria-label="Report the last answer" title="Report an answer">
+          <span data-icon="flag" data-icon-class="icon-sm"></span>
+        </button>
+        <button class="hilal-icon-btn" type="button" data-hilal-close
+                aria-label="Close the chat">
+          <span data-icon="close" data-icon-class="icon-sm"></span>
+        </button>
+      </span>
+    </header>
+
+    {#- The allowance. Shown always, not only when it runs out: a person who can see
+        it going down is never surprised by it stopping. -#}
+    <div class="hilal-meter" data-hilal-meter data-state="ok">
+      <span class="hilal-meter-track" aria-hidden="true"><span class="hilal-meter-fill" data-hilal-meter-fill></span></span>
+      <span class="hilal-meter-text" data-hilal-meter-text>Checking your daily allowance…</span>
+    </div>
+
+    <div class="hilal-scroll" data-hilal-scroll tabindex="0"
+         role="log" aria-live="polite" aria-label="Your conversation with Hilal">
+      <ol class="hilal-thread" data-hilal-thread></ol>
+
+      <div class="hilal-typing" data-hilal-typing hidden>
+        <span class="hilal-bubble-mark" aria-hidden="true"><span data-icon="spark" data-icon-class="icon-sm"></span></span>
+        <span class="hilal-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="sr-only">Hilal is writing</span>
+      </div>
+    </div>
+
+    {#- Offered follow-ups. Buttons, never sent on their own. -#}
+    <div class="hilal-chips" data-hilal-chips hidden aria-label="Things you could ask next"></div>
+
+    {#- The locked state. One place, so the reason and the disabled box always agree. -#}
+    <div class="hilal-locked" data-hilal-locked hidden role="status">
+      <span class="hilal-locked-mark" aria-hidden="true"><span data-icon="clock" data-icon-class="icon"></span></span>
+      <div>
+        <strong data-hilal-locked-title>That is all for today</strong>
+        <p data-hilal-locked-text></p>
+        <p class="hilal-locked-reset" data-hilal-locked-reset></p>
+        <a class="t-action is-primary hilal-upgrade" data-hilal-upgrade href="/dashboard/billing" hidden>
+          <span data-icon="spark" data-icon-class="icon-sm"></span>See what a plan adds
+        </a>
+      </div>
+    </div>
+
+    <form class="hilal-compose" data-hilal-form>
+      <label class="sr-only" for="hilal-input">Write to Hilal</label>
+      {#- Short on purpose. The invitation used to be a full sentence, which wrapped
+          onto a second line inside a one-line box and put a scrollbar down the side of
+          an empty field. It has to fit on one line at the narrowest width this window
+          is ever drawn at. -#}
+      <textarea id="hilal-input" data-hilal-input rows="1" autocomplete="off"
+                placeholder="Ask me anything…"></textarea>
+      <button class="hilal-send" type="submit" data-hilal-send aria-label="Send">
+        <span data-icon="send" data-icon-class="icon-sm"></span>
+      </button>
+    </form>
+
+    <p class="hilal-foot">
+      Hilal explains what is on record and helps you use the product. It never gives
+      buying or selling advice, and every choice stays yours.
+    </p>
+  </div>
+
+  {#- Reporting one answer. -#}
+  <dialog class="t-dialog hilal-dialog" data-hilal-report aria-labelledby="hilal-report-title">
+    <div class="t-dialog-shell">
+      <header class="t-dialog-head">
+        <div>
+          <h2 id="hilal-report-title">Report this answer</h2>
+          <p>Tell us what was wrong with it. We read every one.</p>
+        </div>
+        <button class="t-close" type="button" data-hilal-report-close aria-label="Close">
+          <span data-icon="close" data-icon-class="icon"></span>
+        </button>
+      </header>
+      <form class="t-dialog-body hilal-report-body" data-hilal-report-form>
+        <blockquote class="hilal-report-quote" data-hilal-report-quote></blockquote>
+        <fieldset class="hilal-reasons">
+          <legend>What was wrong?</legend>
+          <label><input type="radio" name="hilal-reason" value="wrong" checked><span>It was not correct</span></label>
+          <label><input type="radio" name="hilal-reason" value="confusing"><span>I could not understand it</span></label>
+          <label><input type="radio" name="hilal-reason" value="not_allowed"><span>It said something it should not</span></label>
+          <label><input type="radio" name="hilal-reason" value="other"><span>Something else</span></label>
+        </fieldset>
+        <label class="hilal-field">
+          <span>Anything to add? <em>Optional</em></span>
+          <textarea data-hilal-report-note rows="3" maxlength="2000"></textarea>
+        </label>
+        <footer class="t-dialog-foot">
+          <button class="t-action" type="button" data-hilal-report-cancel>Cancel</button>
+          <button class="t-action is-primary" type="submit">
+            <span data-icon="flag" data-icon-class="icon-sm"></span>Send the report
+          </button>
+        </footer>
+      </form>
+    </div>
+  </dialog>
+
+  {#- Asked when the window is closed with the X. Skippable — it closes either way. -#}
+  <dialog class="t-dialog hilal-dialog hilal-rate" data-hilal-rate aria-labelledby="hilal-rate-title">
+    <div class="t-dialog-shell">
+      <header class="t-dialog-head">
+        <div>
+          <h2 id="hilal-rate-title">How was that?</h2>
+          <p>It takes a second, and it tells us what to fix.</p>
+        </div>
+        <button class="t-close" type="button" data-hilal-rate-skip aria-label="Close without rating">
+          <span data-icon="close" data-icon-class="icon"></span>
+        </button>
+      </header>
+      <form class="t-dialog-body" data-hilal-rate-form>
+        <div class="hilal-stars" data-hilal-stars role="radiogroup" aria-label="How many stars">
+          {% for value in [1, 2, 3, 4, 5] %}
+          <button class="hilal-star" type="button" role="radio" aria-checked="false"
+                  data-hilal-star="{{ value }}"
+                  aria-label="{{ value }} star{{ '' if value == 1 else 's' }}">
+            <span data-icon="star" data-icon-class="icon"></span>
+          </button>
+          {% endfor %}
+        </div>
+        <p class="hilal-stars-word" data-hilal-stars-word aria-live="polite"></p>
+        <label class="hilal-field">
+          <span>What would have made it better? <em>Optional</em></span>
+          <textarea data-hilal-rate-comment rows="3" maxlength="2000"
+                    placeholder="Anything at all — it helps."></textarea>
+        </label>
+        <footer class="t-dialog-foot">
+          <button class="t-action" type="button" data-hilal-rate-skip>Skip</button>
+          <button class="t-action is-primary" type="submit" data-hilal-rate-send disabled>
+            <span data-icon="check" data-icon-class="icon-sm"></span>Send
+          </button>
+        </footer>
+      </form>
+    </div>
+  </dialog>
+
+  <p class="sr-only" data-hilal-announce role="status" aria-live="polite"></p>
+</div>

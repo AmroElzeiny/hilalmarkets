@@ -41,6 +41,7 @@ __all__ = [
     "CopyViolation",
     "FORBIDDEN_CLAIM_PHRASES",
     "FORBIDDEN_PRODUCT_PHRASES",
+    "MOJIBAKE_MARKERS",
     "SHARIA_SPELLING_PATTERN",
     "customer_copy_sources",
     "scan_customer_copy",
@@ -104,7 +105,25 @@ BRAND_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"(?<![\w.$/])HilalMarkets(?![\w/]|\.\w)"
 )
 
-CUSTOMER_COPY_SUFFIXES: Final[frozenset[str]] = frozenset({".html", ".py", ".js"})
+#: Punctuation that has been through a Windows codepage and come back wrong.
+#:
+#: A dash, a quote or an ellipsis is three bytes in UTF-8 beginning ``E2 80``. Read that
+#: file as the machine's ANSI codepage and write it back as UTF-8, and those three bytes
+#: become two or three visible junk characters. Every bulk text rewrite on Windows can do
+#: it, and nothing else notices: the file still parses, the tests still import it, and the
+#: only thing that changed is what a customer reads.
+#:
+#: It had already happened. ``“RSI length” must be one of the choices shown`` — a message
+#: shown to somebody filling in a rule — was on screen with junk where its quotes should
+#: be. The lint ran over that exact file every commit and was not looking for this.
+#:
+#: The pairs below are the opening bytes seen through CP1251 and CP1252, which are the two
+#: this happens with in practice.
+MOJIBAKE_MARKERS: Final[tuple[str, ...]] = ("вЂ", "â€", "Ã¢", "Ã©", "Ã¢â‚¬")
+
+CUSTOMER_COPY_SUFFIXES: Final[frozenset[str]] = frozenset(
+    {".html", ".py", ".js", ".ts", ".tsx"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,10 +175,32 @@ def customer_copy_sources(root: Path) -> tuple[Path, ...]:
         root / "src" / "ai_market_monitor" / "telegram" / "service.py",
         root / "src" / "ai_market_monitor" / "whatsapp" / "rendering.py",
         root / "src" / "ai_market_monitor" / "whatsapp" / "service.py",
+        # The dashboard routers. A page whose words are decided in Python rather than
+        # in its template is still a page a customer reads: `/main` writes every
+        # headline, tile and explanation in `main_dashboard.py`, and the redesigned
+        # pages do the same in `dashboard_test.py`. Linting the templates and not these
+        # would leave the newest copy in the product unchecked — the same gap the note
+        # above describes, one layer further in.
+        root / "src" / "ai_market_monitor" / "api" / "routers" / "main_dashboard.py",
+        root / "src" / "ai_market_monitor" / "api" / "routers" / "dashboard_test.py",
+        root / "src" / "ai_market_monitor" / "api" / "routers" / "dashboard.py",
         root / "src" / "ai_market_monitor" / "engine" / "conversation_language.py",
         root / "src" / "ai_market_monitor" / "engine" / "builder_contract.py",
         root / "src" / "ai_market_monitor" / "engine" / "builder_operations.py",
         root / "src" / "ai_market_monitor" / "engine" / "builder_boolean.py",
+        # The public site's own pages. Half of this website is Jinja and half is React,
+        # and only the Jinja half was ever linted — so the landing page, the contact
+        # form and both legal documents could say anything at all. That is not a small
+        # gap: the Privacy Policy and the Terms of Use are the most carefully read text
+        # this product publishes, and they live here.
+        #
+        # `imports/` is deliberately left out. It is generated from Figma, its strings
+        # are class names and coordinates rather than sentences, and a rule enforced on
+        # generated output would be enforced on the generator instead.
+        root / "Hilal-Markets-Website" / "src" / "App.tsx",
+        root / "Hilal-Markets-Website" / "src" / "pages",
+        root / "Hilal-Markets-Website" / "src" / "legal",
+        root / "Hilal-Markets-Website" / "src" / "components",
     )
     return tuple(path for path in candidates if path.exists())
 
@@ -198,6 +239,17 @@ def scan_text(text: str, path: Path) -> tuple[CopyViolation, ...]:
                     match.group(0),
                 )
             )
+        for marker in MOJIBAKE_MARKERS:
+            if marker in line:
+                violations.append(
+                    CopyViolation(
+                        path,
+                        number,
+                        "encoding: a dash or quote was written through a Windows codepage",
+                        marker,
+                    )
+                )
+                break
     return tuple(violations)
 
 

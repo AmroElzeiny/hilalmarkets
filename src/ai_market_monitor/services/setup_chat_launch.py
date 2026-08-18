@@ -4010,8 +4010,21 @@ return tostring(next_value)
         """Execute a durable scan after either an agent or server-owned option turn."""
 
         request = dict(request)
-        direction = str(request.get("movement_direction") or "up")
-        threshold = float(str(request.get("threshold_percent") or 0))
+        movement_direction = request.get("movement_direction")
+        threshold_percent = request.get("threshold_percent")
+        if movement_direction is None or threshold_percent is None:
+            # `_route_read_only_scan` never hands a scan over to either caller of this
+            # method without both fields set (it returns early while either is None).
+            # Refusing here, rather than defaulting to "up"/0%, is the second gate: if
+            # that invariant is ever broken by a later change, this must not silently
+            # run a live scan against a threshold nobody stated.
+            raise SetupLaunchError(
+                "READ_ONLY_SCAN_REQUEST_INCOMPLETE",
+                "This scan request is missing its stated move size or direction.",
+                stage="patch",
+            )
+        direction = str(movement_direction)
+        threshold = float(str(threshold_percent))
         window = str(request.get("measurement_window") or "")
         language = conversation.active_language
         try:

@@ -18,8 +18,10 @@ from ai_market_monitor.api.dependencies import (
     get_market_data_provider,
     get_market_previewer,
 )
+from ai_market_monitor.api.request_guards import client_fingerprint
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.csrf import csrf_token_matches
+from ai_market_monitor.core.dashboard_paths import COMPLIANCE_CHANGES_PATH
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.models import (
     AISetupChatSession,
@@ -125,6 +127,12 @@ from ai_market_monitor.schemas.strategy import (
     StrategyDefinition,
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import ConditionNodeType, StrategyDraftV2
+from ai_market_monitor.services.account_settings import (
+    MUTED_SYMBOL_LIMIT,
+    AccountSettingsService,
+    SettingsChoice,
+    SettingsRejected,
+)
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.ai_availability import availability_for
 from ai_market_monitor.services.ai_budget import AIBudgetService, limits_from_settings
@@ -140,14 +148,25 @@ from ai_market_monitor.services.ai_setup_evaluator_control import (
     evaluator_turn,
 )
 from ai_market_monitor.services.ai_usage_context import ai_usage_correlation
+from ai_market_monitor.services.alert_emails import (
+    ALERT_SENDER_EMAIL,
+    ALERT_SENDER_NAME,
+    alert_email_address,
+)
 from ai_market_monitor.services.builder_universe import builder_universe_options
 from ai_market_monitor.services.coverage import market_coverage_for_user
 from ai_market_monitor.services.dashboard_jobs import DashboardJobService, export_file_path
-from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
+from ai_market_monitor.services.email_branding import HilalMarketsEmailRenderer
+from ai_market_monitor.services.email_delivery import (
+    AuthEmailService,
+    EmailDeliveryError,
+    email_delivery_available,
+)
 from ai_market_monitor.services.entitlements import EntitlementError, EntitlementService
 from ai_market_monitor.services.interfaces import MarketDataProvider, RecentMarketPreviewer
 from ai_market_monitor.services.lifecycle_dashboard import state_label
 from ai_market_monitor.services.market_preview import timeframe_duration
+from ai_market_monitor.services.notification_preferences import offered_channels
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
 from ai_market_monitor.services.openai_interpreter import configured_strategy_interpreter
 from ai_market_monitor.services.setup_chat_evaluation import (
@@ -163,6 +182,8 @@ from ai_market_monitor.services.setup_observability import (
     SetupObservabilityService,
 )
 from ai_market_monitor.services.strategy import StrategyGateError, StrategyService
+from ai_market_monitor.services.support import support_priority
+from ai_market_monitor.services.support_intake import SupportIntakeGuard
 from ai_market_monitor.services.template_catalog import builtin_template_payloads
 from ai_market_monitor.services.verified_strategy import (
     VerifiedStrategyError,
@@ -363,6 +384,68 @@ class ThemePreferenceRequest(BaseModel):
     theme: Literal["dark", "light"]
 
 
+class AlertChannelsRequest(BaseModel):
+    """Every way a person wants to be told, sent as the whole set rather than a diff.
+
+    The whole set, so two switches flipped quickly cannot arrive out of order and leave
+    the account with the state of the older press. The values are checked against
+    `offered_channels` before anything is written.
+    """
+
+    channels: list[str] = Field(default_factory=list, max_length=8)
+
+
+class AccountSettingsRequest(BaseModel):
+    """One whole settings set, as the redesigned Settings page sends it.
+
+    Only the outer shape is checked here — a number is a number, a list is not longer
+    than it could sensibly be. *Which* values are real is `AccountSettingsService`'s
+    single answer, so this model must never grow a second list of allowed sounds or
+    channels beside it.
+    """
+
+    timezone: str = Field(min_length=1, max_length=64)
+    near_miss_enabled: bool = True
+    near_miss_threshold: int = Field(default=70, ge=1, le=100)
+    maximum_alerts_per_hour: int = Field(default=50, ge=1, le=1000)
+    maximum_alerts_per_day: int = Field(default=500, ge=1, le=10000)
+    alert_channels: list[str] = Field(default_factory=list, max_length=8)
+    providers: list[str] = Field(default_factory=list, max_length=8)
+    alert_days: list[str] = Field(default_factory=list, max_length=8)
+    alert_hours: list[str] = Field(default_factory=list, max_length=24)
+    finished_opportunity_alerts: bool = True
+    muted_symbols: list[str] = Field(default_factory=list, max_length=MUTED_SYMBOL_LIMIT)
+    compliance_alert_channels: list[str] = Field(default_factory=list, max_length=8)
+    compliance_alert_digest: str = Field(default="immediate", max_length=24)
+    dashboard_notifications_enabled: bool = True
+    dashboard_notification_sound: str = Field(default="chime", max_length=24)
+    forming_dashboard_notifications: bool = False
+    forming_notification_sound: str = Field(default="pulse", max_length=24)
+    qualification_change_alerts: bool = True
+
+    def as_choice(self) -> SettingsChoice:
+        return SettingsChoice(
+            timezone=self.timezone,
+            near_miss_enabled=self.near_miss_enabled,
+            near_miss_threshold=self.near_miss_threshold,
+            maximum_alerts_per_hour=self.maximum_alerts_per_hour,
+            maximum_alerts_per_day=self.maximum_alerts_per_day,
+            alert_channels=list(self.alert_channels),
+            providers=list(self.providers),
+            alert_days=list(self.alert_days),
+            alert_hours=list(self.alert_hours),
+            finished_opportunity_alerts=self.finished_opportunity_alerts,
+            muted_symbols=list(self.muted_symbols),
+            compliance_alert_channels=list(self.compliance_alert_channels),
+            compliance_alert_digest=self.compliance_alert_digest,
+            dashboard_notifications_enabled=self.dashboard_notifications_enabled,
+            dashboard_notification_sound=self.dashboard_notification_sound,
+            forming_dashboard_notifications=self.forming_dashboard_notifications,
+            forming_notification_sound=self.forming_notification_sound,
+            qualification_change_alerts=self.qualification_change_alerts,
+        )
+
+
 class SupportScreenshot(BaseModel):
     filename: str = Field(min_length=1, max_length=160)
     content_type: Literal["image/png", "image/jpeg", "image/webp"]
@@ -513,6 +596,113 @@ async def save_theme_preference(
         }
     await session.commit()
     return {"theme": payload.theme}
+
+
+@router.put("/preferences/settings")
+async def save_account_settings(
+    payload: AccountSettingsRequest,
+    x_csrf_token: str = Header(default="", alias="X-CSRF-Token"),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Save the whole settings set, for a page that saves as you go.
+
+    The whole set, never one field. Two switches flipped quickly cannot then arrive out
+    of order and leave the account holding the older press — the same reason the
+    channels endpoint above takes the whole list.
+
+    Nothing about what a setting may be is decided here. `AccountSettingsService` owns
+    that and the ``POST /dashboard/settings`` form calls the same method, so the two
+    ways of saving cannot drift into two different ideas of a valid value.
+    """
+
+    if not csrf_token_matches(settings, principal.user_id, x_csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid form token.")
+    user = await session.get(User, principal.user_id)
+    if user is None:  # pragma: no cover - the principal was just resolved from this row
+        raise HTTPException(status_code=404, detail="Account not found")
+    try:
+        stored = await AccountSettingsService(session, settings).save(
+            user, payload.as_choice()
+        )
+    except SettingsRejected as exc:
+        # Nothing was written. The page says which value stopped it, in its own words.
+        await session.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    await session.commit()
+    return {"saved": True, "settings": stored}
+
+
+@router.get("/support/tickets")
+async def list_support_tickets(
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """The requests this person sent, and what they said in them.
+
+    Their own words, read back. The live page listed a subject and a status badge and
+    nothing else, so somebody who wrote in three days ago had no way to see what they
+    had actually asked — only that "a thing" was open.
+
+    Scoped to the signed-in account by the query itself rather than by a check
+    afterwards, so there is no path where one person's request reaches another.
+    """
+
+    tickets = list(
+        (
+            await session.scalars(
+                select(SupportRequest)
+                .where(SupportRequest.user_id == principal.user_id)
+                .order_by(SupportRequest.created_at.desc())
+                .limit(20)
+            )
+        ).all()
+    )
+    replies: dict[UUID, list[SupportTicketMessage]] = {}
+    if tickets:
+        rows = (
+            await session.scalars(
+                select(SupportTicketMessage)
+                .where(
+                    SupportTicketMessage.support_request_id.in_(
+                        [ticket.id for ticket in tickets]
+                    ),
+                    # An internal note is written by staff for staff. It is not part of
+                    # the conversation this person is having with us.
+                    SupportTicketMessage.internal.is_(False),
+                )
+                .order_by(SupportTicketMessage.created_at.asc())
+            )
+        ).all()
+        for row in rows:
+            replies.setdefault(row.support_request_id, []).append(row)
+    return {
+        "tickets": [
+            {
+                "id": str(ticket.id),
+                "subject": ticket.subject,
+                "category": ticket.category,
+                "status": ticket.status.value,
+                "created_at": ticket.created_at,
+                "resolved_at": ticket.resolved_at,
+                "messages": [
+                    {
+                        "id": str(message.id),
+                        "from_you": message.author_type == "user",
+                        "body": message.body,
+                        "attachment_count": len(message.attachments or []),
+                        "created_at": message.created_at,
+                    }
+                    for message in replies.get(ticket.id, [])
+                ],
+            }
+            for ticket in tickets
+        ]
+    }
 
 
 async def _owned_strategy(
@@ -1770,6 +1960,8 @@ async def ai_setup_chat_builder_contract(
                 "beginner_friendly": item.beginner_friendly,
                 "timeframes": list(item.timeframes),
                 "examples": list(item.examples),
+                # Searched, never shown. See BuilderMechanic.search_words.
+                "search_words": list(item.search_words),
                 "operators": [_choice_payload(choice) for choice in item.operators],
                 "directions": [_choice_payload(choice) for choice in item.directions],
                 "parameters": [
@@ -3785,7 +3977,7 @@ async def notification_center(
                 "status": alert.alert_type.value,
                 "created_at": alert.created_at,
                 "action_url": (
-                    "/dashboard/opportunities?tab=compliance_changes"
+                    COMPLIANCE_CHANGES_PATH
                     if compliance
                     else f"/dashboard/alerts/{alert.id}/proof"
                 ),
@@ -4836,9 +5028,22 @@ async def integrations(
 
 @router.delete("/integrations/telegram")
 async def disconnect_telegram(
+    x_csrf_token: str | None = Header(default=None),
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
+    """Take a person's Telegram account off their account, at their request.
+
+    The form token is checked here, like every other write on the Connections page. It
+    was the one that did not, and it is the most destructive of them: it deletes the
+    connection, the sign-in identity and the bot conversation, none of which come back.
+    The page has always sent the token; nothing was reading it.
+    """
+
+    if not csrf_token_matches(settings, principal.user_id, x_csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid form token.")
+
     connection = await session.scalar(
         select(TelegramConnection).where(TelegramConnection.user_id == principal.user_id)
     )
@@ -4881,13 +5086,180 @@ async def disconnect_telegram(
     return {"ok": True, "telegram": None}
 
 
-@router.post("/support/tickets", status_code=status.HTTP_201_CREATED)
-async def create_support_ticket(
-    payload: SupportTicketCreateRequest,
+@router.put("/integrations/channels")
+async def save_alert_channels(
+    payload: AlertChannelsRequest,
+    x_csrf_token: str | None = Header(default=None),
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
+    """Turn a way of being told on or off, from the Connections page.
+
+    Which channels may be chosen is `offered_channels`, never a list written here — a
+    channel the platform cannot deliver must not become saveable just because a request
+    named it. WhatsApp additionally needs the plan.
+
+    The in-app channel is always kept. It is the one place a person can always go back
+    and read what happened, and switching every channel off must not mean losing the
+    record as well as the message.
+    """
+
+    if not csrf_token_matches(settings, principal.user_id, x_csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid form token.")
+
+    entitlement = await EntitlementService(session).current(principal.user_id)
+    allowed = {channel.value for channel in offered_channels(settings)}
+    if not entitlement.feature_enabled("whatsapp"):
+        allowed.discard(DeliveryChannel.WHATSAPP.value)
+    refused = [channel for channel in payload.channels if channel not in allowed]
+    if refused:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "channel_not_available",
+                "message": "That way of being told is not available on this account.",
+                "channels": refused,
+            },
+        )
+    chosen = [DeliveryChannel.WEB.value]
+    chosen += [
+        channel
+        for channel in dict.fromkeys(payload.channels)
+        if channel != DeliveryChannel.WEB.value
+    ]
+
+    preference = await session.scalar(
+        select(DashboardPreference).where(DashboardPreference.user_id == principal.user_id)
+    )
+    if preference is None:
+        preference = DashboardPreference(
+            user_id=principal.user_id,
+            default_timezone="UTC",
+            theme="light",
+            notification_preferences={},
+        )
+        session.add(preference)
+    values = dict(preference.notification_preferences or {})
+    # Both keys, because both are read. `current()` falls back from one to the other,
+    # so writing only one leaves the two disagreeing for anybody reading the older name.
+    values["alert_channels"] = chosen
+    values["channels"] = chosen
+    preference.notification_preferences = values
+    await session.commit()
+    return {"ok": True, "channels": chosen}
+
+
+@router.post("/integrations/email/test")
+async def send_email_test(
+    x_csrf_token: str | None = Header(default=None),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Send one real email to the address on the account, so a person can *see* it work.
+
+    "Is it working?" is the question this page exists to answer, and the only honest way
+    to answer it is to send something. The result is recorded like every other channel's
+    test, so a failure is readable afterwards rather than only in the moment.
+    """
+
+    if not csrf_token_matches(settings, principal.user_id, x_csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid form token.")
+    if not email_delivery_available(settings):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "email_unavailable",
+                "message": "Email is not switched on for this platform yet.",
+            },
+        )
+    # The same owner the real sender uses, so a test cannot succeed to an address that
+    # alerts would never be sent to.
+    recipient = await alert_email_address(session, principal.user_id)
+    if not recipient:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "email_missing",
+                "message": "There is no confirmed email address on this account.",
+            },
+        )
+
+    rendered = HilalMarketsEmailRenderer(settings).connection_test()
+    result = IntegrationTestResult(
+        user_id=principal.user_id,
+        integration="email",
+        destination=recipient,
+        status="pending",
+    )
+    session.add(result)
+    try:
+        message_id = await AuthEmailService(settings).send_transactional(
+            recipient=recipient,
+            subject=rendered.subject,
+            text_body=rendered.text_body,
+            html_body=rendered.html_body,
+            # New every time on purpose: a test a person asked for twice should arrive
+            # twice, or the second press looks like a failure.
+            idempotency_key=f"email-test-{uuid4()}",
+            purpose="connection_test",
+            sender_email=ALERT_SENDER_EMAIL,
+            sender_name=ALERT_SENDER_NAME,
+        )
+        result.status = "sent"
+        result.provider_message_id = message_id
+    except EmailDeliveryError as exc:
+        result.status = "failed"
+        result.error_code = exc.code
+        await session.commit()
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.code,
+                "message": "We could not send it. Nothing about your account changed.",
+            },
+        ) from exc
+    await session.commit()
+    return {"ok": True, "sent_to": recipient}
+
+
+@router.post("/support/tickets", status_code=status.HTTP_201_CREATED)
+async def create_support_ticket(
+    payload: SupportTicketCreateRequest,
+    request: Request,
+    x_csrf_token: str = Header(default="", alias="X-CSRF-Token"),
+    principal: UserPrincipal = Depends(get_dashboard_principal),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    # Checked like every other state-changing route on this router. This one alone was
+    # writing a row, storing uploaded files and sending two emails on the strength of a
+    # session cookie, which is the shape a cross-site request exploits. The dashboard's
+    # own fetch helper has always sent the token, so nothing that legitimately calls
+    # this notices the difference.
+    if not csrf_token_matches(settings, principal.user_id, x_csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid form token.")
+    requester_email = (
+        str(payload.email)
+        if payload.email
+        else await _user_email(session, principal.user_id)
+    )
+    # The same allowance as the public form, counted from the same ledger, decided by
+    # the same module. Asked first, so a refused request never decodes a screenshot,
+    # writes a file, or sends an email.
+    guard = SupportIntakeGuard(session, settings)
+    intake_client = client_fingerprint(request, settings)
+    decision = await guard.check(
+        email=requester_email or str(principal.user_id),
+        client_fingerprint=intake_client,
+    )
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            headers={"Retry-After": str(max(1, decision.retry_after_seconds))},
+            detail={"code": decision.code, "message": decision.message()},
+        )
     decoded_screenshots: list[tuple[str, str, bytes]] = []
     extension_by_type = {
         "image/png": ".png",
@@ -4917,14 +5289,7 @@ async def create_support_ticket(
         decoded_screenshots.append(
             (f"screenshot-{index + 1}{extension}", screenshot.content_type, content)
         )
-    contact_email = (
-        str(payload.email)
-        if payload.email
-        else await _user_email(
-            session,
-            principal.user_id,
-        )
-    )
+    contact_email = requester_email
     context = {
         **payload.context,
         "source": payload.context.get("source", "dashboard"),
@@ -4934,7 +5299,11 @@ async def create_support_ticket(
     ticket = SupportRequest(
         user_id=principal.user_id,
         category=payload.category,
-        priority="normal",
+        # Asked of the one owner. This route stored every request as "normal" whatever
+        # it was about, so somebody reporting that no message reached them was queued
+        # behind a general question — while the rule that says otherwise sat unused in
+        # `services/support.py`.
+        priority=support_priority(payload.category),
         subject=payload.subject,
         description=payload.description,
         context=context,
@@ -4975,6 +5344,11 @@ async def create_support_ticket(
         created_at=_now(),
     )
     session.add(message)
+    await guard.record(
+        door="dashboard",
+        email=requester_email or str(principal.user_id),
+        client_fingerprint=intake_client,
+    )
     await session.commit()
     try:
         await AuthEmailService(settings).send_support_ticket(
@@ -5004,6 +5378,10 @@ async def create_support_ticket(
         ),
         decoded_screenshots,
     )
+    remaining = await guard.check(
+        email=requester_email or str(principal.user_id),
+        client_fingerprint=intake_client,
+    )
     return {
         "ticket": {
             "id": ticket.id,
@@ -5015,6 +5393,12 @@ async def create_support_ticket(
             "created_at": ticket.created_at,
         },
         "message": {"id": message.id, "created_at": message.created_at},
+        # Told plainly, so the page can say how many are left rather than letting the
+        # next one be refused as a surprise.
+        "remaining_requests": min(
+            remaining.remaining_for_email, remaining.remaining_for_client
+        ),
+        "window_hours": round(guard.limits.window_hours, 2),
     }
 
 

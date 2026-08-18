@@ -1,0 +1,550 @@
+{% extends "hilal/base_dashboard.html" %}
+{% block page_styles_late %}
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260818-live-4">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260818-live-4">
+{% endblock %}
+{% block content %}
+
+{#- Settings.
+
+    Every control on this page saves the moment it is used, and every one of them is
+    read by something real at the other end. Two of the live page's settings had no
+    reader at all, and two settings the product *does* read had no control anywhere.
+
+    The order is the order somebody thinks in: where, when, how much, about what. -#}
+
+<div class="hm-t hm-g" data-settings-root>
+
+  <header class="t-head" data-hm-part="The page heading">
+    <div class="t-head-copy">
+      <p class="t-eyebrow"><span data-icon="sliders" data-icon-class="icon-sm"></span>Your account</p>
+      <h1>Settings</h1>
+    </div>
+    <a class="t-action" href="{{ connections_path }}">
+      <span data-icon="integrations" data-icon-class="icon-sm"></span>Set up Telegram and email
+    </a>
+  </header>
+
+  {#- With no Save button, "did that work?" has to be answered every single time. -#}
+  <div class="g-saved" data-state="idle" data-g-saved>
+    <span class="g-saved-icon" aria-hidden="true"><span data-icon="check" data-icon-class="icon"></span></span>
+    <span class="g-saved-copy">
+      <strong data-g-saved-title>Everything here saves by itself</strong>
+      <span data-g-saved-detail></span>
+    </span>
+    <button class="t-action" type="button" data-g-retry hidden>
+      <span data-icon="refresh" data-icon-class="icon-sm"></span>Try again
+    </button>
+  </div>
+  <p class="sr-only" role="status" aria-live="polite" data-g-said></p>
+
+  <nav class="a-jump" aria-label="Jump to a group of settings">
+    <a href="#g-where" data-g-jump-link><span data-icon="bell" data-icon-class="icon-sm"></span>Where</a>
+    <a href="#g-when" data-g-jump-link><span data-icon="clock" data-icon-class="icon-sm"></span>When</a>
+    <a href="#g-howmuch" data-g-jump-link><span data-icon="sliders" data-icon-class="icon-sm"></span>How much</a>
+    <a href="#g-about" data-g-jump-link><span data-icon="radar" data-icon-class="icon-sm"></span>About what</a>
+    <a href="#g-screen" data-g-jump-link><span data-icon="dashboard" data-icon-class="icon-sm"></span>On this screen</a>
+    <a href="#g-evidence" data-g-jump-link><span data-icon="compliance" data-icon-class="icon-sm"></span>Shariah updates</a>
+    <a href="#g-market" data-g-jump-link><span data-icon="market" data-icon-class="icon-sm"></span>Exchanges</a>
+  </nav>
+
+  <div class="g-groups">
+
+    {#- 1. Where -------------------------------------------------------------- -#}
+    <section class="g-group" id="g-where" data-g-group data-hm-part="Where we tell you">
+      <div class="g-group-head">
+        <span class="a-mark" data-tone="accent" aria-hidden="true"><span data-icon="bell" data-icon-class="icon"></span></span>
+        <div>
+          <h2>Where we tell you</h2>
+          <p>A notice always waits for you here in the dashboard. These are the extra places we can reach you.</p>
+        </div>
+      </div>
+
+      <div class="g-row is-stacked">
+        <div class="g-choices" role="group" aria-label="Where we send you messages">
+          {% for channel in alert_channels %}
+          <button class="g-choice"
+                  type="button"
+                  aria-pressed="{{ 'true' if channel.chosen else 'false' }}"
+                  {{ 'disabled' if not channel.available else '' }}
+                  data-g-set="alert_channels"
+                  data-value="{{ channel.value }}">
+            <span class="g-choice-icon" aria-hidden="true"><span data-icon="{{ channel.icon }}" data-icon-class="icon"></span></span>
+            <span class="g-choice-copy">
+              <strong>{{ channel.label }}</strong>
+            </span>
+            <span class="g-choice-tick" aria-hidden="true"><span data-icon="check" data-icon-class="icon-sm"></span></span>
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    {#- 2. When --------------------------------------------------------------- -#}
+    <section class="g-group" id="g-when" data-g-group data-hm-part="When we tell you">
+      <div class="g-group-head">
+        <span class="a-mark" aria-hidden="true"><span data-icon="clock" data-icon-class="icon"></span></span>
+        <div>
+          <h2 class="g-group-title">
+            Timing
+            <span class="t-info">
+              <span class="t-info-icon" aria-hidden="true"><span data-icon="info" data-icon-class="icon-sm"></span></span>
+              <span class="t-info-box">Your days and hours, in your own time. Outside these, a message waits for you here instead.</span>
+            </span>
+          </h2>
+        </div>
+      </div>
+
+      <div class="g-row">
+        <div class="g-row-copy">
+          <strong>Your time zone</strong>
+          <span>For AI messages and notification settings.</span>
+        </div>
+        <div class="g-row-control">
+          <span class="g-select">
+            <span data-icon="globe" data-icon-class="icon-sm"></span>
+            <select data-g-select="timezone" aria-label="Your time zone">
+              {% for zone in timezones %}
+              <option value="{{ zone.value }}" {{ 'selected' if zone.value == saved.timezone else '' }}>{{ zone.label }}</option>
+              {% endfor %}
+            </select>
+          </span>
+        </div>
+      </div>
+
+      <div class="g-row is-stacked">
+        <div class="g-row-copy">
+          <strong>Which days</strong>
+        </div>
+        <div class="g-row-control is-full">
+          <button class="t-switch" type="button" role="switch"
+                  aria-checked="{{ 'true' if every_day else 'false' }}"
+                  data-g-every-day>
+            <span class="t-switch-track" aria-hidden="true"><span class="t-switch-knob"></span></span>
+            <span class="t-switch-words">
+              <strong data-g-every-day-label>{{ 'Every day' if every_day else 'Only the days I pick' }}</strong>
+              <span>Turn this off to choose particular days.</span>
+            </span>
+          </button>
+        </div>
+        <div class="g-week" data-every-day="{{ 'true' if every_day else 'false' }}" role="group" aria-label="Days we may tell you" data-g-week>
+          {% for day in day_options %}
+          <button class="g-day"
+                  type="button"
+                  aria-pressed="{{ 'true' if day.chosen else 'false' }}"
+                  {{ 'disabled' if every_day else '' }}
+                  data-g-set="alert_days"
+                  data-value="{{ day.value }}">
+            <span aria-hidden="true">{{ day.short }}</span>
+            <span class="sr-only">{{ day.value }}</span>
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="g-row is-stacked">
+        <div class="g-row-copy">
+          <strong>Which hours</strong>
+          <span>Press a part of the day to take all of it, or pick single hours.</span>
+        </div>
+        <div class="g-hours" data-g-hours>
+          {% for group in hour_groups %}
+          <div class="g-part">
+            <button class="g-part-name t-action is-quiet" type="button" data-g-part="{{ group.hours|join(',') }}">
+              <span data-icon="{{ group.icon }}" data-icon-class="icon-sm"></span>{{ group.name }}
+              <span class="sr-only">— choose every hour from {{ group.from_label }} to {{ group.to_label }}</span>
+            </button>
+            <div class="g-part-hours" role="group" aria-label="{{ group.name }} hours">
+              {% for hour in group.hours %}
+              <button class="g-hour"
+                      type="button"
+                      aria-pressed="{{ 'true' if hour in chosen_hours else 'false' }}"
+                      data-g-set="alert_hours"
+                      data-value="{{ hour }}">{{ hour }}</button>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+          {#- "No hour chosen" means every hour. That is what the product really does, so
+              it is what the page has to say — a person reading an empty grid as "never"
+              would be wrong in the most expensive direction. -#}
+          <p class="g-hours-note" data-g-hours-note>
+            <span data-icon="info" data-icon-class="icon-sm"></span>
+            <span data-g-hours-words></span>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    {#- 3. How much ----------------------------------------------------------- -#}
+    <section class="g-group" id="g-howmuch" data-g-group data-hm-part="How much we send">
+      <div class="g-group-head">
+        <span class="a-mark" aria-hidden="true"><span data-icon="sliders" data-icon-class="icon"></span></span>
+        <div>
+          <h2>How much we send</h2>
+        </div>
+      </div>
+
+      <div class="g-row">
+        <div class="g-row-copy">
+          <strong>Maximum messages per hour</strong>
+        </div>
+        <div class="g-row-control">
+          <span class="g-number">
+            <input type="number" min="1" max="1000" step="1" value="{{ saved.maximum_alerts_per_hour }}"
+                   data-g-number="maximum_alerts_per_hour" aria-label="Maximum messages per hour">
+            <span>an hour</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="g-row">
+        <div class="g-row-copy">
+          <strong>Maximum messages per day</strong>
+        </div>
+        <div class="g-row-control">
+          <span class="g-number">
+            <input type="number" min="1" max="10000" step="1" value="{{ saved.maximum_alerts_per_day }}"
+                   data-g-number="maximum_alerts_per_day" aria-label="Maximum messages per day">
+            <span>a day</span>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    {#- 4. About what --------------------------------------------------------- -#}
+    <section class="g-group" id="g-about" data-g-group data-hm-part="What we tell you about">
+      <div class="g-group-head">
+        <span class="a-mark" aria-hidden="true"><span data-icon="radar" data-icon-class="icon"></span></span>
+        <div>
+          <h2>What we tell you about</h2>
+        </div>
+      </div>
+
+      <div class="g-row is-stacked">
+        <div class="g-switches">
+          <button class="t-switch" type="button" role="switch"
+                  aria-checked="{{ 'true' if saved.near_miss_enabled else 'false' }}"
+                  data-g-switch="near_miss_enabled">
+            <span class="t-switch-track" aria-hidden="true"><span class="t-switch-knob"></span></span>
+            <span class="t-switch-words">
+              <strong>Nearly-there setups</strong>
+              <span>Hear about close calls early.</span>
+            </span>
+          </button>
+          <button class="t-switch" type="button" role="switch"
+                  aria-checked="{{ 'true' if saved.finished_opportunity_alerts else 'false' }}"
+                  data-g-switch="finished_opportunity_alerts">
+            <span class="t-switch-track" aria-hidden="true"><span class="t-switch-knob"></span></span>
+            <span class="t-switch-words">
+              <strong>When an opportunity ends</strong>
+              <span>Told either way, pass or fail.</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {#- Rendered already hidden when its switch is off, so the row is never briefly
+          drawn and then taken away while the page is still settling. -#}
+      <div class="g-row" data-g-shown-by="near_miss_enabled" {{ 'hidden' if not saved.near_miss_enabled else '' }}>
+        <div class="g-row-copy">
+          <strong>Closeness needed</strong>
+          <span>Only tell me when this much of my list is already true.</span>
+        </div>
+        <div class="g-row-control">
+          <span class="g-number">
+            <input type="number" min="1" max="100" step="1" value="{{ saved.near_miss_threshold }}"
+                   data-g-number="near_miss_threshold" aria-label="How much of the list must already be true">
+            <span>out of 100</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="g-row is-stacked">
+        <div class="g-row-copy">
+          <strong>Muted coins</strong>
+          <span>Write a coin like BTC to silence it everywhere. Write BTC/USDT to silence only that pair.</span>
+        </div>
+        <div class="g-mute">
+          <div class="g-mute-add">
+            <input type="text" maxlength="24" placeholder="Type a coin, for example BTC"
+                   data-g-mute-input aria-label="A coin to silence">
+            <button class="t-action" type="button" data-g-mute-add>
+              <span data-icon="plus" data-icon-class="icon-sm"></span>Silence it
+            </button>
+          </div>
+          <ul class="g-chips" data-g-chips data-limit="{{ muted_symbol_limit }}">
+            {% for symbol in saved.muted_symbols %}
+            <li class="g-chip" data-g-chip data-value="{{ symbol }}">
+              <span>{{ symbol }}</span>
+              <button type="button" data-g-chip-remove aria-label="Stop silencing {{ symbol }}">
+                <span data-icon="close" data-icon-class="icon-sm"></span>
+              </button>
+            </li>
+            {% endfor %}
+          </ul>
+          <p class="g-chip-empty" data-g-chip-empty {{ 'hidden' if saved.muted_symbols else '' }}>
+            Nothing is silenced. You hear about every coin your Watchlists find.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    {#- 5. On this screen ----------------------------------------------------- -#}
+    <section class="g-group" id="g-screen" data-g-group data-hm-part="On this screen" data-hm-guide-target="settings-notification-preferences">
+      <div class="g-group-head">
+        <span class="a-mark" aria-hidden="true"><span data-icon="dashboard" data-icon-class="icon"></span></span>
+        <div>
+          <h2>On this screen</h2>
+        </div>
+      </div>
+
+      <div class="g-row is-stacked">
+        <div class="g-switches">
+          <button class="t-switch" type="button" role="switch"
+                  aria-checked="{{ 'true' if saved.dashboard_notifications_enabled else 'false' }}"
+                  data-g-switch="dashboard_notifications_enabled">
+            <span class="t-switch-track" aria-hidden="true"><span class="t-switch-knob"></span></span>
+            <span class="t-switch-words">
+              <strong>Show me finished matches</strong>
+              <span>A card in the corner when every check on your list has passed.</span>
+            </span>
+          </button>
+          <button class="t-switch" type="button" role="switch"
+                  aria-checked="{{ 'true' if saved.forming_dashboard_notifications else 'false' }}"
+                  data-g-switch="forming_dashboard_notifications">
+            <span class="t-switch-track" aria-hidden="true"><span class="t-switch-knob"></span></span>
+            <span class="t-switch-words">
+              <strong>Show me ones still forming</strong>
+              <span>A card for coins that are getting close but are not there yet.</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <div class="g-row" data-g-shown-by="dashboard_notifications_enabled" {{ 'hidden' if not saved.dashboard_notifications_enabled else '' }}>
+        <div class="g-row-copy">
+          <strong>Sound for a finished match</strong>
+        </div>
+        <div class="g-row-control">
+          <fieldset class="g-picker" data-g-pick="dashboard_notification_sound">
+            <legend>Sound for a finished match</legend>
+            {% for value, label in confirmed_sounds %}
+            <label class="g-pick">
+              <input type="radio" name="confirmed_sound" value="{{ value }}"
+                     {{ 'checked' if saved.dashboard_notification_sound == value else '' }}>
+              <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+          </fieldset>
+          <button class="t-action" type="button" data-g-hear="dashboard_notification_sound">
+            <span data-icon="play" data-icon-class="icon-sm"></span>Hear it
+          </button>
+        </div>
+      </div>
+
+      <div class="g-row" data-g-shown-by="forming_dashboard_notifications" {{ 'hidden' if not saved.forming_dashboard_notifications else '' }}>
+        <div class="g-row-copy">
+          <strong>Sound for one still forming</strong>
+          <span>Quieter than the finished one, on purpose.</span>
+        </div>
+        <div class="g-row-control">
+          <fieldset class="g-picker" data-g-pick="forming_notification_sound">
+            <legend>Sound for one still forming</legend>
+            {% for value, label in forming_sounds %}
+            <label class="g-pick">
+              <input type="radio" name="forming_sound" value="{{ value }}"
+                     {{ 'checked' if saved.forming_notification_sound == value else '' }}>
+              <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+          </fieldset>
+          <button class="t-action" type="button" data-g-hear="forming_notification_sound">
+            <span data-icon="play" data-icon-class="icon-sm"></span>Hear it
+          </button>
+        </div>
+      </div>
+    </section>
+
+    {#- 6. Shariah updates ---------------------------------------------------- -#}
+    <section class="g-group" id="g-evidence" data-g-group data-hm-part="Shariah updates" data-hm-guide-target="settings-compliance-behaviour">
+      <div class="g-group-head">
+        <span class="a-mark" data-tone="warning" aria-hidden="true"><span data-icon="compliance" data-icon-class="icon"></span></span>
+        <div>
+          <h2>When a coin's Shariah status changes</h2>
+        </div>
+      </div>
+
+      <div class="g-row">
+        <div class="g-row-copy">
+          <strong>Here in the dashboard</strong>
+          <span>Always on, so an important change cannot pass you by.</span>
+        </div>
+        <div class="g-row-control">
+          <p class="a-state" data-tone="success"><span data-icon="lock" data-icon-class="icon-sm"></span>Always on</p>
+        </div>
+      </div>
+
+      <div class="g-row is-stacked">
+        <div class="g-row-copy">
+          <strong>Anywhere else</strong>
+          <span>Also send these where you chose above.</span>
+        </div>
+        <div class="g-choices" role="group" aria-label="Where else to send Shariah updates">
+          {% for channel in evidence_channels %}
+          <button class="g-choice"
+                  type="button"
+                  aria-pressed="{{ 'true' if channel.chosen else 'false' }}"
+                  {{ 'disabled' if not channel.available else '' }}
+                  data-g-set="compliance_alert_channels"
+                  data-value="{{ channel.value }}">
+            <span class="g-choice-icon" aria-hidden="true"><span data-icon="{{ channel.icon }}" data-icon-class="icon"></span></span>
+            <span class="g-choice-copy">
+              <strong>{{ channel.label }}</strong>
+            </span>
+            <span class="g-choice-tick" aria-hidden="true"><span data-icon="check" data-icon-class="icon-sm"></span></span>
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="g-row">
+        <div class="g-row-copy">
+          <strong>How soon</strong>
+          <span>A serious change always comes straight away, whichever you pick.</span>
+        </div>
+        <div class="g-row-control">
+          <fieldset class="g-picker" data-g-pick="compliance_alert_digest">
+            <legend>How soon to send Shariah updates</legend>
+            <label class="g-pick">
+              <input type="radio" name="evidence_timing" value="immediate"
+                     {{ 'checked' if saved.compliance_alert_digest != 'daily' else '' }}>
+              <span>Straight away</span>
+            </label>
+            <label class="g-pick">
+              <input type="radio" name="evidence_timing" value="daily"
+                     {{ 'checked' if saved.compliance_alert_digest == 'daily' else '' }}>
+              <span>Once a day</span>
+            </label>
+          </fieldset>
+        </div>
+      </div>
+
+      <div class="g-row">
+        <div class="g-row-copy">
+          <strong>Small wording changes</strong>
+          <span>Only the wording changed.</span>
+        </div>
+        <div class="g-row-control">
+          <button class="t-switch" type="button" role="switch"
+                  aria-checked="{{ 'true' if saved.qualification_change_alerts else 'false' }}"
+                  data-g-switch="qualification_change_alerts">
+            <span class="t-switch-track" aria-hidden="true"><span class="t-switch-knob"></span></span>
+            <span class="t-switch-words">
+              <strong>Tell me about those too</strong>
+              <span>Turn it off to hear only about bigger changes.</span>
+            </span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    {#- 7. Exchanges ---------------------------------------------------------- -#}
+    <section class="g-group" id="g-market" data-g-group data-hm-part="Which exchanges">
+      <div class="g-group-head">
+        <span class="a-mark" aria-hidden="true"><span data-icon="market" data-icon-class="icon"></span></span>
+        <div>
+          <h2>Which exchanges we watch</h2>
+        </div>
+      </div>
+
+      <div class="g-row is-stacked">
+        <div class="g-choices" role="group" aria-label="Which exchanges to watch">
+          {% for provider in providers %}
+          <button class="g-choice"
+                  type="button"
+                  aria-pressed="{{ 'true' if provider.chosen else 'false' }}"
+                  data-g-set="providers"
+                  data-value="{{ provider.value }}">
+            <span class="g-choice-icon" aria-hidden="true"><img src="{{ provider.logo }}" alt=""></span>
+            <span class="g-choice-copy">
+              <strong>{{ provider.label }}</strong>
+              <small>Read prices from {{ provider.label }}.</small>
+            </span>
+            <span class="g-choice-tick" aria-hidden="true"><span data-icon="check" data-icon-class="icon-sm"></span></span>
+          </button>
+          {% endfor %}
+        </div>
+        {#- This one has a real consequence and it is said before it happens, not after.
+            It is also the only setting on this page that asks before it acts. -#}
+        <p class="g-warn">
+          <span data-icon="warning" data-icon-class="icon-sm"></span>
+          <span>Turning one off stops every Watchlist that uses it. Those Watchlists stay saved, but they stop looking.</span>
+        </p>
+      </div>
+    </section>
+
+    {#- 8. Your data ---------------------------------------------------------- -#}
+    <section class="g-group" id="g-data" data-g-group data-hm-part="Your data">
+      <div class="g-group-head">
+        <span class="a-mark" aria-hidden="true"><span data-icon="shield" data-icon-class="icon"></span></span>
+        <div>
+          <h2>Your data</h2>
+        </div>
+      </div>
+      <div class="g-choices">
+        <a class="g-choice" href="/cookies?settings=1">
+          <span class="g-choice-icon" aria-hidden="true"><span data-icon="cookie" data-icon-class="icon"></span></span>
+          <span class="g-choice-copy"><strong>Cookie choices</strong><small>Change what you agreed to.</small></span>
+          <span class="g-choice-tick" aria-hidden="true"><span data-icon="chevron_right" data-icon-class="icon-sm"></span></span>
+        </a>
+        <a class="g-choice" href="/privacy">
+          <span class="g-choice-icon" aria-hidden="true"><span data-icon="shield" data-icon-class="icon"></span></span>
+          <span class="g-choice-copy"><strong>Privacy policy</strong><small>What we hold and why.</small></span>
+          <span class="g-choice-tick" aria-hidden="true"><span data-icon="chevron_right" data-icon-class="icon-sm"></span></span>
+        </a>
+        <a class="g-choice" href="{{ support_path }}">
+          <span class="g-choice-icon" aria-hidden="true"><span data-icon="support" data-icon-class="icon"></span></span>
+          <span class="g-choice-copy"><strong>Ask about your data</strong><small>Send us a request and we answer by email.</small></span>
+          <span class="g-choice-tick" aria-hidden="true"><span data-icon="chevron_right" data-icon-class="icon-sm"></span></span>
+        </a>
+      </div>
+    </section>
+  </div>
+</div>
+
+{#- Asking before an exchange goes off.
+
+    Every other control on this page saves the moment it is used, because every other
+    control is easy to undo by pressing it again. This one is not: it stops Watchlists
+    looking at the market, and a person can walk away without noticing. So it is the one
+    control that asks first — the same pattern as unlinking Telegram on Connections, and
+    for the same reason. A browser confirm box is unstyled, unbranded, and not something
+    a screen reader announces as a choice. -#}
+<dialog class="t-dialog g-ask" data-g-ask-dialog aria-labelledby="g-ask-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <span class="t-eyebrow"><span data-icon="warning" data-icon-class="icon-sm"></span>Before you do</span>
+        <h2 id="g-ask-title">Stop watching <span data-g-ask-name>this exchange</span>?</h2>
+      </div>
+      <button class="t-close" type="button" data-g-ask-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <div class="t-dialog-body">
+      <p>Every Watchlist that reads prices from here stops looking. They stay saved exactly as they are, and nothing is deleted.</p>
+      <p>You can turn it back on at any time, and they start looking again.</p>
+    </div>
+    <footer class="t-dialog-foot">
+      <button class="t-action" type="button" data-g-ask-cancel>Keep watching it</button>
+      <button class="t-action is-danger" type="button" data-g-ask-go>
+        <span data-icon="pause" data-icon-class="icon-sm"></span>Stop watching it
+      </button>
+    </footer>
+  </div>
+</dialog>
+{% endblock %}
+{% block page_scripts %}
+<script type="module" src="{{ url_for('static', path='/hm-settings-test.js') }}?v=20260818-live-4"></script>
+{% endblock %}

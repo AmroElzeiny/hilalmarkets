@@ -30,7 +30,7 @@ the deadline and then issuing a request that cannot finish wastes the provider's
 limit and returns nothing.
 
 Nothing here logs a prompt, an API key, an ``Authorization`` header or a request body.
-The attempt record carries status, class, timing and the provider's own request id вЂ” the
+The attempt record carries status, class, timing and the provider's own request id — the
 things needed to explain an outage, none of the things that must never be stored.
 """
 
@@ -72,7 +72,7 @@ class FailureClass(StrEnum):
     #: The upstream broke or timed out. Retryable with backoff.
     TRANSIENT = "transient"
     #: The upstream answered, but not with something we can use. Retrying the transport
-    #: cannot change a malformed body вЂ” the same bytes come back.
+    #: cannot change a malformed body — the same bytes come back.
     INVALID_RESPONSE = "invalid_response"
     #: The request itself is wrong (400, 404, 422). Retrying sends the same wrong thing.
     PERMANENT = "permanent"
@@ -120,7 +120,7 @@ class AttemptRecord:
     """Everything worth knowing about one call, and nothing that must not be stored.
 
     Deliberately carries no headers, no body and no prompt. An outage is explained by
-    *when*, *what class* and *which upstream request id* вЂ” never by replaying what was
+    *when*, *what class* and *which upstream request id* — never by replaying what was
     sent.
     """
 
@@ -431,8 +431,8 @@ class CircuitBreaker:
 class CircuitStateStore:
     """Where circuit state is shared between workers.
 
-    An interface rather than a concrete Redis client so the breaker keeps working вЂ” in
-    per-worker mode вЂ” when no shared store is configured. Every implementation must treat
+    An interface rather than a concrete Redis client so the breaker keeps working — in
+    per-worker mode — when no shared store is configured. Every implementation must treat
     unavailability as "no opinion", never as "open".
 
     ``allow`` deliberately has three answers. ``True`` and ``False`` are the shared
@@ -730,7 +730,7 @@ async def call_with_reliability(
     """Make one provider call, with pooling, bounded retries and the circuit breaker.
 
     ``deadline_seconds`` is what remains of the whole turn. No attempt starts, and no
-    backoff is slept, unless both fit inside it вЂ” a retry that cannot finish before the
+    backoff is slept, unless both fit inside it — a retry that cannot finish before the
     turn is abandoned spends the provider's rate limit for nothing.
 
     ``mutation_committed`` must be True whenever the call has already changed state on the

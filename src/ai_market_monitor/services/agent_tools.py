@@ -29,6 +29,7 @@ from ai_market_monitor.engine.formula_compiler import (
     compile_explicit_formula_group,
     parse_percentage_formula,
 )
+from ai_market_monitor.engine.grounded_patch import comparator_is_grounded, direction_is_grounded
 from ai_market_monitor.engine.strategy_state import StrategyDraftState
 from ai_market_monitor.engine.turn_fragments import classify_turn
 from ai_market_monitor.schemas.agent_control import (
@@ -46,7 +47,7 @@ from ai_market_monitor.schemas.agent_control import (
     RunOneTimeScanArgs,
     ValidateCapabilitySelectionArgs,
 )
-from ai_market_monitor.schemas.strategy import StrategyDefinition, StrategyDirection
+from ai_market_monitor.schemas.strategy import Comparator, StrategyDefinition, StrategyDirection
 from ai_market_monitor.services.agent_policy import (
     AgentRuntimePolicyState,
     AgentServerContext,
@@ -192,6 +193,16 @@ class AgentToolService:
         sources = {_normalized(item.fragment) for item in report.fragments}
         runtime.policy_state.candidate_capability_keys.update(candidates)
         runtime.policy_state.candidate_source_fragments.update(sources)
+        # Per-fragment, not just per-turn: a multi-condition message ("RSI below 30
+        # and volume 2x average") must not let a capability that scored on one clause
+        # be bound to a different clause's wording just because both appeared
+        # somewhere in the same turn. See AgentPolicyService.validate_call.
+        by_fragment = runtime.policy_state.candidate_capability_keys_by_fragment
+        for item in report.fragments:
+            key = _normalized(item.fragment)
+            by_fragment[key] = by_fragment.get(key, frozenset()) | {
+                candidate.capability_key for candidate in item.candidates
+            }
         unresolved = [item for item in report.fragments if item.status != "matched"]
         missing_timeframe = (
             not explicit_timeframes
@@ -1317,13 +1328,29 @@ def _numeric_value_is_user_authored(value: Any, runtime: AgentToolRuntime) -> bo
 
 
 def _comparator_is_user_authored(comparator: str, source_fragment: str) -> bool:
+    """Whether the fragment states this comparator, in any language the product accepts.
+
+    This used to check only the English word table below — a second copy of the
+    vocabulary ``comparators.py`` already owns, with no Arabic or Arabizi entry at
+    all — so a trader who wrote a comparison correctly in Arabic (which the
+    deterministic compiler reads fine) could still have the agent's own selection
+    refused as "not expressed by the user". The English table is kept exactly as it
+    was, so nothing that passed before stops passing; ``comparator_is_grounded`` is
+    added as a second, multilingual way to pass. ``is_true``/``is_false`` and the
+    two cross comparators are not phrases ``comparator_is_grounded`` knows, so they
+    keep their own checks.
+    """
     if comparator == "is_true":
         return True
     lowered = source_fragment.casefold()
     if comparator == "crosses_above":
-        return bool(re.search(r"\b(?:cross(?:es|ed)?|reclaim(?:s|ed)?)\b.{0,24}\babove\b", lowered))
+        return bool(
+            re.search(r"\b(?:cross(?:es|ed)?|reclaim(?:s|ed)?)\b.{0,24}\babove\b", lowered)
+        ) or comparator_is_grounded(Comparator.CROSSES_ABOVE, source_fragment)
     if comparator == "crosses_below":
-        return bool(re.search(r"\b(?:cross(?:es|ed)?)\b.{0,24}\bbelow\b", lowered))
+        return bool(
+            re.search(r"\b(?:cross(?:es|ed)?)\b.{0,24}\bbelow\b", lowered)
+        ) or comparator_is_grounded(Comparator.CROSSES_BELOW, source_fragment)
     vocabulary = {
         "above": ("above", "over", "greater", "higher"),
         "below": ("below", "under", "less", "lower"),
@@ -1339,20 +1366,58 @@ def _comparator_is_user_authored(comparator: str, source_fragment: str) -> bool:
         "equals": ("equal", "equals", "exactly", "is"),
         "is_false": ("not", "avoid", "without", "no "),
     }
-    words = vocabulary.get(comparator)
-    if not words:
+    if any(word in lowered for word in vocabulary.get(comparator, ())):
+        return True
+    if comparator == "is_false":
+        # Not one of comparators.py's comparison phrases — this asks whether a
+        # boolean mechanic was explicitly negated, which is a different vocabulary.
+        # comparators.py has no entry for it, so the Arabic/Arabizi negation words
+        # are added directly rather than through comparator_is_grounded.
+        return any(term in lowered for term in ("لا", "مش", "بدون", "مافيش", "la2", "msh"))
+    try:
+        value = Comparator(comparator)
+    except ValueError:
         return False
-    return any(word in lowered for word in words)
+    return comparator_is_grounded(value, source_fragment)
+
+
+#: Words for "neither side" that ``direction_is_grounded`` cannot express — it only
+#: knows "up"/"down"/"signed", and a capability's "neutral" is a different claim (no
+#: side at all) that must still be justified by the trader's own words, not assumed.
+_NEUTRAL_DIRECTION_TERMS = (
+    "neutral",
+    "either direction",
+    "both directions",
+    "any direction",
+    "up or down",
+    "either way",
+    "محايد",
+    "أي اتجاه",
+    "كلاهما",
+)
 
 
 def _direction_is_user_authored(direction: str, source_fragment: str) -> bool:
+    """Whether the fragment states this side, in any language the product accepts.
+
+    Same defect as the comparator table above: an English-only copy of
+    ``price_movement.py``'s vocabulary. ``direction_is_grounded`` is the shared,
+    multilingual reader; "long"/"short" (a trade side, not a price move) and
+    "green"/"red" (candle-colour slang) are kept as a narrow addition because
+    ``price_movement.py`` deliberately does not claim them as movement words.
+    """
+    lowered = source_fragment.casefold()
     vocabulary = {
         "bullish": ("bullish", "long", "upward", "green"),
         "bearish": ("bearish", "short", "downward", "red"),
         "neutral": ("neutral", "either direction", "both directions", "any direction"),
     }
-    lowered = source_fragment.casefold()
-    return any(phrase in lowered for phrase in vocabulary[direction])
+    if any(phrase in lowered for phrase in vocabulary.get(direction, ())):
+        return True
+    if direction == "neutral":
+        return any(term in lowered for term in _NEUTRAL_DIRECTION_TERMS)
+    canonical = {"bullish": "up", "bearish": "down"}.get(direction)
+    return canonical is not None and direction_is_grounded(canonical, source_fragment)
 
 
 def _draft_uses_timeframe(payload: dict[str, Any] | None, timeframe: str) -> bool:

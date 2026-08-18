@@ -1,0 +1,1561 @@
+/* Design layer for the redesigned dashboard pages.
+ *
+ * Every colour, radius, shadow and typeface here comes from the tokens already
+ * declared in hilalmarkets-brand.css and hilalmarkets-fonts.css. Nothing new is
+ * invented: no new brand colour, no second type family, no second radius scale.
+ * The names below (--t-*) are *aliases with intent* over those tokens, so a rule
+ * can say "the quiet surface" instead of repeating a hex value that would then be
+ * free to drift from the brand file.
+ *
+ * `brand guide.md` sections 9 and 12: predominantly white, hierarchy from spacing
+ * and type before decoration, apple green as one focal accent rather than a
+ * decoration applied everywhere, borders light and shadows minimal.
+ */
+
+/* The tokens are declared for the page, the dialogs *and* Hilal's window. A <dialog>
+   is moved to the top layer and is not a descendant of the page wrapper, and Hilal sits
+   beside the page rather than inside it, so scoping the tokens to `.hm-t` alone left
+   every popup with unstyled buttons and left Hilal writing the spacing scale out again
+   as fallback values — a second copy of the scale, free to drift from this one.
+
+   The same three names carry the shared primitives below. Hilal's "See what a plan
+   adds" was a `.t-action` that matched no rule at all: it rendered as bare underlined
+   text with the icon stacked above it, which is what a person out of allowance was
+   shown as their only way forward. */
+body.hilal-dashboard .hm-t,
+body.hilal-dashboard dialog.t-dialog,
+body.hilal-dashboard .hm-hilal {
+  /* Surfaces */
+  --t-canvas: var(--hm-canvas);
+  --t-surface: var(--hm-surface);
+  --t-quiet: var(--hm-surface-soft);
+  --t-line: var(--hm-hairline);
+  --t-line-strong: var(--hm-hairline-strong);
+
+  /* Text. --hm-muted used to measure 3.98:1 on white — under the 4.5:1 normal-size body
+     text needs — which is why small copy on this path uses --t-copy (7.5:1). The token
+     itself has since been raised to 5.55:1, so --t-muted now clears AA as well; small
+     copy still prefers --t-copy, because AAA is the floor the redesign works to. */
+  --t-ink: var(--hm-ink);
+  --t-ink-strong: var(--hm-ink-strong);
+  --t-copy: var(--hm-copy);
+  --t-muted: var(--hm-muted);
+
+  /* The single accent */
+  --t-accent: var(--hm-apple);
+  --t-accent-pale: var(--hm-apple-pale);
+  --t-accent-soft: var(--hm-apple-soft);
+  --t-accent-text: var(--hm-success);
+
+  /* Direction of a price move. Never the only signal: an arrow icon and a signed
+     number carry the same meaning for anyone who cannot separate these two. */
+  --t-rise: var(--hm-success);
+  --t-fall: var(--hm-danger);
+
+  /* Rhythm. These are the step values the shipped dashboard already uses; they are
+     named here, not changed. */
+  --t-1: 4px;
+  --t-2: 8px;
+  --t-3: 12px;
+  --t-4: 16px;
+  --t-5: 24px;
+  --t-6: 32px;
+  --t-7: 48px;
+
+  --t-r-sm: var(--hm-radius-sm);
+  --t-r-md: var(--hm-radius-md);
+  --t-r-lg: var(--hm-radius-lg);
+  --t-r-xl: var(--hm-radius-xl);
+  --t-ease: cubic-bezier(.2, .75, .25, 1);
+  --t-fast: 140ms;
+  --t-base: 220ms;
+}
+
+body.hilal-dashboard .hm-t,
+body.hilal-dashboard .hm-t *,
+body.hilal-dashboard dialog.t-dialog,
+body.hilal-dashboard dialog.t-dialog *,
+body.hilal-dashboard .hm-hilal,
+body.hilal-dashboard .hm-hilal * {
+  box-sizing: border-box;
+}
+
+body.hilal-dashboard .hm-t {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-6);
+  color: var(--t-ink);
+}
+
+/* ── Shared primitives ─────────────────────────────────────────────────────── */
+
+/* `.t-scope` below is the page and the popups together. Components that appear in
+   both are written against it once, rather than duplicated per surface. */
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-card {
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  margin: 0;
+  color: var(--t-copy);
+  font-size: .75rem;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: none;
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-eyebrow .t-logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: .5rem;
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) h1 { margin: 0; font-size: clamp(1.65rem, 1.2rem + 1.6vw, 2.3rem); line-height: 1.15; }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) h2 { margin: 0; font-size: clamp(1.15rem, 1rem + .6vw, 1.4rem); line-height: 1.25; }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) h3 { margin: 0; font-size: 1rem; line-height: 1.35; }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) p { margin: 0; color: var(--t-copy); line-height: 1.6; }
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-lede {
+  max-width: 62ch;
+  color: var(--t-copy);
+  font-size: 1rem;
+}
+
+/* Numbers are the content on this page. Tabular figures keep a column of prices
+   aligned as digits change, so a moving market does not make the page jitter. */
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-figure {
+  font-family: var(--hm-font-display);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: -.01em;
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-chamfer {
+  /* The logo-derived cut. `brand guide.md` section 6: a rare recognisable accent,
+     at most one clearly visible chamfer per composition — so it appears exactly
+     once per page, on the live-status seal. */
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+
+/* ── Page header ───────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-t .t-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--t-4) var(--t-5);
+}
+
+body.hilal-dashboard .hm-t .t-head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-2);
+}
+
+/* Live status. A dot that pulses only while data is genuinely arriving, and stops
+   the moment it is not — the movement is the status, not decoration. */
+body.hilal-dashboard .hm-t .t-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-3);
+  padding: var(--t-2) var(--t-4);
+  border: 1px solid var(--t-line-strong);
+  background: var(--t-surface);
+  color: var(--t-copy);
+  font-size: .8rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-t .t-live-dot {
+  position: relative;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--t-muted);
+  transition: background var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-t .t-live[data-state="live"] .t-live-dot { background: var(--t-accent-text); }
+body.hilal-dashboard .hm-t .t-live[data-state="stale"] .t-live-dot { background: var(--hm-warning); }
+body.hilal-dashboard .hm-t .t-live[data-state="down"] .t-live-dot { background: var(--hm-danger); }
+
+body.hilal-dashboard .hm-t .t-live[data-state="live"] .t-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border: 1px solid var(--t-accent-text);
+  border-radius: 999px;
+  opacity: 0;
+  animation: t-ping 2.4s var(--t-ease) infinite;
+}
+
+@keyframes t-ping {
+  0% { opacity: .6; transform: scale(.6); }
+  70%, 100% { opacity: 0; transform: scale(1.35); }
+}
+
+body.hilal-dashboard .hm-t .t-live-text { display: flex; flex-direction: column; line-height: 1.3; }
+body.hilal-dashboard .hm-t .t-live-text small { color: var(--t-copy); font-size: .72rem; }
+
+/* ── Orientation tiles: the page's own filters ─────────────────────────────── */
+
+body.hilal-dashboard .hm-t .t-tiles {
+  display: grid;
+  gap: var(--t-3);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+body.hilal-dashboard .hm-t .t-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-1);
+  min-height: 96px;
+  padding: var(--t-4) var(--t-5);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: start;
+  transition: border-color var(--t-base) var(--t-ease), transform var(--t-base) var(--t-ease), box-shadow var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-t .t-tile:hover {
+  border-color: var(--t-line-strong);
+  box-shadow: var(--hm-shadow-xs);
+  transform: translateY(-2px);
+}
+
+body.hilal-dashboard .hm-t .t-tile[aria-pressed="true"] {
+  border-color: var(--t-ink);
+  box-shadow: inset 0 0 0 1px var(--t-ink);
+}
+
+body.hilal-dashboard .hm-t .t-tile-top {
+  display: flex;
+  align-items: center;
+  gap: var(--t-2);
+  color: var(--t-copy);
+  font-size: .8rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-t .t-tile-top .icon,
+body.hilal-dashboard .hm-t .t-tile-top .icon-sm { width: 16px; height: 16px; }
+
+body.hilal-dashboard .hm-t .t-tile-value { font-size: 1.75rem; }
+body.hilal-dashboard .hm-t .t-tile-note { color: var(--t-copy); font-size: .78rem; }
+
+body.hilal-dashboard .hm-t .t-tile[aria-pressed="true"] .t-tile-value { color: var(--t-ink-strong); }
+
+/* The one green focal point on the page: the selected tile's underline. */
+body.hilal-dashboard .hm-t .t-tile-bar {
+  height: 3px;
+  margin-top: auto;
+  border-radius: 999px;
+  background: var(--t-line);
+  transition: background var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-t .t-tile[aria-pressed="true"] .t-tile-bar { background: var(--t-accent); }
+
+/* ── Control bar ───────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-t .t-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-3);
+  padding: var(--t-3);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-t .t-search {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 230px;
+}
+
+body.hilal-dashboard .hm-t .t-search .icon,
+body.hilal-dashboard .hm-t .t-search .icon-sm {
+  position: absolute;
+  top: 50%;
+  inset-inline-start: 14px;
+  width: 18px;
+  height: 18px;
+  color: var(--t-copy);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+body.hilal-dashboard .hm-t .t-search input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--t-4) 0 42px;
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-quiet);
+  color: var(--t-ink);
+  font: inherit;
+  transition: border-color var(--t-base) var(--t-ease), background var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-t:dir(rtl) .t-search input { padding: 0 42px 0 var(--t-4); }
+
+body.hilal-dashboard .hm-t .t-search input:hover { border-color: var(--t-ink); }
+body.hilal-dashboard .hm-t .t-search input:focus { background: var(--t-surface); outline-offset: 2px; }
+body.hilal-dashboard .hm-t .t-search input::placeholder { color: var(--t-copy); }
+
+/* Segmented control: exchange, and the card/table view switch. */
+body.hilal-dashboard .hm-t .t-segment {
+  display: inline-flex;
+  gap: var(--t-1);
+  padding: var(--t-1);
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard .hm-t .t-segment button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  min-height: 36px;
+  padding: 0 var(--t-4);
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--t-copy);
+  cursor: pointer;
+  font: inherit;
+  font-size: .85rem;
+  font-weight: 500;
+  transition: background var(--t-base) var(--t-ease), color var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-t .t-segment button:hover { color: var(--t-ink); }
+
+body.hilal-dashboard .hm-t .t-segment button[aria-pressed="true"],
+body.hilal-dashboard .hm-t .t-segment button[aria-checked="true"] {
+  background: var(--t-surface);
+  color: var(--t-ink);
+  box-shadow: var(--hm-shadow-xs);
+}
+
+body.hilal-dashboard .hm-t .t-segment img { width: 16px; height: 16px; border-radius: 4px; }
+body.hilal-dashboard .hm-t .t-segment .icon,
+body.hilal-dashboard .hm-t .t-segment .icon-sm { width: 16px; height: 16px; }
+
+body.hilal-dashboard .hm-t .t-field {
+  display: inline-flex;
+  flex: 1 1 330px;
+  min-width: 0;
+  align-items: center;
+  gap: var(--t-2);
+  min-height: 44px;
+  padding: 0 var(--t-3);
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-quiet);
+}
+
+/* The label is one line beside the control, never stacked above it: a wrapped
+   label pushed the select out of the pill and clipped the standard's name. */
+body.hilal-dashboard .hm-t .t-field > :where(span, label) {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--t-1);
+  color: var(--t-copy);
+  font-size: .8rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-t .t-field > label .icon,
+body.hilal-dashboard .hm-t .t-field > label .icon-sm { width: 15px; height: 15px; }
+
+/* A standard's name is the thing being chosen, so the control keeps enough width to
+   read it and the row wraps instead of truncating it to "AAOI...". */
+body.hilal-dashboard .hm-t .t-field select {
+  min-width: 11ch;
+  flex: 1 1 auto;
+  border: 0;
+  background: transparent;
+  color: var(--t-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: .85rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+body.hilal-dashboard .hm-t .t-control-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--t-copy);
+  font-size: .8rem;
+}
+
+/* ── Asset cards ───────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-t .t-grid {
+  display: grid;
+  gap: var(--t-3);
+  grid-template-columns: repeat(auto-fill, minmax(276px, 1fr));
+}
+
+body.hilal-dashboard .hm-t .t-asset {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-3);
+  padding: var(--t-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+  transition: border-color var(--t-base) var(--t-ease), box-shadow var(--t-base) var(--t-ease), transform var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-t .t-asset:hover,
+body.hilal-dashboard .hm-t .t-asset:focus-within {
+  border-color: var(--t-line-strong);
+  box-shadow: var(--hm-shadow-sm);
+  transform: translateY(-3px);
+}
+
+body.hilal-dashboard .hm-t .t-asset[hidden] { display: none; }
+
+body.hilal-dashboard .hm-t .t-asset-top {
+  display: flex;
+  align-items: center;
+  gap: var(--t-3);
+}
+
+body.hilal-dashboard .hm-t .t-logo {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  overflow: hidden;
+  border: 1px solid var(--t-line);
+  border-radius: 13px;
+  background: var(--t-quiet);
+  color: var(--t-ink);
+  font-family: var(--hm-font-display);
+  font-size: .74rem;
+  font-weight: 500;
+  letter-spacing: .02em;
+}
+
+body.hilal-dashboard .hm-t .t-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  /* The catalog logo fades in over the monogram rather than replacing it in a
+     single frame, so a slow network shows a settled placeholder instead of a flash. */
+  animation: t-logo-in var(--t-base) var(--t-ease) both;
+}
+
+@keyframes t-logo-in { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: scale(1); } }
+
+body.hilal-dashboard .hm-t .t-asset-name { display: flex; min-width: 0; flex-direction: column; }
+body.hilal-dashboard .hm-t .t-asset-symbol { font-family: var(--hm-font-display); font-size: 1rem; font-weight: 500; }
+body.hilal-dashboard .hm-t .t-asset-full {
+  overflow: hidden;
+  color: var(--t-copy);
+  font-size: .8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Favourite control. 44px target, pressed state carried by aria-pressed as well
+   as by the fill, and the label changes so it is never "a red heart" alone. */
+body.hilal-dashboard .hm-t .t-fav {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-inline-start: auto;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--t-copy);
+  cursor: pointer;
+  transition: color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease), border-color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-t .t-fav:hover { border-color: var(--t-line-strong); background: var(--t-quiet); color: var(--t-ink); }
+body.hilal-dashboard .hm-t .t-fav[aria-pressed="true"] { color: var(--hm-danger); }
+body.hilal-dashboard .hm-t .t-fav[disabled] { cursor: progress; opacity: .55; }
+body.hilal-dashboard .hm-t .t-fav .icon { width: 20px; height: 20px; }
+
+body.hilal-dashboard .hm-t .t-fav[aria-pressed="true"] .icon { animation: t-fav-in 320ms var(--t-ease); }
+
+@keyframes t-fav-in {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.28); }
+  100% { transform: scale(1); }
+}
+
+/* Price block */
+body.hilal-dashboard .hm-t .t-price-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--t-3);
+}
+
+body.hilal-dashboard .hm-t .t-price { font-size: 1.4rem; }
+body.hilal-dashboard .hm-t .t-price[data-empty="true"] { color: var(--t-copy); font-size: 1rem; }
+
+body.hilal-dashboard .hm-t .t-change {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-1);
+  font-family: var(--hm-font-display);
+  font-size: .9rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-t .t-change .icon,
+body.hilal-dashboard .hm-t .t-change .icon-sm { width: 15px; height: 15px; }
+body.hilal-dashboard .hm-t .t-change[data-direction="up"] { color: var(--t-rise); }
+body.hilal-dashboard .hm-t .t-change[data-direction="down"] { color: var(--t-fall); }
+body.hilal-dashboard .hm-t .t-change[data-direction="flat"] { color: var(--t-copy); }
+
+/* A price that moved flashes its own background briefly. It marks the change and
+   then stops; nothing here loops. */
+body.hilal-dashboard .hm-t .t-price.is-up { animation: t-tick-up 620ms var(--t-ease); }
+body.hilal-dashboard .hm-t .t-price.is-down { animation: t-tick-down 620ms var(--t-ease); }
+
+@keyframes t-tick-up {
+  0% { color: var(--t-rise); transform: translateY(2px); }
+  100% { color: inherit; transform: translateY(0); }
+}
+
+@keyframes t-tick-down {
+  0% { color: var(--t-fall); transform: translateY(-2px); }
+  100% { color: inherit; transform: translateY(0); }
+}
+
+/* 24h range. Real values only: the marker sits where the last trade falls between
+   the day's low and high. When any of the three is missing the whole strip is
+   hidden rather than drawn at a guessed position. */
+body.hilal-dashboard .hm-t .t-range { display: flex; flex-direction: column; gap: var(--t-1); }
+
+body.hilal-dashboard .hm-t .t-range-track {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--t-line-strong), var(--t-accent-pale));
+}
+
+body.hilal-dashboard .hm-t .t-range-marker {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--t-surface);
+  border-radius: 999px;
+  background: var(--t-ink);
+  transform: translate(-50%, -50%);
+  transition: left var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-t .t-range-ends {
+  display: flex;
+  justify-content: space-between;
+  color: var(--t-copy);
+  font-size: .7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Status. Colour is never alone: an icon and a word carry the same meaning. */
+body.hilal-dashboard .hm-t .t-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  align-self: flex-start;
+  padding: var(--t-1) var(--t-3);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .hm-t .t-status .icon,
+body.hilal-dashboard .hm-t .t-status .icon-sm { width: 14px; height: 14px; flex: none; }
+body.hilal-dashboard .hm-t .t-status[data-tone="eligible"] { border-color: var(--t-accent-pale); background: var(--t-accent-pale); color: var(--t-accent-text); }
+body.hilal-dashboard .hm-t .t-status[data-tone="review"] { border-color: var(--hm-warning-bg); background: var(--hm-warning-bg); color: var(--hm-warning); }
+body.hilal-dashboard .hm-t .t-status[data-tone="excluded"] { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); color: var(--hm-danger); }
+body.hilal-dashboard .hm-t .t-status[data-tone="neutral"] { border-color: var(--hm-neutral-bg); background: var(--hm-neutral-bg); color: var(--hm-neutral); }
+
+body.hilal-dashboard .hm-t .t-asset-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-1) var(--t-3);
+  color: var(--t-copy);
+  font-size: .76rem;
+}
+
+body.hilal-dashboard .hm-t .t-asset-meta span { display: inline-flex; align-items: center; gap: var(--t-1); }
+body.hilal-dashboard .hm-t .t-asset-meta .icon,
+body.hilal-dashboard .hm-t .t-asset-meta .icon-sm { width: 13px; height: 13px; }
+
+/* One action per row, at every width.
+   Side by side, each button had roughly half a card to hold "See the evidence" and
+   "Full Passport", so both wrapped or truncated on the narrower cards. A full-width
+   row each keeps the wording whole and gives both a larger target. */
+body.hilal-dashboard .hm-t .t-asset-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-2);
+  margin-top: auto;
+  padding-top: var(--t-3);
+  border-top: 1px solid var(--t-line);
+}
+
+body.hilal-dashboard .hm-t .t-asset-actions > .t-action {
+  flex: none;
+  width: 100%;
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: var(--t-2);
+  /* 44px, not 40. WCAG 2.2 AA (2.5.8) asks for 24×24 as a minimum and this path's own
+     rules ask for 44×44 — which every card action already met and the shared button
+     quietly did not, so a header action was four pixels short on every page here. */
+  min-height: 44px;
+  padding: 0 var(--t-3);
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-surface);
+  color: var(--t-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: .85rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background var(--t-fast) var(--t-ease), border-color var(--t-fast) var(--t-ease), transform var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action:hover { border-color: var(--t-ink); background: var(--t-quiet); transform: translateY(-1px); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action .icon,
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action .icon-sm { width: 16px; height: 16px; }
+
+/* The one primary action per card gets the accent; everything else stays quiet. */
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action.is-primary { border-color: var(--t-accent); background: var(--t-accent); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action.is-primary:hover { border-color: var(--t-ink); background: var(--t-ink); color: var(--t-surface); }
+
+/* The quieter of two actions sitting together. It stays a full button — same height,
+   same target — and only its text steps back, so the pair reads as "this one first".
+
+   This used to be `.w-quiet`, declared only under `.hm-w` and `.hm-o`. Connections and
+   the account pages asked for it too and matched nothing at all, so "Unlink Telegram"
+   was drawn exactly as loudly as the action beside it. A modifier on the button belongs
+   with the button. */
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action.is-quiet { color: var(--t-copy); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action.is-quiet:hover { color: var(--t-ink); }
+
+/* The action that takes something away. Never green: apple green is the brand accent
+   and `brand guide.md` section 10 keeps brand colour and product meaning apart, so the
+   accent must not end up on "unlink". The word carries the meaning; the colour only
+   agrees with it. */
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action.is-danger {
+  border-color: var(--hm-danger-line);
+  background: var(--hm-danger-bg);
+  color: var(--hm-danger);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action.is-danger:hover {
+  border-color: var(--hm-danger);
+  background: var(--hm-danger);
+  color: var(--t-surface);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action:disabled {
+  border-color: var(--t-line);
+  background: var(--t-quiet);
+  color: var(--t-copy);
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ── The switch ───────────────────────────────────────────────────────────────
+ *
+ * One switch for the whole path. It was written for the Connections page and the
+ * Settings redesign needed the same control eleven more times; a second copy is how
+ * two switches on two pages end up disagreeing about what "on" looks like.
+ *
+ * It is a `<button role="switch">`, never a checkbox dressed up as one, so its state
+ * lives in `aria-checked` and is in the accessibility tree rather than only in which
+ * side the knob sits on. The words beside it change too — position and colour are
+ * never the only signal.
+ */
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .t-switch {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  gap: var(--t-3);
+  padding: var(--t-3);
+  border: 1px solid var(--t-line-strong);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  color: var(--t-ink);
+  cursor: pointer;
+  font: inherit;
+  text-align: start;
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .t-switch:hover {
+  border-color: var(--t-ink);
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .t-switch[aria-checked="true"] {
+  border-color: var(--t-accent);
+  background: var(--t-accent-soft);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .t-switch-track {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 26px;
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-quiet);
+  transition: background var(--t-base) var(--t-ease), border-color var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .t-switch[aria-checked="true"] .t-switch-track {
+  border-color: var(--hm-apple-deep);
+  background: var(--t-accent);
+}
+
+/* The knob travels. That is the whole animation: it shows *which way* the thing just
+   moved, which a colour change alone does not. */
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .t-switch-knob {
+  position: absolute;
+  top: 2px;
+  inset-inline-start: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--t-surface);
+  box-shadow: var(--hm-shadow-xs);
+  transition: transform var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .t-switch[aria-checked="true"] .t-switch-knob {
+  transform: translateX(18px);
+}
+
+body.hilal-dashboard .hm-t:dir(rtl) .t-switch[aria-checked="true"] .t-switch-knob {
+  transform: translateX(-18px);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .t-switch-words { display: grid; min-width: 0; gap: 2px; }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .t-switch-words strong { color: var(--t-ink-strong); font-size: .9rem; }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .t-switch-words span { color: var(--t-copy); font-size: .8rem; line-height: 1.5; }
+
+/* While a switch is being saved it stays readable and stays where it is. Nothing is
+   disabled and nothing moves: a control that vanishes mid-press is a control a person
+   presses twice. */
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog) .t-switch[data-busy="true"] { cursor: progress; opacity: .72; }
+
+@media (prefers-reduced-motion: reduce) {
+  body.hilal-dashboard :is(.hm-t, dialog.t-dialog) :where(.t-switch, .t-switch-track, .t-switch-knob) {
+    transition: none;
+  }
+}
+
+/* An asset whose quote could not be read stays visible and says so. Its screening
+   status is unaffected by a missing price and must not look weaker. */
+body.hilal-dashboard .hm-t .t-asset[data-quote="missing"] .t-price { color: var(--t-copy); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-nodata {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-1);
+  color: var(--hm-warning);
+  font-size: .74rem;
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-nodata .icon,
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-nodata .icon-sm { width: 13px; height: 13px; }
+
+/* ── Table view ────────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-t .t-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-t table.t-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .875rem;
+}
+
+body.hilal-dashboard .hm-t .t-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--t-3) var(--t-4);
+  border-bottom: 1px solid var(--t-line);
+  background: var(--t-quiet);
+  color: var(--t-copy);
+  font-size: .78rem;
+  font-weight: 500;
+  text-align: start;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-t .t-table th button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-1);
+  min-height: 32px;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-t .t-table th button:hover { color: var(--t-ink); }
+body.hilal-dashboard .hm-t .t-table th button .icon,
+body.hilal-dashboard .hm-t .t-table th button .icon-sm { width: 13px; height: 13px; opacity: .55; }
+body.hilal-dashboard .hm-t .t-table th[aria-sort] button .icon { opacity: 1; color: var(--t-ink); }
+
+body.hilal-dashboard .hm-t .t-table td {
+  padding: var(--t-3) var(--t-4);
+  border-bottom: 1px solid var(--t-line);
+  vertical-align: middle;
+}
+
+body.hilal-dashboard .hm-t .t-table tbody tr { transition: background var(--t-fast) var(--t-ease); }
+body.hilal-dashboard .hm-t .t-table tbody tr:hover { background: var(--t-quiet); }
+body.hilal-dashboard .hm-t .t-table tbody tr:last-child td { border-bottom: 0; }
+body.hilal-dashboard .hm-t .t-table tbody tr[hidden] { display: none; }
+
+body.hilal-dashboard .hm-t .t-table .t-cell-coin { display: flex; align-items: center; gap: var(--t-3); }
+body.hilal-dashboard .hm-t .t-table .t-logo { width: 32px; height: 32px; border-radius: 10px; font-size: .66rem; }
+body.hilal-dashboard .hm-t .t-table .t-num { font-family: var(--hm-font-display); font-variant-numeric: tabular-nums; white-space: nowrap; }
+body.hilal-dashboard .hm-t .t-table .t-row-actions { display: flex; gap: var(--t-1); justify-content: flex-end; }
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-icon-btn {
+  display: grid;
+  place-items: center;
+  /* 44px, not 40. The last control on this path that was still short of the 44×44 this
+     path's own rules ask for — the shared button and the two navigation controls were
+     already brought up to it. */
+  width: 44px;
+  height: 44px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--t-copy);
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-icon-btn:hover { border-color: var(--t-line-strong); background: var(--t-surface); color: var(--t-ink); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-icon-btn .icon,
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-icon-btn .icon-sm { width: 18px; height: 18px; }
+
+/* ── The info hint ─────────────────────────────────────────────────────────────
+ *
+ * One small "i" mark that reveals a short explanation on hover, beside a word that
+ * would otherwise need its own always-on sentence. Written once here rather than
+ * once per page: `/main`'s tiles and its "closest to ready" state, and this path's
+ * Opportunities cards, all show the same shape — an icon, the word, and a longer
+ * meaning that only needs to be read when it is asked for.
+ *
+ * `.hm-t` carries the `--t-*` tokens on `/main` too, because the page root there
+ * carries both `hm-t` and `hm-main` at once — so this rule needs no second copy for
+ * that page's own token names.
+ */
+body.hilal-dashboard .hm-t .t-info {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+body.hilal-dashboard .hm-t .t-info-icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: var(--t-copy);
+}
+
+body.hilal-dashboard .hm-t .t-info .icon-sm { width: 14px; height: 14px; }
+
+body.hilal-dashboard .hm-t .t-info-box {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 6px);
+  inset-inline-end: -8px;
+  width: max-content;
+  max-width: 230px;
+  padding: var(--t-2) var(--t-3);
+  border: 1px solid var(--t-line-strong);
+  border-radius: var(--t-r-sm);
+  background: var(--t-surface);
+  box-shadow: var(--hm-shadow-md);
+  color: var(--t-copy);
+  font-size: .78rem;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity var(--t-fast) var(--t-ease), transform var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-t .t-info:hover .t-info-box {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.hilal-dashboard .hm-t .t-info-box { transition: opacity var(--t-fast) linear; }
+}
+
+/* ── Loading, empty and failure states ─────────────────────────────────────── */
+
+body.hilal-dashboard .hm-t .t-skeleton-grid { display: grid; gap: var(--t-3); grid-template-columns: repeat(auto-fill, minmax(276px, 1fr)); }
+
+body.hilal-dashboard .hm-t .t-skeleton {
+  height: 208px;
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: linear-gradient(100deg, var(--t-quiet) 30%, var(--hm-neutral-bg) 50%, var(--t-quiet) 70%) 0 0 / 300% 100%;
+  animation: t-shimmer 1.4s linear infinite;
+}
+
+@keyframes t-shimmer { to { background-position: -300% 0; } }
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--t-3);
+  padding: var(--t-7) var(--t-5);
+  border: 1px dashed var(--t-line-strong);
+  border-radius: var(--t-r-lg);
+  background: var(--t-quiet);
+  text-align: center;
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-state p { max-width: 46ch; }
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-state-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  color: var(--t-ink);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-state-icon .icon { width: 24px; height: 24px; }
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-3);
+  padding: var(--t-3) var(--t-4);
+  border: 1px solid var(--hm-warning-bg);
+  border-radius: var(--t-r-md);
+  background: var(--hm-warning-bg);
+  color: var(--hm-warning);
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-banner[data-tone="error"] { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); color: var(--hm-danger); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-banner[data-tone="info"] { border-color: var(--hm-info-bg); background: var(--hm-info-bg); color: var(--hm-info); }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-banner strong { display: block; font-weight: 600; }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-banner p { color: inherit; font-size: .875rem; }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-banner .icon { flex: none; width: 20px; height: 20px; }
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-banner-body { display: flex; flex-direction: column; gap: var(--t-2); align-items: flex-start; }
+
+/* ── Dialogs shared by both popups ─────────────────────────────────────────── */
+
+body.hilal-dashboard dialog.t-dialog {
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(86vh, 880px);
+  padding: 0;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-xl);
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+  box-shadow: var(--hm-shadow-popover);
+}
+
+body.hilal-dashboard dialog.t-dialog::backdrop {
+  background: rgba(43, 46, 53, .42);
+  backdrop-filter: blur(3px);
+}
+
+body.hilal-dashboard dialog.t-dialog .t-dialog-shell {
+  display: flex;
+  max-height: min(86vh, 880px);
+  flex-direction: column;
+}
+
+body.hilal-dashboard dialog.t-dialog .t-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--hm-radius-sm);
+  padding: 24px 24px 16px;
+  border-bottom: 1px solid var(--hm-hairline);
+}
+
+body.hilal-dashboard dialog.t-dialog .t-dialog-head h2 { margin: 0; font-size: 1.2rem; }
+body.hilal-dashboard dialog.t-dialog .t-dialog-head p { margin: 4px 0 0; color: var(--hm-copy); font-size: .875rem; line-height: 1.55; }
+
+body.hilal-dashboard dialog.t-dialog .t-dialog-body {
+  display: flex;
+  overflow-y: auto;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+}
+
+/* The body's own gap cannot reach through the one wrapper the content sits in, so
+   the wrapper and each block inside it carry the same rhythm. Without this every
+   heading sat flush against the block above it. */
+body.hilal-dashboard dialog.t-dialog [data-pq-content] {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+body.hilal-dashboard dialog.t-dialog [data-pq-content] > section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+body.hilal-dashboard dialog.t-dialog .t-dialog-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 24px 20px;
+  border-top: 1px solid var(--hm-hairline);
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard dialog.t-dialog .t-dialog-foot .t-foot-note {
+  margin-inline-end: auto;
+  color: var(--hm-copy);
+  font-size: .8rem;
+}
+
+body.hilal-dashboard dialog.t-dialog .t-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-inline-start: auto;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--hm-copy);
+  cursor: pointer;
+  transition: border-color 140ms var(--hm-motion), background 140ms var(--hm-motion), color 140ms var(--hm-motion);
+}
+
+body.hilal-dashboard dialog.t-dialog .t-close:hover { border-color: var(--hm-hairline-strong); background: var(--hm-surface-soft); color: var(--hm-ink); }
+body.hilal-dashboard dialog.t-dialog .t-close .icon { width: 18px; height: 18px; }
+
+/* ── Favorites popup ───────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .t-fav-list { display: flex; flex-direction: column; gap: 8px; }
+
+body.hilal-dashboard .t-fav-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface);
+  transition: border-color 140ms var(--hm-motion), background 140ms var(--hm-motion), opacity 140ms var(--hm-motion);
+}
+
+body.hilal-dashboard .t-fav-row .t-logo {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 11px;
+  background: var(--hm-surface-soft);
+  font-family: var(--hm-font-display);
+  font-size: .68rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .t-fav-row .t-logo img { width: 100%; height: 100%; object-fit: contain; }
+body.hilal-dashboard .t-fav-row .t-fav-copy { display: flex; min-width: 0; flex-direction: column; }
+body.hilal-dashboard .t-fav-row .t-fav-copy strong { font-family: var(--hm-font-display); font-weight: 500; }
+body.hilal-dashboard .t-fav-row .t-fav-copy small { color: var(--hm-copy); font-size: .78rem; }
+
+body.hilal-dashboard .t-fav-row[data-marked="true"] {
+  border-color: var(--hm-danger-line);
+  background: var(--hm-danger-bg);
+}
+
+body.hilal-dashboard .t-fav-row[data-marked="true"] .t-fav-copy strong { text-decoration: line-through; }
+
+body.hilal-dashboard .t-fav-remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  margin-inline-start: auto;
+  padding: 0 14px;
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: 999px;
+  background: var(--hm-surface);
+  color: var(--hm-copy);
+  cursor: pointer;
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: border-color 140ms var(--hm-motion), color 140ms var(--hm-motion), background 140ms var(--hm-motion);
+}
+
+body.hilal-dashboard .t-fav-remove:hover { border-color: var(--hm-danger); color: var(--hm-danger); }
+body.hilal-dashboard .t-fav-remove[aria-pressed="true"] { border-color: var(--hm-danger); background: var(--hm-danger); color: #fff; }
+body.hilal-dashboard .t-fav-remove .icon { width: 15px; height: 15px; }
+
+/* ── Passport quick view popup ─────────────────────────────────────────────── */
+
+body.hilal-dashboard dialog.t-dialog.t-passport-dialog { width: min(720px, calc(100vw - 32px)); }
+
+body.hilal-dashboard .t-pq-hero { display: flex; align-items: center; gap: 14px; }
+
+body.hilal-dashboard .t-pq-hero .t-logo {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  overflow: hidden;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 16px;
+  background: var(--hm-surface-soft);
+  font-family: var(--hm-font-display);
+  font-size: .85rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .t-pq-hero .t-logo img { width: 100%; height: 100%; object-fit: contain; }
+
+body.hilal-dashboard .t-pq-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--hm-apple-pale);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-apple-soft);
+}
+
+body.hilal-dashboard .t-pq-answer[data-tone="review"] { border-color: var(--hm-warning-bg); background: var(--hm-warning-bg); }
+body.hilal-dashboard .t-pq-answer[data-tone="excluded"] { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); }
+body.hilal-dashboard .t-pq-answer[data-tone="neutral"] { border-color: var(--hm-neutral-bg); background: var(--hm-neutral-bg); }
+body.hilal-dashboard .t-pq-answer p { margin: 0; color: var(--hm-ink); font-size: .95rem; line-height: 1.55; }
+
+body.hilal-dashboard .t-facts {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-hairline);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+body.hilal-dashboard .t-facts > div { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; background: var(--hm-surface); }
+body.hilal-dashboard .t-facts small { color: var(--hm-copy); font-size: .72rem; }
+body.hilal-dashboard .t-facts strong { font-family: var(--hm-font-display); font-size: .88rem; font-weight: 500; }
+
+body.hilal-dashboard .t-reasons { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+
+body.hilal-dashboard .t-reasons li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--hm-copy);
+  font-size: .9rem;
+  line-height: 1.55;
+}
+
+body.hilal-dashboard .t-reasons .icon,
+body.hilal-dashboard .t-reasons .icon-sm { flex: none; width: 16px; height: 16px; margin-top: 3px; color: var(--hm-success); }
+
+/* Long explanations live behind a disclosure so the popup never becomes a wall. */
+body.hilal-dashboard .t-more { border: 1px solid var(--hm-hairline); border-radius: var(--hm-radius-md); background: var(--hm-surface-soft); }
+
+body.hilal-dashboard .t-more > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  cursor: pointer;
+  font-size: .875rem;
+  font-weight: 500;
+  list-style: none;
+}
+
+body.hilal-dashboard .t-more > summary::-webkit-details-marker { display: none; }
+body.hilal-dashboard .t-more > summary .icon { width: 16px; height: 16px; transition: transform 200ms var(--hm-motion); }
+body.hilal-dashboard .t-more[open] > summary .icon { transform: rotate(180deg); }
+body.hilal-dashboard .t-more > summary .t-more-count { margin-inline-start: auto; color: var(--hm-copy); font-size: .78rem; font-weight: 400; }
+body.hilal-dashboard .t-more-body { display: flex; flex-direction: column; gap: 10px; padding: 0 14px 14px; }
+body.hilal-dashboard .t-more-body p { margin: 0; color: var(--hm-copy); font-size: .875rem; line-height: 1.6; }
+body.hilal-dashboard .t-more[open] .t-more-body { animation: t-open 220ms var(--hm-motion); }
+
+@keyframes t-open { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+body.hilal-dashboard .t-uses { display: flex; flex-direction: column; gap: 6px; }
+
+body.hilal-dashboard .t-use {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-surface);
+  font-size: .85rem;
+}
+
+body.hilal-dashboard .t-use span:first-child { flex: 1; }
+
+body.hilal-dashboard .t-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: .75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .t-pill .icon,
+body.hilal-dashboard .t-pill .icon-sm { width: 13px; height: 13px; }
+body.hilal-dashboard .t-pill[data-tone="eligible"] { border-color: var(--hm-apple-pale); background: var(--hm-apple-pale); color: var(--hm-success); }
+body.hilal-dashboard .t-pill[data-tone="review"] { border-color: var(--hm-warning-bg); background: var(--hm-warning-bg); color: var(--hm-warning); }
+body.hilal-dashboard .t-pill[data-tone="excluded"] { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); color: var(--hm-danger); }
+body.hilal-dashboard .t-pill[data-tone="neutral"] { border-color: var(--hm-neutral-bg); background: var(--hm-neutral-bg); color: var(--hm-neutral); }
+
+body.hilal-dashboard .t-pq-skeleton { display: flex; flex-direction: column; gap: 12px; }
+
+body.hilal-dashboard .t-pq-skeleton i {
+  display: block;
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(100deg, var(--hm-surface-soft) 30%, var(--hm-neutral-bg) 50%, var(--hm-surface-soft) 70%) 0 0 / 300% 100%;
+  animation: t-shimmer 1.4s linear infinite;
+}
+
+body.hilal-dashboard .t-pq-skeleton i:nth-child(1) { width: 55%; height: 26px; }
+body.hilal-dashboard .t-pq-skeleton i:nth-child(4) { height: 76px; border-radius: var(--hm-radius-md); }
+
+/* ── Passport page ─────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-t .t-passport-hero {
+  display: grid;
+  gap: var(--t-5);
+  padding: var(--t-5);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-xl);
+  background: var(--t-surface);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.hilal-dashboard .hm-t .t-passport-identity { display: flex; align-items: center; gap: var(--t-4); }
+
+body.hilal-dashboard .hm-t .t-passport-identity .t-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  font-size: .95rem;
+}
+
+body.hilal-dashboard .hm-t .t-seal {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  align-self: flex-start;
+  padding: var(--t-2) var(--t-4);
+  background: var(--t-ink);
+  color: var(--t-surface);
+  font-size: .8rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-t .t-seal .icon { width: 16px; height: 16px; color: var(--t-accent); }
+
+/* Sticky in-page navigation. Long documents need a way back to the top level. */
+body.hilal-dashboard .hm-t .t-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  overflow-x: auto;
+  gap: var(--t-1);
+  padding: var(--t-2);
+  border: 1px solid var(--t-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .92);
+  backdrop-filter: blur(8px);
+  scrollbar-width: none;
+}
+
+body.hilal-dashboard .hm-t .t-tabs::-webkit-scrollbar { display: none; }
+
+body.hilal-dashboard .hm-t .t-tabs a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  /* 44px, not 40. Same shortfall the shared button had: every card action already met
+     this path's 44×44 rule and the two navigation controls quietly did not. */
+  min-height: 44px;
+  padding: 0 var(--t-4);
+  border-radius: 999px;
+  color: var(--t-copy);
+  font-size: .85rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-t .t-tabs a:hover { background: var(--t-quiet); color: var(--t-ink); }
+body.hilal-dashboard .hm-t .t-tabs a[aria-current="true"] { background: var(--t-ink); color: var(--t-surface); }
+body.hilal-dashboard .hm-t .t-tabs a .icon,
+body.hilal-dashboard .hm-t .t-tabs a .icon-sm { width: 15px; height: 15px; }
+
+body.hilal-dashboard .hm-t .t-section { display: flex; flex-direction: column; gap: var(--t-4); scroll-margin-top: 88px; }
+body.hilal-dashboard .hm-t .t-section-head { display: flex; flex-direction: column; gap: var(--t-1); }
+
+body.hilal-dashboard .hm-t .t-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-3);
+  padding: var(--t-5);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-t .t-two { display: grid; gap: var(--t-3); grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+
+body.hilal-dashboard .hm-t .t-kv { display: flex; align-items: baseline; justify-content: space-between; gap: var(--t-3); padding: var(--t-2) 0; border-bottom: 1px solid var(--t-line); }
+body.hilal-dashboard .hm-t .t-kv:last-child { border-bottom: 0; }
+body.hilal-dashboard .hm-t .t-kv > span { color: var(--t-copy); font-size: .85rem; }
+body.hilal-dashboard .hm-t .t-kv > strong { font-family: var(--hm-font-display); font-size: .88rem; font-weight: 500; text-align: end; }
+
+body.hilal-dashboard .hm-t .t-timeline { display: flex; flex-direction: column; gap: var(--t-4); margin: 0; padding: 0 0 0 var(--t-5); list-style: none; }
+
+body.hilal-dashboard .hm-t .t-timeline li { position: relative; display: flex; flex-direction: column; gap: var(--t-1); }
+
+body.hilal-dashboard .hm-t .t-timeline li::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  inset-inline-start: calc(var(--t-5) * -1 + 4px);
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--t-accent-text);
+  border-radius: 999px;
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-t .t-timeline li::after {
+  content: "";
+  position: absolute;
+  top: 18px;
+  bottom: calc(var(--t-4) * -1);
+  inset-inline-start: calc(var(--t-5) * -1 + 8px);
+  width: 1px;
+  background: var(--t-line);
+}
+
+body.hilal-dashboard .hm-t .t-timeline li:last-child::after { display: none; }
+body.hilal-dashboard .hm-t .t-timeline strong { font-family: var(--hm-font-display); font-size: .9rem; font-weight: 500; }
+body.hilal-dashboard .hm-t .t-timeline small { color: var(--t-copy); font-size: .76rem; }
+
+body.hilal-dashboard .hm-t .t-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-2) var(--t-3);
+  padding: var(--t-3);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+  font-size: .85rem;
+}
+
+body.hilal-dashboard .hm-t .t-source .t-source-name { flex: 1 1 200px; font-weight: 500; }
+body.hilal-dashboard .hm-t .t-source a { display: inline-flex; align-items: center; gap: 5px; color: var(--hm-info); font-weight: 500; }
+body.hilal-dashboard .hm-t .t-source a .icon,
+body.hilal-dashboard .hm-t .t-source a .icon-sm { width: 14px; height: 14px; }
+
+body.hilal-dashboard .hm-t .t-code {
+  overflow-wrap: anywhere;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--hm-neutral-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .78rem;
+}
+
+body.hilal-dashboard .hm-t .t-form-row { display: flex; flex-direction: column; gap: var(--t-2); }
+
+body.hilal-dashboard .hm-t .t-form-row label { color: var(--t-copy); font-size: .85rem; font-weight: 500; }
+
+body.hilal-dashboard .hm-t .t-form-row :where(select, textarea) {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--t-line-strong);
+  border-radius: var(--t-r-sm);
+  background: var(--t-surface);
+  color: var(--t-ink);
+  font: inherit;
+  font-size: .9rem;
+}
+
+body.hilal-dashboard .hm-t .t-form-row textarea { min-height: 108px; resize: vertical; }
+
+/* ── Printable evidence report ─────────────────────────────────────────────── */
+
+/* The report page carries both classes on one element (`class="hm-t t-report"`), so
+   these are joined selectors, not descendant ones. Written as `.hm-t .t-report` they
+   matched nothing and the report's tables shipped with no borders at all. */
+body.hilal-dashboard .hm-t.t-report { display: flex; flex-direction: column; gap: var(--t-5); }
+
+body.hilal-dashboard .hm-t .t-report-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--t-4);
+  padding-bottom: var(--t-4);
+  border-bottom: 2px solid var(--t-ink);
+}
+
+body.hilal-dashboard .hm-t .t-report-block { display: flex; flex-direction: column; gap: var(--t-3); break-inside: avoid; }
+body.hilal-dashboard .hm-t .t-report-block > h2 { padding-bottom: var(--t-2); border-bottom: 1px solid var(--t-line); }
+
+body.hilal-dashboard .hm-t.t-report table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+body.hilal-dashboard .hm-t.t-report :where(th, td) {
+  padding: var(--t-2) var(--t-3);
+  border: 1px solid var(--t-line);
+  text-align: start;
+  vertical-align: top;
+}
+body.hilal-dashboard .hm-t.t-report th { background: var(--t-quiet); color: var(--t-copy); font-weight: 500; }
+/* A two-column fact table should not stretch its label column across half the page. */
+body.hilal-dashboard .hm-t.t-report th[scope="row"] { width: 1%; white-space: nowrap; }
+
+/* Printing an evidence report should print the report.
+ *
+ * This used to name `.app-sidebar` and `.app-topbar`, and neither of those classes has
+ * ever existed in this product — the shell is `.sidebar` and `.topbar`, and is marked
+ * `data-hm-shell-nav` / `data-hm-shell-top` now. So the rule hid nothing, and a printed
+ * Shariah evidence report carried the whole side menu and the search box down its first
+ * page. The markers are used rather than the class names, because the markers are what
+ * the shell is identified by everywhere else and cannot drift from it. */
+@media print {
+  body.hilal-dashboard [data-hm-shell-nav],
+  body.hilal-dashboard [data-hm-shell-top],
+  body.hilal-dashboard .sidebar-backdrop,
+  body.hilal-dashboard .hm-hilal,
+  body.hilal-dashboard .cookie-banner,
+  body.hilal-dashboard .dash-toast,
+  body.hilal-dashboard .hm-t .t-no-print { display: none !important; }
+
+  /* With the menu gone, the page is one column across the paper rather than a narrow
+     strip beside an empty gap where the menu used to be. */
+  body.hilal-dashboard .app-shell { display: block !important; padding: 0 !important; }
+
+  body.hilal-dashboard .app-content { padding: 0 !important; }
+  body.hilal-dashboard .hm-t .t-report-block { break-inside: avoid; }
+  body.hilal-dashboard .hm-t .t-panel,
+  body.hilal-dashboard .hm-t .t-card { box-shadow: none; }
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  body.hilal-dashboard .hm-t { gap: var(--t-5); }
+  body.hilal-dashboard .hm-t .t-controls { padding: var(--t-2); }
+  body.hilal-dashboard .hm-t .t-search { flex-basis: 100%; }
+  body.hilal-dashboard .hm-t .t-grid,
+  body.hilal-dashboard .hm-t .t-skeleton-grid { grid-template-columns: 1fr; }
+  body.hilal-dashboard .hm-t .t-passport-hero { padding: var(--t-4); }
+  body.hilal-dashboard .hm-t .t-panel { padding: var(--t-4); }
+  body.hilal-dashboard dialog.t-dialog .t-dialog-head,
+  body.hilal-dashboard dialog.t-dialog .t-dialog-body,
+  body.hilal-dashboard dialog.t-dialog .t-dialog-foot { padding-inline: 16px; }
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  body.hilal-dashboard .hm-t .t-live[data-state="live"] .t-live-dot::after,
+  body.hilal-dashboard .hm-t .t-skeleton,
+  body.hilal-dashboard .t-pq-skeleton i { animation: none; }
+
+  body.hilal-dashboard .hm-t .t-skeleton,
+  body.hilal-dashboard .t-pq-skeleton i { background: var(--hm-neutral-bg); }
+
+  body.hilal-dashboard .hm-t :where(.t-tile, .t-asset, .t-action, .t-icon-btn):hover { transform: none; }
+  body.hilal-dashboard .hm-t .t-logo img { animation: none; }
+}

@@ -1,0 +1,67 @@
+{#- The status vocabulary for server-rendered pages on the redesigned dashboard pages.
+
+    This is the Jinja half of one shared table. The browser half lives in
+    `static/hm-market-vocabulary.js`. They must list exactly the same statuses in
+    exactly the same groups, or the same coin would be drawn one way by the server
+    and another way after the first live refresh.
+
+    They are kept honest by `tests/unit/test_invariant_dashboard_test_tone.py`, which
+    reads both files and fails if either list gains or loses a status.
+
+    An unrecognised status is always `neutral`. Never `eligible`: guessing upwards
+    would present an unreviewed coin as one that passed.
+-#}
+
+{%- set ELIGIBLE_STATUSES = ['eligible', 'eligible_with_qualifications'] -%}
+{%- set REVIEW_STATUSES = ['under_review', 'disputed', 'pending_review'] -%}
+{%- set EXCLUDED_STATUSES = ['excluded', 'not_eligible'] -%}
+
+{%- set COVERAGE_ELIGIBLE = ['covered'] -%}
+{%- set COVERAGE_REVIEW = ['qualified', 'covered_with_qualification'] -%}
+{%- set COVERAGE_EXCLUDED = ['excluded', 'not_covered', 'not_covered_by_this_decision'] -%}
+
+{%- set CRITERION_ELIGIBLE = ['pass'] -%}
+{%- set CRITERION_REVIEW = ['qualification'] -%}
+{%- set CRITERION_EXCLUDED = ['fail'] -%}
+
+{%- macro asset_tone(status) -%}
+{%- set value = (status | string | lower) -%}
+{%- if value in ELIGIBLE_STATUSES -%}eligible
+{%- elif value in REVIEW_STATUSES -%}review
+{%- elif value in EXCLUDED_STATUSES -%}excluded
+{%- else -%}neutral{%- endif -%}
+{%- endmacro -%}
+
+{%- macro coverage_tone(status) -%}
+{%- set value = (status | string | lower) -%}
+{%- if value in COVERAGE_ELIGIBLE -%}eligible
+{%- elif value in COVERAGE_REVIEW -%}review
+{%- elif value in COVERAGE_EXCLUDED -%}excluded
+{%- else -%}neutral{%- endif -%}
+{%- endmacro -%}
+
+{%- macro criterion_tone(outcome) -%}
+{%- set value = (outcome | string | lower) -%}
+{%- if value in CRITERION_ELIGIBLE -%}eligible
+{%- elif value in CRITERION_REVIEW -%}review
+{%- elif value in CRITERION_EXCLUDED -%}excluded
+{%- else -%}neutral{%- endif -%}
+{%- endmacro -%}
+
+{#- Each tone's icon, so colour is never the only signal a status is carried by. -#}
+{%- macro tone_icon(tone) -%}
+{%- if tone == 'eligible' -%}shield_check
+{%- elif tone == 'review' -%}clock
+{%- elif tone == 'excluded' -%}close
+{%- else -%}info{%- endif -%}
+{%- endmacro -%}
+
+{#- A status chip: colour, icon and words together. -#}
+{%- macro chip(tone, label) -%}
+<span class="t-pill" data-tone="{{ tone }}"><span data-icon="{{ tone_icon(tone) }}" data-icon-class="icon-sm"></span>{{ label }}</span>
+{%- endmacro -%}
+
+{#- Turn a stored key such as `token_utility` into "Token utility". -#}
+{%- macro humanize(value) -%}
+{{ (value | string | replace('_', ' ') | replace('-', ' ') | trim | lower | capitalize) }}
+{%- endmacro -%}

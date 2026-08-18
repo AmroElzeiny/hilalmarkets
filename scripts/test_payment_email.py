@@ -35,7 +35,12 @@ async def _run(args: argparse.Namespace) -> int:
         amount=Decimal("29.00"),
         currency="USD",
         payment_date=datetime.now(UTC),
-        renewal_date=datetime.now(UTC) + timedelta(days=30),
+        # The renderer decides for itself whether this date is a renewal or the end of
+        # access, from `renews_automatically`. Passing it as `renewal_date` — which is
+        # not a parameter — made every run of this script fail before it rendered
+        # anything.
+        period_end_date=datetime.now(UTC) + timedelta(days=30),
+        renews_automatically=True,
         receipt_url=None,
         plan_limits={
             "active_strategies": 10,

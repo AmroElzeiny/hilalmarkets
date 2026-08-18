@@ -40,13 +40,20 @@ Enforcement proof:
 
 The canonical schemas are `AdminConversationSummary`, `AdminConversationTimeline`, and
 `AdminConversationMessage`. `AdminConversationExplorer.list_conversations()` performs bounded,
-cursor-paginated batch reads. `AdminConversationExplorer.conversation()` dispatches to exact Setup
-or Public timeline readers and records the privileged access audit.
+cursor-paginated batch reads. `AdminConversationExplorer.conversation()` dispatches to the exact
+timeline reader for the source and records the privileged access audit.
 
-Supported sources:
+Supported sources — the two assistants a customer actually talks to. They are named once in
+`CONVERSATION_SOURCE_LABELS` (`schemas/system_brain.py`), which the filter menu, the conversation
+rows and the agent's own source filter all read:
 
-- `authenticated_setup_chat`: exact persisted `AISetupChatMessage` rows.
-- `public_site_chat`: exact `PublicChatMessage` rows created after migration.
+- `public_site_chat` — **Support AI**: exact `PublicChatMessage` rows created after migration.
+- `dashboard_hilal_agent` — **Hilal Agent**: exact `HilalChatMessage` rows inside their retention
+  window, with a reported answer surfacing as the conversation's error state.
+
+Setup Chat was the third source and was removed on 18 August 2026. It is a strategy-building tool
+rather than a conversation with somebody, and reading it in a support log made most of the log not
+support. Its own quality metrics remain available as System Brain agent tools.
 
 Authoritative email comes only from `UserIdentity`. Anonymous Public Chat is always displayed as
 `Anonymous visitor`. A deleted user is not returned as an identifiable user and message content is

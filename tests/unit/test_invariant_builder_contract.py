@@ -40,7 +40,7 @@ from ai_market_monitor.engine.setup_lifecycle import (
     resolve_lifecycle,
     turn_lifecycle_state,
 )
-from ai_market_monitor.schemas.strategy import Comparator
+from ai_market_monitor.schemas.strategy import UNARY_COMPARATORS, Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
     FormulaKind,
@@ -193,6 +193,30 @@ def test_a_value_out_of_range_is_refused_rather_than_clamped(mechanic) -> None:
     with pytest.raises(BuilderActionError) as raised:
         build_condition(mechanic_key=mechanic.key, values=values, source_turn_id="clamp")
     assert raised.value.code == "VALUE_OUT_OF_RANGE"
+
+
+@pytest.mark.parametrize(
+    "mechanic",
+    list(offered_mechanics()),
+    ids=[item.key for item in offered_mechanics()],
+)
+def test_a_mechanic_offers_a_value_box_only_when_it_compares_against_a_value(mechanic) -> None:
+    """A yes/no rule has nothing to compare against, so it gets nothing to type into.
+
+    Every mechanic used to be given a "Value" field, including the ones whose only
+    comparisons are "happens" and "does not happen" — a box where anything a person
+    typed could never be read. The registry can tell the two apart now, so the form
+    can too, and the rule is checked over the whole catalogue rather than the handful
+    that were noticed.
+    """
+
+    measures = bool({item.value for item in mechanic.operators} - UNARY_COMPARATORS)
+    has_box = mechanic.parameter("threshold") is not None
+    if measures:
+        return
+    assert not has_box, (
+        f"{mechanic.key} only answers yes or no, but offers a value box that nothing reads"
+    )
 
 
 def test_a_mechanic_the_platform_withholds_cannot_be_built() -> None:

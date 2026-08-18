@@ -1,7 +1,7 @@
 """Nested Boolean logic, built and edited entirely through guided clicks.
 
 ``engine/builder_boolean.py`` is unit-tested on its own. These drive the whole path the
-browser drives вЂ” request schema, service dispatch, mutation authority, stored draft вЂ” and
+browser drives — request schema, service dispatch, mutation authority, stored draft — and
 count model calls, because the point of the Builder is that authoring never needs one.
 
 The defect being guarded: ``arrange_conditions`` can only express one flat root join, so
@@ -146,7 +146,7 @@ async def test_nested_logic_is_built_and_stored_with_no_model_call(test_context)
 
 
 async def test_every_structural_action_round_trips_through_the_service(test_context) -> None:
-    """Group, change the join, move a rule, ungroup вЂ” no rule lost at any step."""
+    """Group, change the join, move a rule, ungroup — no rule lost at any step."""
 
     user = await _user(test_context)
     planner = StandInPlanner()

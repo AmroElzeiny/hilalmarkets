@@ -1,0 +1,264 @@
+{% extends "hilal/base_dashboard.html" %}
+{% block page_styles_late %}
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260818-live-4">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-connections-test.css') }}?v=20260818-live-4">
+{% endblock %}
+{% block content %}
+
+{#- Where a person is told.
+
+    The page answers three questions, in the order somebody actually asks them:
+
+      1. Where will you be told?     -> one card per way, with its real state
+      2. Is it working?              -> a test that really sends, per way
+      3. What will you be told about? -> the kinds of message, in plain words
+
+    The live page answered the first one twice — three summary tiles at the top saying
+    exactly what the two cards below already said — and never answered the third at all.
+    Somebody could switch a channel on without ever learning what would arrive on it. -#}
+
+<div class="hm-t hm-c" data-connections-root>
+
+  <header class="t-head" data-hm-part="The page heading">
+    <div class="t-head-copy">
+      <p class="t-eyebrow"><span data-icon="integrations" data-icon-class="icon-sm"></span>How we reach you</p>
+      <h1>Connections</h1>
+      {#- Under the name of the page, and small.
+
+          It was a full-size button on the far right of the heading row, where it read as
+          this page's main action. It is not: it goes to a different page. Where it sits
+          now says what it is — a quiet way on to the next thing, after the heading it
+          belongs under. -#}
+      <a class="c-head-link" href="{{ settings_path }}">
+        <span data-icon="sliders" data-icon-class="icon-sm"></span>When and how often
+      </a>
+    </div>
+  </header>
+
+  {#- Said once, in a sentence, and only when there is something to say. Nobody needs a
+      banner telling them everything is fine. -#}
+  {% if only_in_app %}
+  <div class="t-banner c-banner" data-tone="information" role="status" data-c-banner>
+    <span data-icon="info" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      <strong>Right now you will only be told here</strong>
+      <p>Nothing reaches you away from this page. Switch on email or Telegram below and you hear about a setup as it happens.</p>
+    </div>
+  </div>
+  {% endif %}
+
+  {#- One card per way of being told. Each says what it is, what state it is really in,
+      and what to do next about that state — never a badge on its own. -#}
+  <ul class="c-grid" data-hm-part="Every way of being told" data-hm-guide-target="integrations-channels">
+    {% for channel in channels %}
+    <li class="c-card" data-c-card data-channel="{{ channel.value }}"
+        data-state="{{ channel.state.tone }}">
+
+      <div class="c-card-head">
+        <span class="c-mark" data-tone="{{ channel.state.tone }}" aria-hidden="true">
+          <span data-icon="{{ channel.icon }}" data-icon-class="icon"></span>
+        </span>
+        <div class="c-title">
+          <h2>{{ channel.label }}</h2>
+          <p>{{ channel.what_it_is }}</p>
+        </div>
+      </div>
+
+      {#- Colour, and the word, and an icon. Never one of the three on its own. -#}
+      <p class="c-state" data-tone="{{ channel.state.tone }}">
+        <span data-icon="{{ channel.state.icon }}" data-icon-class="icon-sm"></span>
+        <strong data-c-state-label>{{ channel.state.label }}</strong>
+        <span data-c-state-meaning>{{ channel.state.meaning }}</span>
+      </p>
+
+      {% if channel.facts %}
+      <dl class="c-facts">
+        {% for fact in channel.facts %}
+        <div class="c-fact">
+          <dt>{{ fact.name }}</dt>
+          <dd>{{ fact.value }}</dd>
+        </div>
+        {% endfor %}
+      </dl>
+      {% endif %}
+
+      {% if not channel.available %}
+      {#- "Disabled" on its own is not an answer. Why, and what would change it. -#}
+      <div class="c-locked">
+        <p class="c-locked-why"><span data-icon="lock" data-icon-class="icon-sm"></span>{{ channel.unavailable_reason }}</p>
+        {% if channel.unavailable_fix %}<p class="c-locked-fix">{{ channel.unavailable_fix }}</p>{% endif %}
+      </div>
+      {% endif %}
+
+      <div class="c-actions">
+        {% if channel.always_on %}
+        <p class="c-always">
+          <span data-icon="shield_check" data-icon-class="icon-sm"></span>
+          Nothing to set up. This one is always here.
+        </p>
+
+        {% elif not channel.available %}
+        <button class="t-action" type="button" disabled>
+          <span data-icon="lock" data-icon-class="icon-sm"></span>Not available yet
+        </button>
+
+        {#- Link or Unlink is decided by `linked` — "is there an account on record" — and
+            never by `connected`, which is the different question "would a message
+            actually arrive today". While the two were one value, a Telegram account that
+            was on record but not ready showed **Link Telegram**, which then refused
+            because that account was already theirs, and never showed Unlink at all.
+            There was no way forward and no way back. -#}
+        {% elif channel.value == 'telegram' and not channel.linked %}
+        <button class="t-action is-primary" type="button" data-c-connect-telegram>
+          <span data-icon="telegram" data-icon-class="icon-sm"></span>Link Telegram
+        </button>
+
+        {% else %}
+        {#- A real switch, not a link that looks like one. It says which way it is in
+            words as well as by position, and it announces the result. -#}
+        <button class="t-switch" type="button"
+                role="switch"
+                aria-checked="{{ 'true' if channel.chosen else 'false' }}"
+                data-c-switch="{{ channel.value }}">
+          <span class="t-switch-track" aria-hidden="true"><span class="t-switch-knob"></span></span>
+          <span class="t-switch-words">
+            <strong data-c-switch-label>{{ 'Sending here' if channel.chosen else 'Not sending here' }}</strong>
+            <span data-c-switch-detail>{{ 'Turn it off and nothing arrives here.' if channel.chosen else 'Turn it on to be told here.' }}</span>
+          </span>
+        </button>
+
+        {% if channel.value == 'email' %}
+        <button class="t-action" type="button" data-c-test="email">
+          <span data-icon="send" data-icon-class="icon-sm"></span>Send me a test
+        </button>
+        {% endif %}
+
+        {% if channel.value == 'telegram' and channel.linked %}
+        <button class="t-action is-quiet" type="button" data-c-unlink-telegram>
+          <span data-icon="unlink" data-icon-class="icon-sm"></span>Unlink Telegram
+        </button>
+        {% endif %}
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <p class="sr-only" data-c-said role="status" aria-live="polite"></p>
+
+  {#- What actually arrives. The live page never said this, so somebody could switch a
+      channel on with no idea what it would bring them. The list comes from the product's
+      own set of message kinds, so a kind added later cannot go missing from here. -#}
+  <section class="c-kinds" data-hm-part="What you will be told about">
+    <div class="c-kinds-head">
+      <p class="t-eyebrow"><span data-icon="bell" data-icon-class="icon-sm"></span>What arrives</p>
+      <h2>What you will be told about</h2>
+    </div>
+    <ul class="c-kind-list">
+      {% for kind in message_kinds %}
+      <li class="c-kind" data-tone="{{ kind.semantic_status }}" data-c-kind>
+        <span class="c-kind-mark" data-tone="{{ kind.semantic_status }}" aria-hidden="true">
+          <span data-icon="{{ kind.icon }}" data-icon-class="icon-sm"></span>
+        </span>
+        <div>
+          <strong>{{ kind.label }}</strong>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+
+{#- Linking Telegram. Three steps, each one thing to do, and the fallback command with a
+    button that copies it — the live page printed the raw command as code and left the
+    person to select it by hand. -#}
+<dialog class="t-dialog c-link" data-c-link-dialog aria-labelledby="c-link-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <span class="t-eyebrow"><span data-icon="telegram" data-icon-class="icon-sm"></span>Linking Telegram</span>
+        <h2 id="c-link-title">Three steps, about a minute</h2>
+      </div>
+      <button class="t-close" type="button" data-c-link-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <div class="t-dialog-body">
+      <ol class="c-steps">
+        <li class="c-step">
+          <span class="c-step-number" aria-hidden="true">1</span>
+          <div>
+            <strong>Open the Hilal Markets bot</strong>
+            <p>The button below opens Telegram with the bot already chosen.</p>
+            {% if telegram_connect_url %}
+            <a class="t-action is-primary" href="{{ telegram_connect_url }}" target="_blank" rel="noopener" data-c-link-go>
+              <span data-icon="external" data-icon-class="icon-sm"></span>Open Telegram
+            </a>
+            {% else %}
+            <p class="c-step-blocked">
+              <span data-icon="alert" data-icon-class="icon-sm"></span>
+              We could not make your link just now. Close this and try again in a moment.
+            </p>
+            {% endif %}
+          </div>
+        </li>
+        <li class="c-step">
+          <span class="c-step-number" aria-hidden="true">2</span>
+          <div>
+            <strong>Press start</strong>
+            <p>Telegram fills the message in for you. You only press send.</p>
+            {% if telegram_start_command %}
+            <div class="c-copy">
+              <code data-c-command>{{ telegram_start_command }}</code>
+              <button class="t-action" type="button" data-c-copy>
+                <span data-icon="copy" data-icon-class="icon-sm"></span>Copy it
+              </button>
+            </div>
+            <p class="c-step-note">Using Telegram in a browser? Copy this and send it to the bot yourself.</p>
+            {% endif %}
+          </div>
+        </li>
+        <li class="c-step">
+          <span class="c-step-number" aria-hidden="true">3</span>
+          <div>
+            <strong>Come back here</strong>
+            <p>This page shows Telegram as linked. Nothing else to do.</p>
+          </div>
+        </li>
+      </ol>
+    </div>
+    <footer class="t-dialog-foot">
+      <span class="t-foot-note">Hilal Markets never asks for a password on Telegram.</span>
+      <button class="t-action" type="button" data-c-link-cancel>Close</button>
+    </footer>
+  </div>
+</dialog>
+
+{#- Asking before unlinking. A browser confirm box is unstyled, unbranded, and not
+    something a screen reader announces as a choice. -#}
+<dialog class="t-dialog c-ask" data-c-ask-dialog aria-labelledby="c-ask-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <span class="t-eyebrow"><span data-icon="unlink" data-icon-class="icon-sm"></span>Before you do</span>
+        <h2 id="c-ask-title">Unlink Telegram?</h2>
+      </div>
+      <button class="t-close" type="button" data-c-ask-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <div class="t-dialog-body">
+      <p>Telegram stops receiving anything. Your Watchlists keep working exactly as they are, and every notice still waits for you here in the dashboard.</p>
+      <p>You can link it again at any time.</p>
+    </div>
+    <footer class="t-dialog-foot">
+      <button class="t-action" type="button" data-c-ask-cancel>Keep it</button>
+      <button class="t-action is-danger" type="button" data-c-ask-go>
+        <span data-icon="unlink" data-icon-class="icon-sm"></span>Unlink it
+      </button>
+    </footer>
+  </div>
+</dialog>
+
+{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-connections-test.js') }}?v=20260818-live-4"></script>{% endblock %}

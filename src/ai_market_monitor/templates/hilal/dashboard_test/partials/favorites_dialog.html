@@ -1,0 +1,59 @@
+{#- Favorites.
+    The create-a-watchlist action is deliberately absent here and on every page of
+    this path, so the wording is not present in this file either. Enforced by
+    tests/integration/test_dashboard_test_pages.py, which scans this source. -#}
+{% import "hilal/dashboard_test/macros/coin.html" as coin %}
+<dialog class="t-dialog t-favorites-dialog" data-favorites-dialog aria-labelledby="t-fav-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <h2 id="t-fav-title">Coins you follow</h2>
+        <p>We tell you when the Shariah status of any of these changes. Removing one only stops those messages.</p>
+      </div>
+      <button class="t-close" type="button" data-favorites-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+
+    <div class="t-dialog-body">
+      <div class="t-banner" data-tone="error" data-favorites-error hidden role="alert">
+        <span data-icon="alert" data-icon-class="icon"></span>
+        <div class="t-banner-body"><strong>Nothing was changed</strong><p data-favorites-error-message></p></div>
+      </div>
+
+      {% if saved_assets %}
+      <div class="t-fav-list" data-favorites-list>
+        {% for item in saved_assets %}
+        <div class="t-fav-row" data-favorite-row data-watchlist-id="{{ item.watchlist_id }}" data-asset="{{ item.canonical_asset }}" data-marked="false">
+          {{ coin.logo(item.canonical_asset) }}
+          <span class="t-fav-copy">
+            <strong>{{ item.canonical_asset }}</strong>
+            <small>Added to {{ item.watchlist_name }}</small>
+          </span>
+          <button class="t-fav-remove" type="button" data-favorite-remove aria-pressed="false">
+            <span data-icon="minus" data-icon-class="icon"></span>
+            <span data-favorite-remove-label>Stop following</span>
+          </button>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="t-state">
+        <div class="t-state-icon"><span data-icon="heart" data-icon-class="icon"></span></div>
+        <h3>You do not follow any coin yet</h3>
+        <p>Use the heart on any coin in the list. We will then tell you if its Shariah status changes.</p>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if saved_assets %}
+    <footer class="t-dialog-foot">
+      <span class="t-foot-note" data-favorites-summary aria-live="polite">Nothing marked yet.</span>
+      <button class="t-action" type="button" data-favorites-cancel style="flex:0 0 auto;">Cancel</button>
+      <button class="t-action is-primary" type="button" data-favorites-save style="flex:0 0 auto;" hidden>
+        <span data-icon="check" data-icon-class="icon-sm"></span><span data-favorites-save-label>Save</span>
+      </button>
+    </footer>
+    {% endif %}
+  </div>
+</dialog>
