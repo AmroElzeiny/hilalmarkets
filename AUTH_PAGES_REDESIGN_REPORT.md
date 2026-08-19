@@ -233,7 +233,7 @@ the fix belongs.
 |---|---|
 | `ruff check` over every file I changed | pass |
 | `mypy src` | pass, 376 files |
-| `pytest tests/unit tests/engine tests/interpreter tests/services` | pass, 14,515 tests |
+| `pytest tests/unit tests/engine tests/interpreter tests/services` | pass, 14,548 tests |
 | `pytest tests/integration/test_dashboard_web.py` | pass, 19 tests |
 | `pytest tests/integration/test_system_brain_user_controls.py` | pass |
 | `pytest tests/browser/test_auth_pages_e2e.py` | pass, 118 checks in a real browser |
