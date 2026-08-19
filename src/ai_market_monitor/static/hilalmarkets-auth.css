@@ -17,7 +17,12 @@ body.hilal-auth-page {
   margin: 0;
   background: var(--hm-canvas);
 }
-
+@media (max-width: 900px) {
+  .hilal-auth-page .auth-card {
+    min-height: calc(100dvh - 20px);
+    align-content: center;
+  }
+}
 body.hilal-auth-page {
   color: var(--hm-ink);
   font-family: var(--hm-font-ui);
@@ -1125,7 +1130,7 @@ body.hilal-auth-page {
   .hilal-auth-page .auth-aside-line { font-size: clamp(1.9rem, 8vw, 2.6rem); }
   .hilal-auth-page .auth-main,
   .hilal-auth-page .auth-aside { border-radius: var(--hm-radius-lg); }
-  .hilal-auth-page .auth-card,
+  .hilal-auth-page,
   .hilal-auth-page .auth-legal { width: 100%; }
 }
 
