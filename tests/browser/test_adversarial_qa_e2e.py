@@ -255,8 +255,14 @@ def test_a_shariah_status_always_has_its_evidence_within_reach(
     )
     assert_no_raw_traceback(page)
 
-    row = page.locator(".live-market-row", has_text="SOL/USDT")
-    expect(row).to_be_visible(timeout=20_000)
+    # The redesigned Halal Assets page draws a card per coin, not a table row. This test
+    # was still looking for `.live-market-row` and a "Show passport" button, neither of
+    # which has existed since the page was redesigned — so it was failing on markup
+    # rather than on the rule it exists to protect. The rule is unchanged; only the
+    # place to look for it moved.
+    card = page.locator(".t-asset", has_text="SOL")
+    expect(card.first).to_be_visible(timeout=20_000)
+    card = card.first
 
     offences = [
         hit for hit in scan_for_claims(page.locator("body").inner_text()) if hit.is_violation
@@ -264,16 +270,16 @@ def test_a_shariah_status_always_has_its_evidence_within_reach(
     assert not offences, f"the screened watchlist rendered: {offences}"
 
     # Half one: the status is stated, and its evidence is offered beside it.
-    assert "halal" in row.inner_text().casefold(), "the row states no status to check"
-    passport_button = row.get_by_role("button", name="Show passport")
+    assert "halal" in card.inner_text().casefold(), "the card states no status to check"
+    passport_button = card.locator("[data-quick-view]")
     expect(passport_button).to_be_visible()
 
     # Half two: the evidence is complete. Anything less is a claim nobody reviewed.
     passport_button.click()
-    dialog = page.locator("[data-passport-quick-dialog]")
+    dialog = page.locator("[data-passport-dialog]")
     expect(dialog).to_be_visible()
-    dialog.get_by_role("link", name="Open Full Passport").click()
-    expect(page.locator(".passport-summary-header h1")).to_be_visible(timeout=20_000)
+    dialog.locator("[data-pq-full]").click()
+    expect(page.locator("h1").first).to_be_visible(timeout=20_000)
     assert_no_raw_traceback(page)
 
     passport = page.locator("body").inner_text()

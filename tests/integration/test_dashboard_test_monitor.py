@@ -1,4 +1,4 @@
-"""The visual canvas at `/dashboard/monitor`.
+"""The visual canvas at `/dashboard/create-monitor`.
 
 The redesign brief made several things non-negotiable, and none of them can be checked
 by looking at a screenshot:
@@ -18,10 +18,9 @@ import re
 
 import pytest
 
+from ai_market_monitor.core.dashboard_paths import LEGACY_MONITOR_PATH, MONITOR_PATH
 from ai_market_monitor.db.models.enums import DeliveryChannel
 from tests.integration.test_dashboard_web import _signup_and_verify
-
-MONITOR_PATH = "/dashboard/monitor"
 
 
 async def _signed_in(test_context, email: str) -> str:
@@ -237,3 +236,32 @@ async def test_a_client_without_compression_still_gets_the_page(test_context):
     assert response.status_code == 200
     assert "content-encoding" not in response.headers
     assert "<h1>Monitor</h1>" in response.text
+
+
+async def test_the_canvas_answers_at_the_address_a_person_came_to_use(test_context):
+    """The page is where a monitor is made, and its address says so."""
+    await _signup_and_verify(test_context, email="monitor-address@example.com")
+
+    response = await test_context["client"].get(MONITOR_PATH)
+    assert MONITOR_PATH == "/dashboard/create-monitor"
+    assert response.status_code == 200
+    assert "data-monitor-root" in response.text
+
+
+async def test_the_old_canvas_address_still_opens_the_canvas(test_context):
+    """A saved bookmark and an already-sent redirect both still name the old address."""
+    await _signup_and_verify(test_context, email="monitor-legacy@example.com")
+
+    response = await test_context["client"].get(LEGACY_MONITOR_PATH, follow_redirects=False)
+    assert response.status_code == 308
+    assert response.headers["location"] == MONITOR_PATH
+
+
+async def test_the_new_address_is_not_shared_with_the_older_builder(test_context):
+    """It used to serve the older strategy builder as well. One address, one page."""
+    await _signup_and_verify(test_context, email="monitor-one-owner@example.com")
+
+    canvas = (await test_context["client"].get(MONITOR_PATH)).text
+    builder = (await test_context["client"].get("/dashboard/strategies/new")).text
+    assert "data-monitor-root" in canvas
+    assert "data-monitor-root" not in builder

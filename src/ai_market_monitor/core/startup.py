@@ -51,6 +51,12 @@ _PUBLISHED_PASSWORDS = frozenset(
         "test",
         "dev",
         "local",
+        # The database role and database were renamed to `hilalmarkets` on 19 Aug 2026.
+        # That word now appears in the compose defaults and in both env examples, so it
+        # is exactly as guessable as `market_monitor` was, and is refused for the same
+        # reason. The old name stays listed: an install that never renamed still exists.
+        "hilalmarkets",
+        "hilal_markets",
         "market_monitor",
         "monitor",
     }

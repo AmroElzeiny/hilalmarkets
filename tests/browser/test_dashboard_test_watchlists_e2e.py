@@ -15,6 +15,7 @@ import re
 import pytest
 from playwright.sync_api import Page, expect
 
+from ai_market_monitor.core.dashboard_paths import MONITOR_PATH, MONITORS_PATH
 from tests.browser.conftest import (
     assert_contrast,
     assert_no_horizontal_overflow,
@@ -25,7 +26,10 @@ from tests.browser.conftest import (
     unique_email,
 )
 
-PAGE = "/dashboard/monitors"
+#: Both addresses come from the one file that owns them. Written out here again, they
+#: were a second opinion about where each page lives — and when the canvas moved, this
+#: file was still waiting at the old address.
+PAGE = MONITORS_PATH
 
 
 def _with_lists(page: Page, base_url: str, browser_app) -> None:
@@ -66,7 +70,7 @@ def test_a_person_with_no_lists_is_shown_the_way_to_make_one(
     expect(ways.first).to_contain_text("Draw it on the canvas")
     assert ways.first.get_attribute("href"), "the one way on the page goes nowhere"
     ways.first.click()
-    page.wait_for_url(re.compile(r"/dashboard/monitor$"), timeout=30_000)
+    page.wait_for_url(re.compile(f"{re.escape(MONITOR_PATH)}$"), timeout=30_000)
 
 
 def test_every_card_says_what_it_is_doing_in_words(

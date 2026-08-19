@@ -1,4 +1,4 @@
-/* The monitor canvas at /dashboard/monitor.
+/* The monitor canvas at /dashboard/create-monitor.
  *
  * Brings together the four parts that each own one thing: the contract reader, the
  * plan, the board, and the panels this file draws — the condition library, the
@@ -26,7 +26,17 @@ import {
 import { Board } from "./hm-monitor-board.js";
 
 const root = document.querySelector("[data-monitor-root]");
-if (root) start(root).catch(() => showContractError(root));
+if (root) {
+  // "Try again" is wired before the contract is read, not after it has been read.
+  //
+  // It used to be registered inside `start`, past the `await` that reads the contract.
+  // That is the one path where the button is never reached: the read fails, `start`
+  // stops at the `await`, the error banner appears — carrying a button with no handler
+  // on it. The only way out of a failed read had nothing behind it.
+  const retry = root.querySelector("[data-contract-retry]");
+  if (retry) retry.addEventListener("click", () => window.location.reload());
+  start(root).catch((error) => showContractError(root, error));
+}
 
 const icon = (name, cls = "icon") => (window.icon ? window.icon(name, cls) : "");
 const escapeHtml = (value) =>
@@ -36,11 +46,22 @@ const escapeHtml = (value) =>
 
 const PAGE_SIZE = 40;
 
-function showContractError(scope) {
+/* Why the board is empty, in the words that match what actually happened.
+ *
+ * "It could not be read" and "it did not answer in time" are different things to a
+ * person: the first sounds like something is broken, the second like something worth
+ * trying again in a moment. Both used to read the same. */
+function showContractError(scope, failure) {
   const loading = scope.querySelector("[data-loading]");
   const error = scope.querySelector("[data-contract-error]");
+  const reason = scope.querySelector("[data-contract-reason]");
   if (loading) loading.hidden = true;
   if (error) error.hidden = false;
+  if (reason && window.hmWaitedTooLong && window.hmWaitedTooLong(failure)) {
+    reason.textContent =
+      "The server did not answer in time, so the board stays empty. Nothing was guessed"
+      + " in its place, and your saved draft is untouched.";
+  }
 }
 
 async function start(scope) {
@@ -1543,8 +1564,6 @@ async function start(scope) {
       else board.fit();
     });
   }
-
-  find("[data-contract-retry]").addEventListener("click", () => window.location.reload());
 
   /* ── The two canvas sizes ──────────────────────────────────────────────── */
 

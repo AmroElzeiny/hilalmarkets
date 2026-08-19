@@ -55,6 +55,7 @@ from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.dashboard_paths import (
     CONNECTIONS_PATH,
+    LEGACY_MONITOR_PATH,
     LEGACY_WATCHLISTS_PATH,
     LIFECYCLES_PATH,
     MARKET_PATH,
@@ -207,6 +208,22 @@ async def screened_market_page(
     )
     context.update(_PATH_CHROME)
     return templates.TemplateResponse(request, "hilal/dashboard_test/market.html", context)
+
+
+@router.get(
+    LEGACY_MONITOR_PATH,
+    include_in_schema=False,
+    name="legacy_monitor_canvas_page",
+)
+async def legacy_monitor_canvas_page() -> RedirectResponse:
+    """The address the canvas used to answer at.
+
+    A permanent redirect, not a second copy of the page: saved bookmarks and the
+    "put a monitor away" redirect that has already been sent still name it, and neither
+    can be corrected after the fact.
+    """
+
+    return RedirectResponse(MONITOR_PATH, status_code=308)
 
 
 @router.get(MONITOR_PATH, response_class=HTMLResponse, include_in_schema=False)

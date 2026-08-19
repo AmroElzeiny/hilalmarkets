@@ -2553,14 +2553,14 @@ async def restore_capability_extension(
     return _redirect(f"{_AFTER_MONITOR_ACTION}?message=mechanic_restored")
 
 
-@router.get("/dashboard/create-monitor", response_class=HTMLResponse, include_in_schema=False)
-async def create_monitor_page(
-    request: Request,
-    user: User = Depends(_require_user),
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    return await new_strategy_builder_page(request, user, session, settings)
+#: `/dashboard/create-monitor` is the visual canvas, and only the canvas.
+#:
+#: It used to be registered here as a second front door onto the older strategy builder —
+#: the same page `/dashboard/strategies/new` serves. That builder is still at its own
+#: address; what is gone is the alias, because the canvas answers here now
+#: (`MONITOR_PATH`, served by `routers/dashboard_test.py`). Two routers cannot both own
+#: one address: which page answered would depend on the order they were registered in,
+#: which is not a decision anybody made.
 
 
 #: Trading Assistant is gone from the product, and so are both of its addresses.

@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, expect
 
+from ai_market_monitor.core.dashboard_paths import MONITOR_PATH
 from tests.browser.conftest import (
     assert_no_horizontal_overflow,
     assert_no_raw_traceback,
@@ -23,7 +24,9 @@ from tests.browser.conftest import (
     signup,
 )
 
-MONITOR_PATH = "/dashboard/monitor"
+#: The endpoint the canvas cannot draw without. Named once so the tests that make it
+#: stall, fail or answer late all point at the same address the page really reads.
+CONTRACT_URL = "**/api/v1/dashboard/setup-chat/builder-contract"
 
 
 def _open_canvas(page: Page, base_url: str) -> None:
@@ -903,3 +906,128 @@ def test_nothing_moves_when_a_person_asks_for_less_motion(page: Page, base_url: 
             .filter(item => item.duration > 60 || item.iterations === Infinity)"""
     )
     assert moving == [], f"movement survived reduced motion: {moving[:6]}"
+
+
+# ── When the contract cannot be read ─────────────────────────────────────────
+#
+# The canvas cannot draw a single card until the server has said what this platform can
+# watch for. Everything below is about the ways that read can go wrong, because they all
+# used to end in the same place: a page that says "Reading what this platform can watch
+# for…" and never says anything else.
+
+
+def test_a_contract_that_never_answers_ends_in_a_message_not_a_wait(
+    page: Page, base_url: str
+) -> None:
+    """The reported fault, as a test.
+
+    The request is accepted and then never answered — a stalled connection, a proxy
+    holding it open, a laptop that went to sleep. `fetch` neither resolves nor rejects,
+    so the canvas used to sit on its loading sentence for ever with no error and no way
+    out. It gives up now, and says which of the two things happened.
+    """
+
+    signup(page, base_url)
+    close_any_open_guide(page)
+    # Accepted, never answered. A route handler that never replies holds it open.
+    page.route(CONTRACT_URL, lambda route: None)
+    page.goto(f"{base_url}{MONITOR_PATH}", wait_until="domcontentloaded")
+    close_any_open_guide(page)
+
+    banner = page.locator("[data-contract-error]")
+    # Longer than the wait itself, so what is being asserted is that the page gives up,
+    # not how fast the machine running the test is.
+    expect(banner).to_be_visible(timeout=45_000)
+    expect(page.locator("[data-loading]")).to_be_hidden()
+    expect(page.locator("[data-contract-reason]")).to_contain_text("did not answer in time")
+    # And it says the draft is safe, because that is a person's first worry.
+    expect(banner).to_contain_text("draft is untouched")
+    assert_no_raw_traceback(page)
+
+
+@pytest.mark.deliberate_console_errors("Failed to load resource", "503")
+def test_the_try_again_button_really_tries_again(page: Page, base_url: str) -> None:
+    """The only way out of a failed read has to have something behind it.
+
+    The click handler used to be registered inside the function that runs *after* the
+    contract has been read. On the one path where the button is shown, it had no handler
+    at all: pressing it did nothing, for ever.
+    """
+
+    signup(page, base_url)
+    close_any_open_guide(page)
+
+    attempts = {"count": 0}
+
+    def answer(route: Any) -> None:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            route.fulfill(status=503, content_type="application/json", body="{}")
+        else:
+            route.fallback()
+
+    page.route(CONTRACT_URL, answer)
+    page.goto(f"{base_url}{MONITOR_PATH}", wait_until="domcontentloaded")
+    close_any_open_guide(page)
+
+    expect(page.locator("[data-contract-error]")).to_be_visible(timeout=30_000)
+    page.locator("[data-contract-retry]").click()
+
+    close_any_open_guide(page)
+    page.locator("[data-loading]").wait_for(state="hidden", timeout=30_000)
+    expect(page.locator("[data-node='universe']")).to_be_visible()
+    assert attempts["count"] >= 2, "pressing the button did not ask the server again"
+
+
+def test_the_page_puts_a_time_limit_on_every_request_it_sends(
+    page: Page, base_url: str
+) -> None:
+    """The limit is installed once, for the whole page, before anything else runs.
+
+    Checked in a real browser rather than by reading the template, because what matters
+    is that `fetch` is really wrapped by the time any page code uses it.
+    """
+
+    _open_canvas(page, base_url)
+
+    waits = page.evaluate(
+        "() => window.hmWait && { reading: hmWait.reading, changing: hmWait.changing }"
+    )
+    assert waits, "nothing bounded the requests this page sends"
+    assert 5_000 <= waits["reading"] <= 30_000
+    assert waits["reading"] < waits["changing"]
+
+    # Asking a question gives up quickly, because nothing was changed and trying again
+    # is safe. Anything that makes something happen is given far longer, because the
+    # server may already have done it.
+    assert page.evaluate("() => window.hmWait.forMethod('GET')") == waits["reading"]
+    assert page.evaluate("() => window.hmWait.forMethod('POST')") == waits["changing"]
+    assert page.evaluate("() => window.hmWait.forMethod('delete')") == waits["changing"]
+
+
+def test_a_request_to_somebody_elses_server_keeps_its_own_behaviour(
+    page: Page, base_url: str
+) -> None:
+    """This limit is about our own server, not a third party's.
+
+    A payment page or an analytics script decides how long it waits for itself, and this
+    product is not in a position to overrule it. Proved by holding a request to another
+    origin open for longer than our own limit and showing it is still waiting.
+    """
+
+    _open_canvas(page, base_url)
+    page.route("https://example.invalid/**", lambda route: None)
+
+    settled = page.evaluate(
+        """async () => {
+            let done = false;
+            fetch('https://example.invalid/probe').then(
+                () => { done = true; },
+                () => { done = true; },
+            );
+            const past = window.hmWait.reading + 3000;
+            await new Promise((resolve) => window.setTimeout(resolve, past));
+            return done;
+        }""",
+    )
+    assert settled is False, "our own time limit was applied to another origin's request"

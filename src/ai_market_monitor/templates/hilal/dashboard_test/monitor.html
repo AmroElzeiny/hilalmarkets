@@ -10,8 +10,8 @@
     There is no assistant on this page: no chat panel, no chat popup, and no
     "Hilal Markets Assistant" box. Authoring never requires the assistant. -#}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260819-canvas-2">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-monitor-test.css') }}?v=20260819-canvas-2">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-request-wait">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-monitor-test.css') }}?v=20260820-request-wait">
 {% endblock %}
 {% block content %}
 
@@ -155,7 +155,9 @@
           <span data-icon="alert" data-icon-class="icon"></span>
           <div class="t-banner-body">
             <strong>The list of conditions could not be read</strong>
-            <p>Nothing was guessed in its place, so the board stays empty. Your saved draft is untouched.</p>
+            {#- The sentence is replaced when the read ended because the server did not
+                answer in time, so a person is told which of the two happened. -#}
+            <p data-contract-reason>Nothing was guessed in its place, so the board stays empty. Your saved draft is untouched.</p>
             <button class="t-action" type="button" data-contract-retry><span data-icon="refresh" data-icon-class="icon-sm"></span>Try again</button>
           </div>
         </div>
@@ -441,4 +443,4 @@
 
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-monitor-test.js') }}?v=20260819-canvas-2"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-monitor-test.js') }}?v=20260820-request-wait"></script>{% endblock %}

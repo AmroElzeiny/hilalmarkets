@@ -47,9 +47,19 @@ does not replay prototype scan results, fake data, or placeholder links.
 | Support | `/dashboard/support` | Support request service |
 | System Brain | `/system-brain` | Protected administrator console |
 
-Backward-compatible routes such as `/dashboard/monitors`, `/dashboard/create-monitor`,
-`/dashboard/scan-now`, and `/dashboard/trial` redirect to the consolidated page that
-owns that workflow. They do not render duplicate sections.
+| Create a monitor | `/dashboard/create-monitor` | The visual canvas, drawn from the Builder contract |
+
+`/dashboard/create-monitor` is the visual canvas itself, not a redirect. It used to be a
+second front door onto the older strategy builder while the canvas answered at
+`/dashboard/monitor`; one address now serves one page, and `/dashboard/monitor` is a 308
+to it. Every address in this product is owned by a constant in
+`core/dashboard_paths.py` — never written out a second time in a router, a template or a
+message that leaves the product.
+
+Backward-compatible routes such as `/dashboard/monitors`, `/dashboard/monitor` and
+`/dashboard/trial` redirect to the page that owns that workflow. They do not render
+duplicate sections. `/dashboard/scan-now` is not one of them: Trading Assistant was
+removed and that address refuses.
 
 `Check the Market Now` is an explicit Watch navigation item. It redirects into Scanner mode at
 `/dashboard/strategies/new?mode=scanner`; it is not a duplicate scanner implementation or a

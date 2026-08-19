@@ -92,7 +92,7 @@ Minimum required for the API to start in production:
 - `APP_SECRET_KEY` with at least 32 random characters
 - `PUBLIC_BASE_URL=https://hilalmarkets.com`
 - `APP_BASE_URL=https://app.hilalmarkets.com`
-- `DATABASE_URL=postgresql+asyncpg://market_monitor:<same password>@db:5432/market_monitor`
+- `DATABASE_URL=postgresql+asyncpg://hilalmarkets:<same password>@db:5432/hilalmarkets`
 - `POSTGRES_PASSWORD=<same password>`
 - `REDIS_URL=redis://redis:6379/0`
 - `ALLOW_MOCK_PROVIDERS=false`

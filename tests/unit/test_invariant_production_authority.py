@@ -1025,6 +1025,8 @@ def test_deterministic_text_reports_only_operations_that_survived() -> None:
         "secret",
         "admin",
         "root",
+        "hilalmarkets",
+        "hilal_markets",
         "market_monitor",
         "monitor",
         "short",  # under twelve characters
@@ -1037,7 +1039,11 @@ def test_a_weak_database_password_is_refused_in_deployment(password: str) -> Non
 
 
 def test_a_password_equal_to_the_username_is_refused() -> None:
-    url = "postgresql+asyncpg://hilalmarkets:hilalmarkets@db:5432/market_monitor"
+    # The user here must not be one of the published names, and must be long enough to
+    # pass the length rule. Otherwise an earlier check answers first and this test stops
+    # proving anything about the rule it is named for - which is what happened when the
+    # database role was renamed to `hilalmarkets` and that word joined the refused list.
+    url = "postgresql+asyncpg://deploymentowner:deploymentowner@db:5432/hilalmarkets"
     reason = _weak_database_password(url)
     assert reason is not None
     assert "identical to the database user" in reason

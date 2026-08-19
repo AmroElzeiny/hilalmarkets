@@ -51,7 +51,22 @@ LEGACY_HOME_PATH: Final[str] = "/main"
 MARKET_PATH: Final[str] = "/dashboard/market"
 
 #: The visual canvas where a monitor is drawn.
-MONITOR_PATH: Final[str] = "/dashboard/monitor"
+#:
+#: The address says what a person came here to do. "Monitor" is a noun and the name of a
+#: thing they may not have yet; the page is where one is made. Every button that opens it
+#: already says "Create a monitor", and the guide's own step is called
+#: ``nav-create-monitor``.
+#:
+#: This address was already taken — by the older strategy builder, registered in
+#: ``routers/dashboard.py`` as a second front door onto ``/dashboard/strategies/new``.
+#: One address, two pages, and which one answered depended on the order the routers
+#: happened to be registered in. The alias is gone and this is the only page here.
+MONITOR_PATH: Final[str] = "/dashboard/create-monitor"
+
+#: The address the canvas used to answer at, kept as a permanent redirect rather than
+#: deleted — the same rule ``LEGACY_HOME_PATH`` above follows. It is written into saved
+#: bookmarks and into the "put a monitor away" redirect that has already been sent.
+LEGACY_MONITOR_PATH: Final[str] = "/dashboard/monitor"
 
 #: The monitors somebody has.
 #:
