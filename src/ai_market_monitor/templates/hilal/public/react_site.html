@@ -41,11 +41,13 @@
   <meta name="twitter:image:alt" content="{{ og_image_alt }}">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260818-live-4">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260818-live-4">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260818-live-4">
-  <link rel="stylesheet" href="{{ url_for('static', path='/landing/assets/landing.css') }}?v=20260818-live-4">
-  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260818-live-4">{% endif %}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260819-auth-1">
+  {# One owner for the cookie banner and its settings window, which this template includes below. #}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260819-auth-1">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260819-auth-1">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260819-auth-1">
+  <link rel="stylesheet" href="{{ url_for('static', path='/landing/assets/landing.css') }}?v=20260819-auth-1">
+  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260819-auth-1">{% endif %}
   <script>
     window.HilalMarketsConsentConfig = {{ {
       "version": cookie_consent_version,
@@ -94,10 +96,10 @@
   <div id="root"></div>
   {% include "hilal/partials/cookie_banner.html" %}
   {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260818-live-4"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260818-live-4"></script>
-  {% if site_visit_measurement_enabled %}<script src="{{ url_for('static', path='/hm-visit-analytics.js') }}?v=20260818-live-4" defer></script>{% endif %}
-  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260818-live-4"></script>{% endif %}
-  <script type="module" src="{{ url_for('static', path='/landing/assets/landing.js') }}?v=20260818-live-4"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260819-auth-1"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260819-auth-1"></script>
+  {% if site_visit_measurement_enabled %}<script src="{{ url_for('static', path='/hm-visit-analytics.js') }}?v=20260819-auth-1" defer></script>{% endif %}
+  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260819-auth-1"></script>{% endif %}
+  <script type="module" src="{{ url_for('static', path='/landing/assets/landing.js') }}?v=20260819-auth-1"></script>
 </body>
 </html>

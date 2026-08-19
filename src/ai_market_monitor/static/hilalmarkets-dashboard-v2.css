@@ -3429,84 +3429,29 @@ body.hilal-dashboard .telegram-service-mark {
   mask: url("/static/brand-telegram.svg") center / contain no-repeat;
 }
 
-body.hilal-dashboard .cookie-banner {
-  position: fixed;
-  z-index: 220;
-  right: 32px;
-  bottom: 18px;
-  left: calc(var(--sidebar) + 32px);
-  display: none;
-  max-width: none;
-  padding: 0;
-  overflow: hidden;
-  border: 1px solid var(--hm-hairline-strong);
-  border-radius: 18px;
-  background: var(--hm-surface);
-  box-shadow: var(--hm-shadow-popover);
+/* The cookie banner and its settings window are drawn by a shared partial and styled by
+   `hilalmarkets-cookie.css`, which every page including that partial now loads. They
+   were styled here and again in `hilalmarkets-public.css`, and the two had drifted
+   apart; the sign-in pages loaded neither and rendered them raw.
+
+   What stays here is the one thing that really is the dashboard's business: the banner
+   has to clear the side menu. Those are variables the shared file reads. */
+body.hilal-dashboard {
+  --hm-cookie-left: calc(var(--sidebar) + 32px);
+  --hm-cookie-right: 32px;
+  --hm-cookie-max-width: none;
 }
-body.hilal-dashboard .cookie-banner.is-visible { display: block; animation: hm-dialog-in 220ms cubic-bezier(.2, .75, .25, 1) backwards; }
-body.hilal-dashboard .cookie-banner-inner {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
-}
-body.hilal-dashboard .cookie-banner h2 { margin: 0 0 4px; color: var(--hm-ink); font-size: .95rem; }
-body.hilal-dashboard .cookie-banner p { margin: 0; color: var(--hm-copy); font-size: .8rem; line-height: 1.45; }
-body.hilal-dashboard .cookie-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-body.hilal-dashboard .cookie-modal-backdrop {
-  position: fixed;
-  z-index: 230;
-  inset: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: 18px;
-  background: rgba(43, 46, 53, .48);
-  backdrop-filter: blur(6px);
-}
-body.hilal-dashboard .cookie-modal-backdrop.is-visible { display: flex; }
-body.hilal-dashboard .cookie-modal {
-  display: grid;
-  width: min(560px, 100%);
-  gap: 15px;
-  padding: 22px;
-  border: 1px solid var(--hm-hairline);
-  border-radius: 20px;
-  background: var(--hm-canvas);
-  box-shadow: var(--hm-shadow-popover);
-}
-body.hilal-dashboard .cookie-modal h2 { margin: 2px 0 0; color: var(--hm-ink); }
-body.hilal-dashboard .cookie-modal > p { margin: 0; color: var(--hm-copy); }
-body.hilal-dashboard .cookie-category {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 12px;
-  border: 1px solid var(--hm-hairline);
-  border-radius: 13px;
-  background: var(--hm-surface);
-  color: var(--hm-copy);
-}
-body.hilal-dashboard .cookie-category > span { display: grid; gap: 3px; }
-body.hilal-dashboard .cookie-category strong { color: var(--hm-ink); }
-body.hilal-dashboard .cookie-category input { inline-size: 18px; block-size: 18px; accent-color: var(--hm-apple-deep); }
-body.hilal-dashboard .cookie-fixed { color: var(--hm-muted); font-size: .8rem; font-weight: 700; }
-body.hilal-dashboard .cookie-modal-actions { display: flex; justify-content: flex-end; gap: 9px; }
 
 @media (max-width: 900px) {
-  body.hilal-dashboard .cookie-banner { right: 14px; left: 14px; bottom: 14px; }
+  body.hilal-dashboard {
+    --hm-cookie-left: 14px;
+    --hm-cookie-right: 14px;
+    --hm-cookie-bottom: 14px;
+  }
 }
 
 @media (max-width: 620px) {
   body.hilal-dashboard .live-market-toolbar { align-items: stretch; flex-direction: column; }
-  body.hilal-dashboard .cookie-banner-inner { grid-template-columns: 1fr; }
-  body.hilal-dashboard .cookie-actions { justify-content: stretch; }
-  body.hilal-dashboard .cookie-actions .btn { flex: 1 1 135px; }
-  body.hilal-dashboard .cookie-modal-actions { flex-direction: column-reverse; }
-  body.hilal-dashboard .cookie-modal-actions .btn { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

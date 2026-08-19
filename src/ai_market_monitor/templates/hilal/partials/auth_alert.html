@@ -1,0 +1,44 @@
+{# One banner for everything the four sign-in pages have to say.
+
+   It replaced a chain of fifteen `elif` branches that ended in
+   `error.replace('_', ' ').title()` — which is how somebody trying to sign in came to
+   read "Invalid Login", and somebody signing up came to read an instruction to set an
+   environment variable and restart the application. The words now come from
+   `core/auth_pages.py`, which answers every code these pages can receive in plain
+   English and attaches the next step to it.
+
+   The banner is also the one that used to be painted **green for every error**. The
+   error styling was written inside `:where(...)`, which has no specificity at all, so
+   the plain `.dash-flash` rule above it won and every failure on every one of these
+   pages arrived looking like good news. #}
+<div
+  class="auth-alert"
+  data-tone="{{ auth_alert.tone }}"
+  data-auth-alert
+  role="{{ 'alert' if auth_alert.tone == 'error' else 'status' }}"
+  tabindex="-1">
+  <span class="auth-alert-mark" aria-hidden="true">
+    <span data-icon="{% if auth_alert.tone == 'error' %}warning{% elif auth_alert.tone == 'success' %}check{% else %}info{% endif %}" data-icon-class="icon"></span>
+  </span>
+  <div class="auth-alert-body">
+    {# The tone in words as well as in colour. A person who cannot tell the two panels
+       apart by colour still reads which one this is. brand guide.md section 10. #}
+    <strong><span class="hm-sr-only">{% if auth_alert.tone == 'error' %}Problem: {% elif auth_alert.tone == 'success' %}Done: {% else %}Note: {% endif %}</span>{{ auth_alert.title }}</strong>
+    <p>{{ auth_alert.body }}</p>
+    {% if auth_alert.action_label %}
+      {% if auth_alert.action_resends %}
+        {% if auth_resend_action %}
+          <button type="submit" form="auth-resend-form" class="auth-alert-action">
+            {{ auth_alert.action_label }}
+            <span data-icon="refresh" data-icon-class="icon" aria-hidden="true"></span>
+          </button>
+        {% endif %}
+      {% else %}
+        <a class="auth-alert-action" href="{{ auth_alert.action_href }}">
+          {{ auth_alert.action_label }}
+          <span data-icon="arrow" data-icon-class="icon" aria-hidden="true"></span>
+        </a>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>

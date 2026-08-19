@@ -88,62 +88,16 @@
 .site-footer h2{font-size:.92rem;color:#fff;letter-spacing:0}
 .footer-link-button{appearance:none;border:0;padding:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .footer-link-button:hover,.footer-link-button:focus-visible{color:#fff;text-decoration:underline}
-/* ---- Cookie choices, on the brand -----------------------------------------
-   The banner and the settings panel, in the product's own palette: near-black ink,
-   apple-green accent, hairline #e1e5ea, and the two brand faces. They were on the
-   emerald-and-gold palette this brand no longer uses — a dark green backdrop, an emerald
-   tick colour, a gold icon box — while the dashboard's copy of the same panel had
-   already been redrawn. One control, two looks, depending on which half of the site a
-   person reached it from.
-
-   Apple green is used for the surround of the mark and never for a word or a rule: it
-   measures 1.21:1 against white, so anything that has to be *read* stays ink. */
-.cookie-banner{display:none;position:fixed;z-index:500;left:18px;right:18px;bottom:18px;max-width:1160px;margin:auto;background:#fff;border:1px solid #e1e5ea;border-radius:22px;box-shadow:0 24px 80px rgba(43,46,53,.22);padding:20px;color:#2b2e35}
-.cookie-banner.is-visible{display:block}
+/* The cookie banner and its settings window are drawn by a shared partial and
+   styled by `hilalmarkets-cookie.css`, which every page including that partial now
+   loads. They used to be styled here and again in the dashboard stylesheet, and the
+   two copies had drifted apart; the sign-in pages loaded neither and rendered them
+   raw. Only the public page's own placement stays here. */
 /* The banner is fixed to the bottom of the window, so the page keeps that much room
    clear under its footer. Its measured height is published as
    `--hm-cookie-banner-height` by `hilalmarkets-consent.js`, and is 0px once answered
    and 0px for anyone with scripting off, who never sees it. */
 body.public-page .site-footer{padding-bottom:calc(var(--hm-cookie-banner-height, 0px) + 36px)}
-.cookie-banner-inner{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:start}
-/* The mark, on the accent rather than on gold. `.icon-box.is-gold` is the older
-   palette's shape and it still carries the markup, so it is turned here instead of the
-   template naming a class that only this one place uses. */
-.cookie-banner .icon-box,.cookie-banner .icon-box.is-gold{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;border:1px solid #e1e5ea;background:#eefbc4;color:#2b2e35}
-.cookie-banner h2{font-family:var(--hm-font-display);font-size:1.05rem;font-weight:500;letter-spacing:-.02em;color:#2b2e35;margin:2px 0 5px}
-.cookie-banner p{font-size:.82rem;line-height:1.55;color:#4a505a;margin:0;max-width:650px}
-.cookie-banner a{color:#2b2e35;text-decoration:underline;text-underline-offset:3px}
-.cookie-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-.cookie-modal-backdrop{display:none;position:fixed;inset:0;background:rgba(43,46,53,.55);z-index:510;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(2px)}
-.cookie-modal-backdrop.is-visible{display:flex}
-.cookie-modal{width:min(620px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:26px;border:1px solid #e1e5ea;box-shadow:0 34px 90px -30px rgba(43,46,53,.55);padding:26px;color:#2b2e35}
-.cookie-modal .eyebrow{display:inline-flex;align-items:center;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#5c646e}
-/* 2rem was the old panel's heading size and it filled the whole top of the box for a
-   sentence nobody needs shouted. This is the brand's display face at a size that reads
-   as a panel title rather than as a page. */
-.cookie-modal h2{font-family:var(--hm-font-display);font-size:1.45rem;font-weight:500;letter-spacing:-.025em;line-height:1.15;color:#2b2e35;margin:4px 0 0}
-.cookie-modal>p{font-size:.85rem;line-height:1.6;color:#4a505a;margin:14px 0 4px}
-.cookie-category{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:16px 0;border-bottom:1px solid #e1e5ea;cursor:pointer}
-.cookie-category:last-of-type{border-bottom:0}
-.cookie-category strong{font-size:.95rem;font-weight:600;color:#2b2e35}
-.cookie-category span span{display:block;color:#4a505a;font-size:.8rem;line-height:1.5;margin-top:4px}
-/* The deep apple, not the accent itself: a tick drawn in #cbfa4d on white is invisible,
-   and this one has to be readable as "on". */
-.cookie-category input{width:20px;height:20px;accent-color:#55712a}
-.cookie-fixed{flex:0 0 auto;padding:4px 10px;border:1px solid #e1e5ea;border-radius:999px;background:#f5f8fb;font-size:.73rem;font-weight:600;color:#4a505a}
-.cookie-modal-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:20px}
-
-/* The buttons inside these two boxes, on the brand.
-   `.btn-primary` and `.btn-secondary` in `hilalmarkets.css` are still emerald-and-gold
-   for the rest of the server-rendered pages, and changing them there would repaint every
-   page on the site — which is not what was asked for here. Scoped to the consent boxes
-   so this control matches the brand without moving anything else. The accent carries no
-   meaning and no words: the label on it is ink, which is what makes it readable. */
-.cookie-banner .btn,.cookie-modal .btn{font-family:var(--hm-font-ui);font-weight:500}
-.cookie-banner .btn-primary,.cookie-modal .btn-primary{background:#cbfa4d;border-color:#cbfa4d;color:#2b2e35;box-shadow:0 12px 26px -14px rgba(85,113,42,.8)}
-.cookie-banner .btn-primary:hover,.cookie-modal .btn-primary:hover{background:#d6fb72;border-color:#d6fb72;box-shadow:0 16px 32px -14px rgba(85,113,42,.85)}
-.cookie-banner .btn-secondary,.cookie-modal .btn-secondary{background:#fff;border-color:#d3d9e0;color:#2b2e35}
-.cookie-banner .btn-secondary:hover,.cookie-modal .btn-secondary:hover{border-color:#2b2e35;background:#f5f8fb}
 .skip-link{position:absolute;left:-9999px;top:0;background:#fff;padding:10px;z-index:1000}.skip-link:focus{left:10px;top:10px}
 .opportunity-context{display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 15px;color:var(--muted);font-size:.75rem}.opportunity-context span+span:before{content:"|";margin-right:8px}
 .opportunity-summary{min-height:72px}.opportunity-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}
@@ -169,10 +123,9 @@ body.public-page .site-footer{padding-bottom:calc(var(--hm-cookie-banner-height,
   .public-page{padding-top:82px}.public-hero{padding:72px 0 56px}.public-hero-grid{gap:28px}.hero-art{min-height:300px}.hero-art-card{display:none}
   .public-subnav{top:76px}.help-categories,.trust-matrix,.trust-strip-grid{grid-template-columns:1fr}
   .flow-line-six{grid-template-columns:1fr}
-  .cookie-banner-inner{grid-template-columns:1fr}.cookie-actions{display:grid;grid-template-columns:1fr}.cookie-actions .btn{width:100%}
   .about-values{grid-template-columns:1fr}.public-desktop-action{display:none}
 }
-@media(max-width:480px){.public-mobile-actions{grid-template-columns:1fr}.cookie-modal{padding:20px}.cookie-modal-actions{display:grid}.cookie-modal-actions .btn{width:100%}}
+@media(max-width:480px){.public-mobile-actions{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){.help-category{transition:none}}
 
 /* ==========================================================================

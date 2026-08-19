@@ -414,7 +414,10 @@ def test_hilalmarkets_landing_and_auth_visual_qa(
 
     page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
     expect(page.locator(".auth-shell")).to_be_visible()
-    expect(page.locator(".auth-form-wrap")).to_be_visible()
+    # The white panel the form sits in. It was `.auth-form-wrap` before the sign-in pages
+    # were rebuilt; it is `<main class="auth-main">` now, which is also a real landmark
+    # rather than a bare div.
+    expect(page.locator("main.auth-main")).to_be_visible()
     expect(page.get_by_test_id("signup-form")).to_be_visible()
     assert "placeholder-note" not in page.content()
     page.screenshot(path=str(output / "hilalmarkets-auth-mobile-390.png"), full_page=True)

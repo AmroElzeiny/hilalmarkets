@@ -14,6 +14,7 @@ import pytest
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.copy_rules import (
+    BYTE_ORDER_MARK,
     FORBIDDEN_CLAIM_PHRASES,
     FORBIDDEN_PRODUCT_PHRASES,
     customer_copy_sources,
@@ -360,6 +361,40 @@ def test_customer_copy_sources_are_actually_found() -> None:
 def test_no_forbidden_phrase_appears_in_any_customer_copy_source() -> None:
     violations = scan_customer_copy(ROOT)
     assert not violations, "\n".join(item.describe(ROOT) for item in violations)
+
+
+def test_the_lint_catches_a_byte_order_mark() -> None:
+    """Without this the rule could be present and match nothing."""
+
+    found = scan_text(f"{BYTE_ORDER_MARK}<!doctype html>", Path("example.html"))
+    assert any("byte-order mark" in item.rule for item in found)
+
+
+def test_no_file_a_browser_downloads_begins_with_a_byte_order_mark() -> None:
+    """Three invisible bytes in front of `<!doctype html>` are not nothing.
+
+    Windows PowerShell's `Set-Content -Encoding utf8` adds one to every file it writes.
+    A bulk edit across the templates put one into thirty-seven files at once — every
+    page still rendered, every test but one still passed, and the one that caught it did
+    so only because it compared a rendered page against an exact string.
+
+    Wider than the copy lint on purpose: this is a file-format rule, so it covers every
+    template and every asset the browser fetches, not only the ones a customer's words
+    come from.
+    """
+
+    watched = (
+        *(ROOT / "src" / "ai_market_monitor" / "templates").rglob("*.html"),
+        *(ROOT / "src" / "ai_market_monitor" / "static").glob("*.css"),
+        *(ROOT / "src" / "ai_market_monitor" / "static").glob("*.js"),
+    )
+    assert len(watched) > 50, "the scan found almost nothing; it is broken, not the files"
+    marked = [
+        path.relative_to(ROOT).as_posix()
+        for path in watched
+        if path.read_bytes().startswith(b"\xef\xbb\xbf")
+    ]
+    assert marked == [], marked
 
 
 @pytest.mark.parametrize("phrase", FORBIDDEN_CLAIM_PHRASES)

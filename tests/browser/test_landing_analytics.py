@@ -1,3 +1,4 @@
+import re
 from uuid import uuid4
 
 import pytest
@@ -637,18 +638,38 @@ def test_contact_form_shows_branded_success_without_duplicate_client_submission(
     page: Page,
     base_url: str,
 ) -> None:
+    """One press, one message — and the page says so in the brand's own words.
+
+    This test had been failing since `/contact` was rebuilt. It filled the fields by
+    `name=`, which the rebuilt form does not use, and it pressed a submit button that no
+    longer sends anything on its own: there is a review window in between now.
+
+    Its title promised something it never actually checked, so that is what it checks
+    now. Counting the requests is the whole point — a form that sends twice creates two
+    tickets, spends two of somebody's allowance, and sends them two emails.
+    """
+
+    sent: list[str] = []
+    page.on(
+        "request",
+        lambda request: sent.append(request.url)
+        if request.method == "POST" and request.url.endswith("/public-forms/contact")
+        else None,
+    )
+
     page.goto(f"{base_url}/contact", wait_until="domcontentloaded")
-    form = page.locator("[data-contact-form]")
-    expect(form).to_be_visible()
-    form.locator('input[name="title"]').fill("Private beta contact")
-    form.locator('input[name="email"]').fill(
-        f"contact-{uuid4().hex[:12]}@example.com"
+    expect(page.locator("[data-contact-form]")).to_be_visible()
+    page.locator("main [id$='-title']").fill("How the contact route works")
+    page.locator("main [id$='-email']").fill(f"contact-{uuid4().hex[:12]}@example.com")
+    page.locator("main [id$='-description']").fill(
+        "I would like to understand how a message reaches the team."
     )
-    form.locator('textarea[name="description"]').fill(
-        "I would like to understand the private beta contact process."
-    )
-    form.locator('button[type="submit"]').click()
-    expect(page.locator("[data-contact-success]")).to_be_visible()
-    expect(page.locator("[data-contact-success]")).to_contain_text(
-        "The Hilal Markets team has received one copy."
-    )
+
+    page.get_by_role("button", name=re.compile("Check and send", re.I)).click()
+    expect(page.get_by_role("dialog")).to_be_visible(timeout=5_000)
+    page.get_by_role("button", name=re.compile("Send message", re.I)).click()
+
+    expect(page.locator("[data-contact-success]")).to_be_visible(timeout=15_000)
+    expect(page.locator("[data-contact-success]")).to_contain_text("Your message was sent.")
+    page.wait_for_timeout(1_000)
+    assert len(sent) == 1, f"one press sent {len(sent)} messages"

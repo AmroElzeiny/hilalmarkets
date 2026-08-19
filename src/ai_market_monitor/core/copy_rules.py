@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Final
 
 __all__ = [
+    "BYTE_ORDER_MARK",
     "CUSTOMER_COPY_SUFFIXES",
     "CopyViolation",
     "FORBIDDEN_CLAIM_PHRASES",
@@ -205,10 +206,34 @@ def customer_copy_sources(root: Path) -> tuple[Path, ...]:
     return tuple(path for path in candidates if path.exists())
 
 
+#: The byte-order mark, as it appears once a file has been read as UTF-8.
+#:
+#: Windows PowerShell's `Set-Content -Encoding utf8` writes one at the front of every
+#: file it touches. It is invisible in an editor and harmless in Python, and in a
+#: template it is three bytes **in front of `<!doctype html>`** — which is enough for a
+#: browser to stop treating the document as a standards-mode page. A bulk edit across
+#: the templates put one into thirty-seven files at once and nothing reported it; the
+#: only reason it was noticed at all is that one test compared a rendered page against
+#: an exact string and the string no longer started where it used to.
+#:
+#: Same family as the mojibake markers above: a Windows write, silently damaging a file
+#: that still parses.
+BYTE_ORDER_MARK: Final[str] = "﻿"
+
+
 def scan_text(text: str, path: Path) -> tuple[CopyViolation, ...]:
     """Every violation in one file's text."""
 
     violations: list[CopyViolation] = []
+    if text.startswith(BYTE_ORDER_MARK):
+        violations.append(
+            CopyViolation(
+                path,
+                1,
+                "encoding: the file begins with a byte-order mark",
+                BYTE_ORDER_MARK,
+            )
+        )
     for number, line in enumerate(text.splitlines(), start=1):
         lowered = line.casefold()
         for phrase in FORBIDDEN_PRODUCT_PHRASES:

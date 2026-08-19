@@ -328,7 +328,11 @@ async def test_signin_success_and_failure(test_context):
         follow_redirects=False,
     )
     assert failed.status_code == 303
-    assert failed.headers["location"] == "/signin?error=invalid_login"
+    # A refusal now carries the address back, so a wrong password does not also cost
+    # somebody their email. The error itself is unchanged.
+    assert failed.headers["location"] == (
+        "/signin?error=invalid_login&email=missing%40example.com"
+    )
 
     await _signup_and_verify(test_context, email="signin@example.com")
     wrong = await test_context["client"].post(
@@ -337,7 +341,11 @@ async def test_signin_success_and_failure(test_context):
         follow_redirects=False,
     )
     assert wrong.status_code == 303
-    assert wrong.headers["location"] == "/signin?error=invalid_login"
+    assert wrong.headers["location"] == (
+        "/signin?error=invalid_login&email=signin%40example.com"
+    )
+    filled = await test_context["client"].get(wrong.headers["location"])
+    assert 'value="signin@example.com"' in filled.text
     success = await test_context["client"].post(
         "/signin",
         data={"email": "signin@example.com", "password": "CorrectHorse123!"},
@@ -585,7 +593,9 @@ async def test_signup_password_confirmation_and_complexity_are_enforced(test_con
         },
         follow_redirects=False,
     )
-    assert mismatch.headers["location"] == "/signup?error=password_mismatch"
+    assert mismatch.headers["location"] == (
+        "/signup?error=password_mismatch&email=mismatch%40example.com"
+    )
 
     weak = await test_context["client"].post(
         "/signup",
@@ -596,7 +606,9 @@ async def test_signup_password_confirmation_and_complexity_are_enforced(test_con
         },
         follow_redirects=False,
     )
-    assert weak.headers["location"] == "/signup?error=invalid_password"
+    assert weak.headers["location"] == (
+        "/signup?error=invalid_password&email=weak%40example.com"
+    )
 
 
 async def test_email_code_login_and_password_reset(test_context):
@@ -643,7 +655,9 @@ async def test_email_code_login_and_password_reset(test_context):
         data={"email": "code-login@example.com", "password": "CorrectHorse123!"},
         follow_redirects=False,
     )
-    assert old_password.headers["location"] == "/signin?error=invalid_login"
+    assert old_password.headers["location"] == (
+        "/signin?error=invalid_login&email=code-login%40example.com"
+    )
     new_password = await test_context["client"].post(
         "/signin",
         data={"email": "code-login@example.com", "password": "NewPassword7!"},
@@ -665,7 +679,11 @@ async def test_reset_password_unknown_email_shows_not_registered(test_context):
     assert test_context["settings"].email_test_outbox == []
     page = await test_context["client"].get(requested.headers["location"])
     assert page.status_code == 200
-    assert "This email is not registered. Please sign up first." in page.text
+    # Same meaning, said the way somebody who is not an engineer would say it, with the
+    # next step attached. The wording is owned by `core/auth_pages.py`.
+    assert "We cannot find that account" in page.text
+    assert "Check the spelling, or create one." in page.text
+    assert "Create an account" in page.text
 
 
 async def test_integrations_telegram_link_opens_new_tab_and_creates_pending_link(test_context):

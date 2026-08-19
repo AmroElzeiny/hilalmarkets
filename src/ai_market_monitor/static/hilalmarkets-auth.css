@@ -1,3 +1,16 @@
+/* The way in: /signup, /signin, /signin/code, /reset-password and the confirm step.
+ *
+ * Two panels. On the left, near-black, the journey — which step you are on, what is
+ * behind you, what is left. On the right, white, one job at a time. On a phone the form
+ * comes first and the panel follows it, because a person on a phone came here to sign
+ * in, not to read.
+ *
+ * Everything is drawn from the tokens in `hilalmarkets-brand.css` and the two brand
+ * faces in `hilalmarkets-fonts.css`. No colour, no radius and no easing is invented
+ * here. Every text and boundary pair below carries the contrast it was measured at, and
+ * `test_invariant_auth_pages.py` recomputes all of them.
+ */
+
 html,
 body.hilal-auth-page {
   min-height: 100%;
@@ -12,396 +25,1141 @@ body.hilal-auth-page {
 
 .hilal-auth-page [hidden] { display: none !important; }
 
+/* Text for a screen reader and nobody else. Used for the state of a rule, the tone of a
+   banner and every live announcement — the things this page must say without shouting
+   them at somebody who can already see them. */
+.hilal-auth-page .hm-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.hilal-auth-page .auth-skip {
+  position: absolute;
+  z-index: 900;
+  top: -100px;
+  left: 16px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 12px 18px;
+  border-radius: 0 0 14px 14px;
+  background: var(--hm-ink);
+  color: var(--hm-surface);
+  font-size: .9rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: top var(--hm-motion);
+}
+
+.hilal-auth-page .auth-skip:focus-visible { top: 0; }
+
+/* ── The two panels ───────────────────────────────────────────────────────── */
+
 .hilal-auth-page .auth-shell {
   display: grid;
-  grid-template-columns: minmax(380px, .92fr) minmax(460px, 1.08fr);
+  grid-template-columns: minmax(360px, .88fr) minmax(440px, 1.12fr);
   gap: 16px;
   min-height: 100dvh;
   padding: 16px;
 }
 
-.hilal-auth-page .auth-brand {
+.hilal-auth-page .auth-aside {
   position: relative;
-  isolation: isolate;
   display: flex;
   flex-direction: column;
-  min-height: calc(100dvh - 32px);
-  padding: clamp(28px, 4vw, 58px);
+  gap: clamp(24px, 3.4vh, 40px);
+  padding: clamp(26px, 3vw, 46px);
   overflow: hidden;
   border-radius: var(--hm-radius-xl);
   background: var(--hm-ink);
   color: var(--hm-surface);
+  isolation: isolate;
 }
 
-.hilal-auth-page .auth-brand::before,
-.hilal-auth-page .auth-brand::after {
+/* The brand frame, used the way `brand guide.md` section 7 asks: large, low contrast,
+   behind the content, once. Not a second pattern and not a glow. */
+.hilal-auth-page .auth-aside::before,
+.hilal-auth-page .auth-aside::after {
   position: absolute;
   z-index: -1;
-  border: 1px solid rgba(203, 250, 77, .24);
+  border: 1px solid rgba(203, 250, 77, .18);
   border-radius: 50%;
   content: "";
   pointer-events: none;
 }
 
-.hilal-auth-page .auth-brand::before {
-  top: -16%;
-  right: -28%;
-  width: min(38vw, 520px);
+.hilal-auth-page .auth-aside::before {
+  top: -18%;
+  right: -30%;
+  width: min(40vw, 540px);
   aspect-ratio: 1;
 }
 
-.hilal-auth-page .auth-brand::after {
-  right: -8%;
-  bottom: -20%;
-  width: min(34vw, 430px);
+.hilal-auth-page .auth-aside::after {
+  right: -12%;
+  bottom: -24%;
+  width: min(32vw, 420px);
   aspect-ratio: 1;
+  border-color: transparent;
   background: var(--hm-apple);
-  opacity: .09;
+  opacity: .07;
 }
 
-.hilal-auth-page .auth-logo-surface,
-.hilal-auth-page .auth-form-logo {
+.hilal-auth-page .auth-aside-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hilal-auth-page .auth-logo {
   display: inline-flex;
   align-items: center;
-  width: fit-content;
-}
-
-.hilal-auth-page .auth-logo-surface {
-  padding: 12px 15px;
+  padding: 10px 14px;
   border-radius: 14px;
   background: var(--hm-surface);
 }
 
-.hilal-auth-page .auth-logo-surface img,
-.hilal-auth-page .auth-form-logo img {
-  display: block;
-  width: 197px;
-  max-width: min(100%, 197px);
-  height: auto;
-}
+.hilal-auth-page .auth-logo img { display: block; width: 172px; max-width: 100%; height: auto; }
 
-.hilal-auth-page .auth-brand-copy {
-  max-width: 590px;
-  margin: auto 0;
-  padding: clamp(54px, 9vh, 108px) 0 44px;
-}
-
-.hilal-auth-page .auth-brand-copy .eyebrow {
+/* #e1e5ea on near-black measures 10.74:1. */
+.hilal-auth-page .auth-back {
   display: inline-flex;
+  gap: 7px;
   align-items: center;
-  gap: 8px;
-  color: var(--hm-apple);
-  font-size: .76rem;
-  font-weight: 650;
-  letter-spacing: .04em;
+  min-height: 44px;
+  padding: 0 6px;
+  color: var(--hm-hairline);
+  font-size: .86rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color var(--hm-motion), transform var(--hm-motion);
 }
 
-.hilal-auth-page .auth-brand-copy .eyebrow::before {
-  width: 20px;
-  height: 5px;
-  border-radius: 99px;
-  background: currentColor;
+.hilal-auth-page .auth-back .icon { width: 16px; height: 16px; }
+.hilal-auth-page .auth-back:hover { color: var(--hm-apple); transform: translateX(-2px); }
+
+/* The headline, the journey and the three boundaries are one group, centred in whatever
+   room is left under the logo. Two automatic margins share the spare space evenly above
+   and below it, so a two-step journey and a three-step one both sit in the middle instead
+   of leaving a hole where the third step would have been. */
+.hilal-auth-page .auth-aside-line {
+  margin: auto 0 0;
+  color: var(--hm-surface);
+  font-family: var(--hm-font-display);
+  font-size: clamp(2.1rem, 3.4vw, 3.4rem);
+  font-weight: 500;
+  line-height: 1.02;
+  letter-spacing: -.04em;
+}
+
+.hilal-auth-page .auth-aside-line span { color: var(--hm-apple); }
+
+/* ── The journey ──────────────────────────────────────────────────────────── */
+
+.hilal-auth-page .auth-journey {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hilal-auth-page .auth-journey-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 13px 15px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .045);
+  transition: border-color var(--hm-motion), background var(--hm-motion);
+}
+
+/* The connector. It is the one piece of movement on this panel and it says what the
+   panel is for: these steps are one road, and you are partway along it. */
+.hilal-auth-page .auth-journey-step + .auth-journey-step::before {
+  position: absolute;
+  top: -11px;
+  left: 36px;
+  width: 2px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--hm-on-ink-line);
   content: "";
 }
 
-.hilal-auth-page .auth-brand-copy h1 {
-  margin: 18px 0;
-  color: var(--hm-surface);
-  font-family: var(--hm-font-display);
-  font-size: clamp(2.65rem, 5vw, 5.3rem);
-  font-weight: 500;
-  line-height: .98;
-  letter-spacing: -.05em;
+.hilal-auth-page .auth-journey-step[data-state="done"] + .auth-journey-step::before,
+.hilal-auth-page .auth-journey-step[data-state="current"] + .auth-journey-step::before {
+  background: var(--hm-apple);
 }
 
-.hilal-auth-page .auth-brand-copy h1 span { color: var(--hm-apple); }
-
-.hilal-auth-page .auth-brand-copy > p {
-  max-width: 530px;
-  margin: 0;
-  color: var(--hm-hairline);
-  font-size: clamp(.98rem, 1.6vw, 1.12rem);
-  line-height: 1.7;
-}
-
-.hilal-auth-page .auth-trust-list {
+.hilal-auth-page .auth-journey-mark {
   display: grid;
-  gap: 10px;
-  margin-top: 30px;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--hm-on-ink-line);
+  border-radius: 13px;
+  color: var(--hm-hairline);
+  transition: background var(--hm-motion), color var(--hm-motion), border-color var(--hm-motion);
+}
+
+.hilal-auth-page .auth-journey-mark .icon { width: 19px; height: 19px; }
+
+.hilal-auth-page .auth-journey-step[data-state="done"] .auth-journey-mark {
+  border-color: var(--hm-apple);
+  background: rgba(203, 250, 77, .16);
+  color: var(--hm-apple);
+}
+
+.hilal-auth-page .auth-journey-step[data-state="current"] {
+  border-color: var(--hm-apple);
+  background: rgba(203, 250, 77, .08);
+}
+
+.hilal-auth-page .auth-journey-step[data-state="current"] .auth-journey-mark {
+  border-color: var(--hm-apple);
+  background: var(--hm-apple);
+  color: var(--hm-ink);
+}
+
+.hilal-auth-page .auth-journey-text { display: grid; gap: 2px; min-width: 0; }
+
+.hilal-auth-page .auth-journey-text strong {
+  color: var(--hm-surface);
+  font-size: .92rem;
+  font-weight: 600;
+}
+
+/* var(--hm-on-ink-soft) measures 5.38:1 on this card and 6.51:1 on the panel behind it. */
+.hilal-auth-page .auth-journey-text small,
+.hilal-auth-page .auth-trust-item small {
+  color: var(--hm-on-ink-soft);
+  font-size: .78rem;
+  line-height: 1.45;
+}
+
+/* The state in words, never in colour alone. brand guide.md section 10, WCAG 1.4.1.
+   The edge is the soft on-ink neutral rather than the line one: measured against the
+   translucent card the chip actually sits on, the line colour comes out at 2.87:1 and
+   this one at 5.38:1. The panel behind is darker than the card, which is exactly the
+   kind of difference that makes a boundary pass in one place and fail in another. */
+.hilal-auth-page .auth-journey-state {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border: 1px solid var(--hm-on-ink-soft);
+  border-radius: 999px;
+  color: var(--hm-on-ink-soft);
+  font-size: .7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hilal-auth-page .auth-journey-step[data-state="current"] .auth-journey-state {
+  border-color: var(--hm-apple);
+  background: var(--hm-apple);
+  color: var(--hm-ink);
+}
+
+.hilal-auth-page .auth-journey-step[data-state="done"] .auth-journey-state {
+  border-color: var(--hm-apple);
+  color: var(--hm-apple);
+}
+
+/* ── The three product boundaries ─────────────────────────────────────────── */
+
+.hilal-auth-page .auth-trust {
+  display: grid;
+  gap: 9px;
+  margin: 0 0 auto;
+  padding: 0;
+  list-style: none;
 }
 
 .hilal-auth-page .auth-trust-item {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-columns: 34px minmax(0, 1fr);
   gap: 12px;
   align-items: center;
-  padding: 13px 14px;
-  border: 1px solid rgba(225, 229, 234, .16);
-  border-radius: 15px;
-  background: rgba(255, 255, 255, .045);
+  padding: 11px 13px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .04);
+  transition: border-color var(--hm-motion), background var(--hm-motion);
 }
 
-.hilal-auth-page .auth-trust-item .icon-box {
+.hilal-auth-page .auth-trust-item:hover {
+  border-color: rgba(203, 250, 77, .45);
+  background: rgba(255, 255, 255, .07);
+}
+
+.hilal-auth-page .auth-trust-mark {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   border-radius: 11px;
   background: var(--hm-apple);
   color: var(--hm-ink);
 }
 
+.hilal-auth-page .auth-trust-mark .icon { width: 17px; height: 17px; }
+
 .hilal-auth-page .auth-trust-item strong {
   display: block;
   color: var(--hm-surface);
-  font-size: .86rem;
+  font-size: .84rem;
+  font-weight: 600;
 }
 
-.hilal-auth-page .auth-trust-item small {
-  display: block;
-  margin-top: 2px;
-  color: var(--hm-hairline);
-  font-size: .74rem;
-}
+.hilal-auth-page .auth-trust-item small { display: block; margin-top: 1px; }
 
-.hilal-auth-page .auth-form-wrap {
+/* ── The form side ────────────────────────────────────────────────────────── */
+
+/* The cookie banner is fixed to the bottom of the window, so the card keeps exactly that
+   much room clear underneath itself and the legal row never sits behind it. The height
+   is measured and published as `--hm-cookie-banner-height` by `hilalmarkets-consent.js`;
+   it is 0px once the banner is answered, and 0px for anyone with scripting off, who
+   never sees it. The public footer already clears it the same way. */
+.hilal-auth-page .auth-main {
   display: grid;
-  place-items: center;
+  align-content: center;
+  justify-items: center;
   min-width: 0;
-  padding: clamp(24px, 5vw, 76px);
+  padding: clamp(20px, 3vw, 48px) clamp(16px, 3vw, 56px)
+    calc(clamp(20px, 3vw, 48px) + var(--hm-cookie-banner-height, 0px));
   border: 1px solid var(--hm-hairline);
   border-radius: var(--hm-radius-xl);
   background: var(--hm-surface);
 }
 
-.hilal-auth-page .auth-form { width: min(100%, 520px); }
-.hilal-auth-page .auth-form-logo { margin-bottom: clamp(36px, 7vh, 70px); }
+.hilal-auth-page .auth-card { width: min(100%, 470px); }
 
-.hilal-auth-page .auth-form > .eyebrow {
+.hilal-auth-page .auth-logo-small { display: none; margin-bottom: 22px; padding: 0; }
+.hilal-auth-page .auth-logo-small img { width: 152px; }
+
+.hilal-auth-page .auth-step-chip {
   display: inline-flex;
-  align-items: center;
   gap: 8px;
-  color: var(--hm-apple-deep);
-  font-size: .75rem;
-  font-weight: 650;
+  align-items: center;
+  margin: 0 0 12px;
+  padding: 6px 13px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 999px;
+  background: var(--hm-apple-soft);
+  color: var(--hm-success);
+  font-size: .76rem;
+  font-weight: 600;
 }
 
-.hilal-auth-page .auth-form > .eyebrow::before {
-  width: 18px;
-  height: 5px;
-  border-radius: 99px;
-  background: var(--hm-apple);
-  content: "";
-}
+.hilal-auth-page .auth-step-chip .icon { width: 15px; height: 15px; }
 
-.hilal-auth-page .auth-form h1 {
-  margin: 10px 0 8px;
+.hilal-auth-page .auth-card h1 {
+  margin: 0 0 8px;
   color: var(--hm-ink);
   font-family: var(--hm-font-display);
-  font-size: clamp(2.25rem, 4vw, 3.45rem);
+  font-size: clamp(2rem, 3.4vw, 2.85rem);
   font-weight: 500;
-  letter-spacing: -.045em;
+  line-height: 1.06;
+  letter-spacing: -.04em;
 }
 
-.hilal-auth-page .auth-form > p {
+.hilal-auth-page .auth-lede {
   margin: 0;
   color: var(--hm-copy);
-  line-height: 1.65;
+  font-size: 1rem;
+  line-height: 1.6;
 }
 
-.hilal-auth-page .auth-fields {
+/* ── Something to tell you ────────────────────────────────────────────────── */
+
+.hilal-auth-page .auth-alert {
   display: grid;
-  gap: 14px;
-  margin-top: 26px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 13px;
+  margin: 20px 0 0;
+  padding: 15px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface-soft);
 }
 
-.hilal-auth-page .auth-name-grid {
+.hilal-auth-page .auth-alert-mark {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
 }
 
-.hilal-auth-page .auth-fields label {
-  display: grid;
-  gap: 7px;
+.hilal-auth-page .auth-alert-mark .icon { width: 19px; height: 19px; }
+.hilal-auth-page .auth-alert-body { display: grid; gap: 4px; min-width: 0; }
+
+.hilal-auth-page .auth-alert-body strong {
   color: var(--hm-ink);
-  font-size: .84rem;
-  font-weight: 620;
+  font-size: .95rem;
+  font-weight: 600;
 }
 
-.hilal-auth-page .auth-fields input {
+.hilal-auth-page .auth-alert-body p {
+  margin: 0;
+  color: var(--hm-copy);
+  font-size: .87rem;
+  line-height: 1.55;
+}
+
+/* A failure now looks like one.
+ *
+ * The old rule wrote the error styling inside `:where(...)`, which counts for nothing at
+ * all in the cascade, so the plain rule above it won and **every error on every one of
+ * these pages was painted in the success colours** — pale green panel, green text, for
+ * "Wrong email or password" and "Too many tries" alike. These selectors carry their own
+ * weight, and the tone is written in the markup as well, so the meaning does not depend
+ * on the colour arriving. */
+.hilal-auth-page .auth-alert[data-tone="error"] {
+  border-color: var(--hm-danger-line);
+  background: var(--hm-danger-bg);
+}
+
+.hilal-auth-page .auth-alert[data-tone="error"] .auth-alert-mark {
+  background: var(--hm-danger);
+  color: var(--hm-surface);
+}
+
+/* #8d3029 on #fff5f3 measures 7.58:1. */
+.hilal-auth-page .auth-alert[data-tone="error"] .auth-alert-body strong { color: var(--hm-danger-strong); }
+.hilal-auth-page .auth-alert[data-tone="error"] .auth-alert-body p { color: var(--hm-danger); }
+
+.hilal-auth-page .auth-alert[data-tone="success"] {
+  border-color: var(--hm-apple-pale);
+  background: var(--hm-apple-soft);
+}
+
+.hilal-auth-page .auth-alert[data-tone="success"] .auth-alert-mark {
+  background: var(--hm-apple);
+  color: var(--hm-ink);
+}
+
+.hilal-auth-page .auth-alert[data-tone="success"] .auth-alert-body p { color: var(--hm-success); }
+
+.hilal-auth-page .auth-alert[data-tone="info"] {
+  border-color: var(--hm-info-line);
+  background: var(--hm-info-bg);
+}
+
+.hilal-auth-page .auth-alert[data-tone="info"] .auth-alert-mark {
+  background: var(--hm-info);
+  color: var(--hm-surface);
+}
+
+.hilal-auth-page .auth-alert[data-tone="info"] .auth-alert-body p { color: var(--hm-info); }
+
+.hilal-auth-page .auth-alert-action {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  align-self: start;
+  min-height: 44px;
+  margin-top: 6px;
+  padding: 0 16px;
+  border: 1px solid var(--hm-ink);
+  border-radius: 999px;
+  background: var(--hm-ink);
+  color: var(--hm-surface);
+  font-family: var(--hm-font-ui);
+  font-size: .84rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform var(--hm-motion), background var(--hm-motion), color var(--hm-motion);
+}
+
+.hilal-auth-page .auth-alert-action .icon { width: 16px; height: 16px; }
+
+.hilal-auth-page .auth-alert-action:hover {
+  background: var(--hm-apple);
+  color: var(--hm-ink);
+  transform: translateX(2px);
+}
+
+.hilal-auth-page .auth-note {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-surface-soft);
+  color: var(--hm-copy);
+  font-size: .84rem;
+}
+
+.hilal-auth-page .auth-note .icon { flex: 0 0 auto; width: 17px; height: 17px; color: var(--hm-apple-deep); }
+
+/* ── Fields ───────────────────────────────────────────────────────────────── */
+
+.hilal-auth-page .auth-form { display: grid; gap: 16px; margin-top: 24px; }
+.hilal-auth-page .auth-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.hilal-auth-page .auth-field { display: grid; gap: 7px; min-width: 0; }
+
+.hilal-auth-page .auth-label {
+  color: var(--hm-ink);
+  font-size: .86rem;
+  font-weight: 600;
+}
+
+.hilal-auth-page .auth-forgot {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  align-self: start;
+  min-height: 44px;
+  margin-top: -6px;
+  padding: 0 8px 0 0;
+  color: var(--hm-apple-deep);
+  font-size: .84rem;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color var(--hm-motion), transform var(--hm-motion);
+}
+
+.hilal-auth-page .auth-forgot .icon { width: 16px; height: 16px; }
+.hilal-auth-page .auth-forgot:hover { color: var(--hm-ink); transform: translateX(2px); }
+
+.hilal-auth-page .auth-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--hm-control-line);
+  border-radius: 14px;
+  background: var(--hm-surface-soft);
+  transition: border-color var(--hm-motion), background var(--hm-motion), box-shadow var(--hm-motion);
+}
+
+.hilal-auth-page .auth-input:hover { border-color: var(--hm-ink); }
+
+/* The whole box lifts with the field inside it, so the thing you are typing into is
+   obvious at a glance. The keyboard's own focus ring is drawn by the shared rule in
+   `hilalmarkets-brand.css` and is not touched here. */
+.hilal-auth-page .auth-input:focus-within {
+  border-color: var(--hm-apple-deep);
+  background: var(--hm-surface);
+  box-shadow: 0 0 0 4px rgba(203, 250, 77, .3);
+}
+
+.hilal-auth-page .auth-input-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 44px;
+  color: var(--hm-muted);
+  pointer-events: none;
+  transition: color var(--hm-motion);
+}
+
+.hilal-auth-page .auth-input:focus-within .auth-input-icon { color: var(--hm-apple-deep); }
+.hilal-auth-page .auth-input-icon .icon { width: 18px; height: 18px; }
+
+/* `flex: 1 1 0`, not `1 1 auto`.
+   With `auto` the box's own `width: 100%` became its base size, so the row asked for
+   more room than it had and the browser shrank *every* item to fit — including the
+   "Show" button beside it, which came out four pixels wide with an eye icon crushed
+   inside it. A zero base lets the text box take whatever is left over instead. */
+.hilal-auth-page .auth-control {
+  flex: 1 1 0;
   box-sizing: border-box;
   width: 100%;
-  min-height: 50px;
-  padding: 0 15px;
-  border: 1px solid var(--hm-hairline-strong);
+  min-width: 0;
+  min-height: 52px;
+  padding: 0 14px 0 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--hm-ink);
+  font: inherit;
+  font-size: .97rem;
+}
+
+.hilal-auth-page .auth-input-icon + .auth-control { padding-left: 0; }
+.hilal-auth-page .auth-input > .auth-control:first-child { padding-left: 15px; }
+
+/* #63696f on #fafbfc measures 5.36:1. A placeholder is text and is held to the same
+   4.5:1 as any other text. */
+.hilal-auth-page .auth-control::placeholder { color: var(--hm-muted); opacity: 1; }
+
+.hilal-auth-page .auth-input-tick {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 0;
+  margin-right: 0;
+  overflow: hidden;
+  color: var(--hm-apple-deep);
+  opacity: 0;
+  transition: width var(--hm-motion), opacity var(--hm-motion), margin var(--hm-motion);
+}
+
+.hilal-auth-page .auth-input-tick .icon { width: 18px; height: 18px; }
+
+.hilal-auth-page .auth-field[data-valid="true"] .auth-input-tick {
+  width: 20px;
+  margin-right: 14px;
+  opacity: 1;
+}
+
+.hilal-auth-page .auth-field[data-valid="true"] .auth-input { border-color: var(--hm-apple-deep); }
+
+.hilal-auth-page .auth-field[data-invalid="true"] .auth-input {
+  border-color: var(--hm-danger);
+  background: var(--hm-danger-bg);
+}
+
+.hilal-auth-page .auth-field[data-invalid="true"] .auth-input:focus-within {
+  box-shadow: 0 0 0 4px rgba(141, 48, 41, .16);
+}
+
+.hilal-auth-page .auth-hint {
+  margin: 0;
+  color: var(--hm-muted);
+  font-size: .8rem;
+  line-height: 1.45;
+}
+
+.hilal-auth-page .auth-field-error {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 0;
+  color: var(--hm-danger);
+  font-size: .82rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.hilal-auth-page .auth-field-error::before {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--hm-danger);
+  color: var(--hm-surface);
+  content: "!";
+  font-size: .68rem;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+
+/* ── The password box ─────────────────────────────────────────────────────── */
+
+.hilal-auth-page .auth-control-password { letter-spacing: .02em; }
+
+.hilal-auth-page .auth-reveal {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+  align-self: stretch;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px 0 10px;
+  border: 0;
+  border-left: 1px solid var(--hm-hairline);
+  border-radius: 0 13px 13px 0;
+  background: transparent;
+  color: var(--hm-copy);
+  font-family: var(--hm-font-ui);
+  font-size: .8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--hm-motion), background var(--hm-motion);
+}
+
+.hilal-auth-page .auth-reveal .icon { width: 17px; height: 17px; }
+.hilal-auth-page .auth-reveal:hover { background: var(--hm-neutral-bg); color: var(--hm-ink); }
+.hilal-auth-page .auth-reveal[aria-pressed="true"] { color: var(--hm-apple-deep); }
+
+.hilal-auth-page .auth-caps {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  margin: 0;
+  padding: 8px 11px;
+  border: 1px solid var(--hm-warning-bg);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-warning-bg);
+  color: var(--hm-warning);
+  font-size: .8rem;
+  font-weight: 500;
+}
+
+.hilal-auth-page .auth-caps .icon { flex: 0 0 auto; width: 16px; height: 16px; }
+
+/* The rule, as a list that ticks itself off.
+ *
+ * Five rules, read from `core/auth_pages.py` — the same five the server checks — so this
+ * list can never promise something the server will refuse. It used to be one sentence
+ * under the box, and the only way to find out which part you had missed was to press the
+ * button and be sent back. */
+.hilal-auth-page .auth-rules {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 5px 14px;
+  margin: 3px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hilal-auth-page .auth-rule {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--hm-muted);
+  font-size: .79rem;
+  transition: color var(--hm-motion);
+}
+
+.hilal-auth-page .auth-rule-mark {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border: 1px solid var(--hm-control-line);
+  border-radius: 50%;
+  color: transparent;
+  transition: background var(--hm-motion), border-color var(--hm-motion), color var(--hm-motion);
+}
+
+.hilal-auth-page .auth-rule-mark .icon { width: 11px; height: 11px; }
+.hilal-auth-page .auth-rule-state { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+/* Met: a tick, a darker word and a filled mark. Three signals, only one of them colour. */
+.hilal-auth-page .auth-rule[data-met="true"] { color: var(--hm-success); }
+
+.hilal-auth-page .auth-rule[data-met="true"] .auth-rule-mark {
+  border-color: var(--hm-apple-deep);
+  background: var(--hm-apple-deep);
+  color: var(--hm-surface);
+}
+
+.hilal-auth-page .auth-match {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  margin: 0;
+  font-size: .8rem;
+  font-weight: 500;
+}
+
+.hilal-auth-page .auth-match[data-match="true"] { color: var(--hm-success); }
+.hilal-auth-page .auth-match[data-match="false"] { color: var(--hm-danger); }
+.hilal-auth-page .auth-match .icon { width: 16px; height: 16px; }
+
+/* ── Six digits ───────────────────────────────────────────────────────────── */
+
+/* Roomier than the other fields on purpose. The keyboard's ring is drawn 5px outside the
+   six boxes and its halo reaches 6px past that, so at the ordinary 7px gap the ring sat
+   across the label above and the hint below it. */
+.hilal-auth-page .auth-field-code { gap: 14px; }
+
+.hilal-auth-page .auth-code { position: relative; }
+
+.hilal-auth-page .auth-code-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 60px;
+  padding: 0 16px;
+  border: 1px solid var(--hm-control-line);
   border-radius: 14px;
   outline: none;
   background: var(--hm-surface-soft);
   color: var(--hm-ink);
   font: inherit;
-  transition: border-color var(--hm-motion), box-shadow var(--hm-motion), background var(--hm-motion);
+  font-size: 1.4rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .3em;
+  transition: border-color var(--hm-motion), box-shadow var(--hm-motion);
 }
 
-.hilal-auth-page .auth-fields input:hover { border-color: var(--hm-muted); }
-.hilal-auth-page .auth-fields input:focus {
+.hilal-auth-page .auth-code-input:focus {
+  border-color: var(--hm-apple-deep);
+  box-shadow: 0 0 0 4px rgba(203, 250, 77, .3);
+}
+
+/* The six boxes are drawn only once the script has taken over the input. With scripting
+   off this stays one ordinary, perfectly usable text box — which is the whole reason it
+   is one input and not six. */
+.hilal-auth-page .auth-code-cells { display: none; }
+
+.hilal-auth-page .auth-code.is-enhanced .auth-code-cells {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: clamp(5px, 1.4vw, 9px);
+}
+
+.hilal-auth-page .auth-code-cell {
+  display: grid;
+  place-items: center;
+  height: 62px;
+  border: 1px solid var(--hm-control-line);
+  border-radius: 14px;
+  background: var(--hm-surface-soft);
+  color: var(--hm-ink);
+  font-family: var(--hm-font-display);
+  font-size: 1.55rem;
+  font-variant-numeric: tabular-nums;
+  transition: border-color var(--hm-motion), background var(--hm-motion), transform var(--hm-motion);
+}
+
+.hilal-auth-page .auth-code-cell[data-filled="true"] {
   border-color: var(--hm-apple-deep);
   background: var(--hm-surface);
-  box-shadow: 0 0 0 4px rgba(203, 250, 77, .32);
 }
 
-.hilal-auth-page .auth-fields small {
-  color: var(--hm-muted);
-  font-size: .74rem;
-  font-weight: 480;
-  line-height: 1.45;
+/* The box the next digit lands in. A second inner edge rather than a second halo: the
+   keyboard's own focus ring already surrounds the whole group, and two green halos on
+   top of each other read as a mistake rather than as a place to type. */
+.hilal-auth-page .auth-code-cell[data-active="true"] {
+  border-color: var(--hm-apple-deep);
+  background: var(--hm-surface);
+  box-shadow: inset 0 0 0 1px var(--hm-apple-deep);
 }
 
-.hilal-auth-page :where(.btn, .text-link) {
-  font-family: var(--hm-font-ui);
-  font-weight: 650;
+.hilal-auth-page .auth-code.is-enhanced .auth-code-input {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  letter-spacing: 0;
 }
 
-.hilal-auth-page .auth-fields .btn {
+.hilal-auth-page .auth-code.is-enhanced .auth-code-input:focus { box-shadow: none; }
+
+/* The keyboard's ring surrounds all six boxes, because there is one field here however
+   many boxes are drawn. Only the *offset* is changed — the colour and the width belong to
+   the one indicator declared in `hilalmarkets-brand.css`, and a surface that writes its
+   own is the bug that pair exists to stop. */
+.hilal-auth-page .auth-code.is-enhanced .auth-code-input:focus-visible { outline-offset: 5px; }
+
+/* ── The button that finishes the page ────────────────────────────────────── */
+
+.hilal-auth-page .auth-submit {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
   width: 100%;
-  min-height: 50px;
-  margin-top: 5px;
-  border-color: var(--hm-apple);
+  min-height: 54px;
+  margin-top: 4px;
+  padding: 0 22px;
+  border: 1px solid var(--hm-apple);
   border-radius: 999px;
   background: var(--hm-apple);
   color: var(--hm-ink);
-  transition: transform var(--hm-motion), background var(--hm-motion), color var(--hm-motion);
+  font-family: var(--hm-font-ui);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--hm-motion), background var(--hm-motion), color var(--hm-motion),
+    border-color var(--hm-motion), box-shadow var(--hm-motion);
 }
 
-.hilal-auth-page .auth-fields .btn:hover {
+.hilal-auth-page .auth-submit .icon { width: 19px; height: 19px; }
+
+.hilal-auth-page .auth-submit:hover {
   border-color: var(--hm-ink);
   background: var(--hm-ink);
   color: var(--hm-surface);
-  transform: translateY(-1px);
+  box-shadow: 0 18px 34px -20px rgba(43, 46, 53, .8);
+  transform: translateY(-2px);
 }
 
-.hilal-auth-page .auth-alternative-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  flex-wrap: wrap;
-  margin-top: 15px;
-}
+.hilal-auth-page .auth-submit:active { transform: translateY(0); }
 
-.hilal-auth-page .auth-alternative-actions .btn {
+.hilal-auth-page .auth-submit[disabled] {
   border-color: var(--hm-hairline-strong);
+  background: var(--hm-neutral-bg);
+  color: var(--hm-muted);
+  box-shadow: none;
+  cursor: progress;
+  transform: none;
+}
+
+/* The mark spins only while something is really happening, and only once it has been
+   pressed. Nothing on this page loops for decoration. brand guide.md section 15. */
+.hilal-auth-page .auth-submit[data-busy="true"] .auth-submit-mark {
+  animation: hm-auth-spin 900ms linear infinite;
+}
+
+@keyframes hm-auth-spin { to { transform: rotate(360deg); } }
+
+/* ── The other way in ─────────────────────────────────────────────────────── */
+
+.hilal-auth-page .auth-or {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 14px;
+  align-items: center;
+  margin: 22px 0 16px;
+  color: var(--hm-muted);
+  font-size: .8rem;
+}
+
+.hilal-auth-page .auth-or::before,
+.hilal-auth-page .auth-or::after {
+  height: 1px;
+  background: var(--hm-hairline);
+  content: "";
+}
+
+.hilal-auth-page .auth-alt {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 22px;
+  gap: 13px;
+  align-items: center;
+  min-height: 44px;
+  padding: 13px 15px;
+  border: 1px solid var(--hm-control-line);
+  border-radius: var(--hm-radius-md);
   background: var(--hm-surface);
+  color: var(--hm-ink);
+  text-decoration: none;
+  transition: border-color var(--hm-motion), background var(--hm-motion), transform var(--hm-motion);
+}
+
+.hilal-auth-page .auth-alt:hover {
+  border-color: var(--hm-ink);
+  background: var(--hm-surface-soft);
+  transform: translateY(-2px);
+}
+
+.hilal-auth-page .auth-alt-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background: var(--hm-apple-soft);
+  color: var(--hm-apple-deep);
+}
+
+.hilal-auth-page .auth-alt-mark .icon { width: 19px; height: 19px; }
+.hilal-auth-page .auth-alt-text { display: grid; gap: 2px; min-width: 0; }
+.hilal-auth-page .auth-alt-text strong { font-size: .92rem; font-weight: 600; }
+.hilal-auth-page .auth-alt-text small { color: var(--hm-muted); font-size: .79rem; line-height: 1.4; }
+.hilal-auth-page .auth-alt-go { color: var(--hm-muted); transition: transform var(--hm-motion), color var(--hm-motion); }
+.hilal-auth-page .auth-alt-go .icon { width: 19px; height: 19px; }
+.hilal-auth-page .auth-alt:hover .auth-alt-go { color: var(--hm-apple-deep); transform: translateX(4px); }
+
+/* ── Where the code went, and asking for another ──────────────────────────── */
+
+.hilal-auth-page .auth-sentto {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  margin: 20px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface-soft);
+  color: var(--hm-copy);
+  font-size: .88rem;
+}
+
+.hilal-auth-page .auth-sentto strong { color: var(--hm-ink); overflow-wrap: anywhere; }
+
+.hilal-auth-page .auth-sentto-mark {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: var(--hm-apple);
   color: var(--hm-ink);
 }
 
-.hilal-auth-page .auth-switch {
-  margin-top: 22px !important;
-  text-align: center;
-  color: var(--hm-muted) !important;
+.hilal-auth-page .auth-sentto-mark .icon { width: 16px; height: 16px; }
+
+.hilal-auth-page .auth-resend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 16px;
 }
 
-.hilal-auth-page :where(.auth-switch a, .text-link) {
+.hilal-auth-page .auth-resend-label { color: var(--hm-muted); font-size: .88rem; }
+
+.hilal-auth-page .auth-resend-btn {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--hm-control-line);
+  border-radius: 999px;
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+  font-family: var(--hm-font-ui);
+  font-size: .86rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color var(--hm-motion), background var(--hm-motion), color var(--hm-motion);
+}
+
+.hilal-auth-page .auth-resend-btn .icon { width: 16px; height: 16px; }
+.hilal-auth-page .auth-resend-btn:hover { border-color: var(--hm-ink); background: var(--hm-surface-soft); }
+
+.hilal-auth-page .auth-resend-btn[disabled] {
+  border-color: var(--hm-hairline-strong);
+  background: var(--hm-neutral-bg);
+  color: var(--hm-muted);
+  cursor: not-allowed;
+}
+
+.hilal-auth-page .auth-resend-btn[disabled] .icon { opacity: .6; }
+
+/* ── The line under the form, and the legal row ───────────────────────────── */
+
+.hilal-auth-page .auth-switch {
+  margin: 20px 0 0;
+  color: var(--hm-copy);
+  font-size: .92rem;
+  text-align: center;
+}
+
+.hilal-auth-page .auth-switch a {
   color: var(--hm-apple-deep);
-  text-decoration-thickness: 1px;
+  font-weight: 500;
+  text-decoration: underline;
   text-underline-offset: 3px;
 }
 
-.hilal-auth-page .dash-flash,
-.hilal-auth-page .auth-inline-error {
-  margin: 18px 0 0;
-  padding: 13px 15px;
-  border: 1px solid var(--hm-hairline);
-  border-radius: 13px;
-  background: var(--hm-apple-soft);
-  color: var(--hm-success);
-  font-size: .84rem;
-}
+.hilal-auth-page .auth-switch a:hover { color: var(--hm-ink); }
 
-.hilal-auth-page :where(.dash-flash.error, .auth-inline-error) {
-  border-color: var(--hm-danger-line);
-  background: var(--hm-danger-bg);
-  color: var(--hm-danger);
-}
-
-@media (max-width: 980px) {
-  .hilal-auth-page .auth-shell { grid-template-columns: minmax(0, 1fr); }
-  .hilal-auth-page .auth-brand { min-height: auto; }
-  .hilal-auth-page .auth-brand-copy { margin: 0; padding: 64px 0 20px; }
-  .hilal-auth-page .auth-trust-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-
-@media (max-width: 680px) {
-  .hilal-auth-page .auth-shell { gap: 8px; padding: 8px; }
-  .hilal-auth-page .auth-brand,
-  .hilal-auth-page .auth-form-wrap { border-radius: 22px; }
-  .hilal-auth-page .auth-brand { padding: 24px 20px; }
-  .hilal-auth-page .auth-brand-copy { padding: 52px 0 12px; }
-  .hilal-auth-page .auth-brand-copy h1 { font-size: clamp(2.4rem, 13vw, 3.4rem); }
-  .hilal-auth-page .auth-trust-list { grid-template-columns: minmax(0, 1fr); }
-  .hilal-auth-page .auth-form-wrap { padding: 34px 20px; }
-  .hilal-auth-page .auth-form-logo { margin-bottom: 38px; }
-  .hilal-auth-page .auth-name-grid { grid-template-columns: minmax(0, 1fr); }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .hilal-auth-page .auth-brand { animation: hm-auth-enter-left 420ms cubic-bezier(.2, .75, .25, 1) both; }
-  .hilal-auth-page .auth-form-wrap { animation: hm-auth-enter-right 440ms cubic-bezier(.2, .75, .25, 1) both; }
-  .hilal-auth-page .auth-trust-item { animation: hm-auth-rise 360ms cubic-bezier(.2, .75, .25, 1) both; }
-  .hilal-auth-page .auth-trust-item:nth-child(2) { animation-delay: 70ms; }
-  .hilal-auth-page .auth-trust-item:nth-child(3) { animation-delay: 140ms; }
-}
-
-@keyframes hm-auth-enter-left {
-  from { opacity: 0; transform: translateX(-12px); }
-}
-
-@keyframes hm-auth-enter-right {
-  from { opacity: 0; transform: translateX(12px); }
-}
-
-@keyframes hm-auth-rise {
-  from { opacity: 0; transform: translateY(8px); }
-}
-
-/* The legal row under the auth form. Quiet on purpose: it has to be reachable and
-   readable, and it must not compete with the one thing this page is for. */
-.auth-legal {
+.hilal-auth-page .auth-legal {
   display: flex;
   flex-wrap: wrap;
+  gap: 4px 14px;
   justify-content: center;
-  gap: 8px 18px;
-  width: 100%;
-  max-width: 420px;
-  margin: 22px auto 0;
+  width: min(100%, 470px);
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px solid var(--hm-hairline);
 }
 
-.auth-legal a,
-.auth-legal button {
+.hilal-auth-page .auth-legal a,
+.hilal-auth-page .auth-legal button {
   display: inline-flex;
+  gap: 6px;
   align-items: center;
-  min-height: 32px;
-  padding: 0;
+  min-height: 44px;
+  padding: 0 6px;
   border: 0;
+  border-radius: 10px;
   background: none;
-  color: #5c646e;
+  color: var(--hm-muted);
   font-family: inherit;
-  font-size: 13px;
-  font-weight: 450;
+  font-size: .8rem;
+  font-weight: 500;
+  text-decoration: none;
   cursor: pointer;
-  transition: color .18s ease;
+  transition: color var(--hm-motion), background var(--hm-motion);
 }
 
-.auth-legal a:hover,
-.auth-legal button:hover {
-  color: #2b2e35;
-  text-decoration: underline;
-  text-underline-offset: 4px;
+.hilal-auth-page .auth-legal .icon { width: 15px; height: 15px; }
+
+.hilal-auth-page .auth-legal a:hover,
+.hilal-auth-page .auth-legal button:hover {
+  background: var(--hm-canvas);
+  color: var(--hm-ink);
 }
+
+/* ── Smaller screens ──────────────────────────────────────────────────────── */
+
+@media (max-width: 1080px) {
+  .hilal-auth-page .auth-shell { grid-template-columns: minmax(300px, .95fr) minmax(380px, 1.05fr); }
+}
+
+/* The form comes first on a phone. The panel behind it still carries the journey and the
+   three boundaries, and a person who wants them scrolls; a person who came to sign in
+   does not have to. */
+@media (max-width: 900px) {
+  .hilal-auth-page .auth-shell {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .hilal-auth-page .auth-main { order: 1; align-content: start; padding: 26px 20px 30px; }
+  /* On a phone the panel is under the form, so it is the panel that has to clear the
+     banner rather than the card. */
+  .hilal-auth-page .auth-aside {
+    order: 2;
+    gap: 22px;
+    padding-bottom: calc(clamp(26px, 3vw, 46px) + var(--hm-cookie-banner-height, 0px));
+  }
+  .hilal-auth-page .auth-aside-head { display: none; }
+  .hilal-auth-page .auth-logo-small { display: inline-flex; }
+  .hilal-auth-page .auth-aside-line { font-size: clamp(1.9rem, 8vw, 2.6rem); }
+  .hilal-auth-page .auth-main,
+  .hilal-auth-page .auth-aside { border-radius: var(--hm-radius-lg); }
+  .hilal-auth-page .auth-card,
+  .hilal-auth-page .auth-legal { width: 100%; }
+}
+
+@media (max-width: 560px) {
+  .hilal-auth-page .auth-row { grid-template-columns: minmax(0, 1fr); }
+  .hilal-auth-page .auth-rules { grid-template-columns: minmax(0, 1fr); }
+  .hilal-auth-page .auth-code-cell { height: 54px; font-size: 1.3rem; }
+  .hilal-auth-page .auth-journey-step { grid-template-columns: 38px minmax(0, 1fr); }
+  .hilal-auth-page .auth-journey-state { grid-column: 2; justify-self: start; margin-top: 2px; }
+  .hilal-auth-page .auth-journey-step + .auth-journey-step::before { left: 34px; }
+  .hilal-auth-page .auth-journey-mark { width: 38px; height: 38px; }
+  /* The word goes, the accessible name stays. `display: none` here would have left the
+     button with an icon and nothing a screen reader could read — the same fault that
+     once left nine links in the side menu with no name at all. */
+  .hilal-auth-page .auth-reveal .auth-reveal-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .hilal-auth-page .auth-reveal { padding: 0 12px; }
+}
+
+/* ── Less motion ──────────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
-  .auth-legal a,
-  .auth-legal button {
-    transition-duration: .01ms;
+  .hilal-auth-page *,
+  .hilal-auth-page *::before,
+  .hilal-auth-page *::after {
+    transition: none !important;
+    animation: none !important;
+    transform: none !important;
   }
 }

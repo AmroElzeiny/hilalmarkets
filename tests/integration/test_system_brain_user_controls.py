@@ -281,7 +281,11 @@ async def test_ban_blocks_signup_login_code_and_password_with_exact_message(
     assert "error=account_banned" in signin.headers["location"]
     assert "error=account_banned" in code.headers["location"]
     message = await test_context["client"].get("/signin?error=account_banned")
-    assert "Your profile is banned." in message.text
+    # Same refusal, said the way somebody who is not an engineer would say it, and with
+    # the one thing they can do about it. The wording is owned by `core/auth_pages.py`.
+    assert "This account is blocked" in message.text
+    assert "Write to us if you think this is a mistake." in message.text
+    assert "Contact support" in message.text
     async with test_context["session_factory"]() as session:
         stored_user = await session.get(User, customer.id)
         ban_count = await session.scalar(select(func.count(AccountBan.id)))

@@ -21,8 +21,20 @@ APPROVED_BRAND_HEX = {
     "#63696f",
     "#6c271f",
     "#7ba428",
+    # The edge of a *control*, as opposed to the edge of a card. Both hairlines below
+    # measure under 1.5:1 on white, so a bordered input had a boundary in the code and
+    # none on the screen; this one measures 3.90:1 and clears WCAG 1.4.11.
+    "#79828d",
     "#8a6316",
     "#8d3029",
+    # Text and edges **on** the near-black panel, where the light neutrals are far too
+    # bright. 6.51:1 and 3.04:1 on `--hm-ink` respectively.
+    "#aeb4bd",
+    "#767b83",
+    # The edge of an information panel — the partner of `#e4b8b2`, which is the edge of
+    # a danger panel. It was missing, so the one component that needed it had to write a
+    # value of its own.
+    "#bcdcec",
     "#cbfa4d",
     "#d0d6de",
     "#e1e5ea",
@@ -359,6 +371,11 @@ def test_final_authenticated_styles_use_only_approved_brand_hex_colors():
         Path("src/ai_market_monitor/static/hm-monitor-test.css"),
         Path("src/ai_market_monitor/static/hm-account-test.css"),
         Path("src/ai_market_monitor/static/hm-hilal-chat.css"),
+        # The way in. It was not checked at all, which is how a page nobody scans gets a
+        # colour nobody approved — and it is the first thing every customer sees.
+        Path("src/ai_market_monitor/static/hilalmarkets-auth.css"),
+        # The cookie banner, now that one stylesheet draws it for every surface.
+        Path("src/ai_market_monitor/static/hilalmarkets-cookie.css"),
     )
     unexpected: dict[str, list[str]] = {}
     for path in files:

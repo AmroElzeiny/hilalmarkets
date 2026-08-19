@@ -18,6 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.api.dependencies import get_market_previewer
 from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.core.asset_logos import asset_logo
+from ai_market_monitor.core.auth_pages import (
+    CODE_RESEND_SECONDS,
+    alert_for,
+    browser_password_rules,
+    page_copy,
+)
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.csrf import csrf_token, csrf_token_matches
 from ai_market_monitor.core.dashboard_paths import (
@@ -871,6 +877,83 @@ async def _context(
     }
 
 
+async def _auth_context(
+    *,
+    request: Request,
+    session: AsyncSession,
+    settings: Settings,
+    page: str,
+) -> dict:
+    """Everything one of the five sign-in pages needs, decided in Python.
+
+    The template used to work all of this out itself: which of a page's two forms to
+    draw, what an error code means in English, what the password rule is, and how long a
+    code lasts. Four of those are facts the server owns, and a template restating a fact
+    is a second copy of it — which is why the page could say "wait one minute" while the
+    server waited sixty seconds, and could print an SMTP configuration instruction to
+    somebody trying to sign up. ``core/auth_pages.py`` owns them now; this function only
+    joins them to the addresses this router knows about.
+    """
+
+    user = await _current_user(request, session, settings)
+    message = request.query_params.get("message")
+    error = request.query_params.get("error")
+    email = (request.query_params.get("email") or "").strip()
+    copy = page_copy(page, has_email=bool(email), code_sent=message == "code_sent")
+
+    selected_plan_code, selected_billing_interval = _subscription_selection(
+        request.query_params.get("plan_code"),
+        request.query_params.get("billing_interval"),
+    )
+    auth_query = _subscription_query(selected_plan_code, selected_billing_interval)
+    if request.query_params.get("telegram_link"):
+        auth_query["telegram_link"] = request.query_params["telegram_link"]
+    suffix = f"?{urlencode(auth_query)}" if auth_query else ""
+
+    # An error's "do this instead" button has to keep whatever the person arrived with.
+    # A bare `/signin` here would quietly drop the plan they had just chosen.
+    links = {
+        "signin": f"/signin{suffix}",
+        "signup": f"/signup{suffix}",
+        "signin_code": f"/signin/code{suffix}",
+        "reset": "/reset-password",
+        "support": f"mailto:{settings.support_email}",
+    }
+
+    # Where "send me another code" posts to, on the pages that have one. A page with no
+    # entry here simply does not offer the button, rather than offering one that 404s.
+    resend_actions = {
+        ("signup_verify", ""): "/signup/verify/resend",
+        ("signin_code", "enter"): "/signin/code/request",
+        ("reset_password", "enter"): "/reset-password/request",
+    }
+
+    return await _context(
+        request=request,
+        session=session,
+        settings=settings,
+        user=user,
+        page=page,
+        title=copy.title,
+        auth=copy,
+        auth_resend_action=resend_actions.get((page, copy.state), ""),
+        auth_email=email,
+        auth_links=links,
+        auth_alert=alert_for(
+            page=page,
+            message=message,
+            error=error,
+            ttl_minutes=settings.auth_code_ttl_minutes,
+            links=links,
+        ),
+        auth_password_rules=browser_password_rules(),
+        auth_code_ttl_minutes=settings.auth_code_ttl_minutes,
+        auth_code_resend_seconds=CODE_RESEND_SECONDS,
+        auth_code_max_attempts=settings.auth_code_max_attempts,
+        support_email=settings.support_email,
+    )
+
+
 async def _builder_screening_context(
     session: AsyncSession,
     user: User,
@@ -1020,13 +1103,11 @@ async def signup_page(
         templates.TemplateResponse(
             request,
             "auth.html",
-            await _context(
+            await _auth_context(
                 request=request,
                 session=session,
                 settings=settings,
-                user=await _current_user(request, session, settings),
                 page="signup",
-                title="Sign Up",
             ),
         )
     )
@@ -1072,7 +1153,9 @@ async def signup_submit(
                 if telegram_link:
                     query["telegram_link"] = telegram_link
                 return _redirect(f"/signup/verify?{urlencode(query)}")
-            query = {"error": code}
+            # The address comes back with the refusal. Without it a person whose email
+            # was already taken landed on an empty form and typed everything again.
+            query = {"error": code, "email": email}
             query.update(_subscription_query(plan_code, billing_interval))
             if telegram_link:
                 query["telegram_link"] = telegram_link
@@ -1095,16 +1178,46 @@ async def signup_verify_page(
         templates.TemplateResponse(
             request,
             "auth.html",
-            await _context(
+            await _auth_context(
                 request=request,
                 session=session,
                 settings=settings,
-                user=await _current_user(request, session, settings),
                 page="signup_verify",
-                title="Verify Your Email",
             ),
         )
     )
+
+
+@router.post("/signup/verify/resend", include_in_schema=False)
+async def signup_verify_resend(
+    request: Request,
+    email: str = Form(...),
+    telegram_link: str | None = Form(None),
+    plan_code: str | None = Form(None),
+    billing_interval: str | None = Form(None),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Send the waiting sign-up another code.
+
+    The confirm step used to offer only "Start again", which threw away the name, the
+    email and the password somebody had just typed because their code had not arrived
+    yet. Everything needed is already stored, so nothing is asked for twice.
+    """
+
+    query: dict[str, str] = {"email": email}
+    query.update(_subscription_query(plan_code, billing_interval))
+    if telegram_link:
+        query["telegram_link"] = telegram_link
+    try:
+        await WebAuthService(session, settings).resend_signup_email_code(email=email)
+        await session.commit()
+    except (WebAuthError, EmailDeliveryError) as exc:
+        await session.rollback()
+        query["error"] = getattr(exc, "code", "email_unavailable")
+        return _redirect(f"/signup/verify?{urlencode(query)}")
+    query["message"] = "code_sent"
+    return _redirect(f"/signup/verify?{urlencode(query)}")
 
 
 @router.post("/signup/verify", include_in_schema=False)
@@ -1203,7 +1316,9 @@ async def signin_submit(
     except (ValueError, TelegramAccountLinkError) as exc:
         await session.rollback()
         code = getattr(exc, "code", "invalid_login")
-        query = {"error": code}
+        # Same reason as the sign-up path: a wrong password should not also cost a
+        # person their email address.
+        query = {"error": code, "email": email}
         query.update(_subscription_query(plan_code, billing_interval))
         if telegram_link:
             query["telegram_link"] = telegram_link
@@ -1240,13 +1355,11 @@ async def signin_page(
         templates.TemplateResponse(
             request,
             "auth.html",
-            await _context(
+            await _auth_context(
                 request=request,
                 session=session,
                 settings=settings,
-                user=await _current_user(request, session, settings),
                 page="signin",
-                title="Sign In",
             ),
         )
     )
@@ -1262,13 +1375,11 @@ async def signin_code_page(
         templates.TemplateResponse(
             request,
             "auth.html",
-            await _context(
+            await _auth_context(
                 request=request,
                 session=session,
                 settings=settings,
-                user=await _current_user(request, session, settings),
                 page="signin_code",
-                title="Login With One-Time Code",
             ),
         )
     )
@@ -1371,13 +1482,11 @@ async def reset_password_page(
         templates.TemplateResponse(
             request,
             "auth.html",
-            await _context(
+            await _auth_context(
                 request=request,
                 session=session,
                 settings=settings,
-                user=await _current_user(request, session, settings),
                 page="reset_password",
-                title="Reset Password",
             ),
         )
     )

@@ -7,6 +7,10 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.auth_pages import (
+    CODE_RESEND_SECONDS,
+    password_validation_error,
+)
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.security import (
     InvalidContinuationToken,
@@ -183,37 +187,118 @@ class WebAuthService:
             .order_by(PendingEmailSignup.created_at.desc())
             .limit(1)
         )
-        if latest is not None and (_as_aware(latest.created_at) + timedelta(seconds=60)) > now:
+        resend_gate = timedelta(seconds=CODE_RESEND_SECONDS)
+        if latest is not None and (_as_aware(latest.created_at) + resend_gate) > now:
             raise WebAuthError(
                 "code_recently_sent",
-                "A code was sent recently. Wait one minute before requesting another.",
+                f"A code was sent recently. Wait {CODE_RESEND_SECONDS} seconds "
+                "before requesting another.",
             )
         if latest is not None and latest.consumed_at is None:
             latest.consumed_at = now
 
-        code = self._new_auth_code()
-        pending = PendingEmailSignup(
-            email=normalized,
+        await self._store_signup_code(
+            normalized=normalized,
             display_identifier=email.strip(),
             first_name=clean_first_name,
             last_name=clean_last_name,
             password_hash=hash_password(password),
             telegram_link=telegram_link,
-            code_digest=self._auth_code_digest(normalized, "signup", code),
-            created_at=now,
-            expires_at=now + timedelta(minutes=self.settings.auth_code_ttl_minutes),
-            attempts=0,
-            max_attempts=self.settings.auth_code_max_attempts,
             requested_ip_hash=self._request_ip_hash(requested_ip),
+            now=now,
         )
-        self.session.add(pending)
+        return True
+
+    async def resend_signup_email_code(self, *, email: str) -> bool:
+        """Send a waiting sign-up a fresh code, without asking for anything again.
+
+        The row created by :meth:`request_signup_email_code` already holds the name, the
+        hashed password and any Telegram link, so somebody whose first email never
+        arrived does not have to type all of it a second time. Until this existed the
+        only way forward from the confirm step was "Start again" and an empty form —
+        which is a lot to ask of a person whose only problem is a slow mail server.
+
+        It stores nothing new and it grants nothing: the fresh code is checked by exactly
+        the same path as the first one.
+        """
+
+        normalized = normalize_email(email)
+        if not normalized:
+            raise WebAuthError("invalid_email", "Enter a valid email address.")
+        await self._ensure_not_banned(normalized)
+        now = datetime.now(UTC)
+        latest = await self.session.scalar(
+            select(PendingEmailSignup)
+            .where(PendingEmailSignup.email == normalized)
+            .order_by(PendingEmailSignup.created_at.desc())
+            .limit(1)
+        )
+        if latest is None or latest.consumed_at is not None:
+            raise WebAuthError(
+                "account_not_registered",
+                "No sign-up is waiting for that email.",
+            )
+        resend_gate = timedelta(seconds=CODE_RESEND_SECONDS)
+        if (_as_aware(latest.created_at) + resend_gate) > now:
+            raise WebAuthError(
+                "code_recently_sent",
+                f"A code was sent recently. Wait {CODE_RESEND_SECONDS} seconds "
+                "before requesting another.",
+            )
+        latest.consumed_at = now
+        await self._store_signup_code(
+            normalized=normalized,
+            display_identifier=latest.display_identifier,
+            first_name=latest.first_name,
+            last_name=latest.last_name,
+            password_hash=latest.password_hash,
+            telegram_link=latest.telegram_link,
+            requested_ip_hash=latest.requested_ip_hash,
+            now=now,
+        )
+        return True
+
+    async def _store_signup_code(
+        self,
+        *,
+        normalized: str,
+        display_identifier: str,
+        first_name: str | None,
+        last_name: str | None,
+        password_hash: str,
+        telegram_link: str | None,
+        requested_ip_hash: str | None,
+        now: datetime,
+    ) -> None:
+        """Write one waiting sign-up and email its code.
+
+        Both the first request and a resend land here, so the two can never disagree
+        about how long a code lasts or how many tries it gets.
+        """
+
+        code = self._new_auth_code()
+        self.session.add(
+            PendingEmailSignup(
+                email=normalized,
+                display_identifier=display_identifier,
+                first_name=first_name,
+                last_name=last_name,
+                password_hash=password_hash,
+                telegram_link=telegram_link,
+                code_digest=self._auth_code_digest(normalized, "signup", code),
+                created_at=now,
+                expires_at=now + timedelta(minutes=self.settings.auth_code_ttl_minutes),
+                attempts=0,
+                max_attempts=self.settings.auth_code_max_attempts,
+                requested_ip_hash=requested_ip_hash,
+            )
+        )
         await self.session.flush()
         await AuthEmailService(self.settings).send_code(
-            recipient=email.strip(),
+            recipient=display_identifier,
             code=code,
             purpose="signup",
         )
-        return True
 
     async def complete_signup_with_email_code(self, *, email: str, code: str) -> User:
         normalized = normalize_email(email)
@@ -359,10 +444,12 @@ class WebAuthService:
             .order_by(EmailAuthChallenge.created_at.desc())
             .limit(1)
         )
-        if latest is not None and (_as_aware(latest.created_at) + timedelta(seconds=60)) > now:
+        resend_gate = timedelta(seconds=CODE_RESEND_SECONDS)
+        if latest is not None and (_as_aware(latest.created_at) + resend_gate) > now:
             raise WebAuthError(
                 "code_recently_sent",
-                "A code was sent recently. Wait one minute before requesting another.",
+                f"A code was sent recently. Wait {CODE_RESEND_SECONDS} seconds "
+                "before requesting another.",
             )
         if latest is not None and latest.consumed_at is None:
             latest.consumed_at = now
@@ -591,21 +678,6 @@ def normalize_person_name(
 
 def normalize_password(password: str) -> str:
     return password if not password_validation_error(password) else ""
-
-
-def password_validation_error(password: str) -> str | None:
-    value = password or ""
-    if len(value) < 6:
-        return "Password must contain at least 6 characters."
-    if not any(character.islower() for character in value):
-        return "Password must include a lowercase letter."
-    if not any(character.isupper() for character in value):
-        return "Password must include a capital letter."
-    if not any(character.isdigit() for character in value):
-        return "Password must include a number."
-    if not any(not character.isalnum() for character in value):
-        return "Password must include a special character."
-    return None
 
 
 def _as_aware(value: datetime) -> datetime:

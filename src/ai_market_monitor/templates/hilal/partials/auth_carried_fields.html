@@ -1,0 +1,12 @@
+{# What a person arrived with, carried through the form.
+
+   A plan chosen on the pricing page and a Telegram connection started in the chat both
+   survive sign-up only because they travel with every submit. Written once, so a new
+   form on these pages cannot forget one of them. #}
+{%- if selected_plan_code -%}
+  <input type="hidden" name="plan_code" value="{{ selected_plan_code }}">
+  <input type="hidden" name="billing_interval" value="{{ selected_billing_interval }}">
+{%- endif -%}
+{%- if request.query_params.get('telegram_link') -%}
+  <input type="hidden" name="telegram_link" value="{{ request.query_params.get('telegram_link') }}">
+{%- endif -%}

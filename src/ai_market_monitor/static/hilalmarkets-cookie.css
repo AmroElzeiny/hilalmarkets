@@ -1,0 +1,316 @@
+/* The cookie banner and its settings window. One owner, for every page that draws them.
+ *
+ * `hilal/partials/cookie_banner.html` is included by four templates: the public Jinja
+ * pages, the React site shell, the dashboard, and the sign-in pages. It was styled in
+ * exactly two of those places — `hilalmarkets-public.css` and
+ * `hilalmarkets-dashboard-v2.css` — and the two disagreed about its size, its corners
+ * and its colours.
+ *
+ * The sign-in pages loaded neither. So `/signup`, `/signin`, `/signin/code` and
+ * `/reset-password` all rendered the banner and the settings window as **unstyled blocks
+ * stacked under the form**, including a dialog carrying `aria-hidden="true"` that was
+ * nonetheless on screen, in the page flow, and reachable with Tab. A keyboard user
+ * tabbing off the sign-in button walked into six controls that a screen reader had been
+ * told were not there.
+ *
+ * The look lives here and nowhere else. Where the banner *sits* is still the surface's
+ * business — the dashboard has to clear its side menu — so the four inset values are
+ * variables a page may set, and nothing else is overridden anywhere.
+ */
+
+.cookie-banner {
+  position: fixed;
+  z-index: 500;
+  right: var(--hm-cookie-right, 18px);
+  bottom: var(--hm-cookie-bottom, 18px);
+  left: var(--hm-cookie-left, 18px);
+  display: none;
+  box-sizing: border-box;
+  max-width: var(--hm-cookie-max-width, 1160px);
+  margin: 0 auto;
+  padding: 18px;
+  border: 1px solid var(--hm-hairline-strong, #d0d6de);
+  border-radius: 22px;
+  background: var(--hm-surface, #fff);
+  box-shadow: 0 24px 80px -28px rgba(43, 46, 53, .45);
+  color: var(--hm-ink, #2b2e35);
+  font-family: var(--hm-font-ui);
+}
+
+.cookie-banner.is-visible { display: block; }
+
+.cookie-banner-inner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+}
+
+/* `.icon-box.is-gold` is the older name for this mark and the template still says it.
+   Both are matched here rather than renaming a class in four templates. */
+.cookie-banner .icon-box,
+.cookie-banner .icon-box.is-gold {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--hm-hairline, #e1e5ea);
+  border-radius: 14px;
+  background: var(--hm-apple-soft, #f1fadf);
+  color: var(--hm-ink, #2b2e35);
+}
+
+.cookie-banner .icon-box .icon { width: 20px; height: 20px; }
+
+.cookie-banner h2 {
+  margin: 0 0 4px;
+  color: var(--hm-ink, #2b2e35);
+  font-family: var(--hm-font-display);
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: -.02em;
+}
+
+.cookie-banner p {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--hm-copy, #50555e);
+  font-size: .84rem;
+  line-height: 1.55;
+}
+
+.cookie-banner a {
+  color: var(--hm-ink, #2b2e35);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.cookie-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* ── The settings window ──────────────────────────────────────────────────── */
+
+.cookie-modal-backdrop {
+  position: fixed;
+  z-index: 510;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(43, 46, 53, .55);
+  backdrop-filter: blur(3px);
+}
+
+.cookie-modal-backdrop.is-visible { display: flex; }
+
+.cookie-modal {
+  box-sizing: border-box;
+  width: min(620px, 100%);
+  max-height: 90vh;
+  padding: 24px;
+  overflow: auto;
+  border: 1px solid var(--hm-hairline, #e1e5ea);
+  border-radius: 24px;
+  background: var(--hm-surface, #fff);
+  box-shadow: 0 34px 90px -30px rgba(43, 46, 53, .55);
+  color: var(--hm-ink, #2b2e35);
+  font-family: var(--hm-font-ui);
+}
+
+/* The window's own header row. It reads `.row-between` and `.eyebrow` from whichever
+   stylesheet the page happened to load, which is two more things that were missing on
+   the sign-in pages. Declared here so the component stands on its own everywhere. */
+.cookie-modal .row-between {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.cookie-modal .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  color: var(--hm-muted, #63696f);
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.cookie-modal h2 {
+  margin: 4px 0 0;
+  color: var(--hm-ink, #2b2e35);
+  font-family: var(--hm-font-display);
+  font-size: 1.45rem;
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -.025em;
+}
+
+.cookie-modal > p {
+  margin: 14px 0 4px;
+  color: var(--hm-copy, #50555e);
+  font-size: .88rem;
+  line-height: 1.6;
+}
+
+.cookie-category {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid var(--hm-hairline, #e1e5ea);
+  border-radius: 14px;
+  background: var(--hm-surface-soft, #fafbfc);
+  cursor: pointer;
+  transition: border-color var(--hm-motion, 220ms ease), background var(--hm-motion, 220ms ease);
+}
+
+label.cookie-category:hover {
+  border-color: var(--hm-control-line, #79828d);
+  background: var(--hm-surface, #fff);
+}
+
+.cookie-category > span,
+.cookie-category > div { display: grid; gap: 3px; }
+.cookie-category strong { color: var(--hm-ink, #2b2e35); font-size: .92rem; font-weight: 600; }
+
+.cookie-category span span,
+.cookie-category p {
+  margin: 0;
+  color: var(--hm-copy, #50555e);
+  font-size: .8rem;
+  line-height: 1.5;
+}
+
+/* This rule existed and never applied.
+ *
+ * In `hilalmarkets-public.css` the comment above it opened with `\*` instead of `/*`, so
+ * the browser read the whole comment as part of the selector, found it invalid, and
+ * dropped the rule. The switches were therefore the browser's own 13px default: under
+ * the 24px minimum for a control and painted in the browser's blue rather than the
+ * brand's green. The broken comment is fixed in that file too; this is the rule it was
+ * trying to write.
+ *
+ * The deep apple, not the accent: a tick drawn in #cbfa4d on white measures 1.21:1 and
+ * cannot be seen. This one measures 5.55:1 and has to be readable as "on".
+ */
+.cookie-category input {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  accent-color: var(--hm-apple-deep, #55712a);
+  cursor: pointer;
+}
+
+.cookie-fixed {
+  flex: 0 0 auto;
+  padding: 5px 11px;
+  border: 1px solid var(--hm-hairline, #e1e5ea);
+  border-radius: 999px;
+  background: var(--hm-neutral-bg, #eef1f4);
+  color: var(--hm-copy, #50555e);
+  font-size: .74rem;
+  font-weight: 600;
+}
+
+.cookie-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+/* ── The buttons ──────────────────────────────────────────────────────────── */
+
+/* The template asks for `.btn`, which four different stylesheets define differently.
+ * The component draws its own instead, so a cookie choice looks and measures the same
+ * on the website, in the dashboard and on the sign-in pages.
+ *
+ * 44px tall, because WCAG 2.5.8 asks for a 44px target and three of these sat at 38px.
+ * The edge is `--hm-control-line`, measured at 3.90:1 on white. The pale grey it
+ * replaced measured 1.36:1, so the outline buttons had no visible boundary at all.
+ */
+.cookie-banner .btn,
+.cookie-modal .btn {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--hm-control-line, #79828d);
+  border-radius: 999px;
+  background: var(--hm-surface, #fff);
+  color: var(--hm-ink, #2b2e35);
+  font-family: var(--hm-font-ui);
+  font-size: .86rem;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform var(--hm-motion, 220ms ease), background var(--hm-motion, 220ms ease),
+    border-color var(--hm-motion, 220ms ease), color var(--hm-motion, 220ms ease);
+}
+
+.cookie-banner .btn:hover,
+.cookie-modal .btn:hover {
+  border-color: var(--hm-ink, #2b2e35);
+  background: var(--hm-canvas, #f5f8fb);
+  transform: translateY(-1px);
+}
+
+.cookie-banner .btn-primary,
+.cookie-modal .btn-primary {
+  border-color: var(--hm-apple, #cbfa4d);
+  background: var(--hm-apple, #cbfa4d);
+  color: var(--hm-ink, #2b2e35);
+}
+
+.cookie-banner .btn-primary:hover,
+.cookie-modal .btn-primary:hover {
+  border-color: var(--hm-ink, #2b2e35);
+  background: var(--hm-ink, #2b2e35);
+  color: var(--hm-surface, #fff);
+}
+
+.cookie-modal .btn-icon {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+  border-radius: 14px;
+}
+
+.cookie-banner .icon,
+.cookie-modal .icon { width: 18px; height: 18px; }
+
+@media (max-width: 860px) {
+  .cookie-banner-inner { grid-template-columns: auto minmax(0, 1fr); }
+  .cookie-actions { grid-column: 1 / -1; justify-content: stretch; }
+  .cookie-actions .btn { flex: 1 1 140px; }
+}
+
+@media (max-width: 520px) {
+  .cookie-banner { right: 10px; bottom: 10px; left: 10px; padding: 14px; }
+  .cookie-banner-inner { grid-template-columns: minmax(0, 1fr); }
+  .cookie-modal { padding: 18px; }
+  .cookie-modal-actions { flex-direction: column-reverse; }
+  .cookie-modal-actions .btn { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cookie-banner .btn,
+  .cookie-modal .btn,
+  .cookie-category {
+    transition: none;
+    transform: none;
+  }
+}

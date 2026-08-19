@@ -32,6 +32,12 @@ const ICONS = Object.freeze({
   close:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   // Lucide `arrow-right`, unchanged.
   arrow:'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  // Lucide `arrow-left`, unchanged. Its own shape rather than `arrow` turned 180°:
+  // a static `transform: rotate(180deg)` is erased by the reduced-motion rule that
+  // sets `transform: none` on everything, so a "back" arrow pointed forwards for
+  // anybody who had asked for less movement. A rotation is not a decoration and it
+  // does not belong in a rule about motion.
+  arrow_left:'<path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>',
   chevron:'<path d="m8 10 4 4 4-4"/>',
   // Lucide `check`, unchanged.
   check:'<path d="M20 6 9 17l-5-5"/>',

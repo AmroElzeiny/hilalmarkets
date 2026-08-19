@@ -27,219 +27,214 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <meta name="description" content="Secure access to Hilal Markets Halal Assets intelligence and guided monitoring.">
-  <title>{{ title }} | Hilal Markets</title>
+  <title>{{ auth.title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260818-live-4">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260818-live-4">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260818-live-4">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-auth.css') }}?v=20260818-live-4">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260819-auth-1">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260819-auth-1">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260819-auth-1">
+  {# The cookie banner and its window are drawn by a shared partial and were styled in
+     the public stylesheet and the dashboard stylesheet — neither of which this page
+     loads. Both of them rendered here as raw unstyled blocks under the form, including
+     a dialog marked `aria-hidden` that was nonetheless on screen and reachable by Tab.
+     One stylesheet owns them now, and every page that includes the partial loads it. #}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260819-auth-1">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-auth.css') }}?v=20260819-auth-1">
 </head>
-<body class="hilal-auth-page">
+{% from "hilal/macros/auth_fields.html" import field, password_field, code_field, submit, sent_to, resend with context %}
+{% set suffix = auth_link_suffix %}
+{% set email_value = auth_email %}
+<body class="hilal-auth-page" data-auth-page="{{ auth.page }}" data-auth-state="{{ auth.state }}">
+  <a class="auth-skip" href="#auth-card">Skip to the form</a>
+
   <div class="auth-shell">
-    <section class="auth-brand">
-      <a class="auth-logo-surface" href="/" aria-label="Hilal Markets home"><img src="{{ url_for('static', path='/hilal-markets-logo.svg') }}" alt="Hilal Markets"></a>
-      <div class="auth-brand-copy">
-        <span class="eyebrow">Screened first. Watched continuously.</span>
-        <h1>Know what fits your values.<br><span>Know when it matters.</span></h1>
-        <p>Start with a disclosed Shariah methodology, choose the market behavior you care about, and keep every decision in your hands.</p>
+
+    {#  The left panel. It used to be the same three sentences on all five pages. It is
+        the journey now: which step you are on, what is behind you, what is left. Signing
+        up is two pages and nothing said so.  #}
+    <aside class="auth-aside">
+      <div class="auth-aside-head">
+        <a class="auth-logo" href="/" aria-label="Hilal Markets home">
+          <img src="{{ url_for('static', path='/hilal-markets-logo.svg') }}" alt="Hilal Markets" width="197" height="31">
+        </a>
+        <a class="auth-back" href="/"><span data-icon="arrow_left" data-icon-class="icon" aria-hidden="true"></span>Back to the website</a>
       </div>
-      <div class="auth-trust-list" aria-label="Hilal Markets product boundaries">
-        <div class="auth-trust-item"><span class="icon-box"><span data-icon="passport" data-icon-class="icon"></span></span><span><strong>Evidence stays visible</strong><small>Methodology, source, and review history remain inspectable.</small></span></div>
-        <div class="auth-trust-item"><span class="icon-box"><span data-icon="workflow" data-icon-class="icon"></span></span><span><strong>You approve every rule</strong><small>AI helps structure your idea but cannot activate it for you.</small></span></div>
-        <div class="auth-trust-item"><span class="icon-box"><span data-icon="radar" data-icon-class="icon"></span></span><span><strong>Monitoring, not execution</strong><small>Hilal Markets watches crypto spot setups and never places trades.</small></span></div>
-      </div>
-    </section>
-    <main class="auth-form-wrap">
-      <div class="auth-form auth-production-form">
-        <h1>{{ title }}</h1>
-    {% set selection_suffix = auth_link_suffix %}
-    {% if message == 'code_sent' and page == 'signup_verify' %}
-      <div class="dash-flash success">A six-digit code was sent to your email. Enter it below to create your dashboard account.</div>
-    {% elif message == 'code_sent' %}
-      <div class="dash-flash success">A six-digit code was sent if that email belongs to an account.</div>
-    {% elif message %}
-      <div class="dash-flash success">{{ message.replace('_', ' ').title() }}</div>
-    {% endif %}
-    {% if error == 'account_banned' %}
-      <div class="dash-flash error">Your profile is banned.</div>
-    {% elif error == 'account_exists' %}
-      <div class="dash-flash error">This email already has an account. Please sign in instead.</div>
-      <p><a class="btn btn-primary" href="/signin{{ selection_suffix if selected_plan_code else ('?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '') }}">Go To Sign In</a></p>
-    {% elif error == 'account_not_registered' %}
-      <div class="dash-flash error">This email is not registered. Please sign up first.</div>
-      <p><a class="btn btn-primary" href="/signup{{ selection_suffix if selected_plan_code else ('?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '') }}">Go To Sign Up</a></p>
-    {% elif error == 'password_mismatch' %}
-      <div class="dash-flash error">Password and repeat password must match.</div>
-    {% elif error == 'invalid_password' %}
-      <div class="dash-flash error">Use at least 6 characters with a lowercase letter, capital letter, number and special character.</div>
-    {% elif error == 'email_unavailable' %}
-      <div class="dash-flash error">Email delivery is not configured. Check the SMTP settings and try again.</div>
-    {% elif error == 'email_adapter_disabled' %}
-      <div class="dash-flash error">Email delivery is disabled. Set EMAIL_ADAPTER=smtp in the active environment and restart the app.</div>
-    {% elif error == 'smtp_required_fields_missing' %}
-      <div class="dash-flash error">SMTP is enabled, but required fields are missing. Check SMTP_HOST and SMTP_FROM_EMAIL in the active environment.</div>
-    {% elif error == 'smtp_delivery_failed' %}
-      <div class="dash-flash error">The SMTP provider did not accept the message. Check SMTP credentials, TLS, sender address and provider logs.</div>
-    {% elif error in ['invalid_code', 'code_expired'] %}
-      <div class="dash-flash error">The one-time code is invalid or expired.</div>
-    {% elif error == 'code_locked' %}
-      <div class="dash-flash error">Too many attempts. Request a new one-time code.</div>
-    {% elif error == 'code_recently_sent' %}
-      <div class="dash-flash error">A code was sent recently. Wait one minute before requesting another.</div>
-    {% elif error %}
-      <div class="dash-flash error">{{ error.replace('_', ' ').title() }}</div>
-    {% endif %}
-    {% if page in ['signup', 'signin'] %}
-      <form
-        method="post"
-        action="/{{ page }}"
-        class="auth-fields"
-        data-password-form="{{ page }}"
-        data-testid="{{ 'signup-form' if page == 'signup' else 'login-form' }}"
-      >
-        {% if request.query_params.get('telegram_link') %}
-          <input type="hidden" name="telegram_link" value="{{ request.query_params.get('telegram_link') }}">
-          <div class="dash-flash success">This form will connect your Dashboard account to Telegram after submit.</div>
+
+      <p class="auth-aside-line">Screened first.<br><span>Watched continuously.</span></p>
+
+      <ol class="auth-journey" aria-label="Where you are">
+        {% for step in auth.journey.steps %}
+          {% set position = loop.index0 %}
+          {% if position < auth.journey.current %}{% set state = 'done' %}
+          {% elif position == auth.journey.current %}{% set state = 'current' %}
+          {% else %}{% set state = 'todo' %}{% endif %}
+          <li class="auth-journey-step" data-state="{{ state }}"{% if state == 'current' %} aria-current="step"{% endif %}>
+            <span class="auth-journey-mark" aria-hidden="true"><span data-icon="{{ 'check' if state == 'done' else step.icon }}" data-icon-class="icon"></span></span>
+            <span class="auth-journey-text">
+              <strong>{{ step.title }}</strong>
+              <small>{{ step.hint }}</small>
+            </span>
+            {# Never colour alone: every step says its state in words as well.
+               brand guide.md section 10 and WCAG 1.4.1. #}
+            <span class="auth-journey-state">{% if state == 'done' %}Done{% elif state == 'current' %}You are here{% else %}Next{% endif %}</span>
+          </li>
+        {% endfor %}
+      </ol>
+
+      <ul class="auth-trust" aria-label="What Hilal Markets does and does not do">
+        <li class="auth-trust-item">
+          <span class="auth-trust-mark" aria-hidden="true"><span data-icon="passport" data-icon-class="icon"></span></span>
+          <span><strong>Evidence stays visible</strong><small>Methodology, source and review history stay open to you.</small></span>
+        </li>
+        <li class="auth-trust-item">
+          <span class="auth-trust-mark" aria-hidden="true"><span data-icon="workflow" data-icon-class="icon"></span></span>
+          <span><strong>You approve every rule</strong><small>The assistant helps you shape an idea. Only you switch it on.</small></span>
+        </li>
+        <li class="auth-trust-item">
+          <span class="auth-trust-mark" aria-hidden="true"><span data-icon="radar" data-icon-class="icon"></span></span>
+          <span><strong>Watching, never trading</strong><small>Hilal Markets watches crypto spot setups. It never places an order.</small></span>
+        </li>
+      </ul>
+    </aside>
+
+    {# ── The form ─────────────────────────────────────────────────────────── #}
+    <main class="auth-main">
+      <div class="auth-card" id="auth-card">
+        <a class="auth-logo auth-logo-small" href="/" aria-label="Hilal Markets home">
+          <img src="{{ url_for('static', path='/hilal-markets-logo.svg') }}" alt="Hilal Markets" width="160" height="25">
+        </a>
+
+        {% if auth.journey.shows_counter %}
+          <p class="auth-step-chip"><span data-icon="workflow" data-icon-class="icon" aria-hidden="true"></span>Step {{ auth.journey.position }} of {{ auth.journey.total }} &middot; {{ auth.journey.steps[auth.journey.current].title }}</p>
         {% endif %}
+        <h1>{{ auth.title }}</h1>
+        <p class="auth-lede">{{ auth.lede }}</p>
+
+        {% if auth_alert %}
+          {% include "hilal/partials/auth_alert.html" %}
+        {% endif %}
+
         {% if selected_plan_code %}
-          <input type="hidden" name="plan_code" value="{{ selected_plan_code }}">
-          <input type="hidden" name="billing_interval" value="{{ selected_billing_interval }}">
-          <div class="dash-flash success">Your {{ plans[selected_plan_code].name }} plan choice will be kept after authentication.</div>
+          <p class="auth-note"><span data-icon="check" data-icon-class="icon" aria-hidden="true"></span>Your {{ plans[selected_plan_code].name }} plan choice is kept. We take you to it after this.</p>
         {% endif %}
-        {% if page == 'signup' %}
-          <div class="auth-name-grid">
-            <label>First name <input name="first_name" type="text" required maxlength="60" autocomplete="given-name" data-testid="auth-first-name"></label>
-            <label>Last name <input name="last_name" type="text" required maxlength="60" autocomplete="family-name" data-testid="auth-last-name"></label>
-          </div>
+        {% if request.query_params.get('telegram_link') %}
+          <p class="auth-note"><span data-icon="telegram" data-icon-class="icon" aria-hidden="true"></span>Your Telegram will be connected as soon as you are in.</p>
         {% endif %}
-        <label>Email <input name="email" type="email" required autocomplete="email" data-testid="auth-email"></label>
-        <label>Password
-          <input name="password" type="password" required minlength="{{ 6 if page == 'signup' else 1 }}" autocomplete="{{ 'new-password' if page == 'signup' else 'current-password' }}" data-testid="auth-password">
-          {% if page == 'signup' %}<small>At least 6 characters with lowercase, capital, number and special character.</small>{% endif %}
-        </label>
-        {% if page == 'signup' %}
-          <label>Repeat password <input name="repeat_password" type="password" required minlength="6" autocomplete="new-password" data-testid="auth-repeat-password"></label>
-          <div class="auth-inline-error" data-password-error hidden>Passwords must match.</div>
+
+        {# ── Sign up: name, email, password ─────────────────────────────── #}
+        {% if auth.page == 'signup' %}
+          <form method="post" action="/signup" class="auth-form" data-password-form="signup" data-testid="signup-form">
+            {% include "hilal/partials/auth_carried_fields.html" %}
+            <div class="auth-row">
+              {{ field('first_name', 'First name', 'text', icon='user', testid='auth-first-name', autocomplete='given-name', maxlength=60, required=True) }}
+              {{ field('last_name', 'Last name', 'text', icon='user', testid='auth-last-name', autocomplete='family-name', maxlength=60, required=True) }}
+            </div>
+            {{ field('email', 'Email', 'email', icon='mail', testid='auth-email', autocomplete='email', required=True, value=email_value, hint='This is where your six-digit code goes.') }}
+            {{ password_field('password', 'Choose a password', 'auth-password', 'new-password', rules=True) }}
+            {{ password_field('repeat_password', 'Type it once more', 'auth-repeat-password', 'new-password', confirm=True) }}
+            {{ submit(auth.submit, 'send') }}
+          </form>
+          <p class="auth-switch">Already have an account? <a href="/signin{{ suffix }}">Sign in</a></p>
+
+        {# ── Sign in: email and password ────────────────────────────────── #}
+        {% elif auth.page == 'signin' %}
+          <form method="post" action="/signin" class="auth-form" data-password-form="signin" data-testid="login-form">
+            {% include "hilal/partials/auth_carried_fields.html" %}
+            {{ field('email', 'Email', 'email', icon='mail', testid='auth-email', autocomplete='email', required=True, value=email_value) }}
+            {{ password_field('password', 'Password', 'auth-password', 'current-password', forgot=True) }}
+            {{ submit(auth.submit, 'lock') }}
+          </form>
+          <div class="auth-or"><span>or</span></div>
+          <a class="auth-alt" href="/signin/code{{ suffix }}">
+            <span class="auth-alt-mark" aria-hidden="true"><span data-icon="mail" data-icon-class="icon"></span></span>
+            <span class="auth-alt-text"><strong>Email me a code instead</strong><small>Nothing to remember. Six digits, straight to your inbox.</small></span>
+            <span class="auth-alt-go" aria-hidden="true"><span data-icon="arrow" data-icon-class="icon"></span></span>
+          </a>
+          <p class="auth-switch">New here? <a href="/signup{{ suffix }}">Create an account</a></p>
+
+        {# ── Confirm your email, after signing up ───────────────────────── #}
+        {% elif auth.page == 'signup_verify' %}
+          {{ sent_to(email_value) }}
+          <form method="post" action="/signup/verify" class="auth-form" data-testid="verify-form">
+            {% include "hilal/partials/auth_carried_fields.html" %}
+            <input type="hidden" name="email" value="{{ email_value }}">
+            {{ code_field() }}
+            {{ submit(auth.submit, 'shield_check') }}
+          </form>
+          {{ resend() }}
+          <p class="auth-switch">Wrong email? <a href="/signup{{ suffix }}">Start again</a></p>
+
+        {# ── Sign in with a one-time code ───────────────────────────────── #}
+        {% elif auth.page == 'signin_code' %}
+          {% if auth.state == 'enter' %}
+            {{ sent_to(email_value) }}
+            <form method="post" action="/signin/code/verify" class="auth-form" data-testid="code-verify-form">
+              {% include "hilal/partials/auth_carried_fields.html" %}
+              <input type="hidden" name="email" value="{{ email_value }}">
+              {{ code_field() }}
+              {{ submit(auth.submit, 'shield_check') }}
+            </form>
+            {{ resend() }}
+            <p class="auth-switch">Wrong email? <a href="/signin/code{{ suffix }}">Use another one</a></p>
+          {% else %}
+            <form method="post" action="/signin/code/request" class="auth-form" data-testid="code-request-form">
+              {% include "hilal/partials/auth_carried_fields.html" %}
+              {{ field('email', 'Email', 'email', icon='mail', testid='auth-email', autocomplete='email', required=True, hint='Use the email you signed up with.') }}
+              {{ submit(auth.submit, 'send') }}
+            </form>
+            <p class="auth-switch">Prefer your password? <a href="/signin{{ suffix }}">Sign in with it</a></p>
+          {% endif %}
+
+        {# ── Reset your password ────────────────────────────────────────── #}
+        {% elif auth.page == 'reset_password' %}
+          {% if auth.state == 'enter' %}
+            {{ sent_to(email_value) }}
+            <form method="post" action="/reset-password/verify" class="auth-form" data-password-form="reset" data-testid="reset-verify-form">
+              <input type="hidden" name="email" value="{{ email_value }}">
+              {{ code_field() }}
+              {{ password_field('password', 'New password', 'auth-password', 'new-password', rules=True) }}
+              {{ password_field('repeat_password', 'Type it once more', 'auth-repeat-password', 'new-password', confirm=True) }}
+              {{ submit(auth.submit, 'check') }}
+            </form>
+            {{ resend() }}
+          {% else %}
+            <form method="post" action="/reset-password/request" class="auth-form" data-testid="reset-request-form">
+              {{ field('email', 'Email', 'email', icon='mail', testid='auth-email', autocomplete='email', required=True, hint='Use the email you signed up with.') }}
+              {{ submit(auth.submit, 'send') }}
+            </form>
+          {% endif %}
+          <p class="auth-switch">Remembered it? <a href="/signin{{ suffix }}">Back to sign in</a></p>
         {% endif %}
-        <button class="btn btn-primary" type="submit" data-testid="auth-submit">{{ 'Send Verification Code' if page == 'signup' else 'Sign In' }}</button>
-      </form>
-      {% if page == 'signin' %}
-        <div class="auth-alternative-actions">
-          <a class="btn btn-secondary" href="/signin/code{{ selection_suffix if selected_plan_code else ('?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '') }}">Login with one-time code</a>
-          <a class="text-link" href="/reset-password">Reset password</a>
-        </div>
-      {% endif %}
-    {% elif page == 'signup_verify' %}
-      <form method="post" action="/signup/verify" class="auth-fields">
-        {% if selected_plan_code %}<input type="hidden" name="plan_code" value="{{ selected_plan_code }}"><input type="hidden" name="billing_interval" value="{{ selected_billing_interval }}">{% endif %}
-        <label>Email <input name="email" type="email" required value="{{ request.query_params.get('email', '') }}" autocomplete="email"></label>
-        <label>One-time code <input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code" autofocus></label>
-        {% if request.query_params.get('telegram_link') %}<input type="hidden" name="telegram_link" value="{{ request.query_params.get('telegram_link') }}">{% endif %}
-        <button class="btn btn-primary" type="submit">Verify and create account</button>
-      </form>
-      <p class="auth-switch"><a href="/signup{{ selection_suffix if selected_plan_code else ('?telegram_link=' ~ request.query_params.get('telegram_link') if request.query_params.get('telegram_link') else '') }}">Start again</a></p>
-    {% elif page == 'signin_code' %}
-      {% if message == 'code_sent' or request.query_params.get('email') %}
-        <form method="post" action="/signin/code/verify" class="auth-fields">
-          {% if selected_plan_code %}<input type="hidden" name="plan_code" value="{{ selected_plan_code }}"><input type="hidden" name="billing_interval" value="{{ selected_billing_interval }}">{% endif %}
-          <label>Email <input name="email" type="email" required value="{{ request.query_params.get('email', '') }}" autocomplete="email"></label>
-          <label>One-time code <input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code"></label>
-          {% if request.query_params.get('telegram_link') %}<input type="hidden" name="telegram_link" value="{{ request.query_params.get('telegram_link') }}">{% endif %}
-          <button class="btn btn-primary" type="submit">Verify and sign in</button>
-        </form>
-        <p class="auth-switch"><a href="/signin/code{{ selection_suffix }}">Request another code</a></p>
-      {% else %}
-        <form method="post" action="/signin/code/request" class="auth-fields">
-          {% if selected_plan_code %}<input type="hidden" name="plan_code" value="{{ selected_plan_code }}"><input type="hidden" name="billing_interval" value="{{ selected_billing_interval }}">{% endif %}
-          <label>Email <input name="email" type="email" required autocomplete="email"></label>
-          {% if request.query_params.get('telegram_link') %}<input type="hidden" name="telegram_link" value="{{ request.query_params.get('telegram_link') }}">{% endif %}
-          <button class="btn btn-primary" type="submit">Send one-time code</button>
-        </form>
-      {% endif %}
-      <p class="auth-switch"><a href="/signin{{ selection_suffix }}">Use password instead</a></p>
-    {% elif page == 'reset_password' %}
-      {% if message == 'code_sent' or request.query_params.get('email') %}
-        <form method="post" action="/reset-password/verify" class="auth-fields" data-password-form="reset">
-          <label>Email <input name="email" type="email" required value="{{ request.query_params.get('email', '') }}" autocomplete="email"></label>
-          <label>One-time code <input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code"></label>
-          <label>New password
-            <input name="password" type="password" required minlength="6" autocomplete="new-password">
-            <small>At least 6 characters with lowercase, capital, number and special character.</small>
-          </label>
-          <label>Repeat new password <input name="repeat_password" type="password" required minlength="6" autocomplete="new-password"></label>
-          <div class="auth-inline-error" data-password-error hidden>Passwords must match.</div>
-          <button class="btn btn-primary" type="submit">Set new password</button>
-        </form>
-      {% else %}
-        <form method="post" action="/reset-password/request" class="auth-fields">
-          <label>Email <input name="email" type="email" required autocomplete="email"></label>
-          <button class="btn btn-primary" type="submit">Send reset code</button>
-        </form>
-      {% endif %}
-      <p class="auth-switch"><a href="/signin">Back to sign in</a></p>
-    {% endif %}
-    {% set link_suffix = auth_link_suffix %}
-    {% if page == 'signup' %}
-      <p class="auth-switch">Already have an account? <a href="/signin{{ link_suffix }}">Sign in</a></p>
-    {% elif page == 'signin' %}
-      <p class="auth-switch">New here? <a href="/signup{{ link_suffix }}">Create an account</a></p>
-    {% endif %}
       </div>
-      {# The sign-up and sign-in pages carried no link to the Terms, the Privacy Policy
-         or the Cookie Policy at all — on the one page that asks somebody to create an
-         account. The full site footer does not belong here: it is a long dark menu
-         under a short form, and it would push the form off a phone screen. A single
-         quiet row of the three documents is what this page actually needs. #}
+
+      {# A quiet row, not the whole site footer: this page has one job and a long dark
+         menu under a short form would push it off a phone screen. #}
       <nav class="auth-legal" aria-label="Legal">
-        <a href="/terms">Terms of Use</a>
-        <a href="/privacy">Privacy Policy</a>
-        <a href="/cookies">Cookie Policy</a>
-        <button type="button" data-cookie-settings>Cookie settings</button>
+        <a href="/terms"><span data-icon="file_text" data-icon-class="icon" aria-hidden="true"></span>Terms of Use</a>
+        <a href="/privacy"><span data-icon="shield" data-icon-class="icon" aria-hidden="true"></span>Privacy Policy</a>
+        <a href="/cookies"><span data-icon="cookie" data-icon-class="icon" aria-hidden="true"></span>Cookie Policy</a>
+        <button type="button" data-cookie-settings><span data-icon="settings" data-icon-class="icon" aria-hidden="true"></span>Cookie settings</button>
       </nav>
     </main>
   </div>
+
   {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
   {% include "hilal/partials/cookie_banner.html" %}
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260818-live-4"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260818-live-4"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260818-live-4"></script>
+
   <script>
-    function clearSensitiveAuthFields() {
-      document
-        .querySelectorAll('input[type="password"], input[name="code"]')
-        .forEach((field) => {
-          field.value = "";
-        });
-    }
-    window.addEventListener("pageshow", (event) => {
-      if (event.persisted) clearSensitiveAuthFields();
-    });
-    window.addEventListener("pagehide", clearSensitiveAuthFields);
-    document.querySelectorAll("[data-password-form]").forEach((form) => {
-      form.addEventListener("submit", (event) => {
-        if (form.dataset.submitting === "true") {
-          event.preventDefault();
-          return;
-        }
-        const password = form.elements.password?.value || "";
-        const repeat = form.elements.repeat_password?.value || "";
-        const error = form.querySelector("[data-password-error]");
-        if (form.elements.repeat_password && password !== repeat) {
-          event.preventDefault();
-          if (error) error.hidden = false;
-          form.elements.repeat_password.focus();
-          return;
-        }
-        if (error) error.hidden = true;
-        form.dataset.submitting = "true";
-        const submit = form.querySelector("button[type='submit']");
-        if (submit) {
-          submit.disabled = true;
-          submit.dataset.originalText = submit.textContent || "";
-          submit.textContent = form.dataset.passwordForm === "signup" ? "Sending code..." : "Processing...";
-        }
-      });
-    });
+    window.HilalMarketsAuth = {{ {
+      "page": auth.page,
+      "state": auth.state,
+      "passwordRules": auth_password_rules,
+      "resendSeconds": auth_code_resend_seconds,
+      "codeTtlMinutes": auth_code_ttl_minutes,
+      "codeAttempts": auth_code_max_attempts,
+      "codeJustSent": (request.query_params.get("message") == "code_sent"),
+      "email": auth_email
+    } | tojson }};
   </script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260819-auth-1"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260819-auth-1"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260819-auth-1"></script>
+  <script type="module" src="{{ url_for('static', path='/hilalmarkets-auth.js') }}?v=20260819-auth-1"></script>
 </body>
 </html>

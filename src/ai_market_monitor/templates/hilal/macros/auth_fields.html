@@ -1,0 +1,172 @@
+{# One shape for every control on the five sign-in pages.
+
+   Before this the same field was written out by hand in each branch of the template,
+   which is how the sign-up email box ended up with a hint and the sign-in one without,
+   and how none of them ever gained an error line. A field is one macro now, so a fix
+   reaches every page at once.
+
+   Every control here carries: a real `<label>` joined by `for`, an `autocomplete` value
+   the browser understands, a place for an error joined by `aria-describedby`, and a
+   target at least 44px tall (WCAG 2.5.8). #}
+
+{% macro field(name, label, kind, icon='', testid='', autocomplete='', maxlength=0, required=False, value='', hint='') %}
+  {% set id = 'auth-' ~ name|replace('_', '-') %}
+  <div class="auth-field" data-field="{{ name }}">
+    <label class="auth-label" for="{{ id }}">{{ label }}</label>
+    <div class="auth-input">
+      {% if icon %}<span class="auth-input-icon" aria-hidden="true"><span data-icon="{{ icon }}" data-icon-class="icon"></span></span>{% endif %}
+      <input
+        id="{{ id }}"
+        name="{{ name }}"
+        type="{{ kind }}"
+        value="{{ value }}"
+        {% if required %}required{% endif %}
+        {% if maxlength %}maxlength="{{ maxlength }}"{% endif %}
+        {% if autocomplete %}autocomplete="{{ autocomplete }}"{% endif %}
+        {% if testid %}data-testid="{{ testid }}"{% endif %}
+        aria-describedby="{{ id }}-error{% if hint %} {{ id }}-hint{% endif %}"
+        class="auth-control">
+      <span class="auth-input-tick" aria-hidden="true"><span data-icon="check" data-icon-class="icon"></span></span>
+    </div>
+    {% if hint %}<p class="auth-hint" id="{{ id }}-hint">{{ hint }}</p>{% endif %}
+    <p class="auth-field-error" id="{{ id }}-error" data-field-error hidden></p>
+  </div>
+{% endmacro %}
+
+
+{# The password box, with the three things it never had: a way to see what you typed, a
+   warning when Caps Lock is on, and the rule itself as a list that ticks itself off
+   while you type. The rules are read from `core/auth_pages.py` — the same five the
+   server checks — so the page can never promise something the server will refuse. #}
+{% macro password_field(name, label, testid, autocomplete, rules=False, confirm=False, forgot=False) %}
+  {% set id = 'auth-' ~ name|replace('_', '-') %}
+  <div class="auth-field" data-field="{{ name }}">
+    <label class="auth-label" for="{{ id }}">{{ label }}</label>
+    <div class="auth-input">
+      <span class="auth-input-icon" aria-hidden="true"><span data-icon="lock" data-icon-class="icon"></span></span>
+      <input
+        id="{{ id }}"
+        name="{{ name }}"
+        type="password"
+        required
+        autocomplete="{{ autocomplete }}"
+        data-testid="{{ testid }}"
+        aria-describedby="{{ id }}-error{% if rules %} {{ id }}-rules{% endif %}"
+        class="auth-control auth-control-password">
+      <button type="button" class="auth-reveal" data-reveal aria-controls="{{ id }}" aria-pressed="false">
+        <span class="auth-reveal-icon" aria-hidden="true"><span data-icon="eye" data-icon-class="icon"></span></span>
+        <span class="auth-reveal-text">Show</span>
+      </button>
+    </div>
+    <p class="auth-caps" data-caps hidden><span data-icon="warning" data-icon-class="icon" aria-hidden="true"></span>Caps Lock is on, so every letter will be a capital.</p>
+    {% if rules %}
+      <ul class="auth-rules" id="{{ id }}-rules" data-password-rules>
+        {% for rule in auth_password_rules %}
+          <li class="auth-rule" data-rule="{{ rule.key }}" data-met="false">
+            <span class="auth-rule-mark" aria-hidden="true"><span data-icon="check" data-icon-class="icon"></span></span>
+            <span class="auth-rule-label">{{ rule.label }}</span>
+            <span class="auth-rule-state">still needed</span>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="hm-sr-only" aria-live="polite" data-password-live></p>
+    {% endif %}
+    {% if confirm %}
+      <p class="auth-match" data-password-match hidden></p>
+    {% endif %}
+    <p class="auth-field-error" id="{{ id }}-error" data-field-error hidden></p>
+    {# Under the box rather than beside the label. Beside the label it could only be
+       20px tall without pushing the label off its own line, and WCAG 2.5.8 asks for 44.
+       Down here it is a proper target and it reads in the order a person needs it:
+       type your password — and if you cannot remember it, this way. #}
+    {% if forgot %}
+      <a class="auth-forgot" href="/reset-password">
+        <span data-icon="circle_help" data-icon-class="icon" aria-hidden="true"></span>I forgot my password
+      </a>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+
+{# Six digits.
+
+   One real input, with six boxes drawn behind it. Six separate inputs is the usual
+   trick and it is worse in every way that matters here: pasting a code from an email
+   lands entirely in the first box, backspace behaves differently in every browser, and
+   a screen reader announces six unlabelled fields instead of one labelled one. One
+   input keeps paste, keeps the phone keyboard's "from Messages" suggestion through
+   `autocomplete="one-time-code"`, and keeps a single label.
+
+   The boxes are drawn by script, so with scripting off this is an ordinary text box
+   that still works. #}
+{% macro code_field(autofocus=True) %}
+  <div class="auth-field auth-field-code" data-field="code">
+    <label class="auth-label" for="auth-code">Your six-digit code</label>
+    <div class="auth-code" data-code>
+      <span class="auth-code-cells" aria-hidden="true">
+        {% for _ in range(6) %}<span class="auth-code-cell"></span>{% endfor %}
+      </span>
+      <input
+        id="auth-code"
+        class="auth-code-input"
+        name="code"
+        type="text"
+        inputmode="numeric"
+        pattern="[0-9]{6}"
+        maxlength="6"
+        required
+        autocomplete="one-time-code"
+        spellcheck="false"
+        autocapitalize="off"
+        {% if autofocus %}autofocus{% endif %}
+        aria-describedby="auth-code-error auth-code-hint">
+    </div>
+    <p class="auth-hint" id="auth-code-hint">Paste all six at once if you like. The code works for {{ auth_code_ttl_minutes }} minutes and you get {{ auth_code_max_attempts }} tries.</p>
+    <p class="hm-sr-only" aria-live="polite" data-code-live></p>
+    <p class="auth-field-error" id="auth-code-error" data-field-error hidden></p>
+  </div>
+{% endmacro %}
+
+
+{% macro submit(label, icon) %}
+  <button class="auth-submit" type="submit" data-testid="auth-submit">
+    <span class="auth-submit-mark" aria-hidden="true"><span data-icon="{{ icon }}" data-icon-class="icon"></span></span>
+    <span data-submit-label>{{ label }}</span>
+  </button>
+  <p class="hm-sr-only" aria-live="polite" data-form-live></p>
+{% endmacro %}
+
+
+{# "We sent it to this address" — so a typo is visible before somebody waits ten minutes
+   for an email that was never going to arrive. It used to be an editable email box
+   filled in for you, which invited exactly the edit that makes the code stop matching. #}
+{% macro sent_to(address) %}
+  {% if address %}
+    <p class="auth-sentto">
+      <span class="auth-sentto-mark" aria-hidden="true"><span data-icon="send" data-icon-class="icon"></span></span>
+      <span>Sent to <strong>{{ address }}</strong></span>
+    </p>
+  {% endif %}
+{% endmacro %}
+
+
+{# Ask for another code.
+
+   The wait is real: sixty seconds, read from `CODE_RESEND_SECONDS`, the same constant
+   the server refuses an early request with. The button counts it down instead of letting
+   somebody press it and be told off. #}
+{% macro resend() %}
+  {% if auth_resend_action %}
+    <form method="post" action="{{ auth_resend_action }}" class="auth-resend" id="auth-resend-form">
+      {% if selected_plan_code %}<input type="hidden" name="plan_code" value="{{ selected_plan_code }}"><input type="hidden" name="billing_interval" value="{{ selected_billing_interval }}">{% endif %}
+      {% if request.query_params.get('telegram_link') %}<input type="hidden" name="telegram_link" value="{{ request.query_params.get('telegram_link') }}">{% endif %}
+      <input type="hidden" name="email" value="{{ auth_email }}">
+      <span class="auth-resend-label">No code yet?</span>
+      <button type="submit" class="auth-resend-btn" data-resend>
+        <span class="auth-resend-mark" aria-hidden="true"><span data-icon="refresh" data-icon-class="icon"></span></span>
+        <span data-resend-label>Send it again</span>
+      </button>
+    </form>
+    <p class="hm-sr-only" aria-live="polite" data-resend-live></p>
+  {% endif %}
+{% endmacro %}

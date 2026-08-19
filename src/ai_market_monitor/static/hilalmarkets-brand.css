@@ -22,6 +22,16 @@
   --hm-surface-soft: #fafbfc;
   --hm-hairline: #e1e5ea;
   --hm-hairline-strong: #d0d6de;
+  /* The edge of a *control*, as opposed to the edge of a card.
+     WCAG 1.4.11 asks for 3:1 on anything a person has to see in order to use it, and
+     both hairlines above are far under it — `--hm-hairline-strong` measures 1.46:1 on
+     white, so a bordered input or an outline button had a boundary in the code and none
+     on the screen. This one measures 3.90:1 on white, 3.76:1 on the soft field fill and
+     3.65:1 on the canvas. It is the same value the public website already uses as
+     `--color-control` in `Hilal-Markets-Website/src/index.css`; the two files are held
+     equal by `test_invariant_auth_pages.py` so the product and the website cannot end
+     up drawing two different control edges. */
+  --hm-control-line: #79828d;
   --hm-apple: #cbfa4d;
   --hm-apple-soft: #f1fadf;
   --hm-apple-pale: #e8fbbf;
@@ -29,6 +39,17 @@
   --hm-success: #46551b;
   --hm-info: #1f6e97;
   --hm-info-bg: #e2f1f9;
+  /* The edge of an information panel, the partner of `--hm-danger-line` below. It was
+     missing, so the one panel that needed it had to write a hex value into a component
+     stylesheet — which is how a palette grows a sixth colour nobody approved. */
+  --hm-info-line: #bcdcec;
+  /* Text and edges **on** the near-black panel, where the light tokens above are far too
+     bright and white alone is too flat to build a hierarchy from.
+     `--hm-on-ink-soft` measures 6.51:1 on `--hm-ink` and 5.38:1 on the translucent cards
+     drawn over it, so it clears 4.5:1 on both. `--hm-on-ink-line` measures 3.04:1 on
+     `--hm-ink`, which is what WCAG 1.4.11 asks of a boundary a person has to see. */
+  --hm-on-ink-soft: #aeb4bd;
+  --hm-on-ink-line: #767b83;
   --hm-blue: #2a8fc3;
   --hm-warning: #8a6316;
   --hm-warning-bg: #fdf2df;
