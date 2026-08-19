@@ -78,6 +78,9 @@ playwright-report/
 test-results/
 reports/
 exports/
+# Database dumps. Untracked and unignored, these were deleted by any `git clean -fd`,
+# which is exactly what a clean redeploy runs.
+backups/
 screenshots/
 PLAYWRIGHT_E2E_REPORT.md
 *.log
