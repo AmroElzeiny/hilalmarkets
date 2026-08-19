@@ -634,7 +634,15 @@ class Settings(BaseSettings):
     #: and it is the only thing that decides it.
     hilal_chat_free_daily_usd: float = Field(default=0.10, gt=0, le=100)
     #: How much more a paying subscriber gets. Five times the free allowance.
+    #:
+    #: Only consulted when the paid allowance below is left unset. Because it is a whole
+    #: number, the two allowances share one dial: a free figure of 0.15 can only buy a
+    #: paid one of 0.15, 0.30, 0.45 and so on.
     hilal_chat_paid_daily_multiplier: int = Field(default=5, ge=1, le=100)
+    #: The paying subscriber's allowance, stated outright. Wins over the multiplier when
+    #: set, which is what lets the two figures be chosen independently. Left unset, the
+    #: multiplier decides and nothing changes for an existing deployment.
+    hilal_chat_paid_daily_usd: float | None = Field(default=None, gt=0, le=1000)
     #: How many evidence rows one turn may carry. A bound, so a large account cannot
     #: quietly turn one question into an expensive one.
     hilal_chat_max_evidence_assets: int = Field(default=24, ge=1, le=200)
@@ -836,6 +844,44 @@ class Settings(BaseSettings):
         if len(value.get_secret_value()) < 32:
             raise ValueError("APP_SECRET_KEY must contain at least 32 characters")
         return value
+
+    @field_validator("hilal_chat_paid_daily_usd", mode="before")
+    @classmethod
+    def _blank_paid_allowance_means_unset(cls, value: object) -> object:
+        """An empty line in an env file means "not set", for a number as much as for text.
+
+        An env file has no way to write "absent" other than leaving the value empty, and
+        every optional *text* setting in this project already reads a bare ``KEY=`` that
+        way. A number did not: pydantic tried to parse ``""`` as a float and startup died
+        on a template that was only saying "no opinion, use the multiplier".
+
+        That is the same shape as the two list settings that made both example files
+        unloadable, so it is fixed here rather than by writing a number into the template
+        that no deployment actually wants.
+        """
+
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @model_validator(mode="after")
+    def validate_hilal_chat_allowances(self) -> "Settings":
+        """A paying subscriber must never get less than someone paying nothing.
+
+        Stating the paid allowance outright removed a constraint the multiplier used to
+        carry for free: with ``ge=1`` it could not express "less than the free tier". Now
+        that the figure stands alone, nothing stops a typo turning a subscription into a
+        downgrade, and it would show up as paying customers hitting a wall sooner than
+        visitors rather than as anything resembling a configuration error.
+        """
+
+        stated = self.hilal_chat_paid_daily_usd
+        if stated is not None and stated < self.hilal_chat_free_daily_usd:
+            raise ValueError(
+                "HILAL_CHAT_PAID_DAILY_USD must be at least HILAL_CHAT_FREE_DAILY_USD, "
+                "otherwise a paying subscriber receives a smaller allowance than a free one"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_scan_retention_bounds(self) -> "Settings":

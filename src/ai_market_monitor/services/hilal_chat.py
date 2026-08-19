@@ -90,11 +90,22 @@ def daily_allowance(settings: Settings, *, paying: bool) -> Decimal:
 
     One reader. The enforcement path and the figure shown in the window both come
     through here, so they cannot disagree about what the allowance is.
+
+    The paid allowance may be stated outright, and that wins when it is. Deriving it as
+    ``free x multiplier`` made the two numbers share one dial: the multiplier is a whole
+    number, so a free allowance of 0.15 could only ever buy a paid one of 0.15, 0.30,
+    0.45 and so on. Wanting 0.15 free and 0.25 paid was not a strange request, it was
+    simply not expressible, and the only way to reach it was to distort the free figure.
+    The multiplier remains the default for anyone who has not stated a paid figure, so
+    nothing changes for a deployment that never sets it.
     """
 
     free = Decimal(str(settings.hilal_chat_free_daily_usd))
     if not paying:
         return free
+    stated = settings.hilal_chat_paid_daily_usd
+    if stated is not None:
+        return Decimal(str(stated))
     return free * Decimal(int(settings.hilal_chat_paid_daily_multiplier))
 
 
