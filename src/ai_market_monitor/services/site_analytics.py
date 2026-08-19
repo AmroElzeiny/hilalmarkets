@@ -161,6 +161,32 @@ def classify_next_action(path: str) -> str:
     return "page"
 
 
+def recorded_within(
+    column: Any,
+    since: datetime,
+    until: datetime,
+    include_until: bool,
+) -> ColumnElement[bool]:
+    """Whether a timestamped row falls in a window. One rule, because it was written thrice.
+
+    The tiles, the tag chips and the sign-up count each carried their own copy of this
+    comparison, across two tables. Three copies of a boundary is how a chip ends up
+    reporting a different number from the tile above it, and the reader blames the filter
+    rather than the edge.
+
+    ``include_until`` exists for the live window only. Windows are half-open so that
+    "this month" and "the month before" cannot both claim a row that landed exactly on
+    the join. That is right for a boundary between two windows, and wrong for the one at
+    the present moment: a row is stamped with ``now()`` as it is written, the report takes
+    its own ``now()`` moments later, and on a clock that advances in steps — about every
+    15ms on Windows — those two readings can be the same value. The row then sits exactly
+    on an excluded edge and the page reports nobody at all. The join between the two
+    windows stays exclusive; only the live edge reaches the present.
+    """
+
+    return and_(column >= since, column <= until if include_until else column < until)
+
+
 def normalize_path(value: str) -> str:
     """The path alone: no host, no query, no fragment, never longer than the column."""
 
@@ -361,7 +387,9 @@ class SiteAnalyticsService:
         previous_since = since - timedelta(days=days)
         selected = TAGS_BY_KEY.get(tag or "")
 
-        current = await self._window(since, now, selected, landing_only)
+        # The live window reaches the present moment; the one before it stops where the
+        # live one starts. See `visits_within` for why only one of them includes its end.
+        current = await self._window(since, now, selected, landing_only, include_until=True)
         earlier = await self._window(previous_since, since, selected, landing_only)
         return {
             "days": days,
@@ -384,10 +412,12 @@ class SiteAnalyticsService:
         until: datetime,
         selected: TagDefinition | None,
         landing_only: bool,
+        *,
+        include_until: bool = False,
     ) -> dict[str, Any]:
         def scoped(statement: Select[Any]) -> Select[Any]:
             statement = statement.where(
-                SiteVisit.started_at >= since, SiteVisit.started_at < until
+                recorded_within(SiteVisit.started_at, since, until, include_until)
             )
             if landing_only:
                 statement = statement.where(SiteVisit.is_landing.is_(True))
@@ -453,8 +483,9 @@ class SiteAnalyticsService:
         signups = int(
             await self.session.scalar(
                 select(func.count(SiteSignupAttribution.id)).where(
-                    SiteSignupAttribution.created_at >= since,
-                    SiteSignupAttribution.created_at < until,
+                    recorded_within(
+                        SiteSignupAttribution.created_at, since, until, include_until
+                    ),
                     *(
                         [SiteSignupAttribution.source == selected.key.split(":", 1)[1]]
                         if selected is not None and selected.key.startswith("source:")
@@ -571,7 +602,10 @@ class SiteAnalyticsService:
         still shown: an empty answer is information, and hiding it makes the page look
         like the tag does not exist."""
 
-        base = and_(SiteVisit.started_at >= since, SiteVisit.started_at < until)
+        # Called only for the live window, so it reaches the present moment like the
+        # tiles above it. A chip that counted fewer visits than the tile beside it would
+        # be read as a filter bug rather than as a boundary.
+        base = recorded_within(SiteVisit.started_at, since, until, True)
         if landing_only:
             base = and_(base, SiteVisit.is_landing.is_(True))
         columns = [
