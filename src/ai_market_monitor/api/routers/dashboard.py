@@ -31,6 +31,8 @@ from ai_market_monitor.core.dashboard_paths import (
     HOME_PATH,
     INTEGRATIONS_PATH,
     LIFECYCLES_PATH,
+    MONITOR_PATH,
+    MONITORS_PATH,
 )
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
@@ -2369,6 +2371,22 @@ async def strategy_versions_page(
     )
 
 
+#: Where a person is taken after they act on a monitor.
+#:
+#: Every one of these actions used to end on the AI Setup Chat page, which reopens the
+#: last conversation somebody had. So pressing "Pause" or "Put away" on the Monitors page
+#: threw them into a stale chat about a different monitor, and the anchor they arrived on
+#: named a section of that page that is marked hidden. Nothing they had just done was
+#: visible anywhere on the page they landed on.
+#:
+#: There are only two honest destinations, and both are pages the action is about:
+#: the list of monitors, and the canvas where a new one is drawn. They are imported from
+#: ``core/dashboard_paths.py`` rather than written here, so a page that moves address
+#: cannot leave these redirects pointing at nothing.
+_AFTER_MONITOR_ACTION = MONITORS_PATH
+_AFTER_MONITOR_DELETED = MONITOR_PATH
+
+
 @router.post("/dashboard/monitors/{strategy_id}/pause", include_in_schema=False)
 async def pause_monitor(
     strategy_id: UUID,
@@ -2382,10 +2400,10 @@ async def pause_monitor(
             actor_type="dashboard_user",
         )
         await session.commit()
-        return _redirect("/dashboard/strategies/new?message=monitor_paused#monitors")
+        return _redirect(f"{_AFTER_MONITOR_ACTION}?message=monitor_paused")
     except MonitorOperationError as exc:
         await session.rollback()
-        return _redirect(f"/dashboard/strategies/new?error={exc.code}#monitors")
+        return _redirect(f"{_AFTER_MONITOR_ACTION}?error={exc.code}")
 
 
 @router.post("/dashboard/monitors/{strategy_id}/resume", include_in_schema=False)
@@ -2407,10 +2425,10 @@ async def resume_monitor(
             actor_type="dashboard_user",
         )
         await session.commit()
-        return _redirect("/dashboard/strategies/new?message=monitor_resumed#monitors")
+        return _redirect(f"{_AFTER_MONITOR_ACTION}?message=monitor_resumed")
     except MonitorOperationError as exc:
         await session.rollback()
-        return _redirect(f"/dashboard/strategies/new?error={exc.code}#monitors")
+        return _redirect(f"{_AFTER_MONITOR_ACTION}?error={exc.code}")
 
 
 @router.post("/dashboard/monitors/{strategy_id}/delete", include_in_schema=False)
@@ -2426,10 +2444,14 @@ async def delete_monitor(
             actor_type="dashboard_user",
         )
         await session.commit()
-        return _redirect("/dashboard/strategies/new?message=monitor_deleted#monitors")
+        # The monitor is gone, so the list is not what somebody wants next — a fresh
+        # canvas is. The message still travels, so the canvas opens with "Your monitor
+        # was put away" above it and nothing else to read.
+        return _redirect(f"{_AFTER_MONITOR_DELETED}?message=monitor_deleted")
     except MonitorOperationError as exc:
         await session.rollback()
-        return _redirect(f"/dashboard/strategies/new?error={exc.code}#monitors")
+        # Nothing was put away, so the list is still the right place to stand.
+        return _redirect(f"{_AFTER_MONITOR_ACTION}?error={exc.code}")
 
 
 @router.post(
@@ -2456,7 +2478,7 @@ async def prepare_capability_repair(
         await session.commit()
     except ValueError:
         await session.rollback()
-        return _redirect("/dashboard/strategies/new?error=repair_revision_unavailable#monitors")
+        return _redirect(f"{_AFTER_MONITOR_ACTION}?error=repair_revision_unavailable")
     return _redirect(f"/dashboard/strategies/{strategy.id}/builder?message=repair_revision_ready")
 
 
@@ -2482,8 +2504,8 @@ async def discard_capability_repair(
         await session.commit()
     except ValueError:
         await session.rollback()
-        return _redirect("/dashboard/strategies/new?error=repair_revision_unavailable#monitors")
-    return _redirect("/dashboard/strategies/new?message=repair_discarded#monitors")
+        return _redirect(f"{_AFTER_MONITOR_ACTION}?error=repair_revision_unavailable")
+    return _redirect(f"{_AFTER_MONITOR_ACTION}?message=repair_discarded")
 
 
 @router.post(
@@ -2506,7 +2528,7 @@ async def quarantine_capability_extension(
         reason="Owner requested immediate quarantine from the Watchlist dashboard.",
     )
     await session.commit()
-    return _redirect("/dashboard/strategies/new?message=mechanic_quarantined#monitors")
+    return _redirect(f"{_AFTER_MONITOR_ACTION}?message=mechanic_quarantined")
 
 
 @router.post(
@@ -2528,7 +2550,7 @@ async def restore_capability_extension(
         user_id=user.id,
     )
     await session.commit()
-    return _redirect("/dashboard/strategies/new?message=mechanic_restored#monitors")
+    return _redirect(f"{_AFTER_MONITOR_ACTION}?message=mechanic_restored")
 
 
 @router.get("/dashboard/create-monitor", response_class=HTMLResponse, include_in_schema=False)

@@ -1,7 +1,7 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260819-canvas-1">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-watch-test.css') }}?v=20260819-canvas-1">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260819-canvas-2">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-watch-test.css') }}?v=20260819-canvas-2">
 {% endblock %}
 {% block content %}
 
@@ -161,6 +161,25 @@
           <span data-icon="settings" data-icon-class="icon-sm"></span>Change it
         </a>
 
+        {#- A corrected copy of this monitor is waiting, and it is offered here, on the
+            monitor it belongs to. The only place it existed before was a section of the
+            setup-chat page that is never shown — so the Telegram message telling
+            somebody a fix was ready led to a page with no fix anywhere on it. -#}
+        {% if item.repair_id %}
+        <button class="t-action" type="button"
+                data-w-ask="repair"
+                data-name="{{ item.name }}"
+                data-action="/dashboard/capability-extensions/{{ item.repair_id }}/prepare-repair">
+          <span data-icon="refresh" data-icon-class="icon-sm"></span>Look at the fix
+        </button>
+        <button class="t-action is-quiet" type="button"
+                data-w-ask="repair_discard"
+                data-name="{{ item.name }}"
+                data-action="/dashboard/capability-extensions/{{ item.repair_id }}/discard-repair">
+          <span data-icon="close" data-icon-class="icon-sm"></span>Throw the fix away
+        </button>
+        {% endif %}
+
         {#- Pause and put away both open a question first. The live page used the
             browser's own confirm box for archiving — unstyled, unbranded, and not
             something a screen reader announces as a choice. -#}
@@ -279,4 +298,4 @@
 </dialog>
 
 {% endblock %}
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-watchlists-test.js') }}?v=20260819-canvas-1"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-watchlists-test.js') }}?v=20260819-canvas-2"></script>{% endblock %}

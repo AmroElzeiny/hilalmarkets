@@ -828,9 +828,11 @@ class WhatsAppConversationService:
                 buttons=controls,
             )
         if action == "open":
-            url = await self._dashboard_url(
-                connection, f"/dashboard/strategies/new?strategy_id={strategy.id}#monitors"
-            )
+            # This monitor's own page. It used to be the setup-chat page carrying a
+            # strategy id nothing on that page reads and an anchor naming a section of it
+            # that is marked hidden — so "Open dashboard" for one monitor opened somebody's
+            # last conversation instead, and named no monitor at all.
+            url = await self._dashboard_url(connection, f"/dashboard/strategies/{strategy.id}")
             return WhatsAppSessionText(
                 to=connection.wa_id, body=f"Open this Watchlist securely: {url}"
             )

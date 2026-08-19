@@ -416,6 +416,12 @@ def _watchlist_view(item: dict) -> dict:
             else None
         ),
         "needs_repair": bool(item["pending_repair"]),
+        # The waiting repair's own id, so the card can offer it. Without this the page
+        # knew a fix existed and had no way to name it, and the two buttons that act on
+        # one lived only in a section of the setup-chat page that is never shown.
+        "repair_id": (
+            str(item["pending_repair"].id) if item["pending_repair"] is not None else None
+        ),
         "edit_url": f"/dashboard/strategies/{strategy.id}/builder",
         "opportunities_url": f"{OPPORTUNITIES_PATH}?monitor={strategy.id}",
     }

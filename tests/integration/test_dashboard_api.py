@@ -949,16 +949,30 @@ async def test_dashboard_publish_marks_monitor_active(test_context):
         follow_redirects=False,
     )
     assert paused.status_code == 303
-    assert "message=monitor_paused" in paused.headers["location"]
+    assert paused.headers["location"] == "/dashboard/monitors?message=monitor_paused"
     resumed = await test_context["client"].post(
         f"/dashboard/monitors/{payload['strategy']['id']}/resume",
         follow_redirects=False,
     )
     assert resumed.status_code == 303
-    assert "message=monitor_resumed" in resumed.headers["location"]
+    assert resumed.headers["location"] == "/dashboard/monitors?message=monitor_resumed"
     async with test_context["session_factory"]() as session:
         strategy = await session.get(Strategy, UUID(payload["strategy"]["id"]))
         assert strategy.status == StrategyStatus.ACTIVE
+
+    # Putting a monitor away is the one action whose next page is the canvas: the
+    # monitor is gone, so a list of what is left is not what somebody is there for.
+    deleted = await test_context["client"].post(
+        f"/dashboard/monitors/{payload['strategy']['id']}/delete",
+        follow_redirects=False,
+    )
+    assert deleted.status_code == 303
+    assert deleted.headers["location"] == "/dashboard/monitor?message=monitor_deleted"
+    canvas = await test_context["client"].get(deleted.headers["location"])
+    assert canvas.status_code == 200
+    # The confirmation is a sentence, never the key the code passes around.
+    assert "Your monitor was put away." in canvas.text
+    assert "Monitor Deleted" not in canvas.text
 
 
 async def test_dashboard_publish_requires_notification_channel(test_context):

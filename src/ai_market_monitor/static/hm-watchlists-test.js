@@ -34,6 +34,18 @@ const QUESTIONS = {
     body: "It stops checking and leaves this page. Everything it found stays readable, and nothing is deleted.",
     go: "Put it away",
   },
+  // A corrected copy of a monitor is waiting. Both answers change something, so both
+  // are asked the same way every other change on this page is asked.
+  repair: {
+    title: "Look at the fix?",
+    body: "We prepared a corrected copy of this monitor. Opening it switches nothing on — you read it first, and it only starts working if you approve it.",
+    go: "Open the fix",
+  },
+  repair_discard: {
+    title: "Throw the fix away?",
+    body: "The corrected copy is thrown away, and this monitor keeps working exactly as it does now.",
+    go: "Throw it away",
+  },
 };
 
 function start(scope) {

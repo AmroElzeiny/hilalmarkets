@@ -188,3 +188,69 @@ def test_a_list_that_never_ran_reports_nothing_rather_than_the_words_not_yet():
     assert view["last_checked_exact"] is None
     # And the state it is really in is still said in words.
     assert view["working"]["label"] == "Not looked yet"
+    # Nothing is waiting to be fixed, so the card offers nothing about a fix.
+    assert view["repair_id"] is None
+
+
+def test_a_waiting_fix_is_named_so_the_card_can_offer_it():
+    """A corrected copy of a monitor is offered on the monitor it belongs to.
+
+    The page knew a fix existed — `needs_repair` — and had no way to name it, so the two
+    buttons that act on one lived only in a section of the setup-chat page that is marked
+    hidden. The Telegram message telling somebody a fix was ready opened that page, where
+    no fix appeared anywhere.
+    """
+
+    from uuid import uuid4
+
+    from ai_market_monitor.api.routers.dashboard_test import _watchlist_view
+
+    repair_id = uuid4()
+
+    class _Strategy:
+        id = "22222222-2222-2222-2222-222222222222"
+        name = "A monitor with a fix waiting"
+        description = None
+        active_version_id = None
+
+        class status:  # noqa: N801 - a stand-in for the stored enum
+            value = "active"
+
+    view = _watchlist_view(
+        {
+            "strategy": _Strategy(),
+            "health": type("H", (), {"score": 0, "main_issue": None})(),
+            "latest_scan": None,
+            "methodology": None,
+            "main_bottleneck": None,
+            "eligible_asset_count": 0,
+            "pending_repair": type("R", (), {"id": repair_id})(),
+        }
+    )
+
+    assert view["needs_repair"] is True
+    assert view["repair_id"] == str(repair_id)
+
+
+def test_the_monitors_page_offers_both_answers_to_a_waiting_fix():
+    """Reading the fix and throwing it away are both on the card, and both ask first."""
+
+    from pathlib import Path
+
+    markup = (
+        Path(__file__).resolve().parents[2]
+        / "src/ai_market_monitor/templates/hilal/dashboard_test/watchlists.html"
+    ).read_text(encoding="utf-8")
+
+    assert "/prepare-repair" in markup
+    assert "/discard-repair" in markup
+    # Both go through the page's own question, never the browser's unstyled confirm box.
+    assert 'data-w-ask="repair"' in markup
+    assert 'data-w-ask="repair_discard"' in markup
+
+    questions = (
+        Path(__file__).resolve().parents[2]
+        / "src/ai_market_monitor/static/hm-watchlists-test.js"
+    ).read_text(encoding="utf-8")
+    assert "repair:" in questions
+    assert "repair_discard:" in questions

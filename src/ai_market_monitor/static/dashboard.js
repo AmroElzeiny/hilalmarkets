@@ -1268,7 +1268,7 @@
           }
           await publishStrategyVersion(id, version);
           showToast("Monitor published and marked active.");
-          window.location.href = `/dashboard/strategies/new?message=monitor_published&t=${Date.now()}#monitors`;
+          window.location.href = `/dashboard/monitors?message=monitor_published&t=${Date.now()}`;
           return;
         }
         showToast("Draft monitor saved.");
@@ -3040,7 +3040,7 @@
           await publishStrategyVersion(id, version);
           setBuilderActionStatus("Monitor is live. Opening My Monitors...", "success");
           showToast("Monitor published and marked active.");
-          window.location.href = `/dashboard/strategies/new?message=monitor_published&t=${Date.now()}#monitors`;
+          window.location.href = `/dashboard/monitors?message=monitor_published&t=${Date.now()}`;
           return;
         }
         setBuilderActionStatus("Draft saved successfully. You can keep editing, validate, or start monitoring.", "success");
@@ -6112,7 +6112,7 @@
         });
         window.localStorage.removeItem(pendingMonitorPublishKey);
         showToast("Monitor is active.");
-        window.location.href = `/dashboard/strategies/new?message=monitor_published&t=${Date.now()}#monitors`;
+        window.location.href = `/dashboard/monitors?message=monitor_published&t=${Date.now()}`;
       } catch (error) {
         if (!/Telegram|notification channel/i.test(error.message)) {
           window.localStorage.removeItem(pendingMonitorPublishKey);

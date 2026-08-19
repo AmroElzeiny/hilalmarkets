@@ -291,10 +291,19 @@ async def test_telegram_lifecycles_subscription_feedback_and_support(test_contex
             )
         )
         assert "Pricing" in pricing.text
-        # Pre-launch there is no public pricing page to open, so the reply explains that
-        # rather than offering a button that lands on the waitlist under a price label.
-        assert "invite-only" in pricing.text
-        assert not any(button.url and "/pricing" in button.url for button in pricing.buttons)
+        # The reply follows the gate, and this test used to assert only one side of it.
+        # The product is launched, so the settings say so and the reply names the public
+        # pricing page — while the assertion still demanded the pre-launch sentence, and
+        # failed on every run. Both sides are checked here instead of one.
+        if test_context["settings"].waitlist_mode:
+            # Before launch there is no public pricing page to open, so the reply says
+            # that rather than offering a button that lands on the waitlist under a
+            # price label.
+            assert "invite-only" in pricing.text
+            assert not any(button.url and "/pricing" in button.url for button in pricing.buttons)
+        else:
+            assert "public pricing page" in pricing.text
+            assert any(button.url and "/pricing" in button.url for button in pricing.buttons)
         await service.handle_callback(
             TelegramCallback(
                 callback_query_id="cb-feedback",
@@ -747,7 +756,10 @@ async def test_telegram_approve_before_interpretation_points_to_dashboard(test_c
 
         assert "Action needed" in response.text
         assert "Complete strategy interpretation" in response.text
+        # A button that says "Dashboard" opens the dashboard. It used to open the setup
+        # chat's own page, which is where somebody's last conversation is reopened —
+        # every other "Dashboard" button in the file already opened the dashboard.
         assert any(
-            button.url and "/dashboard/strategies/new" in button.url for button in response.buttons
+            button.url and button.url.endswith("/dashboard") for button in response.buttons
         )
         assert not any(button.text == "Create Monitor" for button in response.buttons)

@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.dashboard_paths import MONITORS_PATH
 from ai_market_monitor.db.models import (
     AISetupChatMessage,
     AISetupChatSession,
@@ -1500,9 +1501,13 @@ class CapabilityExtensionService:
                             TelegramButton(
                                 "Review repair",
                                 "external:capability_repair",
+                                # The Monitors page, which is where a waiting repair is
+                                # offered. This pointed at a section of the setup-chat page
+                                # that is marked hidden, so the button in an already-sent
+                                # message opened a chat with no repair anywhere on it.
                                 url=(
                                     f"{str(self.settings.public_base_url).rstrip('/')}"
-                                    "/dashboard/strategies/new#monitors"
+                                    f"{MONITORS_PATH}"
                                 ),
                             )
                         ]

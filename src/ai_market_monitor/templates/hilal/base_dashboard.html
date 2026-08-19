@@ -29,22 +29,22 @@
   <meta name="description" content="Hilal Markets - Shariah-screened crypto spot intelligence and guided monitoring.">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260819-canvas-1">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260819-canvas-2">
   {# One owner for the cookie banner and its settings window, which this template includes below. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260819-canvas-1">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260819-canvas-1">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260819-canvas-2">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260819-canvas-2">
   {% block page_styles %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260819-canvas-1">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260819-canvas-1">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260819-canvas-2">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260819-canvas-2">
   {#- The shell — the side menu and the topbar — after the sheet it replaces, because it
       is the one owner of both and nothing above may still be describing them. -#}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260819-canvas-1">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260819-canvas-1">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260819-canvas-2">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260819-canvas-2">
   {#- A page whose styles must win over the shared dashboard sheets loads them here.
       `page_styles` above is deliberately kept before them for pages that only add. -#}
   {% block page_styles_late %}{% endblock %}
   {% if hilal_chat|default(false) and settings.hilal_chat_enabled %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260819-canvas-1">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260819-canvas-2">
   {% endif %}
 </head>
 {#- The page guide's identity is decided on the server, not parsed from the URL. Where one
@@ -87,7 +87,34 @@
           'creem_api_key_missing': 'Secure card checkout is not configured yet. No payment was created.',
           'creem_product_missing': 'That card plan and billing period are not configured yet. No payment was created.'
         } %}
-        {% if message %}<div class="notice notice-success" role="status" tabindex="-1" data-page-status><span data-icon="check" data-icon-class="icon"></span><div><strong>Done</strong><p>{{ message.replace('_', ' ').title() }}</p></div></div>{% endif %}
+        {#- What a person reads after something worked.
+
+            Every one of these used to be shown as its own internal key with the
+            underscores swapped for spaces — "Monitor Deleted", "Mechanic Quarantined",
+            "Added To Approved Watchlist". Those are words from the code, and this
+            product is built for beginners. A key with no sentence here still falls back
+            to the old shape, so a new one can never render as nothing. -#}
+        {% set dashboard_messages = {
+          'monitor_deleted': 'Your monitor was put away. Everything it found is kept. Draw a new one below whenever you are ready.',
+          'monitor_paused': 'Your monitor is paused. It has stopped checking the market, and everything it found is kept.',
+          'monitor_resumed': 'Your monitor is watching the market again.',
+          'monitor_published': 'Your monitor is on. It is checking the market now, and it will tell you when what you asked for happens.',
+          'repair_revision_ready': 'A fixed copy of your monitor is ready. Read through it before you switch it on.',
+          'repair_discarded': 'The suggested fix was thrown away. Your monitor did not change.',
+          'mechanic_quarantined': 'That custom rule is switched off. Checks that used it stop safely until you turn it back on.',
+          'mechanic_restored': 'That custom rule is switched back on.',
+          'added_to_approved_watchlist': 'That coin is on your list now.',
+          'alerts_moved_to_lifecycles': 'Your alerts live on the Evidence and Activity page now.',
+          'alert_context_moved_to_lifecycles': 'The proof behind an alert lives on the Evidence and Activity page now.',
+          'analytics_moved_to_overview': 'Those numbers live on your Home page now.',
+          'exports_hidden': 'Downloads are switched off for now.',
+          'free_plan_activated': 'You are on the free plan. Nothing was charged.',
+          'plan_selected': 'Your plan choice was saved.',
+          'trial_started': 'Your Monitor trial has started.',
+          'telegram_connected': 'Telegram is connected. We can reach you there now.',
+          'account_created': 'Your account is ready.'
+        } %}
+        {% if message %}<div class="notice notice-success" role="status" tabindex="-1" data-page-status><span data-icon="check" data-icon-class="icon"></span><div><strong>Done</strong><p>{{ dashboard_messages.get(message, message.replace('_', ' ').title()) }}</p></div></div>{% endif %}
         {% if error %}<div class="notice notice-error" role="alert" tabindex="-1" data-page-status><span data-icon="alert" data-icon-class="icon"></span><div><strong>Needs attention</strong><p>{{ dashboard_error_messages.get(error, error.replace('_', ' ').title()) }}</p></div></div>{% endif %}
         {% block content %}{% endblock %}
       </div>
@@ -106,19 +133,19 @@
   {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
   {% include "hilal/partials/cookie_banner.html" %}
   <div class="dash-toast" id="dash-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260819-canvas-1"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260819-canvas-1"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260819-canvas-2"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260819-canvas-2"></script>
   {#- The side menu and the topbar. One owner for their state: `hilalmarkets.js` and
       `dashboard.js` each used to run their own copy of the minimize logic against the
       same class, from two different stored values. -#}
-  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260819-canvas-1"></script>
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260819-canvas-1"></script>
-  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260819-canvas-1"></script>
-  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260819-canvas-1"></script>{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260819-canvas-1"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260819-canvas-1" defer></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260819-canvas-1" defer></script>
-  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260819-canvas-1"></script>{% endif %}
+  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260819-canvas-2"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260819-canvas-2"></script>
+  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260819-canvas-2"></script>
+  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260819-canvas-2"></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260819-canvas-2"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260819-canvas-2" defer></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260819-canvas-2" defer></script>
+  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260819-canvas-2"></script>{% endif %}
   <script>
     (() => {
       const pageStatus = document.querySelector("[data-page-status]");

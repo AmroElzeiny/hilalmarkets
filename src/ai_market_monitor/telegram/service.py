@@ -11,6 +11,7 @@ from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.dashboard_paths import (
     CONNECTIONS_PATH,
     LIFECYCLES_PATH,
+    MONITORS_PATH,
     OPPORTUNITIES_PATH,
     SETTINGS_PATH,
     SUPPORT_PATH,
@@ -473,7 +474,10 @@ class TelegramBotService:
                 message,
                 "Draft rejected. Nothing was activated.",
                 buttons=[
-                    self._dashboard_button("Dashboard", "/dashboard/strategies/new"),
+                    # A button that says "Dashboard" opens the dashboard. Every other
+                    # one in this file does; these two named the setup chat instead, so
+                    # the same word led to two different places.
+                    self._dashboard_button("Dashboard"),
                     TelegramButton("🏠 Main Menu", "back:main"),
                 ],
             )
@@ -1540,7 +1544,7 @@ class TelegramBotService:
                 TelegramButton("Use a template", "mode_template"),
                 TelegramButton("Describe my setup", "mode_describe"),
                 TelegramButton("Import strategy", "mode_import"),
-                self._dashboard_button("My Drafts", "/dashboard/strategies/new#monitors"),
+                self._dashboard_button("My Drafts", MONITORS_PATH),
                 TelegramButton("Go Back", "back:previous"),
             ],
             menu=[
@@ -1566,7 +1570,7 @@ class TelegramBotService:
                 TelegramButton("Use a template", "mode_template"),
                 TelegramButton("Describe my setup", "mode_describe"),
                 TelegramButton("Import strategy", "mode_import"),
-                self._dashboard_button("My Drafts", "/dashboard/strategies/new#monitors"),
+                self._dashboard_button("My Drafts", MONITORS_PATH),
                 TelegramButton("Go Back", "back:previous"),
             ],
         )
@@ -2184,7 +2188,7 @@ class TelegramBotService:
             text,
             buttons=[
                 *control_buttons,
-                self._dashboard_button("Dashboard", "/dashboard/strategies/new#monitors"),
+                self._dashboard_button("Dashboard", MONITORS_PATH),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -2492,7 +2496,7 @@ class TelegramBotService:
         buttons.extend(
             [
                 TelegramButton("🗄️ Delete", f"monitor:delete:{strategy.id}"),
-                self._dashboard_button("Dashboard", "/dashboard/strategies/new#monitors"),
+                self._dashboard_button("Dashboard", MONITORS_PATH),
                 TelegramButton("📋 My Monitors", "menu:my_monitors"),
             ]
         )
@@ -3155,7 +3159,7 @@ class TelegramBotService:
                     buttons=[
                         TelegramButton("Describe Setup", "mode_describe"),
                         TelegramButton("Use Template", "mode_template"),
-                        self._dashboard_button("My Drafts", "/dashboard/strategies/new#monitors"),
+                        self._dashboard_button("My Drafts", MONITORS_PATH),
                         TelegramButton("Cancel", "cancel"),
                     ],
                 )
@@ -3173,7 +3177,8 @@ class TelegramBotService:
             f"Action needed: {message}",
             buttons=[
                 TelegramButton("Sign up / sign in", "account:auth"),
-                self._dashboard_button("Dashboard", "/dashboard/strategies/new"),
+                # Same rule as above: "Dashboard" opens the dashboard, not the setup chat.
+                self._dashboard_button("Dashboard"),
                 TelegramButton("🏠 Main Menu", "back:main"),
             ],
         )
@@ -3596,7 +3601,10 @@ class TelegramBotService:
             "trial": "/dashboard/trial",
             "builder": "/dashboard/strategies/new",
             "create_monitor": "/dashboard/strategies/new",
-            "monitors": "/dashboard/strategies/new#monitors",
+            # The monitors somebody already has, on the page that lists them. This
+            # pointed at a section of the setup-chat page that is hidden, so the button
+            # landed on a chat and showed no monitors at all.
+            "monitors": MONITORS_PATH,
             "scan": _ONE_TIME_SCAN_PATH,
             "near_miss": LIFECYCLES_PATH,
             "lifecycles": LIFECYCLES_PATH,
