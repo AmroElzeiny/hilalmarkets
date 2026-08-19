@@ -70,7 +70,11 @@ async def test_the_page_says_what_your_plan_lets_you_do(test_context):
     page = await _page(test_context, "sub-allowance@example.com")
 
     assert "data-s-allowance" in page
-    assert "Watchlists running at once" in page
+    # "Monitor" is what the product calls the thing that runs. This row called it a
+    # Watchlist, which is the word for a saved list of coins — a different object, and
+    # the same confusion that had the Monitors page answering at `/dashboard/watchlists`.
+    assert "Monitors running at once" in page
+    assert "Watchlists running at once" not in page
 
 
 async def test_an_allowance_of_none_is_never_drawn_as_a_zero(test_context):

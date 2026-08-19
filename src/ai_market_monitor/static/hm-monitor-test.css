@@ -783,9 +783,9 @@ body.hilal-dashboard .hm-m .m-echo small {
   font-weight: 500;
 }
 
-body.hilal-dashboard .hm-m .m-field { display: flex; flex-direction: column; gap: var(--t-2); }
+body.hilal-dashboard :is(.hm-m, dialog.m-launch) .m-field { display: flex; flex-direction: column; gap: var(--t-2); }
 
-body.hilal-dashboard .hm-m .m-field > .m-field-label {
+body.hilal-dashboard :is(.hm-m, dialog.m-launch) .m-field > .m-field-label {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -795,13 +795,13 @@ body.hilal-dashboard .hm-m .m-field > .m-field-label {
   font-weight: 500;
 }
 
-body.hilal-dashboard .hm-m .m-field-need {
+body.hilal-dashboard :is(.hm-m, dialog.m-launch) .m-field-need {
   color: var(--t-copy);
   font-size: .72rem;
   font-weight: 400;
 }
 
-body.hilal-dashboard .hm-m .m-field-help { color: var(--t-copy); font-size: .78rem; line-height: 1.5; }
+body.hilal-dashboard :is(.hm-m, dialog.m-launch) .m-field-help { color: var(--t-copy); font-size: .78rem; line-height: 1.5; }
 
 body.hilal-dashboard .hm-m .m-choices { display: flex; flex-wrap: wrap; gap: var(--t-2); }
 
@@ -824,6 +824,16 @@ body.hilal-dashboard .hm-m .m-choice[aria-pressed="true"] {
   border-color: var(--t-ink);
   background: var(--t-ink);
   color: var(--t-surface);
+}
+
+/* "not set up" beside a way of being told. Quiet, and still readable when the choice
+   is pressed — the note is the reason a person would press it and then go and fix it.
+   The opacity is .85 rather than .75 on purpose: the darker value takes small text on
+   white below the 4.5:1 AA floor, and this is small text. */
+body.hilal-dashboard .hm-m .m-choice-note {
+  margin-inline-start: var(--t-1);
+  font-size: .74rem;
+  opacity: .85;
 }
 
 body.hilal-dashboard .hm-m .m-number {
@@ -865,7 +875,7 @@ body.hilal-dashboard .hm-m .m-select {
   font-size: .85rem;
 }
 
-body.hilal-dashboard .hm-m .m-text {
+body.hilal-dashboard :is(.hm-m, dialog.m-launch) .m-text {
   width: 100%;
   min-height: 44px;
   padding: var(--t-2) var(--t-4);
@@ -877,7 +887,7 @@ body.hilal-dashboard .hm-m .m-text {
   font-size: .85rem;
 }
 
-body.hilal-dashboard .hm-m .m-field-warn {
+body.hilal-dashboard :is(.hm-m, dialog.m-launch) .m-field-warn {
   display: flex;
   align-items: flex-start;
   gap: var(--t-2);
@@ -886,7 +896,7 @@ body.hilal-dashboard .hm-m .m-field-warn {
   line-height: 1.45;
 }
 
-body.hilal-dashboard .hm-m .m-field-warn .icon-sm { flex: none; margin-top: 2px; }
+body.hilal-dashboard :is(.hm-m, dialog.m-launch) .m-field-warn .icon-sm { flex: none; margin-top: 2px; }
 
 body.hilal-dashboard .hm-m .m-inspector-foot {
   display: flex;
@@ -1223,6 +1233,524 @@ body.hilal-dashboard dialog.m-shortcuts kbd {
   text-align: center;
 }
 
+/* ── Choosing coins: search, suggestions, Favorites ────────────────────────── */
+
+/* One search box, one suggestion list, one row of chosen coins. Nothing here invents a
+   colour or a radius: the box is the same shape as every other field on this panel, and
+   the one accent is the tick on a chosen coin. */
+
+body.hilal-dashboard .hm-m .m-search {
+  display: flex;
+  align-items: center;
+  gap: var(--t-2);
+  padding-inline-start: var(--t-3);
+  border: 1px solid var(--t-line-strong);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  color: var(--t-copy);
+  transition: border-color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-search:focus-within { border-color: var(--t-ink); }
+
+body.hilal-dashboard .hm-m .m-search input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--t-3) 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--t-ink);
+  font-family: var(--hm-font-ui);
+  font-size: .85rem;
+}
+
+body.hilal-dashboard .hm-m .m-search input:focus { outline: none; }
+body.hilal-dashboard .hm-m .m-search input::-webkit-search-cancel-button { cursor: pointer; }
+
+body.hilal-dashboard .hm-m .m-suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 264px;
+  margin: var(--t-2) 0 0;
+  padding: var(--t-1);
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard .hm-m .m-suggest-row {
+  display: grid;
+  width: 100%;
+  align-items: center;
+  gap: var(--t-2);
+  grid-template-columns: 26px minmax(0, 1fr) auto auto;
+  padding: var(--t-2);
+  border: 1px solid transparent;
+  border-radius: var(--t-r-sm);
+  background: transparent;
+  color: var(--t-ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    border-color var(--t-fast) var(--t-ease),
+    background var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-suggest-row:hover,
+body.hilal-dashboard .hm-m .m-suggest-row:focus-visible {
+  border-color: var(--t-line-strong);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard .hm-m .m-suggest-mark {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--t-surface);
+  color: var(--t-copy);
+  font-size: .62rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
+body.hilal-dashboard .hm-m .m-suggest-mark img { width: 100%; height: 100%; object-fit: cover; }
+
+body.hilal-dashboard .hm-m .m-suggest-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: .84rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-m .m-suggest-ticker { color: var(--t-copy); font-size: .78rem; }
+
+/* The coins already chosen. A chip, and a button on it that takes one back out —
+   never a row that can only be removed by starting again. */
+body.hilal-dashboard .hm-m .m-coins {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+body.hilal-dashboard .hm-m .m-coin {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--t-1) 0 var(--t-3);
+  border: 1px solid var(--t-accent-pale);
+  border-radius: 999px;
+  background: var(--t-accent-pale);
+  color: var(--t-accent-text);
+}
+
+body.hilal-dashboard .hm-m .m-coin-name {
+  font-family: var(--hm-font-display);
+  font-size: .78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: .01em;
+}
+
+body.hilal-dashboard .hm-m .m-coin-drop {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-coin-drop:hover { background: rgb(0 0 0 / .08); }
+
+/* Favorites lists. */
+body.hilal-dashboard .hm-m .m-lists { display: flex; flex-direction: column; gap: var(--t-2); }
+
+body.hilal-dashboard .hm-m .m-list {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--t-3);
+  min-height: 46px;
+  padding: var(--t-2) var(--t-3);
+  border: 1px solid var(--t-line-strong);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  color: var(--t-ink);
+  font: inherit;
+  font-size: .84rem;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    border-color var(--t-fast) var(--t-ease),
+    background var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-list:hover { border-color: var(--t-ink); }
+
+body.hilal-dashboard .hm-m .m-list[aria-checked="true"] {
+  border-color: var(--t-accent-text);
+  background: var(--t-accent-pale);
+  color: var(--t-accent-text);
+}
+
+body.hilal-dashboard .hm-m .m-list-count { flex: none; color: inherit; font-size: .76rem; opacity: .85; }
+
+body.hilal-dashboard .hm-m .m-pick-bar { display: flex; flex-wrap: wrap; gap: var(--t-2); }
+body.hilal-dashboard .hm-m .m-pick-bar .t-action { flex: 0 1 auto; min-height: 38px; font-size: .78rem; }
+body.hilal-dashboard .hm-m .m-pick-bar .t-action[aria-pressed="true"] {
+  border-color: var(--t-accent-text);
+  background: var(--t-accent-pale);
+  color: var(--t-accent-text);
+}
+
+body.hilal-dashboard .hm-m .m-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-2);
+  margin: var(--t-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A tick and a colour, never colour on its own — `brand guide.md` §10 and §18. */
+body.hilal-dashboard .hm-m .m-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  min-height: 38px;
+  padding: 0 var(--t-3);
+  border: 1px solid var(--t-line-strong);
+  border-radius: 999px;
+  background: var(--t-surface);
+  color: var(--t-copy);
+  font: inherit;
+  font-size: .78rem;
+  cursor: pointer;
+  transition:
+    border-color var(--t-fast) var(--t-ease),
+    background var(--t-fast) var(--t-ease),
+    color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard .hm-m .m-pick-tick { display: inline-flex; opacity: .25; }
+body.hilal-dashboard .hm-m .m-pick[aria-checked="true"] {
+  border-color: var(--t-accent-text);
+  background: var(--t-accent-pale);
+  color: var(--t-accent-text);
+}
+body.hilal-dashboard .hm-m .m-pick[aria-checked="true"] .m-pick-tick { opacity: 1; }
+body.hilal-dashboard .hm-m .m-pick:hover { border-color: var(--t-ink); }
+
+/* ── The last step ─────────────────────────────────────────────────────────── */
+
+body.hilal-dashboard .hm-m .m-next-step { flex: 0 0 auto; }
+
+body.hilal-dashboard dialog.m-launch .m-launch-body { display: block; }
+
+body.hilal-dashboard dialog.m-launch .m-launch-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-4);
+}
+
+/* The setup, read back. A description list, so a screen reader hears "Coins to watch"
+   and its answer as one pair rather than as two loose lines. */
+body.hilal-dashboard dialog.m-launch .m-readback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-1);
+  margin: 0;
+  padding: var(--t-1);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard dialog.m-launch .m-readback-row {
+  display: grid;
+  gap: var(--t-1) var(--t-4);
+  grid-template-columns: 168px minmax(0, 1fr);
+  padding: var(--t-3);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard dialog.m-launch .m-readback dt {
+  color: var(--t-copy);
+  font-size: .78rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard dialog.m-launch .m-readback dd {
+  margin: 0;
+  color: var(--t-ink-strong);
+  font-size: .88rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard dialog.m-launch .m-readback-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: var(--t-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+body.hilal-dashboard dialog.m-launch .m-readback-card {
+  display: flex;
+  align-items: baseline;
+  gap: var(--t-2);
+  padding-inline-start: calc(var(--t-4) * var(--m-depth, 0));
+  color: var(--t-copy);
+  font-size: .84rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard dialog.m-launch .m-readback-card[data-depth="1"] { --m-depth: 1; }
+body.hilal-dashboard dialog.m-launch .m-readback-card[data-depth="2"] { --m-depth: 2; }
+body.hilal-dashboard dialog.m-launch .m-readback-card[data-depth="3"] { --m-depth: 3; }
+body.hilal-dashboard dialog.m-launch .m-readback-card[data-group="true"] {
+  color: var(--t-ink-strong);
+  font-weight: 500;
+}
+
+body.hilal-dashboard dialog.m-launch .m-readback-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--t-accent);
+  translate: 0 -2px;
+}
+
+body.hilal-dashboard dialog.m-launch .m-readback-card em { font-style: normal; opacity: .75; }
+
+body.hilal-dashboard dialog.m-launch .m-launch-promise {
+  display: flex;
+  align-items: center;
+  gap: var(--t-2);
+}
+
+/* The risk note. A real tick box with the words beside it, at a size a finger can
+   reach — never a line of small print somebody is assumed to have read. */
+body.hilal-dashboard dialog.m-launch .m-consent {
+  display: grid;
+  align-items: start;
+  gap: var(--t-3);
+  grid-template-columns: 20px minmax(0, 1fr);
+  padding: var(--t-4);
+  border: 1px solid var(--t-line-strong);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  color: var(--t-copy);
+  cursor: pointer;
+  font-size: .82rem;
+  line-height: 1.55;
+  transition: border-color var(--t-fast) var(--t-ease);
+}
+
+body.hilal-dashboard dialog.m-launch .m-consent:hover { border-color: var(--t-ink); }
+body.hilal-dashboard dialog.m-launch .m-consent:focus-within { border-color: var(--t-ink); }
+
+body.hilal-dashboard dialog.m-launch .m-consent input {
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  accent-color: var(--t-accent-text);
+  cursor: pointer;
+}
+
+body.hilal-dashboard dialog.m-launch .m-consent strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--t-ink-strong);
+  font-weight: 500;
+}
+
+/* The bar. It says "something is happening", then it says what happened — colour and
+   a word together, because colour alone is never a status here. */
+body.hilal-dashboard dialog.m-launch .m-bar-track {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--hm-neutral-bg);
+}
+
+body.hilal-dashboard dialog.m-launch .m-bar-fill {
+  display: block;
+  width: 12%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--t-accent);
+  transition: width var(--t-base) var(--t-ease), background var(--t-base) var(--t-ease);
+}
+
+body.hilal-dashboard dialog.m-launch .m-bar-track[data-state="ok"] .m-bar-fill { background: var(--t-accent-text); }
+body.hilal-dashboard dialog.m-launch .m-bar-track[data-state="partial"] .m-bar-fill { background: var(--hm-warning); }
+body.hilal-dashboard dialog.m-launch .m-bar-track[data-state="failed"] .m-bar-fill { background: var(--hm-danger); }
+
+body.hilal-dashboard dialog.m-launch .m-launch-status {
+  color: var(--t-copy);
+  font-size: .84rem;
+}
+
+body.hilal-dashboard dialog.m-launch .m-sends {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+body.hilal-dashboard dialog.m-launch .m-send {
+  display: grid;
+  align-items: center;
+  gap: var(--t-2) var(--t-3);
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  padding: var(--t-3);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+}
+
+body.hilal-dashboard dialog.m-launch .m-send-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--t-r-sm);
+  background: var(--t-quiet);
+  color: var(--t-ink-strong);
+}
+
+body.hilal-dashboard dialog.m-launch .m-send-name { font-size: .86rem; font-weight: 500; }
+
+body.hilal-dashboard dialog.m-launch .m-send-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-1);
+  color: var(--t-copy);
+  font-size: .78rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard dialog.m-launch .m-send-why {
+  grid-column: 2 / -1;
+  color: var(--t-copy);
+  font-size: .78rem;
+  line-height: 1.45;
+}
+
+/* The message travelling. One dot, left to right, along the row it belongs to — the
+   left-to-right product flow `brand guide.md` §15 asks for, and it stops the moment an
+   answer arrives rather than looping. */
+body.hilal-dashboard dialog.m-launch .m-send-track {
+  position: relative;
+  grid-column: 2 / 3;
+  grid-row: 2;
+  overflow: hidden;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--hm-neutral-bg);
+}
+
+body.hilal-dashboard dialog.m-launch .m-send-dot {
+  position: absolute;
+  inset-block: -2px;
+  width: 34px;
+  border-radius: 999px;
+  background: var(--t-accent);
+  opacity: 0;
+}
+
+body.hilal-dashboard dialog.m-launch .m-send[data-state="sending"] .m-send-dot {
+  opacity: 1;
+  animation: m-send-fly 1.15s var(--t-ease) infinite;
+}
+
+body.hilal-dashboard dialog.m-launch .m-send[data-state="sent"] { border-color: var(--t-accent-pale); }
+body.hilal-dashboard dialog.m-launch .m-send[data-state="sent"] .m-send-state { color: var(--t-accent-text); }
+body.hilal-dashboard dialog.m-launch .m-send[data-state="sent"] .m-send-mark {
+  background: var(--t-accent-pale);
+  color: var(--t-accent-text);
+}
+
+body.hilal-dashboard dialog.m-launch .m-send[data-state="failed"] { border-color: var(--hm-danger-line); }
+body.hilal-dashboard dialog.m-launch .m-send[data-state="failed"] .m-send-state { color: var(--hm-danger); }
+body.hilal-dashboard dialog.m-launch .m-send[data-state="failed"] .m-send-mark {
+  background: var(--hm-danger-bg);
+  color: var(--hm-danger);
+}
+
+@keyframes m-send-fly {
+  0% { left: -34px; }
+  100% { left: 100%; }
+}
+
+body.hilal-dashboard dialog.m-launch .m-outcome {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--t-3);
+  padding: var(--t-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-lg);
+  background: var(--t-quiet);
+}
+
+body.hilal-dashboard dialog.m-launch .m-outcome strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--t-ink-strong);
+  font-family: var(--hm-font-display);
+  font-size: 1.05rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard dialog.m-launch .m-outcome-mark {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--t-surface);
+  color: var(--t-copy);
+}
+
+body.hilal-dashboard dialog.m-launch .m-outcome[data-tone="ok"] { border-color: var(--t-accent-pale); }
+body.hilal-dashboard dialog.m-launch .m-outcome[data-tone="ok"] .m-outcome-mark {
+  background: var(--t-accent-pale);
+  color: var(--t-accent-text);
+}
+body.hilal-dashboard dialog.m-launch .m-outcome[data-tone="mixed"] { border-color: var(--hm-warning-bg); }
+body.hilal-dashboard dialog.m-launch .m-outcome[data-tone="mixed"] .m-outcome-mark {
+  background: var(--hm-warning-bg);
+  color: var(--hm-warning);
+}
+body.hilal-dashboard dialog.m-launch .m-outcome[data-tone="bad"] { border-color: var(--hm-danger-line); }
+body.hilal-dashboard dialog.m-launch .m-outcome[data-tone="bad"] .m-outcome-mark {
+  background: var(--hm-danger-bg);
+  color: var(--hm-danger);
+}
+
 /* ── Narrower screens ──────────────────────────────────────────────────────── */
 
 @media (max-width: 1080px) {
@@ -1257,6 +1785,19 @@ body.hilal-dashboard dialog.m-shortcuts kbd {
 }
 
 @media (max-width: 620px) {
+  /* The read-back is a label beside its answer on a wide screen and a label above it
+     on a narrow one. A fixed 168px first column left the answers in a strip too thin
+     to read a sentence in. */
+  body.hilal-dashboard dialog.m-launch .m-readback-row { grid-template-columns: minmax(0, 1fr); }
+  body.hilal-dashboard dialog.m-launch .m-send { grid-template-columns: 34px minmax(0, 1fr); }
+  body.hilal-dashboard dialog.m-launch .m-send-state { grid-column: 2; }
+  body.hilal-dashboard dialog.m-launch .m-send-track { grid-row: 3; }
+  /* The row wraps rather than dropping its status. "Eligible" and "Eligible with
+     qualifications" are not the same answer, and a narrow screen is not a reason to
+     show only one of them — `brand guide.md` §10 and §18. */
+  body.hilal-dashboard .hm-m .m-suggest-row { grid-template-columns: 26px minmax(0, 1fr) auto; }
+  body.hilal-dashboard .hm-m .m-suggest-row .t-pill { grid-column: 2 / -1; justify-self: start; }
+
   body.hilal-dashboard dialog.m-library .m-lib-body { grid-template-columns: minmax(0, 1fr); }
   body.hilal-dashboard dialog.m-library .m-lib-rail { max-height: none; flex-direction: row; overflow-x: auto; padding-bottom: var(--t-1); }
   body.hilal-dashboard dialog.m-library .m-lib-cat { flex: 0 0 auto; }
@@ -1270,6 +1811,13 @@ body.hilal-dashboard dialog.m-shortcuts kbd {
    two that would still read as motion are stopped outright here. */
 @media (prefers-reduced-motion: reduce) {
   body.hilal-dashboard .hm-m .m-load-dot { animation: none; opacity: 1; scale: 1; }
+  /* The message travelling along a row repeats until an answer arrives, so it has to
+     be stopped outright rather than shortened. The row still says "Sending…" in words,
+     which is the part that carries the meaning. */
+  body.hilal-dashboard dialog.m-launch .m-send[data-state="sending"] .m-send-dot {
+    animation: none;
+    opacity: 0;
+  }
   body.hilal-dashboard .hm-m .m-node:hover,
   body.hilal-dashboard .hm-m .m-starter:hover,
   body.hilal-dashboard .hm-m .m-choice:hover,

@@ -1001,7 +1001,8 @@ class ShariaAdminDashboardService:
                     else "No approval is created by the currently available operational actions."
                 ),
                 "publication": (
-                    "Approval does not publish. Publication remains a separate confirmed action."
+                    "Approving publishes the Passport in the same step, unless a second "
+                    "reviewer is required or written permission is still missing."
                 ),
                 "previous_version": (
                     f"Current public version {publication.version} remains active until "
@@ -1013,7 +1014,7 @@ class ShariaAdminDashboardService:
                 "customer_visibility": (
                     f"{len({row.strategy_id for row in impact_rows})} Watchlists and "
                     f"{len({row.user_id for row in impact_rows})} users may be affected "
-                    "only after a separate publication or safety-hold action."
+                    "once this is published."
                 ),
                 "second_approval": (
                     "A second reviewer is required by current policy."
@@ -1021,8 +1022,8 @@ class ShariaAdminDashboardService:
                     else "No second approval is currently recorded as required."
                 ),
                 "notifications": (
-                    "Approval alone sends no customer status notification. "
-                    "Publication and safety-hold workflows determine audited delivery."
+                    "Customer status notifications follow publication and safety-hold "
+                    "workflows, which record every delivery."
                 ),
             },
             "overdue": bool(
@@ -1229,15 +1230,18 @@ def _evidence_state(
     dossier: AssetResearchDossier | None,
     now: datetime,
 ) -> str:
+    # Most actionable fact first. "Stale" only means the sources are worth re-checking;
+    # missing or unreadable evidence is the thing that actually stops a decision, and
+    # showing the reminder over it hid the real problem behind a softer word.
+    if dossier is None:
+        return "unavailable"
+    if dossier.missing_information_count or dossier.evidence_completeness < 1:
+        return "incomplete"
     if (
         row.source_freshness_deadline is not None
         and _aware(row.source_freshness_deadline) < now
     ):
         return "stale"
-    if dossier is None:
-        return "unavailable"
-    if dossier.missing_information_count or dossier.evidence_completeness < 1:
-        return "incomplete"
     return "current"
 
 

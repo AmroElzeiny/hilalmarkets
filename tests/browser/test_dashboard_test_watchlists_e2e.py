@@ -10,6 +10,8 @@ failed request, so "no bugs" is enforced by the harness rather than by reading.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -23,7 +25,7 @@ from tests.browser.conftest import (
     unique_email,
 )
 
-PAGE = "/dashboard/watchlists"
+PAGE = "/dashboard/monitors"
 
 
 def _with_lists(page: Page, base_url: str, browser_app) -> None:
@@ -47,16 +49,24 @@ def _empty(page: Page, base_url: str) -> None:
 # ── What it says ─────────────────────────────────────────────────────────────
 
 
-def test_a_person_with_no_lists_is_shown_the_two_ways_to_make_one(
+def test_a_person_with_no_lists_is_shown_the_way_to_make_one(
     page: Page, base_url: str
 ) -> None:
+    """One way, and it is the canvas.
+
+    There used to be two — the assistant and the canvas — side by side. Authoring never
+    requires the assistant, so the second card asked a beginner to choose between two
+    things before they knew what either one was. It is gone; what is left has to work.
+    """
+
     _empty(page, base_url)
     expect(page.locator(".w-first")).to_be_visible()
     ways = page.locator(".w-way")
-    expect(ways).to_have_count(2)
-    # Both go somewhere real.
-    for index in range(2):
-        assert ways.nth(index).get_attribute("href")
+    expect(ways).to_have_count(1)
+    expect(ways.first).to_contain_text("Draw it on the canvas")
+    assert ways.first.get_attribute("href"), "the one way on the page goes nowhere"
+    ways.first.click()
+    page.wait_for_url(re.compile(r"/dashboard/monitor$"), timeout=30_000)
 
 
 def test_every_card_says_what_it_is_doing_in_words(

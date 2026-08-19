@@ -98,8 +98,9 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `SHARIA_AI_ALLOW_STANDARD_FALLBACK` | Allows an explicit standard-tier fallback; default is fail-closed `false`. |
 | `SHARIA_REVIEW_REMINDER_HOURS` | Reminder window for open review cases. Default: `6`. |
 | `SHARIA_REVIEW_SLA_HOURS` | Initial due-date window for review cases. Default: `48`. |
-| `REQUIRE_SECOND_REVIEWER` | When true, the reviewer cannot publish the same decision. Default: `false`. |
-| `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` | Authority import and approved-source monitoring interval. Default: `24` hours. |
+| `REQUIRE_SECOND_REVIEWER` | When true, approving does not publish: a different reviewer must publish. Default: `false`, so approving publishes in the same step. |
+| `SHARIA_PACK_EVIDENCE_MAX_AGE_DAYS` | How old retained evidence may be, in days, when deciding an import-pack case. Default: `90`. A Shariah-governance number — change it with the governance owner. |
+| `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` | Authority import and approved-source monitoring interval. Default: `24` hours. Sets each case's re-check reminder; it never refuses a decision. |
 | `SHARIA_SCRAPER_CONCURRENCY` | Must be `1`; official sources are fetched sequentially. |
 | `SHARIA_SCRAPER_OBEY_ROBOTS` | Must remain `true` in staging and production. |
 | `SHARIA_SCRAPER_DOWNLOAD_DELAY_SECONDS` | Delay between official-source requests; deployed minimum is one second. |
@@ -476,8 +477,9 @@ active application `ADMIN`, then provision explicit grants once:
 
 The command is idempotent and records one audit event for each newly activated `SYSTEM_ADMIN`,
 `RESEARCHER`, `REVIEWER`, and `PUBLISHER` grant. In staging/production an ADMIN without an explicit
-grant cannot perform governance mutations. `REQUIRE_SECOND_REVIEWER=false` keeps approval and
-publication separate while allowing the current one-owner operation.
+grant cannot perform governance mutations. With `REQUIRE_SECOND_REVIEWER=false`, approving records
+the approval and publishes the Passport in the same action — two audited governed steps, one press.
+Set it to `true` to keep the two apart and require a different person for the publication.
 
 Application ADMIN authentication and scoped CSRF validation are always authoritative. In
 production, also set `SYSTEM_BRAIN_CLOUDFLARE_ACCESS_REQUIRED=true` and place `/system-brain*`

@@ -256,7 +256,7 @@ async def test_saved_assets_are_consolidated_into_market_while_scanner_stays_dis
 ):
     await _signup(test_context, "distinct-watch-routes@example.com")
 
-    watchlists = await test_context["client"].get("/dashboard/watchlists")
+    watchlists = await test_context["client"].get("/dashboard/monitors")
     saved_assets = await test_context["client"].get("/dashboard/saved-assets")
     # Trading Assistant was removed and both of its addresses answer 404. The one-time
     # scan itself is unchanged — it is a mode of the builder, and that is where the

@@ -384,7 +384,7 @@ DASHBOARD_NAVIGATION = (
             NavigationItem(
                 "Monitors",
                 "watchlists_page",
-                "watchlists",
+                "monitors",
                 "radar",
                 (
                     "strategy_builder",

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from datetime import UTC, datetime
-from typing import Any, get_args
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -55,14 +55,15 @@ from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.dashboard_paths import (
     CONNECTIONS_PATH,
+    LEGACY_WATCHLISTS_PATH,
     LIFECYCLES_PATH,
     MARKET_PATH,
     MONITOR_PATH,
+    MONITORS_PATH,
     OPPORTUNITIES_PATH,
     SETTINGS_PATH,
     SUBSCRIPTION_PATH,
     SUPPORT_PATH,
-    WATCHLISTS_PATH,
 )
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
@@ -97,7 +98,6 @@ from ai_market_monitor.db.models.enums import (
     StrategyStatus,
 )
 from ai_market_monitor.engine.builder_boolean import boolean_limits
-from ai_market_monitor.schemas.strategy import AlertPolicy
 from ai_market_monitor.services.account_settings import (
     ALERT_DAYS,
     MARKET_PROVIDERS,
@@ -111,7 +111,10 @@ from ai_market_monitor.services.entitlements import EntitlementService, PlanCata
 from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.lifecycle_dashboard import lifecycle_cards
 from ai_market_monitor.services.notification_preferences import (
+    CHANNEL_WORDS,
     NotificationPreferenceService,
+    alert_channel_choices,
+    deliverable_channels,
     offered_channels,
 )
 from ai_market_monitor.services.product_language import (
@@ -126,6 +129,9 @@ from ai_market_monitor.services.product_language import (
     watchlist_presentation,
     why_no_message,
 )
+from ai_market_monitor.services.risk_disclaimer import (
+    has_accepted as has_accepted_risk_note,
+)
 from ai_market_monitor.services.setup_observability import SetupObservabilityService
 from ai_market_monitor.services.support_intake import support_intake_limits
 from ai_market_monitor.services.telegram_account_links import (
@@ -139,47 +145,10 @@ router = APIRouter(tags=["dashboard"])
 #: it is in `dashboard_paths.py`, which is where the address itself lives.
 MARKET_BASE_PATH = MARKET_PATH
 
-#: The words a person reads for each delivery channel.
-#:
-#: Only the words. Which channels exist is not decided here.
-_CHANNEL_WORDS = {
-    "web": ("In the dashboard", "A notice waiting for you the next time you sign in."),
-    "telegram": ("Telegram", "A message from the Hilal Markets bot."),
-    "whatsapp": ("WhatsApp", "A message on WhatsApp."),
-    "email": ("Email", "A message to the address you signed up with."),
-}
-
-
-def _alert_channels(settings: Settings) -> list[dict[str, str]]:
-    """Every way a person can really be told, in the words they read.
-
-    Two questions, both answered by their owner and then met in the middle:
-
-    * *Would the compiler accept it?* — ``AlertPolicy``'s own accepted values, so the
-      canvas can never offer something the alert schema would refuse.
-    * *Can we actually deliver it?* — ``offered_channels``, so a retired channel is
-      never offered however long its value lingers in the schema for old rows.
-
-    Asking only the first question is what put a retired channel on this page. The
-    schema still accepts it so that historical alerts stay readable, so the canvas was
-    offering a way to be told that nothing would ever deliver. The retirement note in
-    ``docs/`` explains why the value has to stay in the enum; ``offered_channels`` is
-    where the list of what we really deliver lives.
-    """
-
-    annotation = AlertPolicy.model_fields["channels"].annotation
-    literal = get_args(annotation)[0] if get_args(annotation) else None
-    accepted = [str(value) for value in get_args(literal)] if literal is not None else []
-    deliverable = {channel.value for channel in offered_channels(settings)}
-    channels: list[dict[str, str]] = []
-    for value in accepted:
-        if value not in deliverable:
-            continue
-        label, explanation = _CHANNEL_WORDS.get(
-            value, (value.replace("_", " ").capitalize(), "")
-        )
-        channels.append({"value": value, "label": label, "explanation": explanation})
-    return channels
+#: Every way a person can really be told, in the words they read. The list itself lives
+#: in `services/notification_preferences.py`, beside `offered_channels`, so the canvas,
+#: the Connections page and the canvas's activation route all read one answer.
+_alert_channels = alert_channel_choices
 
 #: What every page here tells the shared shell about itself.
 #:
@@ -269,10 +238,31 @@ async def monitor_canvas_page(
         monitor_contract_url="/api/v1/dashboard/setup-chat/builder-contract",
         monitor_limits=boolean_limits().to_dict(),
         builder_screening=await _builder_screening_context(session, user, settings),
-        watchlists_path="/dashboard/watchlists",
+        watchlists_path=MONITORS_PATH,
         market_path=MARKET_BASE_PATH,
+        # Where somebody is taken after a monitor is switched on, so the page never
+        # writes a dashboard address of its own.
+        settings_path=SETTINGS_PATH,
     )
-    context["monitor_channels"] = _alert_channels(settings)
+    # WhatsApp is a paid feature. The canvas used to offer it to every plan, while the
+    # Connections page did not — so a person could choose a way of being told that their
+    # plan would never deliver, and hear nothing with no error anywhere.
+    entitlement = await EntitlementService(session).current(user.id)
+    context["monitor_channels"] = _alert_channels(
+        settings,
+        whatsapp_allowed=entitlement.feature_enabled("whatsapp"),
+        # Which of them can reach this person today. The card says so while they choose,
+        # rather than the activation gate saying it after the whole board is built.
+        reachable=await deliverable_channels(session, settings, user_id=user.id),
+    )
+    # Whether this person still has to accept the risk note. Asked once, in the popup
+    # that switches a monitor on, and only when it has not been answered — a page that
+    # asked again every time would be asking for an answer it already had.
+    context["risk_note_needed"] = not await has_accepted_risk_note(
+        session,
+        user_id=user.id,
+        version=settings.disclaimer_version,
+    )
     context.update(_PATH_CHROME)
     # There is no coin on this page, so there is nothing for a Passport popup to open.
     context["passport_quick_view_variant"] = "none"
@@ -431,7 +421,23 @@ def _watchlist_view(item: dict) -> dict:
     }
 
 
-@router.get(WATCHLISTS_PATH, response_class=HTMLResponse, include_in_schema=False)
+@router.get(
+    LEGACY_WATCHLISTS_PATH,
+    include_in_schema=False,
+    name="legacy_watchlists_page",
+)
+async def legacy_watchlists_page() -> RedirectResponse:
+    """The address Monitors used to answer at.
+
+    A permanent redirect, not a second copy of the page: alert email, Telegram buttons
+    and saved bookmarks written before the move still name it, and none of those can be
+    corrected after the fact.
+    """
+
+    return RedirectResponse(MONITORS_PATH, status_code=308)
+
+
+@router.get(MONITORS_PATH, response_class=HTMLResponse, include_in_schema=False)
 async def watchlists_page(
     request: Request,
     user: User = Depends(_require_user),
@@ -452,7 +458,7 @@ async def watchlists_page(
         session=session,
         settings=settings,
         user=user,
-        page="watchlists",
+        page="monitors",
         title="Monitors",
         # The page's own "create" button used to sit inside its heading, and only when
         # there was already at least one monitor — so the emptiest page in the product
@@ -526,7 +532,7 @@ def _channel_card(
     keeps behaving exactly as it did.
     """
 
-    label, explanation = _CHANNEL_WORDS.get(value, (value.capitalize(), ""))
+    label, explanation = CHANNEL_WORDS.get(value, (value.capitalize(), ""))
     if not available:
         # The state line says *what* the state is; the panel below it says *why* and
         # what would change it. Putting the reason in both is the same sentence twice on
@@ -775,7 +781,7 @@ async def connections_page(
         telegram_linked=telegram is not None,
         settings_path="/dashboard/settings",
         opportunities_path=OPPORTUNITIES_PATH,
-        watchlists_path=WATCHLISTS_PATH,
+        watchlists_path=MONITORS_PATH,
     )
     context.update(_PATH_CHROME)
     # No coin on this page, so no Passport popup belongs on it.
@@ -1218,7 +1224,7 @@ async def opportunities_page(
         title="Opportunities",
         # The way back to the monitors that found all this. It was a button inside the
         # page heading; it is the same action in the same place on every page now.
-        topbar_actions=(TopbarAction("Monitors", WATCHLISTS_PATH, "radar"),),
+        topbar_actions=(TopbarAction("Monitors", MONITORS_PATH, "radar"),),
         opportunities=views,
         opportunity_counts=counts,
         opportunity_buckets=_OPPORTUNITY_BUCKETS,
@@ -1228,7 +1234,7 @@ async def opportunities_page(
             (name for identifier, name in watchlists if identifier == selected), ""
         ),
         opportunities_path=OPPORTUNITIES_PATH,
-        watchlists_path=WATCHLISTS_PATH,
+        watchlists_path=MONITORS_PATH,
         market_path=MARKET_BASE_PATH,
         monitor_path=MONITOR_PATH,
         new_watchlist_path="/dashboard/strategies/new",
@@ -1253,8 +1259,11 @@ async def opportunities_page(
 #: page describing an allowance that no longer exists. A limit with no entry here is not
 #: shown at all — an unexplained number is worse than a missing one.
 _ALLOWANCE_WORDS: tuple[tuple[str, str, str, str], ...] = (
-    ("active_strategies", "Watchlists running at once", "radar", "watchlists"),
-    ("symbols_per_strategy", "Coins in one Watchlist", "coins", ""),
+    # "Monitor" is what the product calls the thing that runs, on its own page, in the
+    # side menu and in every message it sends. These two rows called it a Watchlist,
+    # which is the word for a saved list of coins — a different object entirely.
+    ("active_strategies", "Monitors running at once", "radar", "watchlists"),
+    ("symbols_per_strategy", "Coins in one monitor", "coins", ""),
     ("on_demand_scans_per_month", "Market checks a month", "scan", ""),
     ("user_initiated_scans_per_week", "Market checks a week", "scan", ""),
     ("detailed_history_days", "Days of history kept", "history", ""),
@@ -1618,7 +1627,7 @@ async def subscription_page(
         open_for_plan=open_for_plan,
         settings_path=SETTINGS_PATH,
         support_path=SUPPORT_PATH,
-        watchlists_path=WATCHLISTS_PATH,
+        watchlists_path=MONITORS_PATH,
     )
     context.update(_PATH_CHROME)
     # No coin on this page, so no Passport popup belongs on it.
@@ -1723,7 +1732,7 @@ async def settings_page(
         available = value in choosable
         return {
             "value": value,
-            "label": _CHANNEL_WORDS.get(value, (value.capitalize(), ""))[0],
+            "label": CHANNEL_WORDS.get(value, (value.capitalize(), ""))[0],
             "what_it_is": what_it_is,
             "icon": icon,
             "available": available,

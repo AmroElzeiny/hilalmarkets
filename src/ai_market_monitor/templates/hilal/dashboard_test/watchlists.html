@@ -1,7 +1,7 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260819-auth-1">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-watch-test.css') }}?v=20260819-auth-1">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260819-canvas-1">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-watch-test.css') }}?v=20260819-canvas-1">
 {% endblock %}
 {% block content %}
 
@@ -194,19 +194,15 @@
 
   {%- else -%}
 
-  {#- Nothing yet. Says what a monitor is, shows the two ways to make one, and asks
-      for nothing else. -#}
+  {#- Nothing yet. Says what a monitor is, shows the one way to make one, and asks for
+      nothing else. The canvas is that way: it needs no assistant, every condition this
+      platform can run is reachable from its own list, and a person can see the whole
+      rule while they build it. -#}
   <section class="w-first" data-hm-part="Making your first monitor">
     <span class="w-first-mark" aria-hidden="true"><span data-icon="radar" data-icon-class="icon"></span></span>
     <h2>Nothing is being watched yet</h2>
     <p>Tell Hilal Markets what to look out for, and it checks the market for you and says when it happens. You pick everything; nothing is decided for you.</p>
     <div class="w-first-ways">
-      <a class="w-way" href="{{ new_watchlist_path }}">
-        <span class="w-way-mark" aria-hidden="true"><span data-icon="chat" data-icon-class="icon"></span></span>
-        <strong>Answer a few questions</strong>
-        <span>The assistant walks you through it, one step at a time.</span>
-        <span class="w-way-go" aria-hidden="true"><span data-icon="arrow" data-icon-class="icon-sm"></span></span>
-      </a>
       <a class="w-way" href="{{ monitor_path }}">
         <span class="w-way-mark" aria-hidden="true"><span data-icon="branch" data-icon-class="icon"></span></span>
         <strong>Draw it on the canvas</strong>
@@ -283,4 +279,4 @@
 </dialog>
 
 {% endblock %}
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-watchlists-test.js') }}?v=20260819-auth-1"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-watchlists-test.js') }}?v=20260819-canvas-1"></script>{% endblock %}

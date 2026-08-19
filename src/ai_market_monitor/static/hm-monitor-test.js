@@ -9,7 +9,7 @@
  * depends on a model being available or on it having understood a sentence.
  */
 
-import { dismiss, reveal, settleIn } from "./hm-motion.js";
+import { attention, dismiss, prefersReducedMotion, reveal, settleIn } from "./hm-motion.js";
 import { publish } from "./hm-page-context.js";
 import { categoryLook, loadCatalog, searchMechanics } from "./hm-monitor-catalog.js";
 import {
@@ -17,6 +17,8 @@ import {
   checkPlan,
   groupWord,
   missingOn,
+  planIsReady,
+  planReadback,
   planSentence,
   readiness,
   ruleClause,
@@ -52,7 +54,14 @@ async function start(scope) {
 
   // The compiler's own shape limits win over the ones rendered into the page: the
   // page was drawn once, the contract is read now.
-  const store = new PlanStore({ limits: catalog.limits || limits });
+  const store = new PlanStore({
+    limits: catalog.limits || limits,
+    // Which ways of being told can really reach this person. Decided by the server,
+    // handed over with the channel list, and never worked out here.
+    reachableChannels: new Set(
+      channels.filter((channel) => channel.ready !== "false").map((channel) => channel.value),
+    ),
+  });
 
   const announce = find("[data-announce]");
   const coach = find("[data-coach]");
@@ -483,19 +492,278 @@ async function start(scope) {
     </div>`;
   }
 
+  /* ── Which coins ─────────────────────────────────────────────────────────
+   *
+   * Three ways of answering, and two of them need a real second step. "Coins I name
+   * myself" used to store a mode and nothing else, so the board said a person had named
+   * coins when they had named none; "One of my Favorites lists" was the same. Both ask
+   * the question properly now, against the server's own screened list — never a coin
+   * typed free-hand, because a ticker nobody screened is a coin the monitor could never
+   * watch. */
+
+  const coinPicker = {
+    query: "",
+    results: [],
+    searching: false,
+    notice: "",
+    favorites: null,
+    loadingFavorites: false,
+    failed: "",
+  };
+  let coinSearchTimer = null;
+
+  /** Which of the two pickers this panel is showing. Said once. */
+  const usingFavorites = () =>
+    store.plan.universe.mode === "approved_watchlist"
+    || Boolean(store.plan.universe.watchlistId);
+
+  const chosenCoins = () => store.plan.universe.symbols || [];
+
+  /**
+   * Redraw the "Coins to watch" panel without taking the search box away.
+   *
+   * The panel is rebuilt from `innerHTML`, so a redraw while somebody is typing would
+   * destroy the input they are typing into and drop the caret. The value survives on
+   * its own — it is read from `coinPicker.query` — but focus does not, so it is put
+   * back on the same control it left.
+   */
+  function repaintUniverse() {
+    if (currentInspector !== "universe") return;
+    const active = document.activeElement;
+    const wasSearching = Boolean(active && active.matches && active.matches("[data-coin-search]"));
+    paintInspector("universe");
+    if (!wasSearching) return;
+    const again = inspectorBody.querySelector("[data-coin-search]");
+    if (!again) return;
+    again.focus();
+    const end = again.value.length;
+    try {
+      again.setSelectionRange(end, end);
+    } catch {
+      // A `search` input refuses selection in some browsers. Focus is the part that
+      // matters; losing the caret position is not worth failing the redraw over.
+    }
+  }
+
+  async function loadFavorites() {
+    if (coinPicker.favorites || coinPicker.loadingFavorites) return;
+    coinPicker.loadingFavorites = true;
+    try {
+      const response = await fetch("/api/v1/dashboard/monitor-canvas/favorites", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("favorites");
+      const payload = await response.json();
+      coinPicker.favorites = Array.isArray(payload.items) ? payload.items : [];
+      coinPicker.failed = "";
+    } catch {
+      coinPicker.favorites = null;
+      coinPicker.failed = "Your Favorites lists could not be read just now.";
+    } finally {
+      coinPicker.loadingFavorites = false;
+      repaintUniverse();
+    }
+  }
+
+  async function searchCoins(query) {
+    coinPicker.searching = true;
+    repaintUniverse();
+    try {
+      const url = `/api/v1/dashboard/monitor-canvas/coins?q=${encodeURIComponent(query)}&limit=12`;
+      const response = await fetch(url, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("coins");
+      const payload = await response.json();
+      // A late answer to an earlier keystroke must not replace the newer one.
+      if (coinPicker.query !== query) return;
+      coinPicker.results = Array.isArray(payload.items) ? payload.items : [];
+      coinPicker.notice = payload.notice || "";
+      coinPicker.failed = "";
+    } catch {
+      coinPicker.results = [];
+      coinPicker.failed = "The coin list could not be read just now. Nothing was guessed in its place.";
+    } finally {
+      coinPicker.searching = false;
+      repaintUniverse();
+    }
+  }
+
+  function coinChips(symbols) {
+    if (!symbols.length) return "";
+    return `<ul class="m-coins" aria-label="Coins this monitor will watch">
+      ${symbols
+        .map(
+          (symbol) => `<li><span class="m-coin">
+            <span class="m-coin-name">${escapeHtml(symbol)}</span>
+            <button class="m-coin-drop" type="button" data-coin-remove="${escapeHtml(symbol)}"
+                    aria-label="Stop watching ${escapeHtml(symbol)}">${icon("close", "icon-sm")}</button>
+          </span></li>`,
+        )
+        .join("")}
+    </ul>`;
+  }
+
+  function typedCoinPicker() {
+    const chosen = chosenCoins();
+    const rows = coinPicker.results.filter((item) => !chosen.includes(item.symbol));
+    return `
+      <div class="m-field">
+        <span class="m-field-label"><span>Search for a coin</span><span class="m-field-need">Needed</span></span>
+        <span class="m-search">
+          ${icon("search", "icon-sm")}
+          <label class="sr-only" for="m-coin-search">Search for a coin by name or ticker</label>
+          <input id="m-coin-search" type="search" autocomplete="off" spellcheck="false"
+                 placeholder="Try: bitcoin, ETH, sol"
+                 value="${escapeHtml(coinPicker.query)}"
+                 role="combobox" aria-expanded="${rows.length > 0}"
+                 aria-controls="m-coin-results" aria-autocomplete="list"
+                 data-coin-search>
+        </span>
+        ${coinPicker.searching ? `<p class="m-field-help" role="status">Looking…</p>` : ""}
+        ${coinPicker.failed ? `<p class="m-field-warn">${icon("alert", "icon-sm")}<span>${escapeHtml(coinPicker.failed)}</span></p>` : ""}
+        <ul class="m-suggest" id="m-coin-results" role="listbox" aria-label="Coins you can add"
+            ${rows.length ? "" : "hidden"}>
+          ${rows
+            .map(
+              (item) => `<li role="presentation">
+                <button class="m-suggest-row" type="button" role="option" aria-selected="false"
+                        data-coin-add="${escapeHtml(item.symbol)}">
+                  <span class="m-suggest-mark" aria-hidden="true">${
+                    item.logo_url
+                      ? `<img src="${escapeHtml(item.logo_url)}" alt="" loading="lazy">`
+                      : escapeHtml(item.symbol.slice(0, 2))
+                  }</span>
+                  <span class="m-suggest-name">${escapeHtml(item.name)}</span>
+                  <span class="m-suggest-ticker t-figure">${escapeHtml(item.symbol)}</span>
+                  <span class="t-pill" data-tone="${item.status === "eligible" ? "eligible" : "neutral"}">${escapeHtml(item.status_label)}</span>
+                </button>
+              </li>`,
+            )
+            .join("")}
+        </ul>
+        ${
+          !coinPicker.searching && coinPicker.query && !rows.length && !coinPicker.failed
+            ? `<p class="m-field-help">Nothing screened matches “${escapeHtml(coinPicker.query)}”. Only coins with a published Shariah review can be watched.</p>`
+            : ""
+        }
+        ${coinPicker.notice ? `<p class="m-field-warn">${icon("info", "icon-sm")}<span>${escapeHtml(coinPicker.notice)}</span></p>` : ""}
+      </div>
+      <div class="m-field">
+        <span class="m-field-label"><span>Chosen so far</span></span>
+        ${
+          chosen.length
+            ? coinChips(chosen)
+            : `<p class="m-field-warn" data-first-missing tabindex="-1">${icon("alert", "icon-sm")}<span>No coin is chosen yet, and none was chosen for you.</span></p>`
+        }
+        <p class="m-field-help">Keep searching to add more. You can take one out at any time.</p>
+      </div>`;
+  }
+
+  function favoritesPicker() {
+    if (coinPicker.favorites === null) {
+      loadFavorites();
+      return `<div class="m-field">
+        <p class="m-field-help" role="status">${coinPicker.failed ? escapeHtml(coinPicker.failed) : "Reading your Favorites lists…"}</p>
+      </div>`;
+    }
+    if (!coinPicker.favorites.length) {
+      return `<div class="m-field">
+        <p class="m-field-warn" data-first-missing tabindex="-1">${icon("alert", "icon-sm")}<span>You have no Favorites lists yet. Save one from Halal Assets, or choose every eligible coin instead.</span></p>
+        <a class="t-action" href="${escapeHtml(scope.dataset.marketPath || "/dashboard/market")}">${icon("coins", "icon-sm")}Open Halal Assets</a>
+      </div>`;
+    }
+
+    const universe = store.plan.universe;
+    const active = coinPicker.favorites.find((item) => item.id === universe.watchlistId) || null;
+    const chosen = new Set(chosenCoins());
+    const whole = Boolean(active) && universe.mode === "approved_watchlist";
+
+    return `
+      <div class="m-field">
+        <span class="m-field-label"><span>Which list</span><span class="m-field-need">Needed</span></span>
+        <div class="m-lists" role="radiogroup" aria-label="Your Favorites lists">
+          ${coinPicker.favorites
+            .map(
+              (item) => `<button class="m-list" type="button" role="radio"
+                      aria-checked="${item.id === universe.watchlistId}"
+                      data-favorite="${escapeHtml(item.id)}"
+                      data-name="${escapeHtml(item.name)}">
+                <span class="m-list-name">${escapeHtml(item.name)}${item.is_default ? " · your default" : ""}</span>
+                <span class="m-list-count">${item.coins.length} coin${item.coins.length === 1 ? "" : "s"}</span>
+              </button>`,
+            )
+            .join("")}
+        </div>
+        ${
+          active
+            ? ""
+            : `<p class="m-field-warn" data-first-missing tabindex="-1">${icon("alert", "icon-sm")}<span>Pick one list.</span></p>`
+        }
+      </div>
+      ${
+        active
+          ? `<div class="m-field">
+              <span class="m-field-label"><span>Coins on “${escapeHtml(active.name)}”</span></span>
+              ${
+                active.coins.length
+                  ? `<div class="m-pick-bar">
+                      <button class="t-action" type="button" data-pick-all aria-pressed="${whole}">${icon("check", "icon-sm")}Watch the whole list</button>
+                      <button class="t-action is-quiet" type="button" data-pick-none>${icon("close", "icon-sm")}Clear</button>
+                    </div>
+                    <ul class="m-picks" aria-label="Coins on this list">
+                      ${active.coins
+                        .map(
+                          (symbol) => `<li>
+                            <button class="m-pick" type="button" role="switch"
+                                    aria-checked="${whole || chosen.has(symbol)}"
+                                    data-pick="${escapeHtml(symbol)}">
+                              <span class="m-pick-tick" aria-hidden="true">${icon("check", "icon-sm")}</span>
+                              <span class="t-figure">${escapeHtml(symbol)}</span>
+                            </button>
+                          </li>`,
+                        )
+                        .join("")}
+                    </ul>
+                    <p class="m-field-help">${
+                      whole
+                        ? "The whole list is being watched, so a coin you add to it later is watched too."
+                        : chosen.size
+                          ? `Only the ${chosen.size} coin${chosen.size === 1 ? "" : "s"} you ticked. A coin added to the list later is not watched unless you tick it.`
+                          : "Tick the coins you want, or watch the whole list."
+                    }</p>`
+                  : `<p class="m-field-warn">${icon("alert", "icon-sm")}<span>${escapeHtml(active.empty_reason || "This list has no coins in it yet.")}</span></p>`
+              }
+            </div>`
+          : ""
+      }`;
+  }
+
   function paintUniversePanel() {
     inspectorKind.innerHTML = `${icon("coins", "icon-sm")}Coins to watch`;
     const options = catalog.universes || [];
+    const universe = store.plan.universe;
+    const pressed = (value) => {
+      if (value === "approved_watchlist") return usingFavorites();
+      if (value === "explicit_assets") {
+        return universe.mode === "explicit_assets" && !universe.watchlistId;
+      }
+      return universe.mode === value;
+    };
     inspectorBody.innerHTML = `
       <div class="m-field">
         <span class="m-field-label"><span>Which coins</span></span>
         <div class="m-choices" role="group" aria-label="Which coins">
           ${options
-            .map((option) => `<button class="m-choice" type="button" data-universe="${escapeHtml(option.value)}" aria-pressed="${store.plan.universe.mode === option.value}">${escapeHtml(option.label)}</button>`)
+            .map((option) => `<button class="m-choice" type="button" data-universe="${escapeHtml(option.value)}" aria-pressed="${pressed(option.value)}">${escapeHtml(option.label)}</button>`)
             .join("")}
         </div>
-        <p class="m-field-help">${escapeHtml((options.find((option) => option.value === store.plan.universe.mode) || {}).explanation || "")}</p>
+        <p class="m-field-help">${escapeHtml((options.find((option) => pressed(option.value)) || {}).explanation || "")}</p>
       </div>
+      ${usingFavorites() ? favoritesPicker() : ""}
+      ${universe.mode === "explicit_assets" && !universe.watchlistId ? typedCoinPicker() : ""}
       <p class="m-field-help">${icon("lock", "icon-sm")} Whichever you pick, only coins with a published Shariah review are watched.</p>
     `;
   }
@@ -503,15 +771,24 @@ async function start(scope) {
   function paintAlertPanel() {
     inspectorKind.innerHTML = `${icon("bell", "icon-sm")}How you hear about it`;
     const chosen = new Set(store.plan.alert.channels);
+    // A way of being told that cannot reach this person yet says so here, while they
+    // are choosing. Saying it only at the last step would refuse a board somebody had
+    // already finished, for a reason that was known before they started.
+    const waiting = channels.filter(
+      (channel) => chosen.has(channel.value) && channel.ready === "false",
+    );
     inspectorBody.innerHTML = `
       <div class="m-field">
         <span class="m-field-label"><span>Where to send it</span><span class="m-field-need">Needed</span></span>
         <div class="m-choices" role="group" aria-label="Where to send it">
           ${channels
-            .map((channel) => `<button class="m-choice" type="button" data-channel="${escapeHtml(channel.value)}" aria-pressed="${chosen.has(channel.value)}">${escapeHtml(channel.label)}</button>`)
+            .map((channel) => `<button class="m-choice" type="button" data-channel="${escapeHtml(channel.value)}" aria-pressed="${chosen.has(channel.value)}">${escapeHtml(channel.label)}${channel.ready === "false" ? ` <span class="m-choice-note">not set up</span>` : ""}</button>`)
             .join("")}
         </div>
         ${chosen.size ? "" : `<p class="m-field-warn" data-first-missing tabindex="-1">${icon("alert", "icon-sm")}<span>Pick at least one.</span></p>`}
+        ${waiting
+          .map((channel) => `<p class="m-field-warn">${icon("alert", "icon-sm")}<span>${escapeHtml(channel.not_ready_reason || "This one is not set up on your account yet.")}</span></p>`)
+          .join("")}
       </div>
       <div class="m-field">
         <span class="m-field-label"><span>Quiet time between messages</span></span>
@@ -634,7 +911,89 @@ async function start(scope) {
     if (!id) return;
 
     const universe = event.target.closest("[data-universe]");
-    if (universe) { store.setUniverse(universe.dataset.universe); return; }
+    if (universe) {
+      const mode = universe.dataset.universe;
+      store.setUniverse(mode);
+      // Leaving the Favorites picker means leaving the list behind. Keeping the id
+      // would draw the list picker under a mode that does not use it, and would send
+      // a list the person had stopped choosing.
+      if (mode !== "approved_watchlist") store.setUniverseWatchlist(null);
+      if (mode === "eligible_market") store.setUniverseSymbols([]);
+      if (mode === "approved_watchlist") {
+        coinPicker.favorites = null;
+        loadFavorites();
+      }
+      if (mode === "explicit_assets") coinPicker.query = "";
+      return;
+    }
+
+    const addCoin = event.target.closest("[data-coin-add]");
+    if (addCoin) {
+      store.setUniverseSymbols([...chosenCoins(), addCoin.dataset.coinAdd]);
+      say(`${addCoin.dataset.coinAdd} added.`);
+      window.requestAnimationFrame(() => {
+        const box = inspectorBody.querySelector("[data-coin-search]");
+        if (box) box.focus();
+      });
+      return;
+    }
+
+    const dropCoin = event.target.closest("[data-coin-remove]");
+    if (dropCoin) {
+      const symbol = dropCoin.dataset.coinRemove;
+      store.setUniverseSymbols(chosenCoins().filter((item) => item !== symbol));
+      say(`${symbol} removed.`);
+      return;
+    }
+
+    const favorite = event.target.closest("[data-favorite]");
+    if (favorite) {
+      store.setUniverseWatchlist(favorite.dataset.favorite, favorite.dataset.name);
+      // Choosing a list means the whole list until somebody says otherwise. It is the
+      // answer that keeps following the list, so it is the one a person gets by simply
+      // picking the list they already keep.
+      store.setUniverse("approved_watchlist");
+      store.setUniverseSymbols([]);
+      return;
+    }
+
+    if (event.target.closest("[data-pick-all]")) {
+      store.setUniverse("approved_watchlist");
+      store.setUniverseSymbols([]);
+      say("Watching the whole list.");
+      return;
+    }
+
+    if (event.target.closest("[data-pick-none]")) {
+      store.setUniverse("explicit_assets");
+      store.setUniverseSymbols([]);
+      say("No coin from this list is chosen.");
+      return;
+    }
+
+    const pick = event.target.closest("[data-pick]");
+    if (pick) {
+      const list = (coinPicker.favorites || []).find(
+        (item) => item.id === store.plan.universe.watchlistId,
+      );
+      const all = list ? list.coins : [];
+      const symbol = pick.dataset.pick;
+      const whole = store.plan.universe.mode === "approved_watchlist";
+      // Unticking one coin out of a whole list turns "the list" into "these coins", so
+      // the ticked set starts from every coin on it rather than from nothing.
+      const current = whole ? all : chosenCoins();
+      const next = current.includes(symbol)
+        ? current.filter((item) => item !== symbol)
+        : [...current, symbol];
+      if (next.length === all.length && all.length) {
+        store.setUniverse("approved_watchlist");
+        store.setUniverseSymbols([]);
+      } else {
+        store.setUniverse("explicit_assets");
+        store.setUniverseSymbols(next);
+      }
+      return;
+    }
 
     const channel = event.target.closest("[data-channel]");
     if (channel) {
@@ -685,6 +1044,21 @@ async function start(scope) {
 
   let typingTimer = null;
   inspectorBody.addEventListener("input", (event) => {
+    const coinSearch = event.target.closest("[data-coin-search]");
+    if (coinSearch) {
+      window.clearTimeout(coinSearchTimer);
+      coinPicker.query = coinSearch.value.trim();
+      if (!coinPicker.query) {
+        coinPicker.results = [];
+        coinPicker.searching = false;
+        repaintUniverse();
+        return;
+      }
+      // A pause rather than a keystroke. Searching on every letter would ask the server
+      // once per letter for an answer nobody has finished asking for.
+      coinSearchTimer = window.setTimeout(() => searchCoins(coinPicker.query), 240);
+      return;
+    }
     const input = event.target.closest("input[data-set]");
     if (!input || !currentInspector) return;
     window.clearTimeout(typingTimer);
@@ -694,6 +1068,42 @@ async function start(scope) {
     typingTimer = window.setTimeout(() => {
       store.setValue(id, name, input.type === "number" && raw !== "" ? Number(raw) : raw);
     }, 260);
+  });
+
+  /* Reaching the suggestions from the search box, and back.
+   *
+   * A list of options that only a mouse can reach is not a list of options. Down enters
+   * it, Up walks back out to the box, Enter takes the one under the cursor. */
+  inspectorBody.addEventListener("keydown", (event) => {
+    const rows = [...inspectorBody.querySelectorAll("[data-coin-add]")];
+    const box = event.target.closest("[data-coin-search]");
+    if (box) {
+      if (event.key === "ArrowDown" && rows.length) {
+        event.preventDefault();
+        rows[0].focus();
+      }
+      if (event.key === "Enter" && rows.length) {
+        event.preventDefault();
+        rows[0].click();
+      }
+      return;
+    }
+    const row = event.target.closest("[data-coin-add]");
+    if (!row) return;
+    const index = rows.indexOf(row);
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      rows[Math.min(rows.length - 1, index + 1)].focus();
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (index === 0) {
+        const again = inspectorBody.querySelector("[data-coin-search]");
+        if (again) again.focus();
+        return;
+      }
+      rows[index - 1].focus();
+    }
   });
 
   find("[data-inspector-close]").addEventListener("click", () => {
@@ -711,6 +1121,7 @@ async function start(scope) {
   const checkList = find("[data-check-list]");
   const checksToggle = find("[data-checks-toggle]");
   const checksCount = find("[data-checks-count]");
+  const nextStep = find("[data-next-step]");
 
   function paintReadout() {
     const universe = (catalog.universes || []).find((option) => option.value === store.plan.universe.mode);
@@ -722,10 +1133,18 @@ async function start(scope) {
     const checks = checkPlan(store, catalog);
     const score = readiness(checks);
     const open = checks.filter((check) => check.tone !== "pass");
-    meter.dataset.tone = score === 100 ? "ready" : score >= 50 ? "near" : "empty";
+    const ready = planIsReady(checks);
+    meter.dataset.tone = ready ? "ready" : score >= 50 ? "near" : "empty";
     meterFill.style.setProperty("--m-ready", `${score}%`);
-    meterText.textContent = score === 100 ? "Ready to take further" : `${score}% ready`;
+    meterText.textContent = ready ? "Ready to switch on" : `${score}% ready`;
     checksCount.textContent = open.length ? `${open.length} to fix` : "All checks pass";
+
+    // The next step appears the moment there is nothing blocking, and disappears again
+    // if something is taken back out. It arrives with a small movement so it is noticed
+    // without asking for attention — `brand guide.md` §15.
+    const wasHidden = nextStep.hidden;
+    nextStep.hidden = !ready;
+    if (ready && wasHidden) reveal(nextStep, { from: 0.9 });
 
     checkList.innerHTML = checks
       .map((check) => {
@@ -744,6 +1163,351 @@ async function start(scope) {
     if (!button) return;
     board.bringIntoView(button.dataset.show);
     showInspector(button.dataset.show);
+  });
+
+  /* ── The last step: read it back, test it, switch it on ──────────────────
+   *
+   * One popup and three states, because it is one action. A person reads what they
+   * built, presses once, watches the message actually go out, and is told what each
+   * way of being told did.
+   *
+   * Two honesty rules run through all of it:
+   *
+   *   * the monitor is created first and the test is sent after. A test that went out
+   *     first would say "it works" about something that had not been saved;
+   *   * a channel that fails does not undo the monitor, and the popup says so in those
+   *     words. Losing a real, running monitor because Telegram was disconnected would
+   *     be a worse answer than the truth.
+   */
+
+  const launch = document.querySelector("[data-launch]");
+  const launchState = { opener: null, busy: false, monitor: null };
+  const launchStep = (name) => launch.querySelector(`[data-launch-step="${name}"]`);
+  const settingsPath = scope.dataset.settingsPath || "/dashboard/settings";
+
+  const CHANNEL_ICON = {
+    web: "dashboard",
+    email: "mail",
+    telegram: "telegram",
+    whatsapp: "whatsapp",
+  };
+
+  function channelLabel(value) {
+    const found = channels.find((channel) => channel.value === value);
+    return found ? found.label : value;
+  }
+
+  /** The setup, written out the way the board writes it. Never a second wording. */
+  function paintReadback() {
+    const universe = (catalog.universes || []).find(
+      (option) => option.value === store.plan.universe.mode,
+    );
+    const rows = planReadback(store, catalog, {
+      universeLabel: universe ? universe.label.toLowerCase() : "the screened coins",
+      channelLabels: channelLabels(store.plan.alert.channels),
+    });
+    launch.querySelector("[data-launch-readback]").innerHTML = rows
+      .map((row) => {
+        const cards = (row.cards || [])
+          .map(
+            (card) => `<li class="m-readback-card" data-depth="${card.depth}" data-group="${Boolean(card.group)}">
+              ${card.group ? "" : `<span class="m-readback-dot" aria-hidden="true"></span>`}
+              <span>${escapeHtml(card.text)}${card.optional ? ` <em>(nice to have)</em>` : ""}</span>
+            </li>`,
+          )
+          .join("");
+        return `<div class="m-readback-row">
+          <dt>${escapeHtml(row.label)}</dt>
+          <dd>${escapeHtml(row.value)}${cards ? `<ul class="m-readback-cards">${cards}</ul>` : ""}</dd>
+        </div>`;
+      })
+      .join("");
+  }
+
+  function showLaunchStep(name) {
+    for (const step of launch.querySelectorAll("[data-launch-step]")) {
+      step.hidden = step.dataset.launchStep !== name;
+    }
+    const visible = launchStep(name);
+    if (visible) settleIn(visible.children, { from: 8 });
+  }
+
+  function openLaunch() {
+    launchState.opener = document.activeElement;
+    launchState.busy = false;
+    launchState.monitor = null;
+    const nameBox = launch.querySelector("[data-launch-name]");
+    // Whatever they called it last time this popup was open. Never a name we invented:
+    // an empty box is answered by the server's own "My monitor", said once.
+    nameBox.value = launchState.name || "";
+    launch.querySelector("[data-launch-eyebrow]").textContent = "Last step";
+    launch.querySelector("[data-launch-title]").textContent = "Check it over, then switch it on";
+    launch.querySelector("[data-launch-lede]").textContent =
+      "This is your monitor in plain words. Nothing is watching yet.";
+    launch.querySelector("[data-launch-note]").textContent = "Nothing starts until you press the button.";
+    const cancel = launch.querySelector("[data-launch-cancel]");
+    cancel.hidden = false;
+    // Reset, because the failure wording renames it. Re-opening the popup after a
+    // refusal would otherwise still offer "Back to the board" on a fresh review step.
+    cancel.textContent = "Go back to the board";
+    launch.querySelector("[data-launch-go]").hidden = false;
+    launch.querySelector("[data-launch-finish]").hidden = true;
+    launch.querySelector("[data-launch-retry]").hidden = true;
+    // The risk note is only on the page for somebody who has not answered it. Where it
+    // is, the button waits for the answer rather than the answer being assumed.
+    const accept = launch.querySelector("[data-launch-accept]");
+    if (accept) accept.checked = false;
+    launch.querySelector("[data-launch-go]").disabled = Boolean(accept);
+    if (accept) {
+      // A button that cannot be pressed must say what would let it be pressed.
+      launch.querySelector("[data-launch-note]").textContent =
+        "Tick the box above, then press the button.";
+    }
+    launch.querySelector("[data-launch-bar]").hidden = true;
+    paintReadback();
+    showLaunchStep("review");
+    launch.showModal();
+    window.requestAnimationFrame(() => nameBox.focus());
+  }
+
+  /** The board as the server reads it: only the cards that are joined to the monitor. */
+  function planForServer() {
+    const build = (id) => {
+      const node = store.node(id);
+      if (!node) return null;
+      if (node.kind === "rule") {
+        return { kind: "rule", mechanic: node.mechanic, values: node.values, required: node.required !== false };
+      }
+      const children = store
+        .children(id)
+        .map((child) => build(child.id))
+        .filter(Boolean);
+      return { kind: "group", op: node.op, children };
+    };
+    const universe = store.plan.universe;
+    return {
+      name: (launch.querySelector("[data-launch-name]").value || "").trim(),
+      root: build(store.plan.rootId),
+      universe: {
+        mode: universe.mode,
+        watchlist_id: universe.mode === "approved_watchlist" ? universe.watchlistId : null,
+        symbols: universe.mode === "explicit_assets" ? universe.symbols || [] : [],
+      },
+      alert: {
+        channels: [...store.plan.alert.channels],
+        cooldown_minutes: store.plan.alert.cooldownMinutes,
+      },
+    };
+  }
+
+  /** One row per way of being told, drawn before anything is sent. */
+  function paintSendRows(chosen) {
+    launch.querySelector("[data-launch-sends]").innerHTML = chosen
+      .map(
+        (value) => `<li class="m-send" data-send="${escapeHtml(value)}" data-state="waiting">
+          <span class="m-send-mark" aria-hidden="true">${icon(CHANNEL_ICON[value] || "bell", "icon-sm")}</span>
+          <span class="m-send-name">${escapeHtml(channelLabel(value))}</span>
+          <span class="m-send-track" aria-hidden="true"><span class="m-send-dot"></span></span>
+          <span class="m-send-state">Waiting</span>
+        </li>`,
+      )
+      .join("");
+  }
+
+  /**
+   * Let each row land, one at a time, before the popup moves on.
+   *
+   * The point is not decoration: a person watching four rows all flip at once learns
+   * nothing about which one is which. One at a time, with a tick or a cross and a word
+   * beside it, is the difference between "it worked" and "email worked, Telegram did
+   * not". Reduced motion gets the same information with no wait at all.
+   */
+  async function settleSendRows(results) {
+    const step = prefersReducedMotion() ? 0 : 200;
+    for (const item of results) {
+      const row = launch.querySelector(`[data-send="${CSS.escape(item.channel)}"]`);
+      if (row) {
+        row.dataset.state = item.sent ? "sent" : "failed";
+        row.querySelector(".m-send-state").innerHTML =
+          `${icon(item.sent ? "check" : "alert", "icon-sm")}${item.sent ? "Sent" : "Did not send"}`;
+        if (step) attention(row);
+      }
+      if (step) await new Promise((done) => window.setTimeout(done, step));
+    }
+  }
+
+  function paintResultRows(results) {
+    launch.querySelector("[data-launch-results]").innerHTML = results
+      .map(
+        (item) => `<li class="m-send" data-state="${item.sent ? "sent" : "failed"}">
+          <span class="m-send-mark" aria-hidden="true">${icon(CHANNEL_ICON[item.channel] || "bell", "icon-sm")}</span>
+          <span class="m-send-name">${escapeHtml(channelLabel(item.channel))}</span>
+          <span class="m-send-state">${icon(item.sent ? "check" : "alert", "icon-sm")}${item.sent ? "Sent" : "Did not send"}</span>
+          <span class="m-send-why">${escapeHtml(item.detail)}</span>
+        </li>`,
+      )
+      .join("");
+  }
+
+  async function runLaunch() {
+    if (launchState.busy) return;
+    launchState.busy = true;
+    launchState.name = (launch.querySelector("[data-launch-name]").value || "").trim();
+    const chosen = [...store.plan.alert.channels];
+
+    launch.querySelector("[data-launch-eyebrow]").textContent = "Switching it on";
+    launch.querySelector("[data-launch-title]").textContent = "Sending one test message";
+    launch.querySelector("[data-launch-lede]").textContent =
+      "It is being switched on, then one message goes to every way you chose.";
+    launch.querySelector("[data-launch-cancel]").hidden = true;
+    launch.querySelector("[data-launch-go]").hidden = true;
+    launch.querySelector("[data-launch-note]").textContent = "This takes a few seconds.";
+    paintSendRows(chosen);
+    showLaunchStep("sending");
+
+    const bar = launch.querySelector("[data-launch-bar]");
+    const fill = launch.querySelector("[data-launch-bar-fill]");
+    bar.hidden = false;
+    bar.dataset.state = "working";
+    fill.style.width = "12%";
+    // The bar moves because something is happening, not to guess how far along it is.
+    // It stops short of the end until a real answer arrives, and only then finishes.
+    const creep = window.setInterval(() => {
+      const now = Number.parseFloat(fill.style.width) || 12;
+      fill.style.width = `${Math.min(88, now + 6)}%`;
+    }, 420);
+    for (const row of launch.querySelectorAll("[data-send]")) {
+      row.dataset.state = "sending";
+      row.querySelector(".m-send-state").textContent = "Sending…";
+    }
+    launch.querySelector("[data-launch-status]").textContent = "Switching it on…";
+
+    let payload = null;
+    let problem = "";
+    try {
+      const response = await fetch("/api/v1/dashboard/monitor-canvas/activate", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          plan: planForServer(),
+          // The board's own sentence, so the message that arrives says the same thing
+          // the person just read.
+          in_plain_words: sentenceText.textContent || "",
+          accepted_risk_note: Boolean(
+            launch.querySelector("[data-launch-accept]")
+            && launch.querySelector("[data-launch-accept]").checked,
+          ),
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        problem =
+          (body && body.detail && body.detail.message)
+          || "The monitor could not be switched on, so nothing was saved.";
+      } else {
+        payload = body;
+      }
+    } catch {
+      problem = "We could not reach the server. Nothing was saved, and your board is untouched.";
+    } finally {
+      window.clearInterval(creep);
+      launchState.busy = false;
+    }
+
+    fill.style.width = "100%";
+    if (problem) {
+      bar.dataset.state = "failed";
+      finishLaunch({ ok: false, message: problem, results: [] });
+      return;
+    }
+    const results = payload.results || [];
+    launch.querySelector("[data-launch-status]").textContent =
+      "It is on. Sending one test message to each way you chose…";
+    await settleSendRows(results);
+    paintResultRows(results);
+    bar.dataset.state = payload.all_sent ? "ok" : "partial";
+    launchState.monitor = payload.monitor || null;
+    finishLaunch({
+      ok: true,
+      allSent: Boolean(payload.all_sent),
+      results,
+      name: (payload.monitor || {}).name || launchState.name || "Your monitor",
+    });
+  }
+
+  function finishLaunch({ ok, allSent, message, results, name }) {
+    const outcome = launch.querySelector("[data-launch-outcome]");
+    const title = launch.querySelector("[data-launch-outcome-title]");
+    const line = launch.querySelector("[data-launch-outcome-line]");
+    const mark = launch.querySelector("[data-launch-outcome-mark]");
+    const note = launch.querySelector("[data-launch-settings-note]");
+    launch.querySelector("[data-launch-eyebrow]").textContent = ok ? "Done" : "Not done";
+    launch.querySelector("[data-launch-lede]").textContent = "";
+
+    if (!ok) {
+      outcome.dataset.tone = "bad";
+      mark.innerHTML = icon("alert", "icon");
+      title.textContent = "It was not switched on";
+      line.textContent = message;
+      note.hidden = true;
+      launch.querySelector("[data-launch-title]").textContent = "Nothing was saved";
+      launch.querySelector("[data-launch-results]").innerHTML = "";
+      launch.querySelector("[data-launch-note]").textContent = "Your board is exactly as you left it.";
+      launch.querySelector("[data-launch-retry]").hidden = false;
+      launch.querySelector("[data-launch-cancel]").hidden = false;
+      launch.querySelector("[data-launch-cancel]").textContent = "Back to the board";
+      launch.querySelector("[data-launch-finish]").hidden = true;
+      showLaunchStep("done");
+      say("The monitor was not switched on. Nothing was saved.");
+      return;
+    }
+
+    const failed = (results || []).filter((item) => !item.sent);
+    outcome.dataset.tone = allSent ? "ok" : "mixed";
+    mark.innerHTML = icon(allSent ? "check" : "alert", "icon");
+    title.textContent = `${name} is watching now`;
+    line.textContent = allSent
+      ? "The test message went to every way you chose. A real alert will arrive the same way."
+      : `The monitor is on and watching. ${failed.length} way${failed.length === 1 ? "" : "s"} of being told did not work, so it is worth fixing before something happens.`;
+    note.hidden = false;
+    launch.querySelector("[data-launch-title]").textContent = allSent
+      ? "It is watching now"
+      : "It is watching, with something to fix";
+    launch.querySelector("[data-launch-note]").textContent =
+      "Your board stays here, so you can build another one.";
+    launch.querySelector("[data-launch-retry]").hidden = true;
+    launch.querySelector("[data-launch-cancel]").hidden = true;
+    launch.querySelector("[data-launch-finish]").hidden = false;
+    showLaunchStep("done");
+    window.requestAnimationFrame(() => launch.querySelector("[data-launch-finish]").focus());
+    say(allSent ? `${name} is watching now.` : `${name} is watching. Some ways of being told did not work.`);
+  }
+
+  find("[data-next-step]").addEventListener("click", openLaunch);
+  launch.querySelector("[data-launch-go]").addEventListener("click", runLaunch);
+  launch.addEventListener("change", (event) => {
+    if (!event.target.closest("[data-launch-accept]")) return;
+    launch.querySelector("[data-launch-go]").disabled = !event.target.checked;
+    launch.querySelector("[data-launch-note]").textContent = event.target.checked
+      ? "Nothing starts until you press the button."
+      : "Tick the box above, then press the button.";
+  });
+  launch.querySelector("[data-launch-retry]").addEventListener("click", openLaunch);
+  launch.querySelector("[data-launch-close]").addEventListener("click", () => {
+    if (!launchState.busy) launch.close();
+  });
+  launch.querySelector("[data-launch-cancel]").addEventListener("click", () => launch.close());
+  launch.querySelector("[data-launch-finish]").addEventListener("click", () => {
+    window.location.href = settingsPath;
+  });
+  // A popup that is doing something must not vanish under a stray Escape: the monitor
+  // is mid-creation and the answer is still coming.
+  launch.addEventListener("cancel", (event) => {
+    if (launchState.busy) event.preventDefault();
+  });
+  launch.addEventListener("close", () => {
+    if (launchState.opener && launchState.opener.isConnected) launchState.opener.focus();
   });
 
   checksToggle.addEventListener("click", () => {

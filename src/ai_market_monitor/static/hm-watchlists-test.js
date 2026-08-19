@@ -1,4 +1,4 @@
-/* The Monitors page at /dashboard/watchlists.
+/* The Monitors page at /dashboard/monitors.
  *
  * Everything here is about finding one monitor among several and being sure before
  * changing it. Nothing on this page computes a fact: the server decided what each

@@ -1168,11 +1168,15 @@ async def _process_sharia_authority_imports() -> dict:
             # Build a bounded research queue after canonical identities are
             # committed. Completed immutable dossiers remain authoritative.
             async with SessionFactory() as session:
+                from ai_market_monitor.services import (
+                    sharia_dossier_state as dossier_state,
+                )
+
                 completed_dossier_id = await session.scalar(
                     select(AssetResearchDossier.id)
                     .where(
                         AssetResearchDossier.external_assessment_id == external_id,
-                        AssetResearchDossier.state == "completed",
+                        dossier_state.complete_state_clause(AssetResearchDossier.state),
                     )
                     .limit(1)
                 )
@@ -1275,11 +1279,13 @@ async def _process_package_enrichment_queue() -> dict[str, int]:
     )
 
     async with SessionFactory() as session:
+        from ai_market_monitor.services import sharia_dossier_state as dossier_state
+
         completed_dossier_exists = (
             select(AssetResearchDossier.id)
             .where(
                 AssetResearchDossier.external_assessment_id == ExternalAssessment.id,
-                AssetResearchDossier.state == "completed",
+                dossier_state.complete_state_clause(AssetResearchDossier.state),
             )
             .exists()
         )

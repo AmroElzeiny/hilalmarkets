@@ -6,12 +6,12 @@
   <meta name="robots" content="noindex,nofollow">
   <title>System Brain | Hilal Markets</title>
   <link rel="icon" type="image/png" href="/static/favicon-dark.png">
-  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260819-auth-1">
-  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260819-auth-1">
-  <link rel="stylesheet" href="/static/system-brain.css?v=20260819-auth-1">
+  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260819-canvas-1">
+  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260819-canvas-1">
+  <link rel="stylesheet" href="/static/system-brain.css?v=20260819-canvas-1">
   <script src="/static/hilalmarkets-icons.js" defer></script>
-  <script src="/static/chat-message-renderer.js?v=20260819-auth-1" defer></script>
-  <script src="/static/system-brain.js?v=20260819-auth-1" defer></script>
+  <script src="/static/chat-message-renderer.js?v=20260819-canvas-1" defer></script>
+  <script src="/static/system-brain.js?v=20260819-canvas-1" defer></script>
 </head>
 <body data-system-brain-csrf="{{ csrf_token }}" data-brain-section="{{ section }}">
   <a class="brain-skip" href="#admin-content">Skip to admin content</a>
@@ -529,8 +529,8 @@
             type="submit"
             name="action"
             value="approve"
-            data-confirm="Mark every condition as passed on the selected cases and approve them? Nothing is published yet."
-          ><i data-icon="check"></i>Approve</button>
+            data-confirm="Mark every condition as passed on the selected cases, approve them and publish their Passports?"
+          ><i data-icon="check"></i>Approve &amp; publish</button>
           <button
             class="danger"
             type="submit"
@@ -548,7 +548,7 @@
         <input type="hidden" name="batch_id" value="{{ undo_batch.id }}">
         <input type="hidden" name="reason" value="Undo of a quick {{ undo_batch.action }} taken by mistake.">
         <span><i data-icon="history"></i> Last action: <strong>{{ undo_batch.action }}</strong> on {{ undo_batch.applied_count }} case{{ '' if undo_batch.applied_count == 1 else 's' }}, {{ undo_batch.created_at.strftime('%d %b %H:%M UTC') }}</span>
-        <button class="brain-secondary-button" type="submit" data-confirm="Put those cases back where they were? The earlier decision stays in the history."><i data-icon="undo"></i>Undo</button>
+        <button class="brain-secondary-button" type="submit" data-confirm="Put those cases back where they were? Any Passport that went public is put on hold, and the earlier decision stays in the history."><i data-icon="undo"></i>Undo</button>
       </form>
       {% endif %}
 

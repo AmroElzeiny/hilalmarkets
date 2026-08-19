@@ -85,7 +85,14 @@ def test_every_group_type_the_schema_accepts_is_offered() -> None:
 
 @pytest.mark.parametrize("node_type", list(GROUP_TYPES), ids=lambda item: str(item.value))
 def test_each_group_type_declares_an_arity_the_schema_agrees_with(node_type) -> None:
-    """``NOT`` takes one child; the schema enforces it. The Builder must say so too."""
+    """One rule is enough for "all"/"any"; "none" takes exactly one.
+
+    The point is not the numbers, it is that there is **one** copy of them. The Builder
+    refused a group with fewer than two rules, this schema accepted one, and the draft's
+    own semantic check refused a nested one — three answers to one question, so a group
+    a person made on one screen could not be saved from another. ``GROUP_ARITY`` in the
+    draft schema is the single answer now, and everything reads it.
+    """
 
     minimum, maximum = GROUP_ARITY[node_type]
     if node_type is ConditionNodeType.NOT:
@@ -93,8 +100,14 @@ def test_each_group_type_declares_an_arity_the_schema_agrees_with(node_type) -> 
         with pytest.raises(ValueError):
             group("bad_not", node_type, leaf("a"), leaf("b"))
     else:
-        assert minimum == 2
+        assert minimum == 1
         assert maximum is None
+        # The schema stores what the Builder allows. A one-rule group is a real group.
+        one = group("one_rule", node_type, leaf("a"))
+        assert [child.node_id for child in one.children] == ["a"]
+    # Empty is refused for every type, by the schema itself.
+    with pytest.raises(ValueError):
+        group("empty", node_type)
 
 
 # ---------------------------------------------------------------------------

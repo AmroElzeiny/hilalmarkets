@@ -16,7 +16,13 @@ product rules that cannot be broken. Only what is new or sharper is written belo
 >
 > * The thing a person builds is called a **monitor** on both pages, because that is what
 >   the side menu calls it. A button called one thing that opens a page called another is
->   worse than either name on its own. `/dashboard/watchlists` is still the address.
+>   worse than either name on its own.
+>
+> **Amended 19 August 2026.** The address followed the name: the page answers at
+> **`/dashboard/monitors`**, and `/dashboard/watchlists` is a permanent redirect to it,
+> kept because sent email, Telegram buttons and saved bookmarks still name it. A
+> *watchlist* in this product is a saved list of coins; a *monitor* is a rule that
+> watches them, and the page is the second of those.
 > * Neither page draws its own top-right button any more. Each **declares** what belongs
 >   in the topbar and the shared bar draws it, so the create action is in the same place,
 >   at the same size, and is there even when the page below it is empty — which is

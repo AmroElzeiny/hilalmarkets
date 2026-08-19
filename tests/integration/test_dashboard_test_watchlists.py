@@ -20,7 +20,7 @@ from ai_market_monitor.services.product_language import (
 )
 from tests.integration.test_dashboard_web import _signup_and_verify
 
-PAGE = "/dashboard/watchlists"
+PAGE = "/dashboard/monitors"
 
 
 async def test_the_page_renders_for_somebody_with_no_lists(test_context):
@@ -29,9 +29,22 @@ async def test_the_page_renders_for_somebody_with_no_lists(test_context):
     assert page.status_code == 200
     body = page.text
     assert "Nothing is being watched yet" in body
-    # And it offers both ways to make one, rather than a dead end.
-    assert "Answer a few questions" in body
+    # One way to make one, and it is the canvas. The assistant route was offered beside
+    # it and is gone: authoring never requires the assistant, and two doors to the same
+    # room made a beginner choose before they knew what either one was.
     assert "Draw it on the canvas" in body
+    assert "Answer a few questions" not in body
+
+
+async def test_the_old_address_still_reaches_the_page(test_context):
+    """`/dashboard/watchlists` is written into sent email and saved bookmarks."""
+
+    await _signup_and_verify(test_context, email="wl-moved@example.com")
+    moved = await test_context["client"].get(
+        "/dashboard/watchlists", follow_redirects=False
+    )
+    assert moved.status_code == 308
+    assert moved.headers["location"] == PAGE
 
 
 async def test_the_page_needs_a_signed_in_person(test_context):

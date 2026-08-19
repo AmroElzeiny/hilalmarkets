@@ -116,11 +116,20 @@ async def test_no_forbidden_claim_reaches_the_canvas(test_context, claim):
 
 
 async def test_the_page_never_says_monitoring_has_started(test_context):
-    """`AI never approves`, and neither does a drawing. The page says so plainly."""
+    """`AI never approves`, and neither does a drawing. The page says so plainly.
+
+    A monitor is switched on from this page now, so the page has to be clearer than
+    before, not vaguer: drawing is still only drawing, and the thing that starts it is
+    a button a person presses after reading the plan back.
+    """
+
     page = await _signed_in(test_context, email="monitor-honest@example.com")
 
     assert "Nothing is being watched while you are here" in page
-    assert "Starting a monitor happens on Watchlists" in page
+    assert "You switch it on from here" in page
+    assert "Nothing is watching yet" in page
+    # And nothing on it claims a monitor is already running.
+    assert "is watching now" not in page
 
 
 async def test_the_shape_limits_come_from_the_compiler(test_context):

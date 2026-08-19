@@ -2104,20 +2104,20 @@ async def methodology_page(
     return _redirect("/how-we-screen")
 
 
-#: `/dashboard/watchlists` is served by the redesigned Monitors page in
+#: `/dashboard/monitors` is served by the redesigned Monitors page in
 #: `dashboard_test.py`, which calls `_monitor_cards_context` below — the same rows.
-#: These two older addresses still answer here because links written years ago use them.
+#: This older address still answers here because links written years ago use it.
+#:
+#: It used to answer `/dashboard/monitors` as well, under the name
+#: `legacy_monitors_page`. That address now belongs to the redesigned page — the same
+#: move `/home` and `/dashboard/market` already made — and `dashboard.py` is included
+#: before `dashboard_test.py`, so leaving the route here would have kept the older copy
+#: in front of the page the side menu opens.
 @router.get(
     "/dashboard/strategies",
     response_class=HTMLResponse,
     include_in_schema=False,
     name="monitors_page",
-)
-@router.get(
-    "/dashboard/monitors",
-    response_class=HTMLResponse,
-    include_in_schema=False,
-    name="legacy_monitors_page",
 )
 async def monitors_page(
     request: Request,

@@ -11,6 +11,17 @@ review rules:
 * the reviewer's own written reason is what is recorded on every case. Nothing is
   written by a model, and nothing is filled in with a default.
 
+**Approve means published.** A reviewer approving an asset is asking for it to be in
+front of customers, so the approval and the publication run together, as two recorded
+governed steps rather than two clicks. Where publication legitimately has to wait — a
+second reviewer is required, or written permission for a provider's content has not been
+recorded — the approval is still kept and the case says what it is waiting for. That is
+an outcome, not a failure.
+
+Undo takes both steps back: a Passport that reached customers is withdrawn through a
+safety hold, which is the recorded way to withdraw one, and only then does the case
+return to where it was. Nothing is ever deleted.
+
 "Mark every condition as passed" is a **human** judgement stated once and applied to the
 selected cases. It is refused, per case, when the methodology does not allow ``pass`` on
 one of its criteria: the honest answer there is that this case needs opening, not that
@@ -33,6 +44,7 @@ from ai_market_monitor.services.sharia_governance import (
     ShariaGovernanceError,
     ShariaGovernanceService,
 )
+from ai_market_monitor.services.sharia_review_blockers import explain_error
 
 #: The outcome a reviewer means by "this condition is met", and the scope decision that
 #: means "this use is covered". Named once so the button, the request and the recorded
@@ -75,6 +87,7 @@ class CaseOutcome:
     previous_state: str = ""
     previous_publication_state: str = ""
     decision_id: UUID | None = None
+    publication_id: UUID | None = None
 
 
 @dataclass(slots=True)
@@ -91,15 +104,33 @@ class BatchOutcome:
     def failed(self) -> int:
         return sum(1 for item in self.results if not item.applied)
 
+    @property
+    def published(self) -> int:
+        return sum(1 for item in self.results if item.publication_id is not None)
+
     def message(self) -> str:
         if not self.results:
             return "No case was selected."
-        verb = "approved" if self.action == "approve" else "rejected and stored"
+        if self.action.startswith("undo_"):
+            return (
+                f"{self.applied} case(s) put back. The earlier decision stays in the "
+                "history."
+            )
+        if self.action == "reject":
+            done = f"{self.applied} case(s) rejected and stored"
+        elif self.published == self.applied:
+            done = f"{self.applied} case(s) approved and published"
+        else:
+            waiting = self.applied - self.published
+            done = (
+                f"{self.applied} case(s) approved, {self.published} published, "
+                f"{waiting} waiting to be published"
+            )
         if not self.failed:
-            return f"{self.applied} case(s) {verb}. Use Undo if this was a mistake."
+            return f"{done}. Use Undo if this was a mistake."
         return (
-            f"{self.applied} case(s) {verb}. {self.failed} could not be decided this way "
-            "and are listed below — open them one by one."
+            f"{done}. {self.failed} could not be decided this way and are listed below "
+            "— open them one by one."
         )
 
 
@@ -164,6 +195,11 @@ class BulkReviewService:
                         "decision_id": str(item.decision_id) if item.decision_id else None,
                         "previous_state": item.previous_state,
                         "previous_publication_state": item.previous_publication_state,
+                        # Kept so Undo knows this one reached customers and has to be
+                        # taken off the public Passport before the case goes back.
+                        "publication_id": (
+                            str(item.publication_id) if item.publication_id else None
+                        ),
                     }
                     for item in applied
                 ],
@@ -190,6 +226,8 @@ class BulkReviewService:
         reference = case.case_reference
         previous_state = case.state
         previous_publication_state = case.publication_state
+        publication_id: UUID | None = None
+        message = "Recorded."
         try:
             if action == "reject":
                 decision = await self.governance.reject_and_store(
@@ -199,25 +237,38 @@ class BulkReviewService:
                 )
             else:
                 criteria, use_cases = await self._all_conditions_pass(case, reason=reason)
-                decision = await self.governance.approve_for_publication(
+                outcome = await self.governance.approve_and_publish(
                     case_id,
                     admin_user_id=admin_user_id,
                     reason=reason,
                     criterion_decisions=criteria,
                     use_case_decisions=use_cases,
                 )
+                decision = outcome.decision
+                publication_id = (
+                    outcome.publication.id if outcome.publication is not None else None
+                )
+                message = (
+                    "Approved and published."
+                    if outcome.published
+                    else (outcome.publication_pending_reason or "Approved.")
+                )
         except (ShariaGovernanceError, BulkReviewError) as exc:
             # One case refusing must not roll back the ones already recorded, so the
-            # failure is reported next to its case and the loop continues.
-            return CaseOutcome(case_id, reference, False, str(exc))
+            # failure is reported next to its case and the loop continues — in the plain
+            # words every screen uses for that refusal, never the raw rule sentence.
+            return CaseOutcome(
+                case_id, reference, False, explain_error(exc).sentence()
+            )
         return CaseOutcome(
             case_id,
             reference,
             True,
-            "Recorded.",
+            message,
             previous_state=previous_state,
             previous_publication_state=previous_publication_state,
             decision_id=decision.id,
+            publication_id=publication_id,
         )
 
     async def _all_conditions_pass(
@@ -329,6 +380,16 @@ class BulkReviewService:
                 case_id, reference, False, "No recorded decision to undo on this case."
             )
         try:
+            # A quick decision that published a Passport put it in front of customers.
+            # Taking that back is a safety hold — the recorded, audited way to withdraw a
+            # published Passport — and only then does the case go back where it was.
+            # Nothing is deleted: the publication stays in the history, held.
+            if item.get("publication_id"):
+                await self.governance.place_safety_hold(
+                    case_id,
+                    admin_user_id=admin_user_id,
+                    reason=reason,
+                )
             await self.governance.undo_decision(
                 case_id,
                 admin_user_id=admin_user_id,
@@ -338,7 +399,9 @@ class BulkReviewService:
                 previous_publication_state=str(item.get("previous_publication_state") or ""),
             )
         except ShariaGovernanceError as exc:
-            return CaseOutcome(case_id, reference, False, str(exc))
+            return CaseOutcome(
+                case_id, reference, False, explain_error(exc).sentence()
+            )
         return CaseOutcome(case_id, reference, True, "Put back.")
 
 

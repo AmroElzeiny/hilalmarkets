@@ -1,7 +1,7 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260819-auth-1">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260819-auth-1">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260819-canvas-1">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260819-canvas-1">
 {% endblock %}
 {% block content %}
 
@@ -115,6 +115,7 @@
       <div class="g-row is-stacked">
         <div class="g-row-copy">
           <strong>Which days</strong>
+          <span>The days of the week we may message you on. Nothing is sent on the others.</span>
         </div>
         <div class="g-row-control is-full">
           <button class="t-switch" type="button" role="switch"
@@ -188,6 +189,7 @@
       <div class="g-row">
         <div class="g-row-copy">
           <strong>Maximum messages per hour</strong>
+          <span>The most we will send you in one hour. Anything past it waits for the next hour.</span>
         </div>
         <div class="g-row-control">
           <span class="g-number">
@@ -201,6 +203,7 @@
       <div class="g-row">
         <div class="g-row-copy">
           <strong>Maximum messages per day</strong>
+          <span>The most we will send you in one day, however many of your monitors match.</span>
         </div>
         <div class="g-row-control">
           <span class="g-number">
@@ -325,6 +328,7 @@
       <div class="g-row" data-g-shown-by="dashboard_notifications_enabled" {{ 'hidden' if not saved.dashboard_notifications_enabled else '' }}>
         <div class="g-row-copy">
           <strong>Sound for a finished match</strong>
+          <span>What you hear in the dashboard when everything you asked for has happened.</span>
         </div>
         <div class="g-row-control">
           <fieldset class="g-picker" data-g-pick="dashboard_notification_sound">
@@ -546,5 +550,5 @@
 </dialog>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-settings-test.js') }}?v=20260819-auth-1"></script>
+<script type="module" src="{{ url_for('static', path='/hm-settings-test.js') }}?v=20260819-canvas-1"></script>
 {% endblock %}

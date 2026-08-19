@@ -21,7 +21,6 @@ from ai_market_monitor.db.models import (
     AlertDelivery,
     AuditEvent,
     DashboardPreference,
-    DisclaimerAcceptance,
     OnboardingSession,
     SetupInstance,
     Strategy,
@@ -66,6 +65,12 @@ from ai_market_monitor.services.monitor_operations import (
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
 from ai_market_monitor.services.onboarding import OnboardingError, OnboardingService
 from ai_market_monitor.services.openai_interpreter import configured_strategy_interpreter
+from ai_market_monitor.services.risk_disclaimer import (
+    DisclaimerIdentityMissing,
+)
+from ai_market_monitor.services.risk_disclaimer import (
+    record_acceptance as record_disclaimer_acceptance,
+)
 from ai_market_monitor.services.strategy import StrategyGateError, StrategyService
 from ai_market_monitor.services.telegram_account_links import (
     TelegramAccountLinkError,
@@ -3093,30 +3098,22 @@ class TelegramBotService:
         return trial_id is not None
 
     async def _record_risk_acknowledgement(self, user_id: UUID, *, source: str) -> None:
-        existing = await self.session.scalar(
-            select(DisclaimerAcceptance.id).where(
-                DisclaimerAcceptance.user_id == user_id,
-                DisclaimerAcceptance.disclaimer_version == self.settings.disclaimer_version,
-            )
-        )
-        if existing is not None:
-            return
-        identity_id = await self.session.scalar(
-            select(UserIdentity.id)
-            .where(UserIdentity.user_id == user_id)
-            .order_by(UserIdentity.is_primary.desc(), UserIdentity.created_at.asc())
-        )
-        if identity_id is None:
-            raise OnboardingError("identity_missing", "Account identity was not found.")
-        self.session.add(
-            DisclaimerAcceptance(
+        """Written through the one owner in `services/risk_disclaimer.py`.
+
+        This used to be its own copy of "check, find the identity, insert". So did the
+        onboarding flow. A legal record with two writers is a legal record that can end
+        up written two different ways.
+        """
+
+        try:
+            await record_disclaimer_acceptance(
+                self.session,
                 user_id=user_id,
-                identity_id=identity_id,
-                disclaimer_version=self.settings.disclaimer_version,
-                acceptance_source=source,
-                accepted_at=datetime.now(UTC),
+                version=self.settings.disclaimer_version,
+                source=source,
             )
-        )
+        except DisclaimerIdentityMissing as exc:
+            raise OnboardingError("identity_missing", str(exc)) from exc
 
     async def _push_navigation(self, conversation: TelegramConversationState, action: str) -> None:
         if action.startswith("back:"):

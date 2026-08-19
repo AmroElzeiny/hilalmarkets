@@ -376,7 +376,20 @@ class ShariaPassportReadService:
         )
         from ai_market_monitor.services.sharia_governance import (
             ShariaAdminTelegramService,
+            ShariaGovernanceService,
         )
+
+        # A report about a live Passport arrives with whatever evidence that Passport was
+        # published on — sometimes none at all, when no Passport is live yet. Calling such
+        # a case "ready for review" put a case in the queue that no approval could ever
+        # accept. The approval path decides, exactly as it does for every other case type.
+        blocker = await ShariaGovernanceService(
+            self.session, self.settings
+        ).review_blocker(case)
+        if blocker is not None:
+            case.state = "needs_evidence"
+            case.requested_evidence = sorted({*case.requested_evidence, str(blocker)})
+            await self.session.flush()
 
         await ShariaAdminTelegramService(self.session, self.settings).enqueue(
             case,

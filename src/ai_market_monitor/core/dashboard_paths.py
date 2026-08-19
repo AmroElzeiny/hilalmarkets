@@ -54,7 +54,19 @@ MARKET_PATH: Final[str] = "/dashboard/market"
 MONITOR_PATH: Final[str] = "/dashboard/monitor"
 
 #: The monitors somebody has.
-WATCHLISTS_PATH: Final[str] = "/dashboard/watchlists"
+#:
+#: The page is called **Monitors** — in its own heading, in the side menu, in the topbar
+#: action and in every sentence the product writes about it. Its address said
+#: ``watchlists``, which is a different product word: a Favorites list of coins is a
+#: watchlist here, and a monitor is a rule that watches them. One page, two names, and
+#: the address was the one nobody could see. The page answers at its own name now.
+MONITORS_PATH: Final[str] = "/dashboard/monitors"
+
+#: The address Monitors used to answer at, kept as a permanent redirect rather than
+#: deleted. It is written into email that has already been sent, into Telegram buttons
+#: and into saved bookmarks, none of which can be corrected after the fact — the same
+#: rule ``LEGACY_HOME_PATH`` above follows.
+LEGACY_WATCHLISTS_PATH: Final[str] = "/dashboard/watchlists"
 
 #: What the monitors found.
 OPPORTUNITIES_PATH: Final[str] = "/dashboard/opportunities"

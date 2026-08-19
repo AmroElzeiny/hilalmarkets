@@ -32,6 +32,7 @@ from ai_market_monitor.db.models import (
     SourceSnapshot,
 )
 from ai_market_monitor.db.models.enums import ShariaMethodologyStatus
+from ai_market_monitor.services import sharia_dossier_state as dossier_state
 from ai_market_monitor.services.provider_reliability import ProviderCallError
 from ai_market_monitor.services.provider_runtime import provider_call, provider_request
 from ai_market_monitor.services.system_brain import estimate_usage_cost
@@ -482,7 +483,7 @@ class ShariaResearchPipeline:
                 failed_source_count=0,
                 ai_status=(
                     "completed"
-                    if existing.state in {"ready", "completed"}
+                    if dossier_state.is_complete(existing.state)
                     else existing.state
                 ),
                 idempotent_replay=True,
@@ -534,7 +535,7 @@ class ShariaResearchPipeline:
             external_assessment_id=external.id,
             monitoring_run_id=run.id,
             run_key=run_key,
-            state="researching",
+            state=dossier_state.RESEARCHING,
             source_snapshot_ids=[str(row.id) for row in snapshots],
             evidence_completeness=len(successful) / (len(sources) + 1),
             evidence_package_hash=evidence_hash,
@@ -570,7 +571,7 @@ class ShariaResearchPipeline:
             ai_row.error_code = exc.code
             ai_row.error_detail = str(exc)[:2000]
             ai_row.completed_at = datetime.now(UTC)
-            dossier.state = "needs_evidence"
+            dossier.state = dossier_state.NEEDS_EVIDENCE
             dossier.limitations = [str(exc)]
             run.status = "failed"
             run.items_succeeded = len(successful)
@@ -595,7 +596,7 @@ class ShariaResearchPipeline:
         ai_row.retry_count = result.retry_count
         ai_row.status = "completed"
         ai_row.completed_at = datetime.now(UTC)
-        dossier.state = "completed"
+        dossier.state = dossier_state.COMPLETE
         dossier.factual_profile = (
             _passport_enrichment_profile(asset, analysis, successful).model_dump(
                 mode="json"
@@ -767,6 +768,7 @@ class ShariaResearchPipeline:
                 hours=self.settings.sharia_source_scan_interval_hours
             )
             await self.session.flush()
+            await self._settle_review_readiness(open_case)
             return open_case
 
         key = f"initial-review:{external.id}:{dossier.evidence_package_hash}"
@@ -806,7 +808,34 @@ class ShariaResearchPipeline:
         )
         self.session.add(case)
         await self.session.flush()
+        await self._settle_review_readiness(case)
         return case
+
+    async def _settle_review_readiness(self, case: ReviewCase) -> None:
+        """Only call a case ready for review when the approval would accept it.
+
+        Research finishing is not the same as the evidence being good enough to decide
+        on. An official page that would not load, or evidence older than the methodology
+        allows, leaves a dossier that is finished but not approvable — and a case
+        presented as "ready" in that state gave the reviewer a button that always failed.
+
+        The question is asked of the approval path itself, never re-listed here, so the
+        queue and the decision can never hold different ideas of ready.
+        """
+
+        from ai_market_monitor.services.sharia_governance import ShariaGovernanceService
+
+        blocker = await ShariaGovernanceService(
+            self.session, self.settings
+        ).review_blocker(case)
+        if blocker is None:
+            return
+        case.state = "needs_evidence"
+        case.requested_evidence = sorted(
+            {*(case.requested_evidence or []), str(blocker)}
+        )
+        case.next_reminder_at = datetime.now(UTC)
+        await self.session.flush()
 
     async def _methodology_id_for_external(self, external: ExternalAssessment):
         if external.methodology_id is not None:

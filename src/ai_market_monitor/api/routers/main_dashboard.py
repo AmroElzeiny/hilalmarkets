@@ -36,8 +36,8 @@ from ai_market_monitor.api.routers.dashboard import (
 from ai_market_monitor.api.routers.dashboard_test import (
     MARKET_BASE_PATH,
     MONITOR_PATH,
+    MONITORS_PATH,
     OPPORTUNITIES_PATH,
-    WATCHLISTS_PATH,
     _assets_by_ticker,
     _merge_opportunities,
     _opportunity_from_journey,
@@ -219,7 +219,7 @@ def _tiles(
                 if total_lists
                 else "You have not made a monitor yet."
             ),
-            href=WATCHLISTS_PATH,
+            href=MONITORS_PATH,
             tone="success",
             explain=(
                 "A monitor is your own set of rules about a coin. It checks the market for you.",
@@ -290,7 +290,7 @@ def _headline(
                 else f"Your {active_lists} monitors are watching."
             ),
             "detail": "Nothing has come close yet. You will be told when something does.",
-            "action": {"label": "See your monitors", "href": WATCHLISTS_PATH, "icon": "arrow"},
+            "action": {"label": "See your monitors", "href": MONITORS_PATH, "icon": "arrow"},
         }
     if total_lists:
         return {
@@ -527,7 +527,7 @@ async def main_dashboard_page(
         screening_warning=screened.warning,
         delivery=await _delivery(session, settings, user),
         opportunities_path=OPPORTUNITIES_PATH,
-        watchlists_path=WATCHLISTS_PATH,
+        watchlists_path=MONITORS_PATH,
         market_path=MARKET_BASE_PATH,
         monitor_path=MONITOR_PATH,
         connections_path=CONNECTIONS_PATH,

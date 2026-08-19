@@ -10,17 +10,13 @@ from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.db.models import (
     AuditEvent,
     CapabilityExtension,
-    DisclaimerAcceptance,
     ShariaUniverseSnapshot,
     Strategy,
     StrategyCondition,
     StrategyUniverse,
     StrategyVersion,
-    TelegramConnection,
-    WhatsAppConnection,
 )
 from ai_market_monitor.db.models.enums import (
-    ConnectionStatus,
     StrategyStatus,
     StrategyVersionStatus,
 )
@@ -39,7 +35,11 @@ from ai_market_monitor.schemas.strategy import (
 )
 from ai_market_monitor.services.entitlements import EntitlementError, EntitlementService
 from ai_market_monitor.services.interfaces import RecentMarketPreviewer
-from ai_market_monitor.services.notification_preferences import NotificationPreferenceService
+from ai_market_monitor.services.notification_preferences import (
+    NotificationPreferenceService,
+    deliverable_channels,
+)
+from ai_market_monitor.services.risk_disclaimer import has_accepted as has_accepted_disclaimer
 from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningError,
     ShariaScreeningService,
@@ -412,19 +412,20 @@ class StrategyService:
                 "preview_required",
                 "A successful current-market preview is required before activation.",
             )
-        disclaimer = await self.session.scalar(
-            select(DisclaimerAcceptance.id).where(
-                DisclaimerAcceptance.user_id == user_id,
-                DisclaimerAcceptance.disclaimer_version == self.disclaimer_version,
-            )
-        )
-        if disclaimer is None:
+        # Read through the one owner in `services/risk_disclaimer.py`, which is also
+        # where an acceptance is written. Two copies of "has this been accepted" is how
+        # one path could record something the other could not see.
+        if not await has_accepted_disclaimer(
+            self.session,
+            user_id=user_id,
+            version=self.disclaimer_version,
+        ):
             raise StrategyGateError(
                 "disclaimer_required",
                 "Accept the current risk disclaimer before activation.",
             )
-        await self._assert_notification_channel(user_id)
         definition = StrategyDefinition.model_validate(version.schema_json)
+        await self._assert_notification_channel(user_id, definition)
         await self._assert_provider_enabled(user_id, definition)
         await self.assert_dynamic_capability_artifacts(definition, user_id=user_id)
         try:
@@ -484,25 +485,35 @@ class StrategyService:
             )
         return definition
 
-    async def _assert_notification_channel(self, user_id: UUID) -> None:
-        telegram = await self.session.scalar(
-            select(TelegramConnection.id).where(
-                TelegramConnection.user_id == user_id,
-                TelegramConnection.status == ConnectionStatus.ACTIVE,
-                TelegramConnection.alerts_enabled.is_(True),
+    async def _assert_notification_channel(
+        self,
+        user_id: UUID,
+        definition: StrategyDefinition,
+    ) -> None:
+        """At least one of the ways this monitor was told to use must really work.
+
+        This used to ask a different question: "is Telegram or WhatsApp connected?" —
+        and nothing else counted. The dashboard notice needs no connection and is always
+        deliverable; email needs only a verified address. So somebody who asked to be
+        told in the dashboard was refused, and told to connect a channel they had not
+        chosen and did not need. Every way the platform can deliver counts now, read
+        from the one owner in `notification_preferences`.
+        """
+
+        reachable = {
+            channel.value
+            for channel in await deliverable_channels(
+                self.session,
+                self.settings,
+                user_id=user_id,
             )
-        )
-        whatsapp = await self.session.scalar(
-            select(WhatsAppConnection.id).where(
-                WhatsAppConnection.user_id == user_id,
-                WhatsAppConnection.status == ConnectionStatus.ACTIVE,
-                WhatsAppConnection.alerts_enabled.is_(True),
-            )
-        )
-        if telegram is None and whatsapp is None:
+        }
+        asked = list(definition.alerts.channels)
+        if not any(channel in reachable for channel in asked):
             raise StrategyGateError(
                 "notification_channel_required",
-                "Connect an available notification channel before activation.",
+                "None of the chosen ways of being told can reach you yet. "
+                "Connect one, or choose the dashboard.",
             )
 
     async def _assert_provider_enabled(

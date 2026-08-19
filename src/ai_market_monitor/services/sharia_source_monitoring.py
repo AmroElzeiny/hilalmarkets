@@ -23,8 +23,12 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import ComplianceChangeSeverity
 from ai_market_monitor.schemas.sharia import ComplianceChangeIngestRequest
+from ai_market_monitor.services import sharia_dossier_state as dossier_state
 from ai_market_monitor.services.compliance_watch import ComplianceWatchService
-from ai_market_monitor.services.sharia_governance import ShariaAdminTelegramService
+from ai_market_monitor.services.sharia_governance import (
+    ShariaAdminTelegramService,
+    ShariaGovernanceService,
+)
 from ai_market_monitor.services.sharia_research import (
     AI_PROMPT_VERSION,
     ShariaAIResearchClient,
@@ -215,16 +219,32 @@ class ShariaSourceMonitoringService:
             await self.session.flush()
             return "unchanged"
 
+        # What the reviewer is asked to look at is the changed pages **and** the retained
+        # authority row that carries the published status. Leaving the authority snapshot
+        # out is what made every change review undecidable: approval requires the imported
+        # authority snapshot to be among the reviewed evidence, and a dossier listing only
+        # the changed pages never contained it. The same list is what the factual analysis
+        # reads, so the two can never describe different evidence.
+        authority_snapshot = await self.session.get(
+            SourceSnapshot, external.source_snapshot_id
+        )
+        reviewed = list(changed)
+        if (
+            authority_snapshot is not None
+            and authority_snapshot.fetch_status == "success"
+            and all(row.id != authority_snapshot.id for row in reviewed)
+        ):
+            reviewed.insert(0, authority_snapshot)
         evidence_hash = _hash_json(
-            [{"id": str(row.id), "hash": row.content_hash} for row in changed]
+            [{"id": str(row.id), "hash": row.content_hash} for row in reviewed]
         )
         dossier = AssetResearchDossier(
             canonical_asset_id=asset.id,
             external_assessment_id=external.id,
             monitoring_run_id=run.id,
             run_key=f"material-change:{asset.id}:{evidence_hash}",
-            state="researching",
-            source_snapshot_ids=[str(row.id) for row in changed],
+            state=dossier_state.RESEARCHING,
+            source_snapshot_ids=[str(row.id) for row in reviewed],
             evidence_completeness=(len(successful) / len(sources) if sources else 0),
             evidence_package_hash=evidence_hash,
             factual_profile={},
@@ -239,7 +259,7 @@ class ShariaSourceMonitoringService:
             reasoning_effort=self.settings.sharia_ai_reasoning_effort,
             requested_service_tier=self.settings.sharia_ai_service_tier,
             prompt_version=AI_PROMPT_VERSION,
-            input_snapshot_ids=[str(row.id) for row in changed],
+            input_snapshot_ids=[str(row.id) for row in reviewed],
             input_hash=evidence_hash,
             output={},
             usage={},
@@ -252,14 +272,14 @@ class ShariaSourceMonitoringService:
         await self.session.flush()
         try:
             result = await self.ai.analyze(
-                await self._change_package(asset, external, changed)
+                await self._change_package(asset, external, reviewed)
             )
         except ShariaResearchError as exc:
             ai_row.status = "failed"
             ai_row.error_code = exc.code
             ai_row.error_detail = str(exc)[:2000]
             ai_row.completed_at = datetime.now(UTC)
-            dossier.state = "needs_evidence"
+            dossier.state = dossier_state.NEEDS_EVIDENCE
             dossier.limitations = [str(exc)]
             run.status = "failed"
             run.last_error_code = exc.code
@@ -275,7 +295,7 @@ class ShariaSourceMonitoringService:
         ai_row.retry_count = result.retry_count
         ai_row.status = "completed"
         ai_row.completed_at = datetime.now(UTC)
-        dossier.state = "ready"
+        dossier.state = dossier_state.COMPLETE
         dossier.factual_profile = (
             analysis.profile.model_dump(mode="json")
             if project_source_changed
@@ -460,6 +480,17 @@ class ShariaSourceMonitoringService:
         )
         self.session.add(case)
         await self.session.flush()
+        # Same rule as the initial review: a case is only called ready when the approval
+        # path would accept it. Asked of that path, never listed again here.
+        blocker = await ShariaGovernanceService(
+            self.session, self.settings
+        ).review_blocker(case)
+        if blocker is not None:
+            case.state = "needs_evidence"
+            case.requested_evidence = sorted(
+                {*(case.requested_evidence or []), str(blocker)}
+            )
+            await self.session.flush()
         return case
 
     async def _change_package(

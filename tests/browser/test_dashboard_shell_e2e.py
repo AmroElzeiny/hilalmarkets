@@ -199,13 +199,13 @@ def test_the_marker_travels_to_whichever_row_is_pointed_at(page: Page, base_url:
 
 
 def test_the_topbar_says_which_page_you_are_on(page: Page, base_url: str) -> None:
-    _open(page, base_url, "/dashboard/watchlists")
+    _open(page, base_url, "/dashboard/monitors")
     expect(page.locator(".hm-top-here-group")).to_have_text("Your monitors")
     expect(page.locator(".hm-top-here-name")).to_have_text("Monitors")
 
 
 def test_the_page_action_is_in_the_bar_and_works(page: Page, base_url: str) -> None:
-    _open(page, base_url, "/dashboard/watchlists")
+    _open(page, base_url, "/dashboard/monitors")
     action = page.locator("[data-hm-top-action]")
     expect(action).to_have_count(1)
     expect(action).to_contain_text("Create a monitor")
@@ -235,7 +235,7 @@ def test_the_assistant_tag_scrolls_its_line_and_can_be_stopped(
     Also the WCAG 2.2.2 half: moving text that starts by itself has to be stoppable.
     """
 
-    _open(page, base_url, "/dashboard/watchlists")
+    _open(page, base_url, "/dashboard/monitors")
     tag = page.locator("[data-hilal-tag]")
     expect(tag).to_be_visible()
 
@@ -261,7 +261,7 @@ def test_the_assistant_tag_scrolls_its_line_and_can_be_stopped(
 def test_the_assistant_says_it_is_software_and_what_it_can_see(
     page: Page, base_url: str
 ) -> None:
-    _open(page, base_url, "/dashboard/watchlists")
+    _open(page, base_url, "/dashboard/monitors")
     words = page.locator("[data-hilal-tag]").inner_text()
     assert "AI assistant" in words
     assert "sees the page you are on" in words

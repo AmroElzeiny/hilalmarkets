@@ -30,7 +30,11 @@ from ai_market_monitor.schemas.planner_intent import (
     BOOLEAN_MAX_DEPTH,
     BOOLEAN_MAX_NODES,
 )
-from ai_market_monitor.schemas.strategy_draft_v2 import ConditionNodeType, ConditionNodeV2
+from ai_market_monitor.schemas.strategy_draft_v2 import (
+    GROUP_ARITY,
+    ConditionNodeType,
+    ConditionNodeV2,
+)
 
 
 class BooleanStructureError(ValueError):
@@ -49,14 +53,10 @@ GROUP_TYPES: tuple[ConditionNodeType, ...] = tuple(
     item for item in ConditionNodeType if item is not ConditionNodeType.CONDITION
 )
 
-#: How many children each group type takes. ``NOT`` is the only fixed-arity one, and the
-#: draft schema enforces it too — this copy exists so the Builder can refuse the edit
-#: before building an invalid node, with a sentence a person can act on.
-GROUP_ARITY: dict[ConditionNodeType, tuple[int, int | None]] = {
-    ConditionNodeType.AND: (2, None),
-    ConditionNodeType.OR: (2, None),
-    ConditionNodeType.NOT: (1, 1),
-}
+# How many rules each way of joining takes — ``GROUP_ARITY``, imported above and never
+# re-declared here. The one answer lives beside ``ConditionNodeType`` in the draft
+# schema, so the Builder cannot refuse an edit the schema would have stored, or allow one
+# it would have rejected. A second copy in this file is how those two came to disagree.
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +66,7 @@ class BooleanLimits:
     max_depth: int
     max_nodes: int
     operators: tuple[str, ...]
-    #: ``{"and": [2, null], "or": [2, null], "not": [1, 1]}`` — how many rules each
+    #: ``{"and": [1, null], "or": [1, null], "not": [1, 1]}`` — how many rules each
     #: grouping takes, so the Builder can grey out "Group" until enough are selected.
     arity: dict[str, tuple[int, int | None]]
 
@@ -264,11 +264,11 @@ def _replace(
     ]
     if not children:
         return None
-    # A group left holding one child is no longer a choice between anything. Collapsing
-    # it keeps the stored tree in the shape the compiler expects instead of storing a
-    # one-child AND that the schema would refuse on the next validation.
-    if node.node_type is not ConditionNodeType.CONDITION and len(children) == 1:
-        return children[0]
+    # A group left holding one child is kept as a group. It used to be collapsed into
+    # that child, because a one-rule "all of these" was refused by ``_require_arity`` on
+    # the next validation — that floor is one now, so collapsing would delete a group the
+    # person made and still wants, the moment they took one rule out of it. An empty
+    # group is still removed, above.
     return node.model_copy(update={"children": children})
 
 
@@ -436,9 +436,9 @@ def move_condition(
             "LAST_RULE",
             "That is the only rule left. Add another before moving this one.",
         )
-    # The target may have collapsed when the rule left it — a two-child group losing one
-    # child becomes that child. Moving into a group that no longer exists must fail here,
-    # not produce a tree with the rule silently dropped.
+    # The target may have gone when the rule left it — a one-child group losing its only
+    # child is removed. Moving into a group that no longer exists must fail here, not
+    # produce a tree with the rule silently dropped.
     landing = find_node(detached, target_group_id)
     if landing is None or landing.node_type is ConditionNodeType.CONDITION:
         raise BooleanStructureError(

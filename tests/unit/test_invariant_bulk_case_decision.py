@@ -95,9 +95,13 @@ async def test_a_bulk_approval_records_every_condition_as_passed(test_context):
     assert outcome.applied == 1
     assert outcome.failed == 0
     assert refreshed is not None
-    assert refreshed.state == "approved"
-    # Approving is not publishing. That stays a separate, deliberate step.
-    assert refreshed.publication_state == "approved_not_published"
+    # Approving publishes. A reviewer approving an asset is asking for it to be in front
+    # of customers, so the approval and the publication run together — two recorded
+    # governed steps, one press. Leaving cases at "approved, not published" is what let a
+    # whole queue be approved and nothing reach anybody.
+    assert refreshed.state == "published"
+    assert refreshed.publication_state == "published"
+    assert outcome.published == 1
     assert decision is not None
     assert {row["outcome"] for row in decision.criterion_decisions} == {PASS_OUTCOME}
     assert {row["decision"] for row in decision.use_case_decisions} == {COVERED_DECISION}
@@ -263,7 +267,7 @@ async def test_a_case_that_cannot_be_decided_this_way_is_named_and_the_rest_go_t
 
     assert outcome.applied == 1
     assert outcome.failed == 1
-    assert refreshed is not None and refreshed.state == "approved"
+    assert refreshed is not None and refreshed.state == "published"
     refused = [item for item in outcome.results if not item.applied]
     assert refused[0].case_id == missing
     assert refused[0].message
@@ -435,7 +439,10 @@ async def test_an_undo_is_refused_once_a_newer_decision_exists(test_context):
         )
 
     assert undone.applied == 0
-    assert "no longer be undone" in undone.results[0].message
+    # Said in the plain words every screen uses for this refusal, and it names the one
+    # thing the reviewer can do instead.
+    assert "newer decision was recorded" in undone.results[0].message
+    assert "Reopen the case" in undone.results[0].message
 
 
 async def test_a_published_passport_is_never_undone_here(test_context):

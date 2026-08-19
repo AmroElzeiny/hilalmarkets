@@ -49,7 +49,7 @@ CUSTOMER_SURFACES: tuple[tuple[str, str], ...] = (
     ("home", "/dashboard"),
     ("scanner builder", "/dashboard/strategies/new"),
     ("monitor creation", "/dashboard/create-monitor"),
-    ("watchlists", "/dashboard/watchlists"),
+    ("monitors", "/dashboard/monitors"),
     ("screened watchlist", "/dashboard/market"),
     ("activity", "/dashboard/opportunities"),
     ("methodology", "/dashboard/methodology"),
@@ -386,7 +386,7 @@ def test_the_setup_chat_refuses_to_write_a_promise_it_was_handed(
 def test_the_signed_out_visitor_cannot_reach_a_customer_page(page: Page, base_url: str) -> None:
     """The simplest authorization attack, and the one most easily broken by a refactor."""
 
-    for path in ("/dashboard", "/dashboard/opportunities", "/dashboard/watchlists"):
+    for path in ("/dashboard", "/dashboard/opportunities", "/dashboard/monitors"):
         response = page.request.get(f"{base_url}{path}", max_redirects=0)
         assert response.status in REFUSING_STATUSES, (
             f"{path} answered {response.status} with no session at all"

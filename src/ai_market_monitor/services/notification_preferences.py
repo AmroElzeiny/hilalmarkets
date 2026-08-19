@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import get_args
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -82,6 +83,140 @@ def offered_channels(settings: Settings) -> set[DeliveryChannel]:
     if email_delivery_available(settings):
         channels.add(DeliveryChannel.EMAIL)
     return channels
+
+
+async def deliverable_channels(
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    user_id: UUID,
+) -> set[DeliveryChannel]:
+    """Every way this **person** can really be told, right now.
+
+    Not the same question as :func:`offered_channels`, which is about the platform.
+    This one is about one account: Telegram has to be connected, WhatsApp has to be
+    connected, email needs a verified address. The dashboard needs nothing — a notice
+    waiting on the page is always deliverable, which is why it is the one channel the
+    product can always fall back on.
+
+    One owner, because the activation gate used to answer it with its own rule: "an
+    active Telegram **or** WhatsApp connection", and nothing else counted. So somebody
+    who chose "In the dashboard" — or, later, email — was told to connect a channel,
+    with no channel to connect and no way forward. Every way the platform can deliver
+    has to count as a way of being told, or the gate is refusing something that works.
+    """
+
+    from ai_market_monitor.db.models import TelegramConnection, WhatsAppConnection
+    from ai_market_monitor.db.models.enums import ConnectionStatus
+    from ai_market_monitor.services.alert_emails import alert_email_address
+
+    offered = offered_channels(settings)
+    reachable: set[DeliveryChannel] = set()
+    if DeliveryChannel.WEB in offered:
+        reachable.add(DeliveryChannel.WEB)
+    if DeliveryChannel.EMAIL in offered and await alert_email_address(session, user_id):
+        reachable.add(DeliveryChannel.EMAIL)
+    if DeliveryChannel.TELEGRAM in offered:
+        connected = await session.scalar(
+            select(TelegramConnection.id).where(
+                TelegramConnection.user_id == user_id,
+                TelegramConnection.status == ConnectionStatus.ACTIVE,
+                TelegramConnection.alerts_enabled.is_(True),
+            )
+        )
+        if connected is not None:
+            reachable.add(DeliveryChannel.TELEGRAM)
+    if DeliveryChannel.WHATSAPP in offered:
+        connected = await session.scalar(
+            select(WhatsAppConnection.id).where(
+                WhatsAppConnection.user_id == user_id,
+                WhatsAppConnection.status == ConnectionStatus.ACTIVE,
+                WhatsAppConnection.alerts_enabled.is_(True),
+            )
+        )
+        if connected is not None:
+            reachable.add(DeliveryChannel.WHATSAPP)
+    return reachable
+
+
+#: The words a person reads for each way of being told.
+#:
+#: Only the words. Which ways exist is not decided here, and no screen writes its own
+#: label for one — a channel named "Email" on one page and "E-mail" on another is two
+#: things as far as a reader is concerned.
+CHANNEL_WORDS: dict[str, tuple[str, str]] = {
+    "web": ("In the dashboard", "A notice waiting for you the next time you sign in."),
+    "telegram": ("Telegram", "A message from the Hilal Markets bot."),
+    "whatsapp": ("WhatsApp", "A message on WhatsApp."),
+    "email": ("Email", "A message to the address you signed up with."),
+}
+
+
+def alert_channel_choices(
+    settings: Settings,
+    *,
+    whatsapp_allowed: bool = True,
+    reachable: set[DeliveryChannel] | None = None,
+) -> list[dict[str, str]]:
+    """Every way a monitor may really be told to send, in the words a person reads.
+
+    Three questions, each answered by its owner and then met in the middle:
+
+    * *Would the compiler accept it?* — ``AlertPolicy``'s own accepted values, so no
+      screen can offer something the alert schema would refuse;
+    * *Can we actually deliver it?* — :func:`offered_channels`, so a retired channel is
+      never offered however long its value lingers in the schema for old rows;
+    * *Does this plan include it?* — WhatsApp is a paid feature, and offering it to a
+      plan that does not have it is a promise the product will not keep.
+
+    One owner, because two of these were already answered in two places. The canvas
+    built its own list from the alert schema alone and offered a retired channel; it
+    then offered WhatsApp to plans without it, while the Connections page did not. The
+    canvas page, the Connections page and the canvas's own activation route all call
+    this now, so what is offered and what is accepted cannot drift apart.
+    """
+
+    from ai_market_monitor.schemas.strategy import AlertPolicy
+
+    annotation = AlertPolicy.model_fields["channels"].annotation
+    literal = get_args(annotation)[0] if get_args(annotation) else None
+    accepted = [str(value) for value in get_args(literal)] if literal is not None else []
+    deliverable = {channel.value for channel in offered_channels(settings)}
+    if not whatsapp_allowed:
+        deliverable.discard(DeliveryChannel.WHATSAPP.value)
+    # Whether each one can reach *this person* today, if the caller has asked. A page
+    # that only knows what the platform delivers will happily let somebody choose
+    # Telegram before connecting it, and the refusal then arrives at the very last step
+    # — after they have built the whole thing.
+    ready = None if reachable is None else {item.value for item in reachable}
+    choices: list[dict[str, str]] = []
+    for value in accepted:
+        if value not in deliverable:
+            continue
+        label, explanation = CHANNEL_WORDS.get(
+            value, (value.replace("_", " ").capitalize(), "")
+        )
+        choice: dict[str, str] = {
+            "value": value,
+            "label": label,
+            "explanation": explanation,
+        }
+        if ready is not None:
+            choice["ready"] = "true" if value in ready else "false"
+            if value not in ready:
+                choice["not_ready_reason"] = CHANNEL_NOT_READY.get(
+                    value, "This one is not set up on your account yet."
+                )
+        choices.append(choice)
+    return choices
+
+
+#: Why one way of being told cannot reach somebody yet, and what to do about it.
+CHANNEL_NOT_READY: dict[str, str] = {
+    "telegram": "Telegram is not connected yet. Connect it on the Connections page.",
+    "whatsapp": "WhatsApp is not connected yet. Connect it on the Connections page.",
+    "email": "There is no confirmed email address on this account yet.",
+}
 
 
 class NotificationPreferenceService:

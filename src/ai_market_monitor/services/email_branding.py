@@ -742,6 +742,58 @@ class HilalMarketsEmailRenderer:
             ),
         )
 
+    def monitor_test_alert(self, *, monitor_name: str, in_plain_words: str) -> BrandedEmail:
+        """The one message sent when a monitor is switched on from the canvas.
+
+        It proves two things at once, which is why it is not the plain connection test:
+        that email reaches this person, and that the monitor they just drew is the one
+        now watching. So it quotes the monitor back in the same plain sentence the board
+        showed them, and says plainly that nothing has happened in the market yet.
+        """
+
+        base_url = str(self.settings.public_base_url).rstrip("/")
+        text_body = (
+            f"{monitor_name} is now watching\n\n"
+            "This is a test message, sent because you just switched this monitor on. "
+            "Nothing has happened in the market yet.\n\n"
+            f"What it watches for: {in_plain_words}\n\n"
+            "A real alert will arrive the same way, and will say which coin it is about "
+            "and what happened.\n\n"
+            f"Your monitors: {base_url}/dashboard/monitors\n\n"
+            "Hilal Markets"
+        )
+        content = (
+            status_block(
+                tone="success",
+                label="Email is working",
+                meaning=(
+                    "This is a test, sent because you just switched this monitor on. "
+                    "Nothing has happened in the market yet."
+                ),
+            )
+            + paragraph(f"What {monitor_name} watches for:")
+            + paragraph(in_plain_words)
+            + button("See your monitors", f"{base_url}/dashboard/monitors")
+            + note(
+                "A real alert will look like this one and will name the coin and what "
+                "happened. You can change how you are told in your settings."
+            )
+        )
+        return BrandedEmail(
+            subject=f"Test: {monitor_name} is now watching",
+            text_body=text_body,
+            html_body=self.shell(
+                title=f"{monitor_name} is now watching",
+                eyebrow="Test message",
+                preheader="Your monitor is on. This is the test message.",
+                content_html=content,
+                footer_reason=(
+                    "You are receiving this because you switched on a monitor and asked "
+                    "to be told by email."
+                ),
+            ),
+        )
+
     def access_changed(
         self,
         *,

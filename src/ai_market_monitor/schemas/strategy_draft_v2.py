@@ -93,6 +93,26 @@ class ConditionNodeType(StrEnum):
     NOT = "not"
 
 
+#: How many rules each way of joining takes: ``(fewest, most)``, where ``None`` is "no
+#: limit". One owner for the whole product.
+#:
+#: This answer used to be written in three places that disagreed. The Builder refused a
+#: group with fewer than two rules; this schema accepted one; the draft's semantic check
+#: refused a *nested* group with one. So a person could make a group in one screen that
+#: another screen would not save, and the canvas could draw a board that passed its own
+#: checks and was refused the moment it became a real monitor.
+#:
+#: The floor is **one**. A group is made before it is filled, and the first rule dropped
+#: into it has to be allowed in, or the group could only ever be built by selecting rules
+#: that already exist. An empty group is still refused — by ``validate_shape`` below —
+#: and "none of these" still takes exactly one rule, because it negates one thing.
+GROUP_ARITY: dict[ConditionNodeType, tuple[int, int | None]] = {
+    ConditionNodeType.AND: (1, None),
+    ConditionNodeType.OR: (1, None),
+    ConditionNodeType.NOT: (1, 1),
+}
+
+
 ConditionUnit = Literal[
     "percent",
     "price",
@@ -307,8 +327,13 @@ class ConditionNodeV2(BaseModel):
                 raise ValueError("boolean groups cannot contain condition fields")
             if not self.children:
                 raise ValueError("boolean groups require children")
-            if self.node_type == ConditionNodeType.NOT and len(self.children) != 1:
-                raise ValueError("NOT requires exactly one child")
+            fewest, most = GROUP_ARITY[self.node_type]
+            if len(self.children) < fewest:
+                raise ValueError(
+                    f"{self.node_type.value} requires at least {fewest} children"
+                )
+            if most is not None and len(self.children) > most:
+                raise ValueError(f"{self.node_type.value} takes exactly {most} child")
         return self
 
     def walk(self) -> list[ConditionNodeV2]:

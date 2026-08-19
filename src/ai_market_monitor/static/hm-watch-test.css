@@ -406,6 +406,12 @@ body.hilal-dashboard :is(.hm-w, .hm-o) .w-first-ways {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
+/* One way, one card's width. The track is sized for two cards side by side, so a
+   single one stretched the full 720px and read as a banner rather than a choice. */
+body.hilal-dashboard :is(.hm-w, .hm-o) .w-first-ways:has(> :only-child) {
+  width: min(420px, 100%);
+}
+
 body.hilal-dashboard :is(.hm-w, .hm-o) .w-way {
   position: relative;
   display: grid;

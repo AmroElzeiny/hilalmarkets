@@ -10,8 +10,8 @@
     There is no assistant on this page: no chat panel, no chat popup, and no
     "Hilal Markets Assistant" box. Authoring never requires the assistant. -#}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260819-auth-1">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-monitor-test.css') }}?v=20260819-auth-1">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260819-canvas-1">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-monitor-test.css') }}?v=20260819-canvas-1">
 {% endblock %}
 {% block content %}
 
@@ -23,6 +23,7 @@
   data-channels='{{ monitor_channels | tojson }}'
   data-market-path="{{ market_path }}"
   data-watchlists-path="{{ watchlists_path }}"
+  data-settings-path="{{ settings_path }}"
   data-screening-configured="{{ 'true' if builder_screening.configured else 'false' }}"
   data-screening-name="{{ builder_screening.methodology_name or '' }}"
   data-screening-version="{{ builder_screening.methodology_version or '' }}"
@@ -188,6 +189,13 @@
         <button class="t-action m-checks-toggle" type="button" data-checks-toggle aria-expanded="false" aria-controls="m-check-list">
           <span data-icon="list" data-icon-class="icon-sm"></span><span data-checks-count>Checks</span>
         </button>
+        {#- The next step, and it only exists once there is one. Hidden rather than
+            disabled: a greyed-out button on a half-finished board invites a person to
+            press it and be told no, when the checklist beside it already says what is
+            missing. -#}
+        <button class="t-action is-primary m-next-step" type="button" data-next-step hidden>
+          <span data-icon="arrow" data-icon-class="icon-sm"></span>Next step
+        </button>
       </div>
     </div>
   </section>
@@ -205,8 +213,8 @@
     </li>
     <li class="t-card m-next-card">
       <span class="m-next-icon"><span data-icon="radar" data-icon-class="icon"></span></span>
-      <strong>Starting a monitor happens on Watchlists</strong>
-      <p>When the plan is finished, take it there. <a href="{{ watchlists_path }}">Open Watchlists</a></p>
+      <strong>You switch it on from here</strong>
+      <p>When every check passes, a &ldquo;Next step&rdquo; button appears above. It reads the plan back to you, sends one test message, and then it is watching. <a href="{{ watchlists_path }}">See your monitors</a></p>
     </li>
   </ul>
 
@@ -215,8 +223,8 @@
     <div class="t-state">
       <div class="t-state-icon"><span data-icon="workflow" data-icon-class="icon"></span></div>
       <h2>The canvas needs JavaScript</h2>
-      <p>Turn it on for this site to draw a monitor here. You can still build one step by step on the Watchlists page.</p>
-      <p><a class="t-action" href="{{ watchlists_path }}"><span data-icon="arrow" data-icon-class="icon-sm"></span>Open Watchlists</a></p>
+      <p>Turn it on for this site to draw a monitor here. You can still see and manage the monitors you already have on the Monitors page.</p>
+      <p><a class="t-action" href="{{ watchlists_path }}"><span data-icon="arrow" data-icon-class="icon-sm"></span>Open Monitors</a></p>
     </div>
   </noscript>
 
@@ -277,6 +285,115 @@
   </div>
 </dialog>
 
+{#- The last step, in three states inside one popup: read it back, watch it being
+    tested, see what happened. One dialog rather than three, because it is one action
+    and a person should never lose the thing they were reading to see its result.
+
+    Nothing here is written in code words. The setup is read back in the same sentences
+    the board printed on the cards, built by `planReadback` in hm-monitor-plan.js — the
+    one place the plan is put into words. -#}
+<dialog class="t-dialog m-launch" data-launch aria-labelledby="m-launch-title">
+  <div class="t-dialog-shell">
+    <header class="t-dialog-head">
+      <div>
+        <p class="t-eyebrow"><span data-icon="sparkles" data-icon-class="icon-sm"></span><span data-launch-eyebrow>Last step</span></p>
+        <h2 id="m-launch-title" data-launch-title>Check it over, then switch it on</h2>
+        <p data-launch-lede>This is your monitor in plain words. Nothing is watching yet.</p>
+      </div>
+      <button class="t-close" type="button" data-launch-close aria-label="Close">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+
+    <div class="t-dialog-body m-launch-body">
+      {#- How it is going, and then how it went. Above the steps so it survives the move
+          from "sending" to "what happened" — the colour it ends on is the answer. -#}
+      <div class="m-bar-track" data-launch-bar data-state="working" hidden>
+        <span class="m-bar-fill" data-launch-bar-fill></span>
+      </div>
+
+      {#- 1. Read it back. -#}
+      <section class="m-launch-step" data-launch-step="review">
+        <div class="m-field">
+          <label class="m-field-label" for="m-launch-name"><span>Call it</span></label>
+          <input class="m-text" id="m-launch-name" type="text" maxlength="120"
+                 placeholder="My first monitor" data-launch-name>
+          <p class="m-field-help">Only a name, so you can find it again. It changes nothing about what is watched.</p>
+        </div>
+        <dl class="m-readback" data-launch-readback></dl>
+
+        {#- Asked once per person, and only when it has not been answered.
+
+            A monitor cannot start without this on file — the activation gate refuses
+            without it — and nothing on the website had ever asked, so every monitor
+            built here failed at the last step. It is a real tick box with the words
+            beside it, not a line of small print somebody is assumed to have read. -#}
+        {% if risk_note_needed %}
+        <label class="m-consent" data-launch-consent>
+          <input type="checkbox" data-launch-accept>
+          <span>
+            <strong>I understand what a monitor does</strong>
+            It watches the market and tells me when what I asked for happens. It does not
+            buy, sell, or decide anything for me, and it is not advice. Prices can move
+            against me and nothing here is a promise about what will happen.
+          </span>
+        </label>
+        {% endif %}
+
+        <p class="t-foot-note m-launch-promise">
+          <span data-icon="lock" data-icon-class="icon-sm"></span>
+          Hilal Markets watches and tells you. It never buys, sells, or decides anything for you.
+        </p>
+      </section>
+
+      {#- 2. Sending. One row per way of being told.
+
+          The bar itself is above all three steps rather than inside this one, so its
+          final colour is still on screen while the result is being read. Inside here it
+          turned green and vanished in the same instant the answer arrived, which is the
+          one moment it existed to describe. -#}
+      <section class="m-launch-step" data-launch-step="sending" hidden>
+        <p class="m-launch-status" data-launch-status role="status" aria-live="polite">Switching it on…</p>
+        <ul class="m-sends" data-launch-sends aria-label="Where the test message is going"></ul>
+      </section>
+
+      {#- 3. What happened. -#}
+      <section class="m-launch-step" data-launch-step="done" hidden>
+        {#- Empty on purpose. What happened is written here after it has happened, by
+            the script that asked. A page that shipped "It is watching now" in its own
+            markup would be a page claiming a monitor had started before anybody pressed
+            anything — true for a screen reader reading source, true for a search engine,
+            and untrue for the person. -#}
+        <div class="m-outcome" data-launch-outcome data-tone="ok">
+          <span class="m-outcome-mark" data-launch-outcome-mark aria-hidden="true"></span>
+          <div>
+            <strong data-launch-outcome-title></strong>
+            <p data-launch-outcome-line></p>
+          </div>
+        </div>
+        <ul class="m-sends" data-launch-results aria-label="What each way of being told did"></ul>
+        <p class="m-field-help" data-launch-settings-note>
+          You can change how you are told — turn one off, add another, or set quiet hours — in your settings.
+        </p>
+      </section>
+    </div>
+
+    <footer class="t-dialog-foot" data-launch-foot>
+      <span class="t-foot-note" data-launch-note>Nothing starts until you press the button.</span>
+      <button class="t-action" type="button" data-launch-cancel>Go back to the board</button>
+      <button class="t-action is-primary" type="button" data-launch-go>
+        <span data-icon="send" data-icon-class="icon-sm"></span>Test and switch it on
+      </button>
+      <button class="t-action is-primary" type="button" data-launch-finish hidden>
+        <span data-icon="check" data-icon-class="icon-sm"></span>Done — open my settings
+      </button>
+      <button class="t-action" type="button" data-launch-retry hidden>
+        <span data-icon="refresh" data-icon-class="icon-sm"></span>Try again
+      </button>
+    </footer>
+  </div>
+</dialog>
+
 <dialog class="t-dialog m-shortcuts" data-shortcuts aria-labelledby="m-shortcuts-title">
   <div class="t-dialog-shell">
     <header class="t-dialog-head">
@@ -324,4 +441,4 @@
 
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-monitor-test.js') }}?v=20260819-auth-1"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-monitor-test.js') }}?v=20260819-canvas-1"></script>{% endblock %}

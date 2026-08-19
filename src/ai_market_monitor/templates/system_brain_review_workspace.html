@@ -196,7 +196,7 @@
   <aside class="brain-decision-panel" aria-label="Review decision" data-testid="human-decision-panel">
     <div class="brain-decision-state">
       <h3>{{ case.state.replace('_',' ').title() }}</h3>
-      <p>Approving does not publish. Publishing is a separate step.</p>
+      <p>Approving publishes this Passport. Rejecting keeps the evidence and shows nothing.</p>
     </div>
     <details class="brain-impact-preview">
       <summary>What will change?</summary>
@@ -229,6 +229,10 @@
     <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form data-review-decision-form>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       {% if detail.methodology_contract_error %}<div class="brain-terminal danger"><strong>Approval blocked</strong><small>{{ detail.methodology_contract_error }}</small></div>{% endif %}
+      {# What stops this decision, said before the button is pressed rather than after.
+         Same words the refusal itself would use, from one owner, so the reviewer never
+         meets two explanations of one rule. #}
+      {% if decision_blocker %}<div class="brain-terminal danger" data-testid="decision-blocker"><strong>Not ready to approve</strong><small>{{ decision_blocker.what_happened }} {{ decision_blocker.next_step }}</small></div>{% endif %}
 
       {# One button for the common case: every condition was met.
 
@@ -242,7 +246,7 @@
           type="button"
           class="brain-secondary-button brain-approve-all"
           data-approve-all
-          {{ 'disabled' if detail.methodology_contract_error else '' }}
+          {{ 'disabled' if detail.methodology_contract_error or decision_blocker else '' }}
         ><i data-icon="check"></i>Mark all as passed</button>
       </div>
 
@@ -272,9 +276,9 @@
       {% endif %}
       <details class="brain-decision-extras" data-decision-extras><summary>Qualifications, gaps, evidence requests</summary><textarea name="qualifications" placeholder="One qualification per line"></textarea><textarea name="acknowledged_gaps" placeholder="One known gap per line"></textarea><textarea name="requested_evidence" placeholder="One evidence request per line"></textarea></details>
       <div class="brain-decision-actions brain-terminal-action">
-        <button name="action" value="approve" data-confirm="Approve without publishing?" class="approve" {{ 'disabled' if detail.methodology_contract_error else '' }}>Approve</button>
-        <button name="action" value="approve_with_qualification" data-confirm="Approve with a qualification, without publishing?" class="approve" {{ 'disabled' if detail.methodology_contract_error else '' }}>Approve with note</button>
-        <button name="action" value="approve_internal_only" data-confirm="Approve for us only, and never show this publicly?" class="secondary" {{ 'disabled' if detail.methodology_contract_error else '' }}>Approve, keep private</button>
+        <button name="action" value="approve" data-confirm="Approve and publish this Passport?" class="approve" {{ 'disabled' if detail.methodology_contract_error or decision_blocker else '' }}>Approve &amp; publish</button>
+        <button name="action" value="approve_with_qualification" data-confirm="Approve with a note and publish this Passport?" class="approve" {{ 'disabled' if detail.methodology_contract_error or decision_blocker else '' }}>Approve with note</button>
+        <button name="action" value="approve_internal_only" data-confirm="Approve for us only, and never show this publicly?" class="secondary" {{ 'disabled' if detail.methodology_contract_error or decision_blocker else '' }}>Approve, keep private</button>
         <button name="action" value="request_more_evidence" class="secondary">Ask for evidence</button>
         <button name="action" value="return_to_research" class="secondary">Back to research</button>
         {% if case.case_type in ['material_source_change','user_factual_report'] %}<button name="action" value="dismiss_false_positive" data-confirm="Close this as a false alarm and keep the record?" class="secondary">False alarm</button>{% endif %}

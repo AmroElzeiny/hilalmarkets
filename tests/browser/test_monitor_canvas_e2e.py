@@ -676,6 +676,205 @@ def test_a_problem_points_at_the_card_it_is_about(page: Page, base_url: str) -> 
     expect(selected).to_have_count(1)
 
 
+# ── Choosing which coins ─────────────────────────────────────────────────────
+
+
+def _open_coins_card(page: Page) -> None:
+    page.locator("[data-node='universe']").click()
+    expect(page.locator("[data-inspector]")).to_be_visible()
+    expect(page.locator("[data-inspector-kind]")).to_contain_text("Coins to watch")
+
+
+def test_naming_coins_yourself_opens_a_real_search(page: Page, base_url: str) -> None:
+    """"Coins I name myself" used to store a mode and ask nothing else.
+
+    The board then said a person had named coins when they had named none, and the
+    monitor would have been refused the moment it was switched on — with a reason they
+    could not act on from the page they were standing on.
+    """
+
+    _open_canvas(page, base_url)
+    _open_coins_card(page)
+
+    page.locator("[data-inspector-body] [data-universe='explicit_assets']").click()
+    search = page.locator("[data-coin-search]")
+    expect(search).to_be_visible()
+
+    # Nothing is chosen, and the board says so rather than looking finished.
+    expect(page.locator("[data-check-list]")).to_contain_text("Add at least one coin")
+    expect(page.locator("[data-node='universe']")).to_have_attribute("data-incomplete", "true")
+
+    search.fill("bt")
+    page.wait_for_timeout(900)
+    suggestions = page.locator("[data-coin-add]")
+    if suggestions.count() == 0:
+        pytest.skip("this database has no screened coins to search")
+
+    ticker = suggestions.first.get_attribute("data-coin-add")
+    suggestions.first.click()
+    page.wait_for_timeout(400)
+
+    # It becomes a chip, the card says how many, and the readout says which.
+    expect(page.locator(f"[data-coin-remove='{ticker}']")).to_be_visible()
+    expect(page.locator("[data-node='universe']")).to_have_attribute("data-incomplete", "false")
+    expect(page.locator("[data-sentence-text]")).to_contain_text(ticker)
+
+    # And one can be taken back out.
+    page.locator(f"[data-coin-remove='{ticker}']").click()
+    page.wait_for_timeout(400)
+    expect(page.locator(f"[data-coin-remove='{ticker}']")).to_have_count(0)
+    expect(page.locator("[data-node='universe']")).to_have_attribute("data-incomplete", "true")
+
+
+def test_the_favorites_picker_says_what_is_missing_when_there_are_no_lists(
+    page: Page, base_url: str
+) -> None:
+    _open_canvas(page, base_url)
+    _open_coins_card(page)
+
+    page.locator("[data-inspector-body] [data-universe='approved_watchlist']").click()
+    page.wait_for_timeout(700)
+    body = page.locator("[data-inspector-body]")
+    # A fresh account has no Favorites list. The panel says so and offers the way to
+    # make one, instead of showing an empty box with nothing in it.
+    expect(body).to_contain_text("Favorites")
+    expect(page.locator("[data-node='universe']")).to_have_attribute("data-incomplete", "true")
+
+
+def test_email_is_offered_as_a_way_of_being_told(page: Page, base_url: str) -> None:
+    """Email was deliverable everywhere else and namable nowhere. It is a choice now."""
+
+    _open_canvas(page, base_url)
+    # The invitation covers the board until there is something on it.
+    _add_first_condition(page)
+    page.locator("[data-node='alert']").click()
+    expect(page.locator("[data-inspector-kind]")).to_contain_text("How you hear about it")
+    expect(page.locator("[data-inspector-body] [data-channel='email']")).to_be_visible()
+
+
+# ── The last step ────────────────────────────────────────────────────────────
+
+
+def _complete_the_open_card(page: Page) -> None:
+    """Fill the three values the card opened on. None of them has a default."""
+
+    page.locator("[data-inspector-body] [data-set='direction'][data-value='up']").click()
+    page.locator("[data-inspector-body] [data-set='comparator'][data-value='gte']").click()
+    page.locator("[data-inspector-body] input[data-set='threshold']").fill("5")
+    page.wait_for_timeout(500)
+
+
+def _choose_a_way_of_being_told(page: Page) -> None:
+    page.locator("[data-node='alert']").click()
+    page.locator("[data-inspector-body] [data-channel='web']").click()
+    page.wait_for_timeout(400)
+
+
+def _finish_the_board(page: Page) -> None:
+    """Every check passing: one complete condition and one way of being told."""
+
+    _add_first_condition(page)
+    _complete_the_open_card(page)
+    _choose_a_way_of_being_told(page)
+
+
+def test_the_next_step_appears_only_when_nothing_is_blocking(page: Page, base_url: str) -> None:
+    _open_canvas(page, base_url)
+    expect(page.locator("[data-next-step]")).to_be_hidden()
+
+    _add_first_condition(page)
+    # A card with nothing set is blocking, so there is still no next step.
+    expect(page.locator("[data-next-step]")).to_be_hidden()
+
+    _complete_the_open_card(page)
+    # And a monitor with no way of telling anybody is still blocking.
+    expect(page.locator("[data-next-step]")).to_be_hidden()
+
+    _choose_a_way_of_being_told(page)
+    expect(page.locator("[data-next-step]")).to_be_visible()
+    expect(page.locator("[data-meter-text]")).to_contain_text("Ready")
+
+
+def test_the_last_step_reads_the_setup_back_in_plain_words(page: Page, base_url: str) -> None:
+    _open_canvas(page, base_url)
+    _finish_the_board(page)
+
+    page.locator("[data-next-step]").click()
+    dialog = page.locator("[data-launch]")
+    expect(dialog).to_be_visible()
+
+    readback = dialog.locator("[data-launch-readback]")
+    expect(readback).to_contain_text("Coins to watch")
+    expect(readback).to_contain_text("Tell me when")
+    expect(readback).to_contain_text("How you hear about it")
+    # The rule is read back as the sentence the card prints, never as a key or a number
+    # nobody chose.
+    expect(readback).to_contain_text("goes up")
+    expect(readback).to_contain_text("5%")
+
+    text = readback.inner_text()
+    for internal in ("gte", "close_to_close", "eligible_market", "mechanic", "null"):
+        assert internal not in text, f"the popup showed an internal word: {internal}"
+
+    # Nothing has happened yet, and it says so.
+    expect(dialog).to_contain_text("Nothing is watching yet")
+    page.locator("[data-launch-cancel]").click()
+    expect(dialog).to_be_hidden()
+
+
+def test_switching_it_on_sends_one_test_message_and_says_what_happened(
+    page: Page, base_url: str
+) -> None:
+    """The whole point of the step: it is on, and this is what reached you.
+
+    Both outcomes are real answers and both are checked. What must never happen is a
+    popup that stops halfway, or one that says it worked without saying where.
+    """
+
+    _open_canvas(page, base_url)
+    _finish_the_board(page)
+    page.locator("[data-next-step]").click()
+    dialog = page.locator("[data-launch]")
+    expect(dialog).to_be_visible()
+
+    page.locator("[data-launch-name]").fill("My first monitor")
+
+    # The risk note is asked once, and the button waits for it. A monitor cannot start
+    # without an acceptance on file, and nothing on the website used to ask — so every
+    # monitor built here failed at the last step with a word from inside the machine.
+    go = page.locator("[data-launch-go]")
+    expect(go).to_be_disabled()
+    page.locator("[data-launch-accept]").check()
+    expect(go).to_be_enabled()
+    go.click()
+
+    # It reaches an answer, and the bar stops on one of the three real states.
+    done = dialog.locator("[data-launch-step='done']")
+    expect(done).to_be_visible(timeout=60_000)
+    tone = dialog.locator("[data-launch-outcome]").get_attribute("data-tone")
+    assert tone == "ok", (
+        "the monitor was not switched on: "
+        f"{dialog.locator('[data-launch-outcome]').inner_text()}"
+    )
+
+    expect(dialog).to_contain_text("is watching now")
+    # One row per way of being told, each with a word beside its mark.
+    rows = dialog.locator("[data-launch-results] .m-send")
+    expect(rows).to_have_count(1)
+    expect(rows.first).to_contain_text("In the dashboard")
+    expect(rows.first).to_contain_text("Sent")
+    expect(dialog).to_contain_text("settings")
+
+    # And the finish button takes them there.
+    page.locator("[data-launch-finish]").click()
+    page.wait_for_url(re.compile(r"/dashboard/settings"), timeout=30_000)
+
+    # The monitor is real: it is on the Monitors page, watching, under its own name.
+    page.goto(f"{base_url}/dashboard/monitors", wait_until="domcontentloaded")
+    close_any_open_guide(page)
+    expect(page.locator("[data-w-card]").filter(has_text="My first monitor")).to_have_count(1)
+
+
 @pytest.mark.parametrize("width", [1440, 1024, 760])
 def test_the_page_never_scrolls_sideways(page: Page, base_url: str, width: int) -> None:
     page.set_viewport_size({"width": width, "height": 900})

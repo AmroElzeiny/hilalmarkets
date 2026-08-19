@@ -34,7 +34,18 @@ export function emptyPlan() {
   return {
     version: 2,
     rootId: root.id,
-    universe: { mode: "eligible_market", dx: 0, dy: 0 },
+    // `watchlistId` and `symbols` are only read for the mode that owns them: a
+    // Favorites list for "one of my Favorites lists", typed-in coins for "coins I name
+    // myself". Both are kept when the mode changes, so switching away and back does not
+    // throw away a choice somebody already made.
+    universe: {
+      mode: "eligible_market",
+      watchlistId: null,
+      watchlistName: "",
+      symbols: [],
+      dx: 0,
+      dy: 0,
+    },
     alert: { channels: [], cooldownMinutes: 15, dx: 0, dy: 0 },
     nodes: { [root.id]: root },
   };
@@ -43,8 +54,12 @@ export function emptyPlan() {
 /* ── The store ─────────────────────────────────────────────────────────────── */
 
 export class PlanStore {
-  constructor({ limits } = {}) {
+  constructor({ limits, reachableChannels } = {}) {
     this.limits = limits || { max_depth: 6, max_nodes: 24, arity: {} };
+    /* Which ways of being told can really reach this person, decided by the server and
+       handed over. `null` means nobody asked, and the checks then say nothing about it
+       rather than guessing that everything works. */
+    this.reachableChannels = reachableChannels || null;
     this.plan = restore() || emptyPlan();
     this.past = [];
     this.future = [];
@@ -392,6 +407,39 @@ export class PlanStore {
     return this.commit((plan) => { plan.universe.mode = mode; });
   }
 
+  /**
+   * Which Favorites list to watch.
+   *
+   * The name is stored beside the id for one reason only: so the card and the readout
+   * can *say* which list without asking the server again every time they redraw. The id
+   * is what is sent and what is authoritative; if the two ever disagree the id wins,
+   * because a list can be renamed and a stale word on a card must never change what is
+   * watched.
+   */
+  setUniverseWatchlist(watchlistId, name = "") {
+    return this.commit((plan) => {
+      plan.universe.watchlistId = watchlistId || null;
+      plan.universe.watchlistName = watchlistId ? String(name || "") : "";
+    });
+  }
+
+  /**
+   * The coins somebody named, in the order they added them.
+   *
+   * Kept as plain tickers — "BTC", not "BTC/USDT". The trading pair is the server's to
+   * build, from the one market scope a monitor carries; a pair assembled here would be
+   * a second answer to "which market is this" and would go wrong the first time the
+   * quote asset differed.
+   */
+  setUniverseSymbols(symbols) {
+    const clean = [...new Set(
+      symbols
+        .map((symbol) => String(symbol || "").trim().toUpperCase())
+        .filter(Boolean),
+    )].slice(0, 200);
+    return this.commit((plan) => { plan.universe.symbols = clean; });
+  }
+
   setChannels(channels) {
     return this.commit((plan) => { plan.alert.channels = [...channels]; });
   }
@@ -428,6 +476,13 @@ function restore() {
     if (!raw) return null;
     const plan = JSON.parse(raw);
     if (!plan || plan.version !== 2 || !plan.nodes || !plan.nodes[plan.rootId]) return null;
+    // A draft saved before "coins to watch" could hold a list or named coins has neither
+    // key. Filling them in is not the same as bumping the version: raising the version
+    // would throw the person's whole board away to add two empty fields to it.
+    plan.universe = plan.universe || { mode: "eligible_market", dx: 0, dy: 0 };
+    if (plan.universe.watchlistId === undefined) plan.universe.watchlistId = null;
+    if (typeof plan.universe.watchlistName !== "string") plan.universe.watchlistName = "";
+    if (!Array.isArray(plan.universe.symbols)) plan.universe.symbols = [];
     return plan;
   } catch {
     return null;
@@ -549,9 +604,33 @@ const JOIN_CLAUSE = {
  * because a readout that grows without limit is the wall of text this page exists to
  * avoid.
  */
+/**
+ * Which coins the monitor watches, as words.
+ *
+ * One owner, because four places say it: the readout sentence, the "Coins to watch"
+ * card, the popup that reads the whole setup back, and the summary the assistant is
+ * given. Written four times, the first rename of a Favorites list would make one of
+ * them wrong and nothing would report it.
+ */
+export function universeWords(store, universeLabel) {
+  const universe = store.plan.universe || {};
+  if (universe.mode === "approved_watchlist") {
+    return universe.watchlistName
+      ? `the coins on your “${universe.watchlistName}” list`
+      : "one of your Favorites lists";
+  }
+  if (universe.mode === "explicit_assets") {
+    const chosen = universe.symbols || [];
+    if (!chosen.length) return "the coins you name";
+    if (chosen.length <= 4) return listWords(chosen);
+    return `${listWords(chosen.slice(0, 3))} and ${chosen.length - 3} more`;
+  }
+  return universeLabel || "the screened coins";
+}
+
 export function planSentence(store, catalog, { universeLabel, channelLabels }) {
   const parts = [];
-  parts.push(`Watch ${universeLabel || "the screened coins"}.`);
+  parts.push(`Watch ${universeWords(store, universeLabel)}.`);
 
   const phrase = groupPhrase(store, catalog, store.plan.rootId);
   parts.push(phrase.text ? `Tell me when ${phrase.text}.` : "No condition has been added yet.");
@@ -597,6 +676,71 @@ function groupPhrase(store, catalog, groupId) {
 function listWords(items) {
   if (items.length <= 1) return items.join("");
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * The whole setup written out, one plain line at a time.
+ *
+ * This is what a person reads before switching a monitor on, and it is the only place
+ * the setup is put into sentences. Nothing here is a field name, a key or a value the
+ * page does not already show: every line is built from the same words that are printed
+ * on the cards, so the popup cannot describe the board differently from the board.
+ *
+ * Returned as rows rather than one blob so the popup can lay them out and a screen
+ * reader can hear "Coins to watch — the coins on your Long term list" as one pair.
+ */
+export function planReadback(store, catalog, { universeLabel, channelLabels }) {
+  const rows = [];
+  rows.push({ label: "Coins to watch", value: capitalise(universeWords(store, universeLabel)) });
+
+  const cards = [];
+  const walk = (groupId, depth) => {
+    for (const child of store.children(groupId)) {
+      if (child.kind === "group") {
+        cards.push({
+          depth,
+          text: `${capitalise(groupWord(child.op))}:`,
+          group: true,
+        });
+        walk(child.id, depth + 1);
+        continue;
+      }
+      const mechanic = catalog.byKey.get(child.mechanic);
+      const clause = mechanic ? ruleClause(mechanic, child.values) : "";
+      cards.push({
+        depth,
+        text: mechanic
+          ? `${mechanic.label}${clause ? ` — ${clause}` : ""}`
+          : "A condition this platform no longer offers",
+        optional: child.required === false,
+        group: false,
+      });
+    }
+  };
+  const root = store.node(store.plan.rootId);
+  walk(store.plan.rootId, 0);
+  rows.push({
+    label: "Tell me when",
+    value: capitalise(groupWord(root ? root.op : "and")),
+    cards,
+  });
+
+  rows.push({
+    label: "How you hear about it",
+    value: channelLabels && channelLabels.length
+      ? listWords(channelLabels)
+      : "Not chosen yet",
+  });
+  rows.push({
+    label: "Quiet time between messages",
+    value: `${store.plan.alert.cooldownMinutes} minute${store.plan.alert.cooldownMinutes === 1 ? "" : "s"}`,
+  });
+  return rows;
+}
+
+function capitalise(text) {
+  const value = String(text || "");
+  return value ? value[0].toUpperCase() + value.slice(1) : value;
 }
 
 /* ── Checks ────────────────────────────────────────────────────────────────── */
@@ -677,6 +821,7 @@ export function checkPlan(store, catalog) {
     const size = group.children.length;
     const arity = (limits.arity || {})[group.op] || [1, null];
     const least = Number(arity[0]) || 1;
+    const most = arity[1] === null || arity[1] === undefined ? null : Number(arity[1]);
     if (size === 0) {
       checks.push({
         id: `bare-${group.id}`,
@@ -691,7 +836,17 @@ export function checkPlan(store, catalog) {
         id: `thin-${group.id}`,
         tone: "warn",
         nodeId: group.id,
-        text: `"${groupWord(group.op)}" needs at least ${least} cards to mean anything.`,
+        text: `"${groupWord(group.op)}" needs at least ${least} card${least === 1 ? "" : "s"} to mean anything.`,
+      });
+    } else if (most !== null && size > most) {
+      // The board had no upper check at all. "None of these" takes exactly one card, so a
+      // second one dropped into it drew a board that looked finished and would have been
+      // refused the moment it was turned into a real monitor.
+      checks.push({
+        id: `wide-${group.id}`,
+        tone: "stop",
+        nodeId: group.id,
+        text: `"${groupWord(group.op)}" holds ${most === 1 ? "one card" : `${most} cards`}, and this one has ${size}. Put the extra cards in their own group first.`,
       });
     }
   }
@@ -711,13 +866,74 @@ export function checkPlan(store, catalog) {
     checks.push({ id: "too-deep", tone: "stop", text: `Groups can sit ${maxDepth} deep. Flatten one to go further.` });
   }
 
-  if (!store.plan.alert.channels.length) {
+  // Which coins. Two of the three ways of choosing need a second answer, and a board
+  // that never asked for it would have been sent to the server and refused there — with
+  // a reason a person cannot act on from the page they are standing on.
+  const universe = store.plan.universe || {};
+  if (universe.mode === "approved_watchlist" && !universe.watchlistId) {
+    checks.push({
+      id: "no-watchlist",
+      tone: "stop",
+      nodeId: "universe",
+      text: "Choose which Favorites list this monitor should watch.",
+    });
+  } else if (universe.mode === "explicit_assets" && !(universe.symbols || []).length) {
+    checks.push({
+      id: "no-coins",
+      tone: "stop",
+      nodeId: "universe",
+      text: "Add at least one coin for this monitor to watch.",
+    });
+  } else {
+    checks.push({
+      id: "coins-chosen",
+      tone: "pass",
+      text: `Watching ${universeWords(store, "the screened coins")}.`,
+    });
+  }
+
+  const wanted = store.plan.alert.channels;
+  if (!wanted.length) {
     checks.push({ id: "no-channel", tone: "stop", nodeId: "alert", text: "Choose at least one way to be told." });
   } else {
-    checks.push({ id: "no-channel", tone: "pass", text: "A way to be told is chosen." });
+    // Chosen is not the same as able to reach you. Telegram has to be connected and
+    // email needs a confirmed address; the dashboard needs nothing. Said here so the
+    // board is honest, rather than at the last step after everything is built.
+    const ready = store.reachableChannels;
+    const cannot = ready ? wanted.filter((value) => !ready.has(value)) : [];
+    if (ready && cannot.length === wanted.length) {
+      checks.push({
+        id: "no-channel",
+        tone: "stop",
+        nodeId: "alert",
+        text: "None of the ways you chose can reach you yet. Connect one, or choose the dashboard.",
+      });
+    } else {
+      checks.push({ id: "no-channel", tone: "pass", text: "A way to be told is chosen." });
+      if (cannot.length) {
+        checks.push({
+          id: "channel-waiting",
+          tone: "warn",
+          nodeId: "alert",
+          text: `${cannot.length} of the ways you chose cannot reach you yet. The monitor still runs, and the rest still work.`,
+        });
+      }
+    }
   }
 
   return checks;
+}
+
+/**
+ * Whether this board could become a real monitor right now.
+ *
+ * "No stops left" rather than "the meter reads 100": the meter is a share of the checks
+ * that pass, and a warning deliberately does not count against it. Reading the meter
+ * would have offered the next step to a board with an unfinished card on it the moment
+ * enough other checks passed.
+ */
+export function planIsReady(checks) {
+  return !checks.some((check) => check.tone === "stop");
 }
 
 export function readiness(checks) {

@@ -124,7 +124,7 @@ async def test_somebody_with_nothing_found_is_told_why_and_given_a_way_on(test_c
     body = page.text
     assert "Nothing has been found yet" in body
     assert "A monitor has to be watching first" in body
-    assert "/dashboard/watchlists" in body
+    assert "/dashboard/monitors" in body
 
 
 async def test_a_coin_appears_once_with_its_state_and_its_count(test_context):

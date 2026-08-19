@@ -182,10 +182,12 @@ async def test_every_structural_action_round_trips_through_the_service(test_cont
         assert sorted(_leaf_ids(tree)) == sorted(leaves)
         assert _groups(tree) == [tree]
 
-        # Regroup, then move the last outside rule in. The outer group is left holding a
-        # single child, which is not a choice between anything, so it collapses onto that
-        # child. The meaning is identical — all three rules must match — and no rule is
-        # lost, which is the property that matters.
+        # Regroup, then move the last outside rule in. The outer group is left holding
+        # one child, and it **stays**. It used to collapse onto that child, because a
+        # group with one rule in it was refused on the next validation; one rule is
+        # enough for a group now, and a group somebody made is not deleted because they
+        # moved a rule out of it. No rule is lost either way, which is the property that
+        # matters, and the meaning is unchanged.
         await _act(
             service, session, chat, "group_conditions", "round-g2",
             node_ids=leaves[1:], operator="or",
@@ -193,14 +195,17 @@ async def test_every_structural_action_round_trips_through_the_service(test_cont
         regrouped_id = next(
             item.node_id for item in _groups(_tree(chat)) if item.node_id != _tree(chat).node_id
         )
+        outer_id = _tree(chat).node_id
         await _act(
             service, session, chat, "move_condition", "round-move",
             node_id=leaves[0], group_id=regrouped_id, position=0,
         )
         tree = _tree(chat)
         assert sorted(_leaf_ids(tree)) == sorted(leaves)
-        assert tree.node_id == regrouped_id
-        assert [child.node_id for child in tree.children][0] == leaves[0]
+        assert tree.node_id == outer_id
+        assert [child.node_id for child in tree.children] == [regrouped_id]
+        inner = tree.children[0]
+        assert [child.node_id for child in inner.children][0] == leaves[0]
         assert (planner.plan_calls, planner.reply_calls) == before
 
 

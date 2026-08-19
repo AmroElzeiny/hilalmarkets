@@ -2530,7 +2530,11 @@ async def test_all_changed_links_make_one_ai_call_and_create_review(test_context
 
     assert pipeline.calls == sorted(pipeline.calls)
     assert ai.calls == 1
-    assert ai.changed_source_counts == [len(pipeline.calls)]
+    # Every changed page in one call, plus the retained authority row the change is
+    # judged against. That row is what carries the published status, and leaving it out
+    # of the reviewed evidence is what made every change review impossible to approve:
+    # the approval requires the authority snapshot to be part of what was reviewed.
+    assert ai.changed_source_counts == [len(pipeline.calls) + 1]
     assert result["review_cases_created"] == 1
     assert changes == len(pipeline.calls)
     assert review is not None

@@ -358,7 +358,18 @@ class AlertPolicy(BaseModel):
 
     forming_alerts: bool = True
     near_miss_threshold: float = Field(default=70, ge=1, le=100)
-    channels: list[Literal["telegram", "whatsapp", "discord", "web"]] = Field(
+    #: Where a monitor's alert may be sent.
+    #:
+    #: ``discord`` is retired and stays only so historical rows still read; what the
+    #: product really offers is decided by ``offered_channels``, never by this list.
+    #: See `docs/RETIRED_DISCORD_COMPATIBILITY.md`.
+    #:
+    #: ``email`` was missing. Email is a full delivery channel everywhere else — the
+    #: dispatcher enqueues it, the renderer draws it, the sender sends it, Settings
+    #: offers it — but a monitor could not name it, so the canvas and the Builder both
+    #: filtered it out of "how you hear about it" and a person who wanted their alerts
+    #: by email had no way to say so.
+    channels: list[Literal["telegram", "whatsapp", "discord", "web", "email"]] = Field(
         min_length=1
     )
     cooldown_seconds: int = Field(default=900, ge=0, le=86400)

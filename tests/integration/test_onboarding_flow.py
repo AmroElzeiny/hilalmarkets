@@ -139,14 +139,13 @@ async def test_ad_to_activation_full_path(test_context):
     assert preview.status_code == 200, preview.text
     assert preview.json()["status"] == "succeeded"
 
-    without_delivery = await client.post(
-        f"/api/v1/onboarding/sessions/{session_id}/activate",
-        headers=headers,
-        json={"strategy_name": "Sweep monitor", "confirm_usage_impact": True},
-    )
-    assert without_delivery.status_code == 409
-    assert without_delivery.json()["detail"]["code"] == "notification_channel_required"
-
+    # No Telegram connection, and it starts anyway — because this monitor also asks to
+    # be told **in the dashboard**, which needs no connection at all.
+    #
+    # The gate used to ask "is Telegram or WhatsApp connected?" and nothing else counted,
+    # so a person whose monitor said "tell me in the dashboard" was refused and sent to
+    # connect a channel they had not chosen and did not need. It asks the real question
+    # now: can any of the ways *this monitor* names actually reach this person?
     async with test_context["session_factory"]() as session:
         session.add(
             TelegramConnection(

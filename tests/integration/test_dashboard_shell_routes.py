@@ -159,7 +159,7 @@ async def test_the_menu_never_points_at_an_older_copy_of_a_page(test_context):
     assert opened == [
         "/home",
         "/dashboard/market",
-        "/dashboard/watchlists",
+        "/dashboard/monitors",
         "/dashboard/monitor",
         "/dashboard/opportunities",
         "/dashboard/connections",
@@ -176,7 +176,7 @@ async def test_the_menu_never_points_at_an_older_copy_of_a_page(test_context):
 
 async def test_the_monitors_page_offers_its_create_action_from_the_topbar(test_context):
     await _signed_in(test_context, email="shell-create@example.com")
-    page = (await test_context["client"].get("/dashboard/watchlists")).text
+    page = (await test_context["client"].get("/dashboard/monitors")).text
 
     topbar = page.split('<header class="topbar hm-top"', 1)[1].split("</header>", 1)[0]
     assert "Create a monitor" in topbar
@@ -194,13 +194,13 @@ async def test_the_opportunities_page_offers_the_way_back_from_the_topbar(test_c
 
     topbar = page.split('<header class="topbar hm-top"', 1)[1].split("</header>", 1)[0]
     assert "Monitors" in topbar
-    assert "/dashboard/watchlists" in topbar
+    assert "/dashboard/monitors" in topbar
     assert "Your Watchlists" not in page
 
 
 async def test_the_topbar_says_which_page_you_are_on(test_context):
     await _signed_in(test_context, email="shell-here@example.com")
-    page = (await test_context["client"].get("/dashboard/watchlists")).text
+    page = (await test_context["client"].get("/dashboard/monitors")).text
 
     topbar = page.split('<header class="topbar hm-top"', 1)[1].split("</header>", 1)[0]
     assert 'class="hm-top-here-group">Your monitors<' in topbar

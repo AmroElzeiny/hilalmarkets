@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import select
 
 from ai_market_monitor.db.models import (
+    PublishedAssetAssessment,
     ReviewActionBatch,
     ReviewCase,
     SiteVisit,
@@ -24,6 +25,7 @@ from ai_market_monitor.db.models import (
 from ai_market_monitor.db.models.enums import IdentityProvider, UserRole
 from ai_market_monitor.services.site_analytics import TAG_DEFINITIONS
 from ai_market_monitor.services.system_brain_bulk_review import MAX_BATCH_SIZE
+from tests.services.test_sc_malaysia_governance import _ready_case
 
 STATS_PAGES = ("/system-brain/stats", "/dashboard/system-brain/stats")
 
@@ -327,6 +329,73 @@ async def test_a_quick_rejection_is_recorded_and_can_be_taken_back(test_context)
     assert restored is not None
     assert restored.state == "ready_for_review"
     assert restored.publication_state == "unpublished"
+
+
+async def test_a_quick_approval_reaches_customers_and_can_be_taken_back(test_context):
+    """The whole point of pressing Approve, driven through the real route.
+
+    A reviewer approving an asset is asking for it to be in front of customers. Approving
+    used to stop at "approved, not published", so a whole queue could be approved and
+    nothing reached anybody. This is the end-to-end proof that it now does, and that Undo
+    still takes it off the public Passport.
+    """
+
+    admin = await _admin(test_context, email="publish-admin@hilalmarkets.test")
+    headers = {"X-User-ID": str(admin.id)}
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        case_id = case.id
+        await session.commit()
+
+    page = await test_context["client"].get(
+        "/dashboard/system-brain/cases", headers=headers
+    )
+    approved = await test_context["client"].post(
+        "/dashboard/system-brain/cases/bulk-decision",
+        headers=headers,
+        data={
+            "action": "approve",
+            "reason": "The retained official evidence supports every condition here.",
+            "case_id": [str(case_id)],
+            "csrf_token": _csrf(page.text),
+        },
+    )
+
+    assert approved.status_code == 303
+    assert "success=" in approved.headers["location"]
+    assert "error=" not in approved.headers["location"]
+
+    async with test_context["session_factory"]() as session:
+        published = await session.get(ReviewCase, case_id)
+        passport = await session.scalar(select(PublishedAssetAssessment))
+        batch = await session.scalar(select(ReviewActionBatch))
+    assert published is not None
+    assert published.state == "published"
+    assert published.publication_state == "published"
+    assert passport is not None and passport.is_active is True
+    assert batch is not None and batch.applied_count == 1
+
+    after = await test_context["client"].get(
+        "/dashboard/system-brain/cases", headers=headers
+    )
+    undone = await test_context["client"].post(
+        "/dashboard/system-brain/cases/bulk-decision/undo",
+        headers=headers,
+        data={
+            "batch_id": str(batch.id),
+            "reason": "Selected the wrong row on the list.",
+            "csrf_token": _csrf(after.text),
+        },
+    )
+
+    assert undone.status_code == 303
+    assert "success=" in undone.headers["location"]
+    async with test_context["session_factory"]() as session:
+        restored = await session.get(ReviewCase, case_id)
+        held = await session.scalar(select(PublishedAssetAssessment))
+    assert restored is not None and restored.state == "ready_for_review"
+    # The Passport is off the public side, and it is still there in the history.
+    assert held is not None and held.is_active is False
 
 
 async def test_a_quick_decision_without_a_valid_form_token_is_refused(test_context):

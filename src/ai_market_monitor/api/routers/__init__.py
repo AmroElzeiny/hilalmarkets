@@ -7,6 +7,7 @@ from ai_market_monitor.api.routers.dashboard_test import router as dashboard_tes
 from ai_market_monitor.api.routers.hilal_chat import router as hilal_chat_router
 from ai_market_monitor.api.routers.investigations import router as investigations_router
 from ai_market_monitor.api.routers.main_dashboard import router as main_dashboard_router
+from ai_market_monitor.api.routers.monitor_canvas import router as monitor_canvas_router
 from ai_market_monitor.api.routers.on_demand import router as on_demand_router
 from ai_market_monitor.api.routers.onboarding import router as onboarding_router
 from ai_market_monitor.api.routers.public import router as public_router
@@ -29,6 +30,7 @@ __all__ = [
     "hilal_chat_router",
     "investigations_router",
     "main_dashboard_router",
+    "monitor_canvas_router",
     "on_demand_router",
     "onboarding_router",
     "public_router",

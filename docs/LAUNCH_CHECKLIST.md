@@ -116,7 +116,8 @@ database backup identifier, evidence hashes, screenshots, provider IDs, and inci
 6. Run `scripts/bootstrap_governance_owner.py` for the verified owner with a recorded reason.
 7. Import real BTC, ETH, and SOL official rows and retain source snapshots/hashes.
 8. Build factual dossiers; explicitly decide every criterion and use scope.
-9. Record approval, then perform the separate publication action.
+9. Record approval; the Passport is published in the same step unless `REQUIRE_SECOND_REVIEWER`
+   is on or a rights clearance is still missing, in which case the case says what it waits for.
 10. Inspect each current Passport and its exact canonical exchange mappings.
 11. Run Check the Market Now and the worker against the same frozen candle snapshot.
 12. Deliver one controlled Telegram test and verify one delivery record.

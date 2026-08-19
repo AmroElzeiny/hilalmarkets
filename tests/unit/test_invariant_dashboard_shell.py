@@ -426,7 +426,7 @@ def test_the_topbar_draws_the_actions_the_page_declared():
     assert "page_identity" in topbar
     from ai_market_monitor.core.site_content import dashboard_page_identity
 
-    assert dashboard_page_identity("watchlists") == {
+    assert dashboard_page_identity("monitors") == {
         "group": "Your monitors",
         "label": "Monitors",
         "icon": "radar",

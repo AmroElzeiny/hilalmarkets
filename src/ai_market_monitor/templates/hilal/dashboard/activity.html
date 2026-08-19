@@ -1,7 +1,7 @@
 {% extends "hilal/base_dashboard.html" %}
 {% from "hilal/macros/coin_logo.html" import coin_logo_block %}
 {% block page_styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260819-auth-1">
+<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260819-canvas-1">
 {% endblock %}
 {% block content %}
 {% macro monitor_filter() %}
@@ -118,4 +118,4 @@
     being fetched nothing else on the page could run, so a slow or unreachable source left
     this page loading for ever with no message. Deferred scripts still run in order, so
     dashboard.js keeps seeing the chart library, and the page finishes loading either way. -#}
-{% block page_scripts %}{% if settings.chart_library_cdn_url %}<script src="{{ settings.chart_library_cdn_url }}" defer></script>{% endif %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260819-auth-1" defer></script>{% endblock %}
+{% block page_scripts %}{% if settings.chart_library_cdn_url %}<script src="{{ settings.chart_library_cdn_url }}" defer></script>{% endif %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260819-canvas-1" defer></script>{% endblock %}

@@ -19,6 +19,7 @@ from ai_market_monitor.api.routers import (
     hilal_chat_router,
     investigations_router,
     main_dashboard_router,
+    monitor_canvas_router,
     on_demand_router,
     onboarding_router,
     public_chat_router,
@@ -163,6 +164,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     application.include_router(activity_router, prefix="/api/v1")
     application.include_router(dashboard_api_router, prefix="/api/v1")
     application.include_router(hilal_chat_router, prefix="/api/v1")
+    application.include_router(monitor_canvas_router, prefix="/api/v1")
     application.include_router(onboarding_router, prefix="/api/v1")
     application.include_router(on_demand_router, prefix="/api/v1")
     application.include_router(investigations_router, prefix="/api/v1")

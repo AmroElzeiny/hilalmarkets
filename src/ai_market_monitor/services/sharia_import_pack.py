@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,7 +61,20 @@ PUBLICATION_GATES = {
     ),
     "FASSET_SHARIAH_REPORTS": "ADMIN_APPROVAL_AND_RIGHTS_REVIEW_REQUIRED",
 }
-TERMINAL_CASE_STATES = {
+#: Cases a person has already decided, which an import must never reuse or re-point.
+#:
+#: Deliberately **not** the same set as ``sharia_governance.TERMINAL_CASE_STATES``, and
+#: no longer sharing its name, because the two answer different questions:
+#:
+#: * governance asks "does this case already have a final decision?", and an ``approved``
+#:   case does not — publication can still follow it;
+#: * an import asks "has a person decided this?", and an ``approved`` case has been
+#:   decided. Reusing it would fold new imported evidence into a review somebody already
+#:   finished, and moving it to a newer methodology version would break its own
+#:   publication, because the decision records the version it was taken under.
+#:
+#: One name over two meanings is how the next reader merges them by mistake.
+DECIDED_CASE_STATES = {
     "approved",
     "published",
     "rejected",
@@ -293,6 +307,7 @@ class ShariaMethodologyImportPackService:
                 for active in active_rows:
                     active.status = ShariaMethodologyStatus.ARCHIVED
                     active.effective_to = now
+                superseded_ids = [row.id for row in active_rows]
                 methodology = ShariaMethodology(
                     code=code,
                     name=_required_text(source_definition, "display_name"),
@@ -304,15 +319,77 @@ class ShariaMethodologyImportPackService:
                     published_at=now,
                     effective_from=now,
                     rules_json=_methodology_rules(package_id),
-                    evidence_requirements_json=_evidence_requirements(package_id),
+                    evidence_requirements_json=_evidence_requirements(
+                        package_id,
+                        maximum_source_age_days=(
+                            self.settings.sharia_pack_evidence_max_age_days
+                        ),
+                    ),
                 )
                 self.session.add(methodology)
                 await self.session.flush()
+                await self._carry_open_cases_forward(
+                    superseded_ids,
+                    methodology,
+                )
             elif methodology.status != ShariaMethodologyStatus.ACTIVE:
                 methodology.status = ShariaMethodologyStatus.ACTIVE
                 methodology.effective_to = None
             result[package_id] = methodology
         return result
+
+    async def _carry_open_cases_forward(
+        self,
+        superseded_ids: list[UUID],
+        methodology: ShariaMethodology,
+    ) -> None:
+        """Move cases still waiting for a decision onto the new methodology version.
+
+        Archiving a methodology used to leave every open case pointing at the archived
+        row. Approval then refused those cases with "The review methodology is not
+        active", and no screen offered any way to move them: the case was stuck for good
+        because a *version number* changed underneath it.
+
+        Only cases nobody has finished are moved, and only to the newer version of the
+        **same** authority code. A decision that was already recorded keeps the exact
+        methodology version it was taken under — that is what makes the record readable
+        years later — so finished cases are left alone.
+        """
+
+        if not superseded_ids:
+            return
+        cases = list(
+            (
+                await self.session.scalars(
+                    select(ReviewCase).where(
+                        ReviewCase.methodology_id.in_(superseded_ids),
+                        ReviewCase.done_at.is_(None),
+                        ReviewCase.state.not_in(DECIDED_CASE_STATES),
+                    )
+                )
+            ).all()
+        )
+        if not cases:
+            return
+        for case in cases:
+            case.methodology_id = methodology.id
+        self.session.add(
+            AuditEvent(
+                actor_user_id=None,
+                actor_type="system",
+                action="sharia.open_cases_moved_to_current_methodology",
+                target_type="sharia_methodology",
+                target_id=str(methodology.id),
+                metadata_redacted={
+                    "methodology_code": methodology.code,
+                    "methodology_version": methodology.version,
+                    "case_count": len(cases),
+                    "decisions_changed": False,
+                },
+                created_at=datetime.now(UTC),
+            )
+        )
+        await self.session.flush()
 
     async def _source_snapshot(
         self,
@@ -597,7 +674,7 @@ class ShariaMethodologyImportPackService:
             .order_by(ReviewCase.created_at.desc())
             .limit(1)
         )
-        if open_case is not None and open_case.state not in TERMINAL_CASE_STATES:
+        if open_case is not None and open_case.state not in DECIDED_CASE_STATES:
             open_case.methodology_id = methodology.id
             open_case.source_freshness_deadline = (
                 datetime.now(UTC)
@@ -1030,7 +1107,19 @@ def _methodology_rules(package_id: str) -> dict[str, Any]:
     }
 
 
-def _evidence_requirements(package_id: str) -> dict[str, Any]:
+def _evidence_requirements(
+    package_id: str,
+    *,
+    maximum_source_age_days: int,
+) -> dict[str, Any]:
+    """The evidence contract a reviewer's decision on this authority is checked against.
+
+    The import pack states no evidence-age policy, so the age comes from configuration
+    rather than from a number written here. A literal ``1`` used to sit in this function:
+    every case built from the pack expired one day after its research ran, and no
+    approval could ever succeed after that.
+    """
+
     critical = [
         "canonical_asset.identity_hash",
         "external_assessment.source_row_id",
@@ -1046,10 +1135,10 @@ def _evidence_requirements(package_id: str) -> dict[str, Any]:
             "factual_dossier",
         ],
         "minimum_evidence_completeness": 1.0,
-        "maximum_source_age_days": 1,
+        "maximum_source_age_days": maximum_source_age_days,
         "critical_missing_fields": critical,
         "contradiction_policy": "block_any_unresolved",
-        "review_cadence_days": 1,
+        "review_cadence_days": maximum_source_age_days,
         "publication_rights_clearance_required": package_id
         in {"SHARIAH_REVIEW_BUREAU", "FASSET_SHARIAH_REPORTS"},
     }

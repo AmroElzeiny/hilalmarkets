@@ -15,7 +15,6 @@ from ai_market_monitor.core.security import (
 )
 from ai_market_monitor.db.models import (
     AttributionTouch,
-    DisclaimerAcceptance,
     IdentityLinkToken,
     OnboardingSession,
     Trial,
@@ -30,6 +29,9 @@ from ai_market_monitor.schemas.onboarding import (
     StartOnboardingRequest,
 )
 from ai_market_monitor.services.identity import IdentityService
+from ai_market_monitor.services.risk_disclaimer import (
+    record_acceptance as record_disclaimer_acceptance,
+)
 from ai_market_monitor.services.trials import TrialError, TrialLifecycleService
 
 
@@ -151,22 +153,18 @@ class OnboardingService:
         identity = await self.session.get(UserIdentity, request.identity_id)
         if identity is None or identity.user_id != onboarding.user_id:
             raise OnboardingError("identity_missing", "Identity does not belong to this account")
-        existing = await self.session.scalar(
-            select(DisclaimerAcceptance).where(
-                DisclaimerAcceptance.user_id == onboarding.user_id,
-                DisclaimerAcceptance.disclaimer_version == request.disclaimer_version,
-            )
+        # Written through the one owner in `services/risk_disclaimer.py`. This used to
+        # be its own copy of "check, then insert", and so did the Telegram bot — a legal
+        # record with three writers is a record that can end up written three ways.
+        # The identity has already been checked against this account above, so it is
+        # passed rather than looked up again.
+        await record_disclaimer_acceptance(
+            self.session,
+            user_id=onboarding.user_id,
+            version=request.disclaimer_version,
+            source=request.acceptance_source,
+            identity_id=identity.id,
         )
-        if existing is None:
-            self.session.add(
-                DisclaimerAcceptance(
-                    user_id=onboarding.user_id,
-                    identity_id=identity.id,
-                    disclaimer_version=request.disclaimer_version,
-                    acceptance_source=request.acceptance_source,
-                    accepted_at=datetime.now(UTC),
-                )
-            )
         await self._activate_trial(onboarding.user_id)
         self._advance(onboarding, OnboardingStep.GUIDED_SETUP)
         await self.session.commit()

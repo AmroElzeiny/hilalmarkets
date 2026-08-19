@@ -16,7 +16,7 @@
  */
 
 import { attention, dismiss, drawPath, reveal } from "./hm-motion.js";
-import { formatValue, missingOn, ruleClause } from "./hm-monitor-plan.js";
+import { formatValue, missingOn, ruleClause, universeWords } from "./hm-monitor-plan.js";
 import { categoryLook } from "./hm-monitor-catalog.js";
 
 const COLUMN = 336;
@@ -355,22 +355,42 @@ export class Board {
   /** Everything a card shows, decided in one place so no two cards disagree. */
   describe(entry) {
     if (entry.id === "universe") {
-      const mode = this.store.plan.universe.mode;
-      const choice = (this.catalog.universes || []).find((option) => option.value === mode);
+      const universe = this.store.plan.universe;
+      const choice = (this.catalog.universes || []).find(
+        (option) => option.value === universe.mode,
+      );
       const screened = this.root.dataset.screeningConfigured === "true";
+      // Two of the three ways of choosing need a second answer. The card says which
+      // one is still missing rather than reading as finished, because "One of my
+      // Favorites lists" with no list chosen is not a choice a monitor can run on.
+      const waiting =
+        (universe.mode === "approved_watchlist" && !universe.watchlistId)
+        || (universe.mode === "explicit_assets" && !(universe.symbols || []).length);
+      const tags = [
+        screened
+          ? { tone: "eligible", text: "Shariah screened", icon: "shield_check" }
+          : { tone: "review", text: "No standard active yet", icon: "alert" },
+      ];
+      if (universe.mode === "explicit_assets" && (universe.symbols || []).length) {
+        tags.push({
+          tone: "neutral",
+          text: `${universe.symbols.length} coin${universe.symbols.length === 1 ? "" : "s"}`,
+          icon: "coins",
+        });
+      }
+      if (waiting) tags.push({ tone: "review", text: "Needs a choice", icon: "alert" });
       return {
         kind: "universe",
         kindLabel: "Coins to watch",
         icon: "coins",
         title: choice ? choice.label : "Every eligible coin",
-        line: choice ? choice.explanation : "",
-        tags: [
-          screened
-            ? { tone: "eligible", text: "Shariah screened", icon: "shield_check" }
-            : { tone: "review", text: "No standard active yet", icon: "alert" },
-        ],
+        // The same words the readout uses, from the one place that writes them.
+        line: waiting
+          ? "Open this card and choose."
+          : `Watching ${universeWords(this.store, choice ? choice.label.toLowerCase() : "")}.`,
+        tags,
         blocked: false,
-        incomplete: false,
+        incomplete: waiting,
       };
     }
 

@@ -25,6 +25,7 @@ from ai_market_monitor.db.models import (
     AgentRun,
     AgentToolCall,
     AuditEvent,
+    ReviewCase,
     SystemBrainActionProposal,
     SystemBrainArtifact,
     SystemBrainMessage,
@@ -54,6 +55,8 @@ from ai_market_monitor.services.sharia_governance import (
     ShariaGovernanceError,
     ShariaGovernanceService,
 )
+from ai_market_monitor.services.sharia_review_blockers import explain_error
+from ai_market_monitor.services.sharia_screening import ShariaScreeningError
 from ai_market_monitor.services.site_analytics import SiteAnalyticsService
 from ai_market_monitor.services.system_brain_actions import (
     SystemBrainActionError,
@@ -68,6 +71,7 @@ from ai_market_monitor.services.system_brain_bulk_review import (
     MAX_BATCH_SIZE,
     BulkReviewError,
     BulkReviewService,
+    CaseOutcome,
 )
 from ai_market_monitor.services.system_brain_conversations import (
     AdminConversationExplorer,
@@ -442,9 +446,7 @@ async def system_brain_bulk_case_decision(
     except BulkReviewError as exc:
         await session.rollback()
         return _cases_redirect(request, error=str(exc))
-    refused = "; ".join(
-        f"{item.reference}: {item.message}" for item in outcome.results if not item.applied
-    )
+    refused = _refused_summary(outcome.results)
     if not outcome.applied:
         return _cases_redirect(
             request,
@@ -482,9 +484,7 @@ async def system_brain_undo_bulk_case_decision(
     except BulkReviewError as exc:
         await session.rollback()
         return _cases_redirect(request, error=str(exc))
-    refused = "; ".join(
-        f"{item.reference}: {item.message}" for item in outcome.results if not item.applied
-    )
+    refused = _refused_summary(outcome.results)
     if not outcome.applied:
         return _cases_redirect(request, error=refused or "Nothing could be put back.")
     return _cases_redirect(
@@ -494,6 +494,30 @@ async def system_brain_undo_bulk_case_decision(
             "history." + (f" Not put back — {refused}" if refused else "")
         ),
     )
+
+
+#: How many refused cases the message after a quick decision names one by one.
+#:
+#: The message travels back in the address bar. Naming 300 refusals there builds a web
+#: address longer than servers and browsers accept, so the reviewer would get a broken
+#: page instead of the outcome — the report of a problem becoming a second, worse
+#: problem. Beyond this many, the rest are counted rather than listed.
+CASES_NAMED_IN_MESSAGE = 5
+
+
+def _refused_summary(results: list[CaseOutcome]) -> str:
+    """The refused cases, named while that stays a readable, sendable message."""
+
+    refused = [item for item in results if not item.applied]
+    if not refused:
+        return ""
+    named = "; ".join(
+        f"{item.reference}: {item.message}" for item in refused[:CASES_NAMED_IN_MESSAGE]
+    )
+    remaining = len(refused) - CASES_NAMED_IN_MESSAGE
+    if remaining > 0:
+        return f"{named}; and {remaining} more — open the list to see them."
+    return named
 
 
 def _cases_redirect(
@@ -538,6 +562,17 @@ async def system_brain_review_detail(
         context["detail"] = await ShariaAdminDashboardService(session).case_detail(case_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # Say what stops this decision *before* the reviewer presses Approve, in the same
+    # words the refusal would use. A button that always fails is the thing being fixed.
+    case = await session.get(ReviewCase, case_id)
+    blocker = (
+        await ShariaGovernanceService(session, settings).review_blocker(case)
+        if case is not None and case.state == "ready_for_review"
+        else None
+    )
+    context["decision_blocker"] = (
+        explain_error(blocker) if blocker is not None else None
+    )
     return _protect(
         templates.TemplateResponse(
             request=request,
@@ -588,7 +623,7 @@ async def system_brain_import_authority_sources(
             "success": (
                 "SC Malaysia and Fasset source imports were queued. New evidence will appear "
                 "in the review Inbox; nothing becomes customer-visible until a reviewer "
-                "approves it and a publisher completes publication."
+                "approves it."
             )
         }
     )
@@ -1463,8 +1498,11 @@ async def system_brain_review_decision(
             if key and decision
         ]
         gap_rows = [line.strip() for line in acknowledged_gaps.splitlines() if line.strip()]
+        # What one Approve press did, in the reviewer's words. Set only by the two
+        # approve-and-publish actions; every other action keeps the generic wording.
+        outcome_message: str | None = None
         if action == "approve":
-            await service.approve_for_publication(
+            outcome = await service.approve_and_publish(
                 case_id,
                 admin_user_id=principal.user_id,
                 reason=reason,
@@ -1472,11 +1510,16 @@ async def system_brain_review_decision(
                 use_case_decisions=use_cases,
                 acknowledged_gaps=gap_rows,
             )
+            outcome_message = (
+                "Approved and published. Customers can see this Passport now."
+                if outcome.published
+                else outcome.publication_pending_reason
+            )
         elif action == "approve_with_qualification":
             qualification_rows = [
                 line.strip() for line in qualifications.splitlines() if line.strip()
             ]
-            await service.approve_for_publication(
+            outcome = await service.approve_and_publish(
                 case_id,
                 admin_user_id=principal.user_id,
                 reason=reason,
@@ -1485,6 +1528,11 @@ async def system_brain_review_decision(
                 criterion_decisions=criteria,
                 use_case_decisions=use_cases,
                 acknowledged_gaps=gap_rows,
+            )
+            outcome_message = (
+                "Approved with a note, and published. Customers can see this Passport now."
+                if outcome.published
+                else outcome.publication_pending_reason
             )
         elif action == "approve_internal_only":
             qualification_rows = [
@@ -1585,14 +1633,23 @@ async def system_brain_review_decision(
         else:
             raise HTTPException(status_code=400, detail="Unknown review action.")
         await session.commit()
-    except ShariaGovernanceError as exc:
+    except (ShariaGovernanceError, ShariaScreeningError) as exc:
         await session.rollback()
-        query = urlencode({"error": str(exc)[:500]})
+        # The same plain wording the Cases page uses for this refusal, so a reviewer
+        # never meets two different explanations of one rule. ``ShariaScreeningError``
+        # is caught alongside it because it can surface while a Passport is being built,
+        # and a reviewer met that one as a blank server error page.
+        query = urlencode({"error": explain_error(exc).sentence()[:500]})
         return RedirectResponse(
             f"/dashboard/system-brain/cases/{case_id}?{query}",
             status_code=303,
         )
-    query = urlencode({"success": f"{action.replace('_', ' ').title()} was recorded and audited."})
+    query = urlencode(
+        {
+            "success": outcome_message
+            or f"{action.replace('_', ' ').title()} was recorded and audited."
+        }
+    )
     return RedirectResponse(
         f"/dashboard/system-brain/cases/{case_id}?{query}",
         status_code=303,

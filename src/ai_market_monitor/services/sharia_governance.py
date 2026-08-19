@@ -45,6 +45,7 @@ from ai_market_monitor.schemas.sharia_methodology import (
     MethodologyRulesDefinition,
     UseCoverageDecisionInput,
 )
+from ai_market_monitor.services import sharia_dossier_state as dossier_state
 from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningError,
     ShariaScreeningService,
@@ -98,6 +99,27 @@ class GovernanceReviewContext:
     snapshots: tuple[SourceSnapshot, ...]
     evidence_snapshot_ids: tuple[str, ...]
     available_evidence_categories: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class CaseDecisionOutcome:
+    """What one Approve press actually did.
+
+    Approving and publishing are still two governed steps, but a reviewer asks for one
+    thing — put this in front of customers — so the two run together. When the second
+    step legitimately waits (a second reviewer is required, or a rights clearance is
+    still missing), the approval is kept and ``publication_pending_reason`` says in plain
+    words what the Passport is waiting for. It is never an error: the decision was made
+    and recorded.
+    """
+
+    decision: ReviewDecision
+    publication: PublishedAssetAssessment | None = None
+    publication_pending_reason: str | None = None
+
+    @property
+    def published(self) -> bool:
+        return self.publication is not None
 
 
 class ShariaGovernanceError(ValueError):
@@ -240,6 +262,66 @@ class ShariaGovernanceService:
             acknowledged_gaps=acknowledged_gaps,
             internal_only=True,
         )
+
+    async def approve_and_publish(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+        with_qualifications: bool = False,
+        criterion_decisions: list[dict] | None = None,
+        use_case_decisions: list[dict] | None = None,
+        qualifications: list[str] | None = None,
+        acknowledged_gaps: list[str] | None = None,
+    ) -> CaseDecisionOutcome:
+        """Approve this case and put the Passport in front of customers.
+
+        One reviewer action, two recorded governed steps — the approval and the
+        publication — each with its own audit entry, each validated exactly as it is when
+        taken separately. Nothing here skips a check: it removes a second click, not a
+        rule.
+
+        The approval is kept whatever happens next. If publication cannot go ahead — a
+        second reviewer is required, written permission is not yet recorded — the reason
+        comes back in the outcome and the case waits at "approved, not published". A
+        publication that refuses must never throw away the decision a person just made,
+        so the attempt runs inside its own savepoint.
+        """
+
+        decision = await self.approve_for_publication(
+            case_id,
+            admin_user_id=admin_user_id,
+            reason=reason,
+            with_qualifications=with_qualifications,
+            criterion_decisions=criterion_decisions,
+            use_case_decisions=use_case_decisions,
+            qualifications=qualifications,
+            acknowledged_gaps=acknowledged_gaps,
+        )
+        if self.settings.require_second_reviewer:
+            return CaseDecisionOutcome(
+                decision=decision,
+                publication_pending_reason=(
+                    "Approved. A second reviewer has to publish it, as your settings require."
+                ),
+            )
+        try:
+            async with self.session.begin_nested():
+                publication = await self.publish_approved(
+                    case_id,
+                    admin_user_id=admin_user_id,
+                    reason=reason,
+                )
+        except (ShariaGovernanceError, ShariaScreeningError) as exc:
+            # ``ShariaScreeningError`` is caught here too. It comes from building the
+            # published assessment, and letting it out turned a publication problem into
+            # a server error page with the reviewer's decision rolled back with it.
+            return CaseDecisionOutcome(
+                decision=decision,
+                publication_pending_reason=f"Approved, but not published yet: {exc}",
+            )
+        return CaseDecisionOutcome(decision=decision, publication=publication)
 
     async def auto_publish_external_reference(
         self,
@@ -508,14 +590,16 @@ class ShariaGovernanceService:
         dossier = context.dossier
         analysis = context.analysis
         methodology = context.methodology
+        # The rights question is about **what is published**, not about who pressed the
+        # button. Metadata-only publication reproduces none of the provider's protected
+        # content, so where that policy is on, it is on for every decision. Keying the
+        # exemption on the actor meant the scheduled import could publish an asset while
+        # a human approving the same asset, producing the same page, was refused.
         if (
             self.settings.sharia_external_rights_enforcement
             and external.source_row_id is not None
             and not external.commercial_display_allowed
-            and not (
-                decision.actor_role == "EXTERNAL_REFERENCE_AUTOMATION"
-                and self.settings.sharia_import_metadata_only_publication
-            )
+            and not self.settings.sharia_import_metadata_only_publication
         ):
             raise ShariaGovernanceError(
                 "external_rights_clearance_required",
@@ -1186,7 +1270,17 @@ class ShariaGovernanceService:
         case = await self.session.get(ReviewCase, case_id)
         if case is None:
             raise ShariaGovernanceError("case_not_found", "Review case not found.")
-        if case.state not in {"draft", "research_failed", "needs_evidence", "researching"}:
+        # ``ready_for_review`` belongs here too. A case waiting for a reviewer whose
+        # evidence has aged out, or whose official source failed to load, needs its
+        # sources fetched again — and without this it had no action at all: approval
+        # refused it and research would not take it back.
+        if case.state not in {
+            "draft",
+            "research_failed",
+            "needs_evidence",
+            "researching",
+            "ready_for_review",
+        }:
             raise ShariaGovernanceError(
                 "invalid_research_transition",
                 f"Research cannot start while the case is {case.state.replace('_', ' ')}.",
@@ -1236,36 +1330,13 @@ class ShariaGovernanceService:
             raise ShariaGovernanceError(
                 "readiness_reason_required", "Record why the evidence package is ready."
             )
-        if not case.canonical_asset_id or not case.external_assessment_id or not case.dossier_id:
-            raise ShariaGovernanceError(
-                "case_evidence_incomplete",
-                "Canonical identity, official assessment, and research dossier are required.",
-            )
-        asset = await self.session.get(CanonicalAsset, case.canonical_asset_id)
-        external = await self.session.get(ExternalAssessment, case.external_assessment_id)
-        dossier = await self.session.get(AssetResearchDossier, case.dossier_id)
-        analysis = await self.session.scalar(
-            select(AIAnalysisSnapshot)
-            .where(
-                AIAnalysisSnapshot.dossier_id == case.dossier_id,
-                AIAnalysisSnapshot.status == "completed",
-            )
-            .order_by(AIAnalysisSnapshot.analysis_version.desc())
-            .limit(1)
-        )
-        if (
-            asset is None
-            or external is None
-            or dossier is None
-            or analysis is None
-            or asset.mapping_state != "verified"
-            or external.mapping_state != "mapped"
-        ):
-            raise ShariaGovernanceError(
-                "completeness_gate_failed",
-                "Identity mapping, official evidence, and the validated factual dossier "
-                "must all be complete before review.",
-            )
+        # "Ready for review" means exactly one thing: a reviewer pressing Approve would be
+        # accepted. Asking the approval path itself is what keeps that true. The shorter
+        # list this used to check — identity, a dossier, an analysis — let cases through
+        # that approval then refused for evidence the methodology also requires.
+        blocker = await self.review_blocker(case)
+        if blocker is not None:
+            raise blocker
         previous = case.state
         case.state = "ready_for_review"
         case.next_reminder_at = datetime.now(UTC) + timedelta(
@@ -1424,7 +1495,7 @@ class ShariaGovernanceService:
             raise ShariaGovernanceError(
                 "identity_not_verified", "Canonical identity must be verified before approval."
             )
-        if dossier.state != "completed" or dossier.completed_at is None:
+        if not dossier_state.is_complete(dossier.state) or dossier.completed_at is None:
             raise ShariaGovernanceError(
                 "dossier_not_complete", "The factual research dossier is not complete."
             )
@@ -1481,12 +1552,12 @@ class ShariaGovernanceService:
                 "The factual analysis was not produced from the current "
                 "successful evidence snapshots.",
             )
-        if case.source_freshness_deadline is not None and _as_utc(
-            case.source_freshness_deadline
-        ) < datetime.now(UTC):
-            raise ShariaGovernanceError(
-                "case_evidence_stale", "The case evidence freshness deadline has passed."
-            )
+        # How old the evidence may be has exactly one owner: the methodology's
+        # ``maximum_source_age_days``, checked immediately below. ``source_freshness_deadline``
+        # is an operational reminder to re-check the sources — it is derived from a
+        # configuration interval, not from the methodology, and refusing a decision on it
+        # meant a second, stricter, ungoverned age rule silently overrode the governed one.
+        # It stays on the case to drive reminders and the evidence badge; it never refuses.
         stale_before = datetime.now(UTC) - timedelta(
             days=requirements.maximum_source_age_days
         )
@@ -1719,7 +1790,7 @@ class ShariaGovernanceService:
         categories = {"source_snapshot"}
         if asset.mapping_state == "verified":
             categories.add("canonical_identity")
-        if dossier.state == "completed":
+        if dossier_state.is_complete(dossier.state):
             categories.add("factual_dossier")
         external_snapshot_available = any(
             row.id == external.source_snapshot_id and row.fetch_status == "success"
@@ -1970,6 +2041,34 @@ class ShariaGovernanceService:
         """
 
         return await self._review_context(case)
+
+    async def review_blocker(self, case: ReviewCase) -> ShariaGovernanceError | None:
+        """What stops this case being approved right now, or ``None`` if nothing does.
+
+        The **one** answer to "can this be decided?". It runs the exact checks
+        ``approve_for_publication`` runs, and returns the first refusal instead of
+        raising it, so three different callers can ask the same question:
+
+        * the research pipeline, before it marks a case ready for a reviewer;
+        * ``mark_ready_for_review``, when a researcher hands a case over;
+        * the review screens, to say plainly what is missing.
+
+        Asking here rather than re-listing the conditions is the point. A queue that
+        offers a decision the approval will then refuse is what produced a page full of
+        errors: the pipeline had its own, shorter idea of "ready" and the approval had
+        the real one.
+        """
+
+        try:
+            await self._review_context(case)
+        except ShariaGovernanceError as blocker:
+            return blocker
+        return None
+
+    async def is_ready_for_review(self, case: ReviewCase) -> bool:
+        """True when a reviewer pressing Approve on this case would be accepted."""
+
+        return await self.review_blocker(case) is None
 
     async def undo_decision(
         self,

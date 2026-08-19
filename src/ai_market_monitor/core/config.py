@@ -192,6 +192,19 @@ class Settings(BaseSettings):
     sharia_import_auto_publish: bool = False
     sharia_import_require_admin_review: bool = True
     sharia_import_metadata_only_publication: bool = False
+    #: How old retained evidence may be, in days, when a reviewer decides a case that
+    #: came from the methodology import pack.
+    #:
+    #: The pack itself states no such number, so one has to be chosen here. The code used
+    #: to write 1 — evidence had to be less than a day old — which no human review can
+    #: meet: every case became undecidable the day after its research ran, and every
+    #: approval failed with "Required evidence is unavailable or older than the
+    #: methodology permits". 90 days is the value this repository governed for the SC
+    #: Malaysia methodology before the pack replaced it.
+    #:
+    #: This is a Shariah-governance number. Change it deliberately, with the governance
+    #: owner, not to make a stuck queue move.
+    sharia_pack_evidence_max_age_days: int = Field(default=90, ge=1, le=3650)
     sharia_identity_discovery_batch_size: int = Field(default=250, ge=1, le=500)
     sharia_external_rights_enforcement: bool = True
     sharia_ai_enrichment_enabled: bool = True

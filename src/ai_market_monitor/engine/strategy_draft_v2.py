@@ -12,6 +12,7 @@ from ai_market_monitor.engine.capability_contract import derive_provider_require
 from ai_market_monitor.schemas.strategy import UNARY_COMPARATORS
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
+    GROUP_ARITY,
     ApprovalBindingV2,
     ConditionNodeType,
     ConditionNodeV2,
@@ -406,16 +407,18 @@ _MAX_BOOLEAN_DEPTH = 6
 
 
 def _boolean_structure_errors(root: ConditionNodeV2 | None) -> list[str]:
-    """Refuse a combination that does not actually combine anything.
+    """Refuse a shape the compiler cannot run.
 
-    A *nested* ``AND`` or ``OR`` holding one child is not a choice or a requirement — it
-    is the shape left behind when a real expression was flattened. It compiles, it
-    validates, and it monitors something narrower than the trader asked for, with
-    nothing in the artifact showing that a branch went missing.
+    How many rules a grouping takes is **not** decided here. It is ``GROUP_ARITY`` in
+    the draft schema, which the node's own validator and the Guided Builder both read,
+    so one answer covers every path a group can be made on.
 
-    The root is exempt. Every draft's outermost node is the registry's own ``all
-    conditions`` group, and it legitimately holds one rule when the trader has written
-    only one rule so far.
+    This check used to hold a fourth, stricter copy of that rule: a *nested* ``AND`` or
+    ``OR`` with one child was refused, on the reasoning that it is the shape left behind
+    when a real expression is flattened. That reasoning is about a tree a model wrote,
+    and it made a group a person deliberately drew on the canvas impossible to save. The
+    floor is one rule everywhere now; how deep the shape may go is still decided here,
+    because depth is a property of the whole tree rather than of one node.
     """
 
     if root is None:
@@ -428,12 +431,11 @@ def _boolean_structure_errors(root: ConditionNodeV2 | None) -> list[str]:
             return
         if node.node_type == ConditionNodeType.CONDITION:
             return
-        if (
-            depth > 1
-            and node.node_type in {ConditionNodeType.AND, ConditionNodeType.OR}
-            and len(node.children) < 2
-        ):
-            errors.append(f"boolean_group_single_child:{node.node_id}:{node.node_type.value}")
+        fewest, most = GROUP_ARITY[node.node_type]
+        if len(node.children) < fewest:
+            errors.append(f"boolean_group_too_small:{node.node_id}:{node.node_type.value}")
+        if most is not None and len(node.children) > most:
+            errors.append(f"boolean_group_too_large:{node.node_id}:{node.node_type.value}")
         for child in node.children:
             walk(child, depth + 1)
 

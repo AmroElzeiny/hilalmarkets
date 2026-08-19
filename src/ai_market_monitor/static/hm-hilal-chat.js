@@ -626,9 +626,14 @@ class HilalChat {
     this.offer(this.openers());
   }
 
-  /** Three things worth asking, chosen for the page they are standing on. */
+  /** Three things worth asking, chosen for the page they are standing on.
+   *
+   *  Matched exactly, never as a substring. `includes("monitor")` also matched the
+   *  Monitors list page once its own key stopped saying "watchlists", and offered a
+   *  person looking at a list of finished monitors three questions about building a
+   *  board they were not on. */
   openers() {
-    if ((document.body.dataset.dashboardPage || "").includes("monitor")) {
+    if ((document.body.dataset.dashboardPage || "") === "monitor_canvas") {
       return [
         "What is my board still missing?",
         "How do I add a condition?",

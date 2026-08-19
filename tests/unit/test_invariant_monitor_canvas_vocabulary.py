@@ -173,13 +173,35 @@ def test_the_board_never_fills_a_required_value_for_a_person():
 
 
 def test_the_contract_is_read_from_one_place():
-    """Two readers of the same contract is how the two would come to disagree."""
+    """Two readers of the same contract is how the two would come to disagree.
+
+    The rule is about the **Builder contract** — what a person may add, choose or set —
+    not about talking to the server at all. The canvas legitimately asks three other
+    questions of its own: which screened coins match what somebody typed, which
+    Favorites lists they have, and "turn this board into a monitor". None of those is a
+    second opinion about the catalogue, and forbidding every ``fetch`` would have meant
+    the only way to ask them was to copy the catalogue reader.
+    """
+
+    catalog = CATALOG_JS.read_text(encoding="utf-8")
+    assert "fetch(" in catalog, "the catalogue reader no longer fetches anything"
+    assert "loadCatalog" in catalog
+
     for path in MONITOR_FILES:
         source = path.read_text(encoding="utf-8")
         if path.name == "hm-monitor-catalog.js":
-            assert "fetch(" in source
             continue
-        assert "fetch(" not in source, f"{path.name} reads the contract for itself"
+        # Handing the address over is not reading it. The page holds the attribute and
+        # passes it to `loadCatalog`; what must never appear twice is a *call* for it.
+        assert "loadCatalog(" in source or "builder-contract" not in source, (
+            f"{path.name} names the contract address without going through loadCatalog"
+        )
+        # Every other call the canvas makes is to its own endpoints — never to a second
+        # copy of the catalogue under a different address.
+        for url in re.findall(r"""fetch\(\s*[`"']([^`"']+)""", source):
+            assert url.startswith("/api/v1/dashboard/monitor-canvas/"), (
+                f"{path.name} calls {url!r}, which is not one of the canvas's own endpoints"
+            )
 
 
 def test_the_canvas_ships_no_second_colour_or_type_scale():
