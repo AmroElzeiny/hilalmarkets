@@ -116,8 +116,6 @@ def _guide_pages(base_url: str) -> list[tuple[str, str]]:
         (f"{base_url}/main", "dashboard-today"),
         (f"{base_url}/dashboard/market", "screened-market"),
         (f"{base_url}/dashboard/strategies", "watch-plans"),
-        (f"{base_url}/dashboard/strategies/new", "strategy-builder-monitor"),
-        (f"{base_url}/dashboard/strategies/new?mode=scanner", "strategy-builder-scanner"),
         (f"{base_url}/dashboard/opportunities", "activity"),
         (f"{base_url}/dashboard/integrations", "integrations"),
         (f"{base_url}/dashboard/billing", "billing"),
@@ -447,8 +445,6 @@ def test_a_mobile_sidebar_target_is_opened_and_then_closed_again(
 @pytest.mark.parametrize(
     ("path", "expected_key"),
     [
-        ("/dashboard/strategies/new", "strategy-builder-monitor"),
-        ("/dashboard/strategies/new?mode=scanner", "strategy-builder-scanner"),
         ("/dashboard/activity", "activity"),
         ("/dashboard/settings", "settings"),
     ],
@@ -586,20 +582,26 @@ def test_a_completed_guide_can_always_be_restarted_from_the_launcher(
     assert_no_raw_traceback(page)
 
 
-def test_arrow_keys_do_not_hijack_typing_in_the_setup_chat(
+def test_arrow_keys_do_not_hijack_typing_in_a_text_field(
     page: Page,
     base_url: str,
 ) -> None:
-    """A guide open beside a text field must not steal the caret keys."""
+    """A guide open beside a text field must not steal the caret keys.
+
+    This used to type into the assistant page's chat box. That page is gone, so it types
+    into the search field on Monitors instead — the property is about any text field, not
+    about that one page.
+    """
 
     signup(page, base_url, unique_email("guide-typing"))
     page.set_viewport_size(DESKTOP)
-    page.goto(f"{base_url}/dashboard/strategies/new", wait_until="domcontentloaded")
+    page.goto(f"{base_url}/dashboard/strategies", wait_until="domcontentloaded")
 
     _start_guide(page)
     before = _counter_text(page)
-    page.locator("[data-ai-chat-input]").click()
-    page.keyboard.type("watch ETH")
+    field = page.locator("input[type='search'], input[type='text']").first
+    field.click()
+    field.type("watch ETH")
     page.keyboard.press("ArrowLeft")
     assert _counter_text(page) == before, "arrow keys inside a field must not move the guide"
     assert_no_raw_traceback(page)

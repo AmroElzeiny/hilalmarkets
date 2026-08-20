@@ -59,12 +59,14 @@ from ai_market_monitor.core.dashboard_paths import (
     LEGACY_WATCHLISTS_PATH,
     LIFECYCLES_PATH,
     MARKET_PATH,
+    MONITOR_BOARD_URL,
     MONITOR_PATH,
     MONITORS_PATH,
     OPPORTUNITIES_PATH,
     SETTINGS_PATH,
     SUBSCRIPTION_PATH,
     SUPPORT_PATH,
+    monitor_edit_path,
 )
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
@@ -122,6 +124,7 @@ from ai_market_monitor.services.product_language import (
     check_presentation,
     checks_in_words,
     every_message_kind,
+    first_check_words,
     gap_in_words,
     how_long_ago,
     how_often,
@@ -229,6 +232,10 @@ async def legacy_monitor_canvas_page() -> RedirectResponse:
 @router.get(MONITOR_PATH, response_class=HTMLResponse, include_in_schema=False)
 async def monitor_canvas_page(
     request: Request,
+    # Read as text on purpose. A mistyped address must open the canvas and be answered
+    # by the board endpoint in a sentence, not by a validation error listing field names
+    # at somebody who followed a broken link.
+    monitor_id: str = Query(default="", alias="monitor", max_length=64),
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
@@ -243,6 +250,12 @@ async def monitor_canvas_page(
     Only two things are settled server-side: the shape limits, so the canvas can say
     "this is as deep as a monitor may go" before the catalogue has finished loading,
     and which screening standard the universe would be drawn from.
+
+    ``?monitor=<id>`` opens a monitor somebody already has, so it can be changed. The
+    board itself is not rendered into the page: it is asked for by the page, from
+    ``/api/v1/dashboard/monitor-canvas/monitors/{id}``, which is the one place that
+    decides whether a monitor may be opened and says why when it may not. Only the id
+    travels through here, and an id nobody owns is refused there rather than here.
     """
 
     context = await _context(
@@ -257,6 +270,11 @@ async def monitor_canvas_page(
         builder_screening=await _builder_screening_context(session, user, settings),
         watchlists_path=MONITORS_PATH,
         market_path=MARKET_BASE_PATH,
+        # Which monitor is being changed, or nothing at all for a new one.
+        monitor_edit_id=monitor_id.strip(),
+        # Where the board is read from and written to. Written once, here, so the page
+        # never assembles an address of its own out of a monitor id.
+        monitor_board_url=MONITOR_BOARD_URL,
         # Where somebody is taken after a monitor is switched on, so the page never
         # writes a dashboard address of its own.
         settings_path=SETTINGS_PATH,
@@ -353,13 +371,17 @@ async def asset_passport_report(
 # ── Watchlists ───────────────────────────────────────────────────────────────
 
 
-def _watchlist_view(item: dict) -> dict:
+def _watchlist_view(item: dict, *, scanning_enabled: bool) -> dict:
     """One Watchlist, turned from stored rows into the words a person reads.
 
     Every judgement the older page made inside its own template is made here instead:
     what the status really is, whether the list has ever run, what is holding it back,
     and how long ago it looked. A template that decides things cannot be tested, and
     the next page needing the same decision will make a different one.
+
+    `scanning_enabled` is required rather than assumed. Whether the platform is checking
+    the market at all changes what "not looked yet" means, and a caller that forgets to
+    pass it would quietly promise a first check that nothing is going to run.
     """
 
     strategy = item["strategy"]
@@ -374,15 +396,24 @@ def _watchlist_view(item: dict) -> dict:
     )
     score = int(round(float(getattr(health, "score", 0) or 0)))
 
+    # "Has it ever looked?" is answered by a check that *finished*, never by the mere
+    # existence of a job row. A queued, running or failed job is a row whose
+    # `completed_at` is still empty, so reading the row alone answered "yes" for a
+    # monitor that had never produced a single reading — and then scored it.
+    checked_at = getattr(scan, "completed_at", None) if scan is not None else None
+
     # "Is it working?" is one question with three honest answers, and the third one —
     # "it has not looked yet" — is the one the older page could not say. It showed a
     # score of 43 out of 100 for a list that had never run, which is a number about
     # nothing.
-    if scan is None:
+    if checked_at is None:
         working = {
             "tone": "neutral",
             "label": "Not looked yet",
-            "detail": "This list has not checked the market for the first time.",
+            "detail": first_check_words(
+                scanning_enabled=scanning_enabled,
+                check_started=scan is not None,
+            ),
         }
     elif score >= 80:
         working = {
@@ -420,8 +451,12 @@ def _watchlist_view(item: dict) -> dict:
         # rather than on the exact moment beside it renders "Looked Not yet". One page
         # guarded correctly and the next one did not; the trap is removed here instead
         # of being remembered at each call site.
-        "last_checked": how_long_ago(scan.completed_at) if scan is not None else None,
-        "last_checked_exact": scan.completed_at if scan is not None else None,
+        #
+        # It is the finished moment that is asked for, not the job row. Guarding on the
+        # row let a queued first check render "Looked Not yet" on the front page — the
+        # exact sentence this field exists to make impossible.
+        "last_checked": how_long_ago(checked_at) if checked_at is not None else None,
+        "last_checked_exact": checked_at,
         # The one thing most often stopping this list, in its own words. Named "holding
         # it back" rather than "bottleneck", which is a word about pipes.
         "holding_back": (
@@ -439,7 +474,10 @@ def _watchlist_view(item: dict) -> dict:
         "repair_id": (
             str(item["pending_repair"].id) if item["pending_repair"] is not None else None
         ),
-        "edit_url": f"/dashboard/strategies/{strategy.id}/builder",
+        # "Change it" opens the canvas on this monitor. It used to open the older
+        # assistant page, which is gone: one page authors a monitor now, and the same
+        # page changes one.
+        "edit_url": monitor_edit_path(strategy.id),
         "opportunities_url": f"{OPPORTUNITIES_PATH}?monitor={strategy.id}",
     }
 
@@ -475,7 +513,9 @@ async def watchlists_page(
     """
 
     cards = await _monitor_cards_context(session, user)
-    views = [_watchlist_view(item) for item in cards]
+    views = [
+        _watchlist_view(item, scanning_enabled=settings.scanning_enabled) for item in cards
+    ]
     context = await _context(
         request=request,
         session=session,
@@ -503,7 +543,10 @@ async def watchlists_page(
         opportunities_path=OPPORTUNITIES_PATH,
         market_path=MARKET_BASE_PATH,
         monitor_path=MONITOR_PATH,
-        new_watchlist_path="/dashboard/strategies/new",
+        new_watchlist_path=MONITOR_PATH,
+        # `market_checking` is not passed here. `_context` builds it for every dashboard
+        # page, so this page reads the same answer as the rest of the product rather than
+        # asking the same question a second time.
     )
     context.update(_PATH_CHROME)
     # No coin on this page, so no Passport popup belongs on it.
@@ -1260,7 +1303,7 @@ async def opportunities_page(
         watchlists_path=MONITORS_PATH,
         market_path=MARKET_BASE_PATH,
         monitor_path=MONITOR_PATH,
-        new_watchlist_path="/dashboard/strategies/new",
+        new_watchlist_path=MONITOR_PATH,
     )
     # Every card names a coin, so this page carries the path's Passport popup. It is
     # opened rather than linked to on purpose: a link straight to the full Passport is a

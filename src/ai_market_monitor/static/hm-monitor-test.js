@@ -17,6 +17,7 @@ import {
   checkPlan,
   groupWord,
   missingOn,
+  planFromServer,
   planIsReady,
   planReadback,
   planSentence,
@@ -64,6 +65,46 @@ function showContractError(scope, failure) {
   }
 }
 
+/* The board one monitor was drawn from, or nothing.
+ *
+ * "Nothing" covers three different situations and they are deliberately not told apart
+ * here: the monitor was never drawn on this canvas, the monitor is not on this account,
+ * or the server could not answer. Every one of them ends the same way — this canvas will
+ * not show a board for that monitor — and the message the server sends says which. What
+ * must never happen is an empty board appearing under that monitor's name.
+ */
+async function readSavedBoard(boardUrl, monitorId) {
+  if (!boardUrl) return { plan: null, reason: "" };
+  try {
+    const response = await fetch(`${boardUrl}/${encodeURIComponent(monitorId)}`, {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = body && body.detail;
+      return {
+        plan: null,
+        reason:
+          (detail && detail.message)
+          || "That monitor could not be read just now. Nothing about it has changed.",
+        monitor: null,
+      };
+    }
+    return {
+      plan: body.plan || null,
+      reason: body.reason || "",
+      monitor: body.monitor || null,
+    };
+  } catch {
+    return {
+      plan: null,
+      reason: "That monitor could not be read just now. Nothing about it has changed.",
+      monitor: null,
+    };
+  }
+}
+
 async function start(scope) {
   const find = (selector) => scope.querySelector(selector);
   const limits = readJson(scope.dataset.limits, {});
@@ -72,6 +113,24 @@ async function start(scope) {
   const catalog = await loadCatalog(scope.dataset.contractUrl);
   find("[data-loading]").hidden = true;
   find("[data-contract-error]").hidden = true;
+
+  /* Which monitor is being changed, and the board it was drawn from.
+   *
+   * Read before the board exists, because the board a person sees on a page that says
+   * "change this monitor" must be that monitor's own — never an empty one they could
+   * switch on by accident, replacing their rules with nothing. When the server has no
+   * board to give, `opening` stays null and the notice below says why. */
+  const asked = (scope.dataset.monitorId || "").trim();
+  const opened = asked ? await readSavedBoard(scope.dataset.boardUrl, asked) : null;
+  const opening = opened && opened.plan ? planFromServer(opened.plan) : null;
+
+  /* Which monitor this board would really change.
+   *
+   * Only a monitor whose board actually opened. A monitor that could not be drawn is not
+   * being changed by whatever gets drawn here instead: the notice offers a *new* monitor,
+   * and switching this board on with that id still attached would replace the person's
+   * rules with a board that was never theirs. So the page stops being about it. */
+  const monitorId = opening ? asked : "";
 
   // The compiler's own shape limits win over the ones rendered into the page: the
   // page was drawn once, the contract is read now.
@@ -82,6 +141,8 @@ async function start(scope) {
     reachableChannels: new Set(
       channels.filter((channel) => channel.ready !== "false").map((channel) => channel.value),
     ),
+    monitorId: monitorId || null,
+    opening,
   });
 
   const announce = find("[data-announce]");
@@ -566,6 +627,21 @@ async function start(scope) {
     }
   }
 
+  /* The name of the Favorites list a reopened board points at.
+   *
+   * A board the server kept holds the list's id and not its name, because a list can be
+   * renamed and a name copied at save time would be wrong the moment it was. So the name
+   * is filled in here, from the person's own lists, the first time they are read. Until
+   * then the readout says "one of your Favorites lists", which is true rather than
+   * blank. */
+  function nameTheChosenList() {
+    const universe = store.plan.universe || {};
+    if (universe.mode !== "approved_watchlist" || !universe.watchlistId) return;
+    if (universe.watchlistName) return;
+    const chosen = (coinPicker.favorites || []).find((item) => item.id === universe.watchlistId);
+    if (chosen) store.labelWatchlist(universe.watchlistId, chosen.name);
+  }
+
   async function loadFavorites() {
     if (coinPicker.favorites || coinPicker.loadingFavorites) return;
     coinPicker.loadingFavorites = true;
@@ -578,6 +654,7 @@ async function start(scope) {
       const payload = await response.json();
       coinPicker.favorites = Array.isArray(payload.items) ? payload.items : [];
       coinPicker.failed = "";
+      nameTheChosenList();
     } catch {
       coinPicker.favorites = null;
       coinPicker.failed = "Your Favorites lists could not be read just now.";
@@ -1262,10 +1339,17 @@ async function start(scope) {
     // an empty box is answered by the server's own "My monitor", said once.
     nameBox.value = launchState.name || "";
     launch.querySelector("[data-launch-eyebrow]").textContent = "Last step";
-    launch.querySelector("[data-launch-title]").textContent = "Check it over, then switch it on";
-    launch.querySelector("[data-launch-lede]").textContent =
-      "This is your monitor in plain words. Nothing is watching yet.";
-    launch.querySelector("[data-launch-note]").textContent = "Nothing starts until you press the button.";
+    // A person changing a monitor is not switching one on: it is already watching. Two
+    // different things said in two different ways, from the one fact that decides it.
+    launch.querySelector("[data-launch-title]").textContent = monitorId
+      ? "Check it over, then save the change"
+      : "Check it over, then switch it on";
+    launch.querySelector("[data-launch-lede]").textContent = monitorId
+      ? "This is your monitor in plain words, with your changes. Nothing has changed yet."
+      : "This is your monitor in plain words. Nothing is watching yet.";
+    launch.querySelector("[data-launch-note]").textContent = monitorId
+      ? "Nothing changes until you press the button."
+      : "Nothing starts until you press the button.";
     const cancel = launch.querySelector("[data-launch-cancel]");
     cancel.hidden = false;
     // Reset, because the failure wording renames it. Re-opening the popup after a
@@ -1376,10 +1460,13 @@ async function start(scope) {
     launchState.name = (launch.querySelector("[data-launch-name]").value || "").trim();
     const chosen = [...store.plan.alert.channels];
 
-    launch.querySelector("[data-launch-eyebrow]").textContent = "Switching it on";
+    launch.querySelector("[data-launch-eyebrow]").textContent = monitorId
+      ? "Saving the change"
+      : "Switching it on";
     launch.querySelector("[data-launch-title]").textContent = "Sending one test message";
-    launch.querySelector("[data-launch-lede]").textContent =
-      "It is being switched on, then one message goes to every way you chose.";
+    launch.querySelector("[data-launch-lede]").textContent = monitorId
+      ? "Your change is being saved, then one message goes to every way you chose."
+      : "It is being switched on, then one message goes to every way you chose.";
     launch.querySelector("[data-launch-cancel]").hidden = true;
     launch.querySelector("[data-launch-go]").hidden = true;
     launch.querySelector("[data-launch-note]").textContent = "This takes a few seconds.";
@@ -1401,7 +1488,9 @@ async function start(scope) {
       row.dataset.state = "sending";
       row.querySelector(".m-send-state").textContent = "Sending…";
     }
-    launch.querySelector("[data-launch-status]").textContent = "Switching it on…";
+    launch.querySelector("[data-launch-status]").textContent = monitorId
+      ? "Saving the change…"
+      : "Switching it on…";
 
     let payload = null;
     let problem = "";
@@ -1411,6 +1500,9 @@ async function start(scope) {
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
+          // Which monitor this board belongs to. Sent so the server writes a new version
+          // of the monitor the person opened, rather than a second monitor beside it.
+          monitor_id: monitorId,
           plan: planForServer(),
           // The board's own sentence, so the message that arrives says the same thing
           // the person just read.
@@ -1443,21 +1535,29 @@ async function start(scope) {
       return;
     }
     const results = payload.results || [];
-    launch.querySelector("[data-launch-status]").textContent =
-      "It is on. Sending one test message to each way you chose…";
+    // Which of the two things happened is the server's answer, not this page's guess.
+    const changed = Boolean((payload.monitor || {}).changed);
+    launch.querySelector("[data-launch-status]").textContent = changed
+      ? "Your change is saved. Sending one test message to each way you chose…"
+      : "It is on. Sending one test message to each way you chose…";
     await settleSendRows(results);
     paintResultRows(results);
     bar.dataset.state = payload.all_sent ? "ok" : "partial";
     launchState.monitor = payload.monitor || null;
+    // The change is saved, so the board kept in this browser is no longer an unfinished
+    // edit — it is what the monitor runs. Keeping it would make the next visit warn
+    // about changes that were saved.
+    if (changed) store.forgetDraft();
     finishLaunch({
       ok: true,
       allSent: Boolean(payload.all_sent),
+      changed,
       results,
       name: (payload.monitor || {}).name || launchState.name || "Your monitor",
     });
   }
 
-  function finishLaunch({ ok, allSent, message, results, name }) {
+  function finishLaunch({ ok, allSent, changed, message, results, name }) {
     const outcome = launch.querySelector("[data-launch-outcome]");
     const title = launch.querySelector("[data-launch-outcome-title]");
     const line = launch.querySelector("[data-launch-outcome-line]");
@@ -1469,40 +1569,53 @@ async function start(scope) {
     if (!ok) {
       outcome.dataset.tone = "bad";
       mark.innerHTML = icon("alert", "icon");
-      title.textContent = "It was not switched on";
+      title.textContent = monitorId ? "The change was not saved" : "It was not switched on";
       line.textContent = message;
       note.hidden = true;
-      launch.querySelector("[data-launch-title]").textContent = "Nothing was saved";
+      launch.querySelector("[data-launch-title]").textContent = monitorId
+        ? "Nothing was changed"
+        : "Nothing was saved";
       launch.querySelector("[data-launch-results]").innerHTML = "";
-      launch.querySelector("[data-launch-note]").textContent = "Your board is exactly as you left it.";
+      launch.querySelector("[data-launch-note]").textContent = monitorId
+        ? "Your monitor is still watching exactly as it was, and your board is as you left it."
+        : "Your board is exactly as you left it.";
       launch.querySelector("[data-launch-retry]").hidden = false;
       launch.querySelector("[data-launch-cancel]").hidden = false;
       launch.querySelector("[data-launch-cancel]").textContent = "Back to the board";
       launch.querySelector("[data-launch-finish]").hidden = true;
       showLaunchStep("done");
-      say("The monitor was not switched on. Nothing was saved.");
+      say(
+        monitorId
+          ? "The change was not saved. Your monitor is unchanged."
+          : "The monitor was not switched on. Nothing was saved.",
+      );
       return;
     }
 
     const failed = (results || []).filter((item) => !item.sent);
     outcome.dataset.tone = allSent ? "ok" : "mixed";
     mark.innerHTML = icon(allSent ? "check" : "alert", "icon");
-    title.textContent = `${name} is watching now`;
+    title.textContent = changed ? `${name} is changed and watching` : `${name} is watching now`;
     line.textContent = allSent
       ? "The test message went to every way you chose. A real alert will arrive the same way."
       : `The monitor is on and watching. ${failed.length} way${failed.length === 1 ? "" : "s"} of being told did not work, so it is worth fixing before something happens.`;
     note.hidden = false;
     launch.querySelector("[data-launch-title]").textContent = allSent
-      ? "It is watching now"
+      ? (changed ? "Your change is saved" : "It is watching now")
       : "It is watching, with something to fix";
-    launch.querySelector("[data-launch-note]").textContent =
-      "Your board stays here, so you can build another one.";
+    launch.querySelector("[data-launch-note]").textContent = changed
+      ? "It is watching by your new rules from now on. What it already found is kept."
+      : "Your board stays here, so you can build another one.";
     launch.querySelector("[data-launch-retry]").hidden = true;
     launch.querySelector("[data-launch-cancel]").hidden = true;
     launch.querySelector("[data-launch-finish]").hidden = false;
     showLaunchStep("done");
     window.requestAnimationFrame(() => launch.querySelector("[data-launch-finish]").focus());
-    say(allSent ? `${name} is watching now.` : `${name} is watching. Some ways of being told did not work.`);
+    say(
+      allSent
+        ? (changed ? `${name} is changed and watching.` : `${name} is watching now.`)
+        : `${name} is watching. Some ways of being told did not work.`,
+    );
   }
 
   find("[data-next-step]").addEventListener("click", openLaunch);
@@ -1520,7 +1633,12 @@ async function start(scope) {
   });
   launch.querySelector("[data-launch-cancel]").addEventListener("click", () => launch.close());
   launch.querySelector("[data-launch-finish]").addEventListener("click", () => {
-    window.location.href = settingsPath;
+    // Somebody who just changed a monitor came from the list of monitors and belongs
+    // back on it, looking at the one they changed. Somebody who just made their first
+    // one is sent to Settings, where the ways of being told are.
+    window.location.href = (launchState.monitor || {}).changed
+      ? scope.dataset.watchlistsPath || "/dashboard/monitors"
+      : settingsPath;
   });
   // A popup that is doing something must not vanish under a stray Escape: the monitor
   // is mid-creation and the answer is still coming.
@@ -1800,6 +1918,55 @@ async function start(scope) {
       board.drawWires();
     }, 160);
   });
+
+  /* ── Opening a monitor somebody already has ──────────────────────────────── */
+
+  if (monitorId) {
+    const named = ((opened && opened.monitor) || {}).name;
+    // The name of the monitor in front of them, so "Change it" on one card can never
+    // land on a page that could be about any of them.
+    if (named) find("[data-page-title]").textContent = named;
+    if (named && !launchState.name) launchState.name = named;
+
+    // A reopened board holds the Favorites list's id and not its name, so the readout
+    // would say "one of your Favorites lists" until somebody happened to open the coin
+    // picker. The lists are read once, here, and the name appears with the board.
+    if (
+      store.plan.universe.mode === "approved_watchlist"
+      && store.plan.universe.watchlistId
+      && !store.plan.universe.watchlistName
+    ) {
+      loadFavorites();
+    }
+
+    if (store.holdsUnsavedEdit) {
+      const draftNotice = find("[data-draft-notice]");
+      draftNotice.hidden = false;
+      find("[data-draft-notice-restore]").addEventListener("click", () => {
+        store.putBackTheSavedMonitor();
+        draftNotice.hidden = true;
+        board.fit();
+      });
+    }
+  } else if (asked) {
+    const notice = find("[data-open-notice]");
+    notice.hidden = false;
+    find("[data-open-notice-text]").textContent =
+      (opened && opened.reason)
+      || "That monitor could not be read just now. Nothing about it has changed.";
+    find("[data-open-notice-fresh]").addEventListener("click", () => {
+      /* The plain address, and nothing else.
+       *
+       * Deliberately *not* clearing the board first. A monitor that cannot be drawn is
+       * opened under the same key as a brand-new monitor, so what is on the board here
+       * is whatever new monitor this person had already started drawing — clearing it
+       * would throw away work that has nothing to do with the monitor they came to
+       * change, and there is no copy of it anywhere else. Somebody who wants an empty
+       * board can empty this one; nobody can get a cleared one back. */
+      window.location.href = window.location.pathname;
+    });
+    say("This monitor cannot be drawn on the canvas. Nothing about it has changed.");
+  }
 
   // A first-time visitor is told the one thing that is not obvious from looking.
   if (!store.ruleCount) {

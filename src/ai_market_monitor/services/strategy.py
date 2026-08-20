@@ -1,6 +1,7 @@
 import json
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
@@ -74,6 +75,7 @@ class StrategyService:
         preview: InterpretationPreview,
         *,
         source_text: str | None,
+        canvas_plan: dict[str, Any] | None = None,
     ) -> tuple[Strategy, StrategyVersion]:
         strategy = Strategy(
             user_id=user_id,
@@ -92,6 +94,7 @@ class StrategyService:
             ambiguities=[issue.model_dump(mode="json") for issue in preview.ambiguities],
             unsupported=[issue.model_dump(mode="json") for issue in preview.unsupported_conditions],
             interpreter=preview.interpreter,
+            canvas_plan=canvas_plan,
         )
         await self._audit(
             user_id,
@@ -113,6 +116,7 @@ class StrategyService:
         ambiguities: list[dict] | None = None,
         unsupported: list[dict] | None = None,
         interpreter: str = "user-edit",
+        canvas_plan: dict[str, Any] | None = None,
     ) -> StrategyVersion:
         self._assert_owner(strategy, user_id)
         current_max = await self.session.scalar(
@@ -154,6 +158,7 @@ class StrategyService:
             unsupported=unsupported or [],
             interpreter=interpreter,
             version_number=(current_max or 0) + 1,
+            canvas_plan=canvas_plan,
         )
         await self._audit(
             user_id,
@@ -740,9 +745,11 @@ class StrategyService:
         unsupported: list[dict],
         interpreter: str,
         version_number: int = 1,
+        canvas_plan: dict[str, Any] | None = None,
     ) -> StrategyVersion:
         schema_json = definition.model_dump(mode="json")
         version = StrategyVersion(
+            canvas_plan_json=canvas_plan,
             strategy_id=strategy.id,
             parent_version_id=parent_version_id,
             created_by_user_id=created_by_user_id,

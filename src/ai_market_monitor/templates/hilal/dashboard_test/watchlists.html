@@ -1,7 +1,7 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-request-wait">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-watch-test.css') }}?v=20260820-request-wait">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-canvas-only">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-watch-test.css') }}?v=20260820-canvas-only">
 {% endblock %}
 {% block content %}
 
@@ -33,6 +33,20 @@
       <p class="t-lede">A monitor checks the market for you and tells you when what you asked for happens.</p>
     </div>
   </header>
+
+  {#- Said above everything, and outside the "has any monitor" guard on purpose: while
+      the platform is not checking the market, a person with no monitor yet is about to
+      build one that will not run either. The words come from `product_language`, so this
+      banner and Home's headline band cannot drift into two accounts of one silence. -#}
+  {% if market_checking %}
+  <div class="t-banner w-banner" data-tone="{{ market_checking.tone }}" role="status" data-w-market-checking>
+    <span data-icon="pause" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      <strong>{{ market_checking.title }}</strong>
+      <p>{{ market_checking.detail }}</p>
+    </div>
+  </div>
+  {% endif %}
 
   {%- if watchlists %}
 
@@ -157,7 +171,11 @@
         <a class="t-action is-primary" href="{{ item.opportunities_url }}">
           <span data-icon="activity" data-icon-class="icon-sm"></span>See what it found
         </a>
-        <a class="t-action" href="{{ item.edit_url }}">
+        {#- The canvas, opened on this monitor. `data-w-edit` names it for the popup that
+            explains what is holding a monitor back, which offers the same way out. That
+            popup used to find this link by its address, so authoring moving from the
+            assistant page to the canvas silently took its button away. -#}
+        <a class="t-action" href="{{ item.edit_url }}" data-w-edit>
           <span data-icon="settings" data-icon-class="icon-sm"></span>Change it
         </a>
 
@@ -298,4 +316,4 @@
 </dialog>
 
 {% endblock %}
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-watchlists-test.js') }}?v=20260820-request-wait"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-watchlists-test.js') }}?v=20260820-canvas-only"></script>{% endblock %}

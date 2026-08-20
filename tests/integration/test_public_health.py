@@ -41,6 +41,10 @@ async def test_public_deep_health_checks_database_and_redis(test_context, monkey
     assert payload["checks"]["sharia_admin_notifications"] in {"ok", "degraded"}
     assert payload["checks"]["sharia_ai_research"] in {"ok", "degraded"}
     assert payload["checks"]["sharia_source_policy"] == "ok"
+    # Whether the product is checking the market at all is answerable from outside the
+    # machine. Without it every other check reads "ok" while nothing is being watched,
+    # and the only way to find out was to read an environment file on the server.
+    assert payload["checks"]["market_scanning"] in {"ok", "off"}
     expected_status = (
         "ok"
         if all(value == "ok" for value in payload["checks"].values())

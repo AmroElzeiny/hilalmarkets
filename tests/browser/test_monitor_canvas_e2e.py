@@ -10,6 +10,7 @@ failed request, so "no bugs" is enforced by the harness rather than by reading.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -1003,6 +1004,117 @@ def test_the_page_puts_a_time_limit_on_every_request_it_sends(
     assert page.evaluate("() => window.hmWait.forMethod('GET')") == waits["reading"]
     assert page.evaluate("() => window.hmWait.forMethod('POST')") == waits["changing"]
     assert page.evaluate("() => window.hmWait.forMethod('delete')") == waits["changing"]
+
+
+# ── Opening a monitor somebody already has ───────────────────────────────────
+#
+# "Change it" on the Monitors page opens this page with a monitor id in the address. The
+# board it draws has to be that monitor's own, and where there is none the page has to
+# say so — an empty board under somebody's monitor name can be switched on, and doing
+# that would replace their rules with nothing.
+
+
+BOARD_URL = "**/api/v1/dashboard/monitor-canvas/monitors/*"
+
+
+def _open_change(page: Page, base_url: str, monitor_id: str) -> None:
+    signup(page, base_url)
+    close_any_open_guide(page)
+    page.goto(
+        f"{base_url}{MONITOR_PATH}?monitor={monitor_id}",
+        wait_until="domcontentloaded",
+    )
+    close_any_open_guide(page)
+    page.locator("[data-loading]").wait_for(state="hidden", timeout=30_000)
+
+
+@pytest.mark.deliberate_console_errors("Failed to load resource", "404")
+def test_a_monitor_with_no_saved_board_says_so_and_offers_a_new_one(
+    page: Page, base_url: str
+) -> None:
+    """The board that must never be drawn: an empty one under a monitor's name.
+
+    The 404 in the console is the point, not a fault: asking for a monitor that is not on
+    this account is answered by refusing, and the page turns that refusal into a sentence
+    instead of an empty board.
+    """
+
+    _open_change(page, base_url, "11111111-1111-1111-1111-111111111111")
+
+    notice = page.locator("[data-open-notice]")
+    expect(notice).to_be_visible(timeout=20_000)
+    expect(notice).to_contain_text("cannot be opened here")
+    # And a way forward that leaves that monitor alone.
+    expect(page.locator("[data-open-notice-fresh]")).to_be_visible()
+    assert_no_horizontal_overflow(page)
+    assert_no_raw_traceback(page)
+
+
+def test_a_saved_board_is_drawn_as_the_monitor_it_belongs_to(
+    page: Page, base_url: str
+) -> None:
+    """The round trip, in a browser: a stored board becomes cards on the canvas.
+
+    The board is served by a stubbed reply rather than by building a real monitor first,
+    because what is being checked is the *drawing* — that the shape the server keeps
+    becomes the shape a person sees, with the right card, the right group and the right
+    coins.
+    """
+
+    monitor_id = "22222222-2222-2222-2222-222222222222"
+    board = {
+        "monitor": {"id": monitor_id, "name": "My saved monitor"},
+        "reason": None,
+        "plan": {
+            "name": "My saved monitor",
+            "root": {
+                "kind": "group",
+                "op": "and",
+                "children": [
+                    {
+                        "kind": "rule",
+                        "mechanic": "open_to_close_percentage",
+                        "values": {
+                            "threshold": 3,
+                            "timeframe": "15m",
+                            "comparator": "gte",
+                            "direction": "up",
+                        },
+                        "required": True,
+                        "children": [],
+                    }
+                ],
+            },
+            "universe": {
+                "mode": "explicit_assets",
+                "watchlist_id": None,
+                "symbols": ["BTC"],
+            },
+            "alert": {"channels": ["web"], "cooldown_minutes": 45},
+        },
+    }
+    page.route(
+        BOARD_URL,
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(board),
+        ),
+    )
+
+    _open_change(page, base_url, monitor_id)
+
+    # The monitor's own name on the page, so "Change it" can never land somewhere that
+    # could be about any monitor.
+    expect(page.locator("[data-page-title]")).to_have_text("My saved monitor")
+    # The rule that was saved, its group, and the two cards every monitor has. An empty
+    # board draws three of those; the fourth is the card that came back.
+    expect(page.locator("[data-nodes] [data-node]")).to_have_count(4)
+    expect(page.locator("[data-open-notice]")).to_be_hidden()
+    # And what was stored is what is read back, not a default.
+    expect(page.locator("[data-node='universe']")).to_contain_text("BTC")
+    assert_no_horizontal_overflow(page)
+    assert_no_raw_traceback(page)
 
 
 def test_a_request_to_somebody_elses_server_keeps_its_own_behaviour(

@@ -1,9 +1,10 @@
 """What the monitor canvas asks the server for.
 
-Three questions, and nothing else:
+Four questions, and nothing else:
 
 * **which coins can I choose?** — the screened list, searched by name or ticker;
 * **which Favorites lists do I have, and what is on them?**;
+* **show me the board this monitor was drawn from**, so it can be changed;
 * **turn this board into a monitor and prove it can reach me.**
 
 The last one runs the product's own activation path — create, approve, check, start —
@@ -11,6 +12,10 @@ rather than a shortcut of its own. A monitor made from the canvas and a monitor 
 anywhere else are the same object, went through the same gates, and can be paused,
 edited and audited in exactly the same way. A private path here would be a second way
 into the runtime, and the first one to drift would be the one nobody tests.
+
+Changing a monitor uses that same path. It writes a **new version** of the monitor that
+already exists rather than a second monitor, so the alerts, the history and the evidence
+trail stay attached to the one thing the person has been watching.
 """
 
 from __future__ import annotations
@@ -28,11 +33,13 @@ from ai_market_monitor.api.dependencies import UserPrincipal, get_market_preview
 from ai_market_monitor.api.routers.dashboard import _builder_screening_context
 from ai_market_monitor.api.routers.dashboard_api import get_dashboard_principal
 from ai_market_monitor.core.config import Settings, get_settings
-from ai_market_monitor.core.dashboard_paths import SETTINGS_PATH
+from ai_market_monitor.core.dashboard_paths import MONITOR_CANVAS_PREFIX, SETTINGS_PATH
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.models import (
     ApprovedWatchlist,
     ApprovedWatchlistAsset,
+    Strategy,
+    StrategyVersion,
     User,
 )
 from ai_market_monitor.schemas.strategy import InterpretationPreview
@@ -64,7 +71,7 @@ from ai_market_monitor.services.verified_strategy import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/dashboard/monitor-canvas", tags=["monitor-canvas"])
+router = APIRouter(prefix=MONITOR_CANVAS_PREFIX, tags=["monitor-canvas"])
 
 
 async def _current_user(
@@ -174,12 +181,88 @@ async def canvas_favorites(
     }
 
 
+# ── Opening a monitor somebody already has ────────────────────────────────────
+
+
+#: Why a monitor cannot be drawn on the canvas, in words that name the next step.
+#:
+#: Never a guessed board. A monitor whose drawing was not kept is not "an empty canvas";
+#: an empty canvas that then gets switched on would replace the person's rules with
+#: nothing. The page says what happened and offers the only honest way forward.
+_NO_BOARD = (
+    "This monitor was not drawn on the canvas, so there is no board to open. You can "
+    "draw a new monitor here, and put this one away when the new one is running."
+)
+
+_MONITOR_GONE = "That monitor is not on this account any more."
+
+
+def _monitor_key(raw: str) -> UUID | None:
+    """One monitor id, or nothing. A mistyped address is not an error to report."""
+
+    try:
+        return UUID(raw)
+    except (ValueError, AttributeError):
+        return None
+
+
+@router.get("/monitors/{monitor_id}")
+async def canvas_monitor_board(
+    monitor_id: str,
+    user: User = Depends(_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """The board one monitor was drawn from, so the canvas can open it again.
+
+    The board is read back exactly as it was sent — never rebuilt from the compiled
+    rules. Nothing turns a compiled monitor back into cards, and a second reader that
+    tried would be a second opinion about what each card meant.
+
+    The id is read as text and parsed here rather than by the route, so a mistyped
+    address answers with the same sentence as a monitor that is not on this account. A
+    validation error would show a beginner a wall of field names, and telling the two
+    apart would tell a stranger which ids are real.
+    """
+
+    key = _monitor_key(monitor_id)
+    strategy = await session.get(Strategy, key) if key is not None else None
+    if strategy is None or strategy.user_id != user.id or strategy.archived_at is not None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "monitor_gone", "message": _MONITOR_GONE},
+        )
+
+    version = await session.scalar(
+        select(StrategyVersion)
+        .where(StrategyVersion.strategy_id == strategy.id)
+        .order_by(StrategyVersion.version_number.desc())
+        .limit(1)
+    )
+    board = version.canvas_plan_json if version is not None else None
+    return {
+        "monitor": {"id": str(strategy.id), "name": strategy.name},
+        # `None` is an answer, not a missing field. The page shows the sentence below it
+        # rather than an empty board a person could switch on by accident.
+        "plan": board,
+        "reason": None if board else _NO_BOARD,
+    }
+
+
 # ── Turning the board into a monitor ──────────────────────────────────────────
 
 
 class CanvasActivateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    #: The monitor this board belongs to, when somebody is changing one they already
+    #: have. Empty means a new monitor. Sent by the page rather than inferred, because
+    #: "change this" and "make another one just like it" are different intentions and
+    #: nothing about the board itself tells them apart.
+    #:
+    #: Text rather than a typed id, so a mistyped one is answered by the same sentence as
+    #: a monitor that is not on this account — see ``_monitor_key``. A validation error
+    #: here would reach a beginner as a list of field names.
+    monitor_id: str = Field(default="", max_length=64)
     plan: CanvasPlan
     #: The board's own sentence, in the words the person read on the page. Sent rather
     #: than rebuilt here on purpose: the readout, the popup and the test message must
@@ -213,9 +296,32 @@ async def activate_canvas_monitor(
     A channel that fails does **not** undo the monitor. The monitor is real and running;
     what failed is one way of being told, which is a thing the person can fix in
     Settings without building anything again. The reply says exactly which is which.
+
+    When ``monitor_id`` is sent the board changes a monitor that already exists: a new
+    version of the same monitor, through the same gates. The old version is superseded
+    by the platform's own activation, so a person never ends up with two monitors where
+    they meant to change one.
     """
 
     plan = payload.plan
+
+    # Whose monitor this is, settled before anything is built. A board carrying somebody
+    # else's monitor id must not reach the compiler, and "not yours" and "not there" are
+    # deliberately the same answer: the difference would tell a stranger that an id is
+    # real.
+    existing: Strategy | None = None
+    if payload.monitor_id.strip():
+        key = _monitor_key(payload.monitor_id.strip())
+        existing = await session.get(Strategy, key) if key is not None else None
+        if (
+            existing is None
+            or existing.user_id != user.id
+            or existing.archived_at is not None
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "monitor_gone", "message": _MONITOR_GONE},
+            )
 
     # What the platform can really deliver, for this person's plan. Checked before
     # anything is built: a channel that reached the alert schema unchecked would raise
@@ -303,18 +409,35 @@ async def activate_canvas_monitor(
     strategy_service = StrategyService(session, settings.disclaimer_version, settings)
     verification_service = VerifiedStrategyService(session, settings)
 
+    # The board is kept beside the rules it compiled to, in this same transaction. It is
+    # what "Change it" opens later; without it the canvas could only ever offer an empty
+    # board for a monitor that already has rules on it.
+    board = plan.model_dump(mode="json")
+
     try:
-        strategy, version = await strategy_service.create_from_interpretation(
-            user.id,
-            InterpretationPreview(
-                strategy=definition,
-                assumptions=[],
-                ambiguities=[],
-                unsupported_conditions=[],
+        if existing is not None:
+            strategy = existing
+            version = await strategy_service.revise(
+                existing,
+                definition,
+                user_id=user.id,
+                source_text=payload.in_plain_words[:2000] or name,
                 interpreter="monitor-canvas",
-            ),
-            source_text=payload.in_plain_words[:2000] or name,
-        )
+                canvas_plan=board,
+            )
+        else:
+            strategy, version = await strategy_service.create_from_interpretation(
+                user.id,
+                InterpretationPreview(
+                    strategy=definition,
+                    assumptions=[],
+                    ambiguities=[],
+                    unsupported_conditions=[],
+                    interpreter="monitor-canvas",
+                ),
+                source_text=payload.in_plain_words[:2000] or name,
+                canvas_plan=board,
+            )
         await verification_service.prepare_version(
             user_id=user.id,
             strategy=strategy,
@@ -354,7 +477,16 @@ async def activate_canvas_monitor(
     await session.commit()
 
     return {
-        "monitor": {"id": str(strategy.id), "name": name, "status": "watching"},
+        "monitor": {
+            "id": str(strategy.id),
+            "name": name,
+            "status": "watching",
+            # Which of the two things just happened, said by the side that knows. The
+            # page words its confirmation from this rather than from whether it happened
+            # to be holding a monitor id — a person who changed a monitor must not be
+            # told a second one was made.
+            "changed": existing is not None,
+        },
         "results": [item.to_dict() for item in results],
         "all_sent": all(item.sent for item in results),
         "settings_url": SETTINGS_PATH,

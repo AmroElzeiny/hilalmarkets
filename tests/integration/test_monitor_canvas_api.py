@@ -1,9 +1,14 @@
-"""The three questions the monitor canvas asks the server, through the real application.
+"""The four questions the monitor canvas asks the server, through the real application.
 
 The point of these is not that the endpoints exist. It is that they **fail closed**: a
 board that cannot become a monitor is refused with a sentence a beginner can act on, and
 nothing about it is quietly filled in on the way. A canvas that silently repaired a
 half-finished board would produce a monitor watching something nobody drew.
+
+The fourth question is "show me the board this monitor was drawn from", and it fails
+closed in its own way: a monitor whose board was never kept answers with **no board and
+a reason**, never with an empty one. An empty board under somebody's monitor name is the
+worst possible answer — switching it on would replace their rules with nothing.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from tests.integration.test_dashboard_web import _signup_and_verify
 COINS = "/api/v1/dashboard/monitor-canvas/coins"
 FAVORITES = "/api/v1/dashboard/monitor-canvas/favorites"
 ACTIVATE = "/api/v1/dashboard/monitor-canvas/activate"
+BOARDS = "/api/v1/dashboard/monitor-canvas/monitors"
 
 
 def _board(**overrides):
@@ -51,6 +57,60 @@ async def test_every_canvas_endpoint_needs_a_signed_in_person(test_context):
     assert (await client.get(COINS)).status_code == 401
     assert (await client.get(FAVORITES)).status_code == 401
     assert (await client.post(ACTIVATE, json=_board())).status_code == 401
+    assert (
+        await client.get(f"{BOARDS}/11111111-1111-1111-1111-111111111111")
+    ).status_code == 401
+
+
+async def test_a_monitor_that_is_not_yours_cannot_be_opened(test_context):
+    """"Not yours", "not there" and "not an id" all answer the same.
+
+    Telling them apart would tell a stranger which ids are real, and a validation error
+    would reach a beginner who followed a broken link as a list of field names.
+    """
+
+    await _signup_and_verify(test_context, email="canvas-open-foreign@example.com")
+    for asked in ("11111111-1111-1111-1111-111111111111", "not-an-id", "0"):
+        answer = await test_context["client"].get(f"{BOARDS}/{asked}")
+        assert answer.status_code == 404, asked
+        assert answer.json()["detail"]["message"] == (
+            "That monitor is not on this account any more."
+        ), asked
+
+
+async def test_a_monitor_with_no_saved_board_says_so_instead_of_offering_an_empty_one(
+    test_context,
+):
+    """The failure this whole endpoint exists to prevent.
+
+    A monitor made in Telegram, or made before the canvas kept its board, has no drawing.
+    The answer is "no board, and here is why" — never an empty board, which somebody
+    could switch on and replace their own rules with nothing.
+    """
+
+    from ai_market_monitor.db.models import Strategy
+
+    email = "canvas-open-no-board@example.com"
+    await _signup_and_verify(test_context, email=email)
+    async with test_context["session_factory"]() as session:
+        user_id = await session.scalar(
+            select(UserIdentity.user_id).where(
+                UserIdentity.normalized_identifier == email,
+            )
+        )
+        strategy = Strategy(user_id=user_id, name="Made somewhere else")
+        session.add(strategy)
+        await session.commit()
+        monitor_id = str(strategy.id)
+
+    answer = await test_context["client"].get(f"{BOARDS}/{monitor_id}")
+    assert answer.status_code == 200
+    body = answer.json()
+    assert body["plan"] is None
+    assert body["monitor"] == {"id": monitor_id, "name": "Made somewhere else"}
+    # A sentence a beginner can act on, not a code.
+    assert " " in body["reason"]
+    assert "_" not in body["reason"]
 
 
 async def test_the_coin_search_answers_with_screened_coins_only(test_context):
@@ -219,6 +279,69 @@ def _minimal_definition(channels: list[str]):
     return definition.model_copy(
         update={"alerts": AlertPolicy(channels=channels)}  # type: ignore[arg-type]
     )
+
+
+async def test_a_saved_board_comes_back_as_the_same_board_that_was_sent(test_context):
+    """The round trip "Change it" rests on: what was drawn is what is opened.
+
+    The board is stored beside the compiled rules and handed straight back — never
+    rebuilt from the rules, because nothing turns compiled rules back into cards. This
+    checks the stored value is still a board the canvas would accept, by validating it
+    against the very model the page posts.
+    """
+
+    from ai_market_monitor.db.models import Strategy
+    from ai_market_monitor.schemas.strategy import InterpretationPreview
+    from ai_market_monitor.services.monitor_canvas import CanvasPlan
+    from ai_market_monitor.services.strategy import StrategyService
+
+    email = "canvas-open-round-trip@example.com"
+    await _signup_and_verify(test_context, email=email)
+    settings = test_context["settings"]
+    sent = _board()["plan"]
+
+    async with test_context["session_factory"]() as session:
+        user_id = await session.scalar(
+            select(UserIdentity.user_id).where(
+                UserIdentity.normalized_identifier == email,
+            )
+        )
+        service = StrategyService(session, settings.disclaimer_version, settings)
+        strategy, _version = await service.create_from_interpretation(
+            user_id,
+            InterpretationPreview(
+                strategy=_minimal_definition(["web"]),
+                interpreter="monitor-canvas",
+            ),
+            source_text="Watch the screened coins.",
+            canvas_plan=sent,
+        )
+        await session.commit()
+        monitor_id = str(strategy.id)
+
+    answer = await test_context["client"].get(f"{BOARDS}/{monitor_id}")
+    assert answer.status_code == 200
+    body = answer.json()
+    assert body["reason"] is None
+    assert body["plan"] == sent
+    # And it is still a board this platform would accept back.
+    assert CanvasPlan.model_validate(body["plan"]).name == "My first monitor"
+
+    async with test_context["session_factory"]() as session:
+        stored = await session.get(Strategy, strategy.id)
+        assert stored is not None
+
+
+async def test_a_board_sent_for_a_monitor_that_is_not_yours_is_refused(test_context):
+    """The board never reaches the compiler with somebody else's monitor id on it."""
+
+    await _signup_and_verify(test_context, email="canvas-change-foreign@example.com")
+    for asked in ("11111111-1111-1111-1111-111111111111", "not-an-id"):
+        payload = _board()
+        payload["monitor_id"] = asked
+        answer = await test_context["client"].post(ACTIVATE, json=payload)
+        assert answer.status_code == 404, asked
+        assert answer.json()["detail"]["message"], asked
 
 
 async def test_the_favorites_answer_carries_the_coins_on_each_list(test_context):

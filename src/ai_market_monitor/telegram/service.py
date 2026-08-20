@@ -11,6 +11,7 @@ from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.dashboard_paths import (
     CONNECTIONS_PATH,
     LIFECYCLES_PATH,
+    MONITOR_PATH,
     MONITORS_PATH,
     OPPORTUNITIES_PATH,
     SETTINGS_PATH,
@@ -66,6 +67,7 @@ from ai_market_monitor.services.monitor_operations import (
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
 from ai_market_monitor.services.onboarding import OnboardingError, OnboardingService
 from ai_market_monitor.services.openai_interpreter import configured_strategy_interpreter
+from ai_market_monitor.services.product_language import market_checking_notice
 from ai_market_monitor.services.risk_disclaimer import (
     DisclaimerIdentityMissing,
 )
@@ -99,12 +101,15 @@ from ai_market_monitor.telegram.types import (
 
 #: Where a "scan the market once" button really goes.
 #:
-#: It used to be ``/dashboard/scan-now``, which was one of the two addresses of the
-#: Trading Assistant page. That page has been removed, and a button inside a Telegram
-#: message lives for as long as the message does — so leaving them pointed at it would
-#: send people from months-old chats to a "not found". The one-time scan itself is
-#: unchanged: it is a mode of the builder, and this is the builder's own address.
-_ONE_TIME_SCAN_PATH = "/dashboard/strategies/new?mode=scanner"
+#: It used to be ``/dashboard/scan-now`` and then ``/dashboard/strategies/new?mode=scanner``
+#: — first the Trading Assistant page, then the assistant page that replaced it. Both are
+#: gone, and the one-time scan went with the second one: it was a mode of that page and
+#: had no front door of its own.
+#:
+#: A button inside a Telegram message lives for as long as the message does, so these
+#: cannot be left pointing at a page that no longer answers. They go to the canvas, which
+#: is where a monitor is made now. The message beside them says so.
+_ONE_TIME_SCAN_PATH = MONITOR_PATH
 
 PRIMARY_MENU = [
     "📋 My Monitors",
@@ -2039,10 +2044,15 @@ class TelegramBotService:
         await AdminNotificationService(self.settings).send(
             f"Monitor active: user:{user_id} strategy:{strategy.name[:40]}"
         )
+        # Both halves used to be written from inside the machine: one named the worker
+        # scheduler and the other named the setting, `SCANNING_ENABLED`, to whoever had
+        # just switched their first monitor on. The words come from the one owner now, so
+        # the bot, the front page and the Monitors page say the same thing.
+        checking = market_checking_notice(scanning_enabled=self.settings.scanning_enabled)
         live_text = (
-            "Live scanning is enabled. The worker scheduler will scan this monitor."
-            if self.settings.scanning_enabled
-            else "Live scanning is currently disabled in SCANNING_ENABLED."
+            "It is checking the market now."
+            if checking is None
+            else f"{checking.title} {checking.detail}"
         )
         return self._plain_callback(
             callback,
@@ -3599,8 +3609,10 @@ class TelegramBotService:
             "about": "/about",
             "billing": "/dashboard/billing",
             "trial": "/dashboard/trial",
-            "builder": "/dashboard/strategies/new",
-            "create_monitor": "/dashboard/strategies/new",
+            # One page authors a monitor: the canvas. Both names are kept because both
+            # are already written into buttons in messages that have been sent.
+            "builder": MONITOR_PATH,
+            "create_monitor": MONITOR_PATH,
             # The monitors somebody already has, on the page that lists them. This
             # pointed at a section of the setup-chat page that is hidden, so the button
             # landed on a chat and showed no monitors at all.

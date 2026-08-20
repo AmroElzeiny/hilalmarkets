@@ -7,7 +7,7 @@
           </div>
           <div class="verified-hero-actions">
             <span class="verified-version-badge">Version {{ version.version_number }}</span>
-            <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/builder">Edit in Canvas</a>
+            <a class="button button-secondary" href="{{ monitor_edit_path(strategy.id) }}">Edit in Canvas</a>
             <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}">Monitor details</a>
           </div>
         </section>
@@ -41,7 +41,7 @@
               <div class="interpretation-rule-list" data-interpretation-list></div>
             </div>
             <div class="button-row verified-actions">
-              <a class="button button-secondary" href="/dashboard/strategies/{{ strategy.id }}/builder">Resolve in Chat or Canvas</a>
+              <a class="button button-secondary" href="{{ monitor_edit_path(strategy.id) }}">Resolve in Chat or Canvas</a>
             </div>
           </section>
 

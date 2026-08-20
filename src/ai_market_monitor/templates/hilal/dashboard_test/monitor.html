@@ -10,8 +10,8 @@
     There is no assistant on this page: no chat panel, no chat popup, and no
     "Hilal Markets Assistant" box. Authoring never requires the assistant. -#}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-request-wait">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-monitor-test.css') }}?v=20260820-request-wait">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-canvas-only">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-monitor-test.css') }}?v=20260820-canvas-only">
 {% endblock %}
 {% block content %}
 
@@ -24,6 +24,11 @@
   data-market-path="{{ market_path }}"
   data-watchlists-path="{{ watchlists_path }}"
   data-settings-path="{{ settings_path }}"
+  {#- Which monitor is being changed, and where its board is read from. Empty means a
+      new monitor. Nothing about the monitor itself is rendered here: the board is asked
+      for by the page, from the one address that decides who may open it. -#}
+  data-monitor-id="{{ monitor_edit_id }}"
+  data-board-url="{{ monitor_board_url }}"
   data-screening-configured="{{ 'true' if builder_screening.configured else 'false' }}"
   data-screening-name="{{ builder_screening.methodology_name or '' }}"
   data-screening-version="{{ builder_screening.methodology_version or '' }}"
@@ -34,7 +39,10 @@
   <header class="t-head m-head" data-hm-part="The page heading">
     <div class="t-head-copy">
       <p class="t-eyebrow"><span data-icon="workflow" data-icon-class="icon-sm"></span>Visual canvas</p>
-      <h1>Monitor</h1>
+      {#- The name of the monitor being changed replaces this word once the board has
+          been read. A person who pressed "Change it" on one monitor has to be able to
+          see, without doubt, which one is in front of them. -#}
+      <h1 data-page-title>Monitor</h1>
     </div>
 
     <p class="m-saved t-chamfer" data-saved-pill data-state="empty">
@@ -42,6 +50,43 @@
       <span data-saved-text>Nothing drawn yet</span>
     </p>
   </header>
+
+  {#- Shown only when somebody opened a monitor this canvas cannot draw: one made in
+      Telegram, or one made before the canvas kept the board it was drawn from. It says
+      so plainly and offers the one honest way forward. Never an empty board pretending
+      to be their monitor — switching that on would replace their rules with nothing. -#}
+  <div class="t-banner m-open-notice" data-open-notice data-tone="error" role="status" hidden>
+    <span data-icon="alert" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      <strong>This monitor cannot be opened here</strong>
+      <p data-open-notice-text></p>
+      <p class="m-open-notice-actions">
+        <button class="t-action is-primary" type="button" data-open-notice-fresh>
+          <span data-icon="plus" data-icon-class="icon-sm"></span>Draw a new monitor
+        </button>
+        <a class="t-action" href="{{ watchlists_path }}">
+          <span data-icon="arrow" data-icon-class="icon-sm"></span>Back to my monitors
+        </a>
+      </p>
+    </div>
+  </div>
+
+  {#- The board carries changes from an earlier visit that were never saved. It looks
+      exactly like the monitor, so it says which one it is, and offers the only way back
+      — Undo cannot help, because the history starts empty on a fresh page. -#}
+  <div class="t-banner m-open-notice" data-draft-notice data-tone="warning" role="status" hidden>
+    <span data-icon="edit" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      <strong>These are changes you did not save</strong>
+      <p>Your monitor is still watching by its old rules. Save this board to use these
+         changes, or put the monitor back as it is running.</p>
+      <p class="m-open-notice-actions">
+        <button class="t-action" type="button" data-draft-notice-restore>
+          <span data-icon="undo" data-icon-class="icon-sm"></span>Put it back as it is running
+        </button>
+      </p>
+    </div>
+  </div>
 
   {#- Which screened universe the board would draw from. Said once, plainly, and never
       as a promise: a draft can be built either way, and the difference is only which
@@ -443,4 +488,4 @@
 
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-monitor-test.js') }}?v=20260820-request-wait"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-monitor-test.js') }}?v=20260820-canvas-only"></script>{% endblock %}

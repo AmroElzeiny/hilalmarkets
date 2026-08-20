@@ -15,7 +15,7 @@ from sqlalchemy import Integer, and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.core.dashboard_paths import LIFECYCLES_PATH
+from ai_market_monitor.core.dashboard_paths import LIFECYCLES_PATH, monitor_edit_path
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
@@ -1181,8 +1181,11 @@ class SetupObservabilityService:
             ],
             "actions": {
                 "view_full_lifecycle": f"{LIFECYCLES_PATH}?setup={setup.id}",
-                "open_canvas": f"/dashboard/strategies/{strategy.id}/builder",
-                "refine_chat": f"/dashboard/strategies/new?refine={strategy.id}",
+                # One page authors a monitor, so both of these are the same address now.
+                # They were two: the canvas, and the assistant page opened in "refine"
+                # mode. The assistant page is gone.
+                "open_canvas": monitor_edit_path(strategy.id),
+                "refine_chat": monitor_edit_path(strategy.id),
                 "view_monitor_health": (
                     f"{LIFECYCLES_PATH}?monitor={strategy.id}#monitor-health"
                 ),

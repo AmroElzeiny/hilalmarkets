@@ -738,7 +738,9 @@ def test_dashboard_home_offers_one_way_to_create_a_watchlist(
     seed_setup_observability(browser_app.database_url, email)
     page.goto(f"{base_url}/dashboard", wait_until="networkidle")
     close_any_open_guide(page)
-    creators = page.locator("a[href='/dashboard/strategies/new']")
+    # The canvas is the one place a monitor is made, so it is the one address a
+    # "create" button on this page may point at. It used to be the assistant page.
+    creators = page.locator("a[href='/dashboard/create-monitor']")
     visible = [
         index for index in range(creators.count()) if creators.nth(index).is_visible()
     ]

@@ -151,6 +151,92 @@ def watchlist_presentation(
     )
 
 
+@dataclass(frozen=True)
+class MarketCheckingNotice:
+    """What a page says when the platform itself is not checking the market."""
+
+    title: str
+    detail: str
+    tone: str
+
+
+#: Said when live scanning is switched off, which stops every monitor of every person at
+#: once.
+#:
+#: This is a deployment switch, so no page may hint that the person did something wrong,
+#: and none may imply that waiting will help. The words never name the setting either:
+#: `SCANNING_ENABLED` is a word from inside the machine.
+_NOT_CHECKING = MarketCheckingNotice(
+    title="We are not checking the market right now.",
+    detail=(
+        "This is switched off on our side. It is not something you did. Your monitors "
+        "keep every rule you approved, and they start looking again as soon as it is "
+        "back on."
+    ),
+    tone="warning",
+)
+
+
+def market_checking_notice(*, scanning_enabled: bool) -> MarketCheckingNotice | None:
+    """The notice every page must carry, or `None` when the market really is checked.
+
+    One owner, because the fact is one fact. The front page says it in its headline band
+    and the Monitors page says it in a banner; both read it from here, so the two cannot
+    grow into two different accounts of the same silence.
+    """
+
+    return None if scanning_enabled else _NOT_CHECKING
+
+
+#: The "done" messages that promise the market is being checked from this moment on.
+#:
+#: Keyed by the code the dashboard already uses, so the template still looks a message up
+#: by its code and no page decides for itself which ones are affected. Somebody published
+#: a monitor, read "It is checking the market now", and then found "Not looked yet" on the
+#: card below — the same screen disagreeing with itself, with the untrue half on top.
+_CHECKING_CLAIMS: dict[str, str] = {
+    "monitor_published": (
+        "Your monitor is on and it keeps every rule you approved. "
+        "We are not checking the market right now, so it has not started looking yet. "
+        "It starts on its own as soon as we are."
+    ),
+    "monitor_resumed": (
+        "Your monitor is on again. "
+        "We are not checking the market right now, so it has not started looking yet. "
+        "It starts on its own as soon as we are."
+    ),
+}
+
+
+def checking_message_overrides(*, scanning_enabled: bool) -> dict[str, str]:
+    """Which "done" messages must be replaced, because they would promise a check.
+
+    Empty whenever the market really is being checked, so the ordinary path keeps the
+    ordinary words and nothing has to be remembered at the call site.
+    """
+
+    return {} if scanning_enabled else dict(_CHECKING_CLAIMS)
+
+
+def first_check_words(*, scanning_enabled: bool, check_started: bool) -> str:
+    """Why a list has not checked the market yet.
+
+    Three different reasons, and only one of them ends on its own. "This list has not
+    checked the market for the first time" reads as *soon*, and soon is not true while
+    the platform is not checking at all — a person waited on a first check that nothing
+    was ever going to run.
+    """
+
+    if not scanning_enabled:
+        return (
+            "Hilal Markets is not checking the market at the moment. "
+            "Nothing is wrong with this list."
+        )
+    if check_started:
+        return "The first check of the market is running now."
+    return "This list has not checked the market for the first time."
+
+
 def how_long_ago(moment: datetime | None, *, now: datetime | None = None) -> str:
     """When something happened, in the words a person would use.
 

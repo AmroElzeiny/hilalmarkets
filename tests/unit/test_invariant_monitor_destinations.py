@@ -7,12 +7,18 @@ somebody landed on reopened a conversation about something else and showed no mo
 all. The same address was written into Telegram buttons, WhatsApp replies and the repair
 notice, none of which can be corrected once the message has been sent.
 
+That page has since been deleted outright: the canvas is the only place a monitor is
+authored, and the same page changes one. Its two addresses stay as permanent redirects
+because they are written into messages already sent — but nothing in the product may
+*point* at them any more, which is what rule 1 now measures.
+
 The rules here are about the whole family, not about the one action that was reported:
 
-1. Nothing shipped may link to that hidden anchor.
-2. No redirect that carries a confirmation may reopen the setup chat.
+1. Nothing shipped links to the assistant page, at any of its addresses.
+2. No redirect that carries a confirmation may reopen it.
 3. Putting a monitor away opens the canvas; every other monitor action opens the list.
 4. Every confirmation a dashboard page can receive has a sentence a beginner can read.
+5. Changing a monitor opens the canvas on that monitor.
 """
 
 from __future__ import annotations
@@ -28,10 +34,19 @@ SRC = ROOT / "src/ai_market_monitor"
 DASHBOARD = SRC / "api/routers/dashboard.py"
 DASHBOARD_JS = SRC / "static/dashboard.js"
 SHELL = SRC / "templates/hilal/base_dashboard.html"
-BUILDER_WORKSPACE = SRC / "templates/hilal/dashboard/partials/builder_workspace.html"
 
 #: The address this whole file exists to keep out of the product.
-HIDDEN_ANCHOR = "/dashboard/strategies/new#monitors"
+#:
+#: It is the assistant page, which is gone. The hidden anchor that started this — the
+#: monitors section of that page, which was marked ``hidden`` — cannot be linked to
+#: because there is nothing left to link to, so the rule is now the whole address.
+ASSISTANT_PAGE = "/dashboard/strategies/new"
+
+#: The two places the address is allowed to appear: the constant that defines it, and the
+#: comments that explain why it still answers. Everything else pointing at it is a link.
+ASSISTANT_PAGE_OWNERS = {
+    "src/ai_market_monitor/core/dashboard_paths.py",
+}
 
 #: Every page the product serves to a signed-in person, by the constant that owns it.
 #: A redirect target has to start with one of these or it points at nothing.
@@ -109,39 +124,57 @@ def _confirmation_keys() -> set[str]:
 # ── The reason the rule exists ───────────────────────────────────────────────
 
 
-def test_the_monitors_section_of_the_builder_page_is_hidden() -> None:
-    """The anchor everything used to point at names a section nobody can see.
+def test_the_assistant_page_is_gone_and_its_address_forwards_to_the_canvas() -> None:
+    """One page authors a monitor. The old address still answers, and only forwards.
 
     If this ever stops being true the rest of this file is arguing about nothing, so it
     is measured rather than remembered.
     """
 
-    markup = _read(BUILDER_WORKSPACE)
-    section = re.search(r'<section id="monitors"[^>]*>', markup)
-    assert section is not None, "the builder page no longer has a monitors section"
-    assert "hidden" in section.group(0)
+    from ai_market_monitor.api.routers import dashboard
+    from ai_market_monitor.core.dashboard_paths import LEGACY_ASSISTANT_PATH
+
+    assert LEGACY_ASSISTANT_PATH == ASSISTANT_PAGE
+    assert not (SRC / "templates/hilal/dashboard/builder.html").exists()
+    assert not (SRC / "templates/hilal/dashboard/partials/builder_workspace.html").exists()
+
+    paths = {getattr(route, "path", "") for route in dashboard.router.routes}
+    assert ASSISTANT_PAGE in paths, "the old address must keep answering, not 404"
 
 
 # ── 1. Nothing links to it ───────────────────────────────────────────────────
 
 
-def test_nothing_shipped_links_to_the_hidden_monitors_anchor() -> None:
-    offenders = [
-        str(path.relative_to(ROOT))
-        for path in _shipped_files()
-        if HIDDEN_ANCHOR in _read(path)
-    ]
+def test_nothing_shipped_links_to_the_assistant_page() -> None:
+    """Every reference outside its own constant is a link somebody can follow.
+
+    A comment mentioning the address is not a link, so only lines carrying it inside an
+    `href`, a redirect or a quoted path count.
+    """
+
+    offenders = []
+    for path in _shipped_files():
+        name = path.relative_to(ROOT).as_posix()
+        if name in ASSISTANT_PAGE_OWNERS:
+            continue
+        for line in _read(path).splitlines():
+            stripped = line.strip()
+            if ASSISTANT_PAGE not in stripped:
+                continue
+            if stripped.startswith(("#", "#:", "*", "{#", "//", "/*")):
+                continue
+            offenders.append(f"{name}: {stripped[:100]}")
     assert offenders == []
 
 
-# ── 2. No confirmation reopens the setup chat ────────────────────────────────
+# ── 2. No confirmation reopens the assistant page ────────────────────────────
 
 
 @pytest.mark.parametrize("target", sorted(set(_redirect_targets() + _browser_targets())))
-def test_no_redirect_carrying_a_confirmation_reopens_the_setup_chat(target: str) -> None:
+def test_no_redirect_carrying_a_confirmation_reopens_the_assistant_page(target: str) -> None:
     if "message=" not in target and "error=" not in target:
         return
-    assert "/dashboard/strategies/new" not in target
+    assert ASSISTANT_PAGE not in target
 
 
 # ── 3. Each action opens the page it is about ────────────────────────────────
@@ -181,6 +214,45 @@ def test_the_two_destinations_are_the_pages_that_own_those_addresses() -> None:
 
     assert dashboard._AFTER_MONITOR_ACTION == MONITORS_PATH
     assert dashboard._AFTER_MONITOR_DELETED == MONITOR_PATH
+
+
+# ── 5. Changing a monitor opens the canvas on that monitor ───────────────────
+
+
+def test_changing_a_monitor_opens_the_canvas_on_that_monitor() -> None:
+    """One address for authoring, whether a monitor is being made or changed.
+
+    Written as a rule about the address rather than about the Monitors page, because
+    five different surfaces offer "change this monitor" and each one used to write the
+    older assistant page's address by hand.
+    """
+
+    from ai_market_monitor.core.dashboard_paths import MONITOR_PATH, monitor_edit_path
+
+    made = monitor_edit_path("abc")
+    assert made.startswith(f"{MONITOR_PATH}?")
+    assert made.endswith("monitor=abc")
+
+
+def test_every_surface_that_changes_a_monitor_uses_that_one_address() -> None:
+    """No shipped file may build the canvas edit address out of its own pieces."""
+
+    from ai_market_monitor.core.dashboard_paths import MONITOR_PATH
+
+    owners = {
+        "src/ai_market_monitor/core/dashboard_paths.py",
+        # The one script that has no import of its own: it draws links inside strings.
+        "src/ai_market_monitor/static/dashboard.js",
+    }
+    offenders = []
+    for path in _shipped_files():
+        name = path.relative_to(ROOT).as_posix()
+        if name in owners:
+            continue
+        for line in _read(path).splitlines():
+            if f"{MONITOR_PATH}?monitor=" in line:
+                offenders.append(f"{name}: {line.strip()[:100]}")
+    assert offenders == []
 
 
 # ── 4. Every confirmation is readable ────────────────────────────────────────

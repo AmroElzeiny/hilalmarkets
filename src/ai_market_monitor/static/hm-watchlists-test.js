@@ -124,7 +124,10 @@ function start(scope) {
       explain.querySelector("[data-w-explain-title]").textContent = button.dataset.name;
       explain.querySelector("[data-w-explain-share]").textContent = `${share}%`;
       const card = button.closest("[data-w-card]");
-      const editable = card && card.querySelector('a[href*="/builder"]');
+      // The card's own "Change it" link, found by what it does rather than by the
+      // address it points at. It was matched on `/builder` — the older assistant page —
+      // so the moment authoring moved to the canvas this popup lost its way out.
+      const editable = card && card.querySelector("[data-w-edit]");
       if (editable) {
         explain.querySelector("[data-w-explain-edit]").href = editable.getAttribute("href");
       }

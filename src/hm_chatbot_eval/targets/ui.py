@@ -151,7 +151,14 @@ class UITarget(ChatTarget):
     async def _verify_authenticated_setup_chat(self) -> None:
         assert self.page is not None
         if await self.page.locator(self.settings.target_ui_expected_marker).count() != 1:
-            raise RuntimeError("Authenticated AI Setup Chat marker was not found exactly once")
+            raise RuntimeError(
+                "Authenticated AI Setup Chat marker was not found exactly once. The "
+                "website no longer serves a signed-in setup chat: the assistant page was "
+                "removed and a monitor is drawn on the canvas, which has no chat on it. "
+                "This browser target has nothing to drive; run the backend target "
+                "instead, or point TARGET_UI_URL at a page that really carries "
+                f"{self.settings.target_ui_expected_marker}."
+            )
         forbidden = [
             item.strip()
             for item in self.settings.target_ui_forbidden_markers.split(",")

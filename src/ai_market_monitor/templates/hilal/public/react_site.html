@@ -4,7 +4,7 @@
   {#- First script on the page, deliberately. It puts a time limit on every request this
       product sends to its own server, and it can only do that for a request sent after
       it has run. See `static/hm-request.js`. -#}
-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260820-request-wait"></script>
+  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260820-canvas-only"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
@@ -45,13 +45,13 @@
   <meta name="twitter:image:alt" content="{{ og_image_alt }}">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260820-request-wait">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260820-canvas-only">
   {# One owner for the cookie banner and its settings window, which this template includes below. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260820-request-wait">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260820-request-wait">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260820-request-wait">
-  <link rel="stylesheet" href="{{ url_for('static', path='/landing/assets/landing.css') }}?v=20260820-request-wait">
-  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260820-request-wait">{% endif %}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260820-canvas-only">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260820-canvas-only">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260820-canvas-only">
+  <link rel="stylesheet" href="{{ url_for('static', path='/landing/assets/landing.css') }}?v=20260820-canvas-only">
+  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260820-canvas-only">{% endif %}
   <script>
     window.HilalMarketsConsentConfig = {{ {
       "version": cookie_consent_version,
@@ -100,10 +100,10 @@
   <div id="root"></div>
   {% include "hilal/partials/cookie_banner.html" %}
   {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260820-request-wait"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260820-request-wait"></script>
-  {% if site_visit_measurement_enabled %}<script src="{{ url_for('static', path='/hm-visit-analytics.js') }}?v=20260820-request-wait" defer></script>{% endif %}
-  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260820-request-wait"></script>{% endif %}
-  <script type="module" src="{{ url_for('static', path='/landing/assets/landing.js') }}?v=20260820-request-wait"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260820-canvas-only"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260820-canvas-only"></script>
+  {% if site_visit_measurement_enabled %}<script src="{{ url_for('static', path='/hm-visit-analytics.js') }}?v=20260820-canvas-only" defer></script>{% endif %}
+  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260820-canvas-only"></script>{% endif %}
+  <script type="module" src="{{ url_for('static', path='/landing/assets/landing.js') }}?v=20260820-canvas-only"></script>
 </body>
 </html>

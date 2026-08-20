@@ -217,7 +217,14 @@ class Settings(BaseSettings):
         default_factory=_default_model_pricing
     )
 
-    target_ui_url: str = "http://127.0.0.1:8000/dashboard/strategies/new"
+    #: The signed-in page the browser evaluator drives.
+    #:
+    #: It was the assistant page, which held the only authenticated setup chat on the
+    #: website. That page is gone, and with it the browser half of this evaluator: there
+    #: is no signed-in chat to drive any more. The address stays pointed at the canvas so
+    #: a run fails with "the marker is not on this page" rather than with a 404 that
+    #: looks like the server is down.
+    target_ui_url: str = "http://127.0.0.1:8000/dashboard/create-monitor"
     target_ui_login_url: str = "http://127.0.0.1:8000/signin"
     target_ui_email: str = ""
     target_ui_password: str = ""

@@ -30,9 +30,11 @@ from ai_market_monitor.core.dashboard_paths import (
     CONNECTIONS_PATH,
     HOME_PATH,
     INTEGRATIONS_PATH,
+    LEGACY_ASSISTANT_PATH,
     LIFECYCLES_PATH,
     MONITOR_PATH,
     MONITORS_PATH,
+    monitor_edit_path,
 )
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
@@ -75,7 +77,6 @@ from ai_market_monitor.db.models import (
     SetupInstance,
     ShariaMethodology,
     Strategy,
-    StrategyTemplate,
     StrategyUniverse,
     StrategyVersion,
     Subscription,
@@ -124,6 +125,10 @@ from ai_market_monitor.services.monitor_operations import (
     MonitorOperationService,
 )
 from ai_market_monitor.services.payment_emails import PaymentEmailRenderer
+from ai_market_monitor.services.product_language import (
+    checking_message_overrides,
+    market_checking_notice,
+)
 from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_screening import (
     AGGREGATE_METHODOLOGY_CODE,
@@ -139,7 +144,6 @@ from ai_market_monitor.services.telegram_account_links import (
     TelegramAccountLinkError,
     TelegramAccountLinkService,
 )
-from ai_market_monitor.services.template_catalog import builtin_template_payloads
 from ai_market_monitor.services.verified_strategy import seal_alert_proof
 from ai_market_monitor.services.web_auth import (
     SESSION_COOKIE_NAME,
@@ -199,6 +203,12 @@ templates.env.filters["plan_limit"] = _plan_limit
 # templates used to answer it themselves, each knowing a different subset; the catalogue
 # address was typed into two of them by hand.
 templates.env.globals["asset_logo"] = asset_logo
+# Where a monitor is made, and where one is changed. Reachable from every template so no
+# page writes the address itself. Seven templates used to type the older assistant page's
+# address by hand, and each one had to be found again when that page moved.
+templates.env.globals["monitor_path"] = MONITOR_PATH
+templates.env.globals["monitor_edit_path"] = monitor_edit_path
+
 
 def _timezone_options(at: datetime | None = None) -> list[dict[str, str]]:
     instant = at or datetime.now(UTC)
@@ -869,6 +879,19 @@ async def _context(
         # one screen ends up telling a customer the assistant is down while the next
         # screen says nothing.
         "status_banners": _status_banners(request, settings),
+        # Whether the platform is checking the market at all — `None` when it is, so a
+        # page only draws something when there is something true to draw. Built here for
+        # every dashboard page, for the same reason as the banners above.
+        "market_checking": market_checking_notice(
+            scanning_enabled=settings.scanning_enabled
+        ),
+        # The "done" messages that claim the market is being checked right now, replaced
+        # while that would not be true. Publishing a monitor answered "It is checking the
+        # market now" and the card underneath said "Not looked yet" — the same screen
+        # disagreeing with itself, with the false half shown first.
+        "dashboard_message_overrides": checking_message_overrides(
+            scanning_enabled=settings.scanning_enabled
+        ),
         "unread_notification_count": unread_notification_count,
         "dashboard_theme": dashboard_theme,
         "dashboard_csrf_token": csrf_token(settings, user.id) if user else None,
@@ -2142,42 +2165,30 @@ async def monitors_page(
     )
 
 
-@router.get("/dashboard/strategies/new", response_class=HTMLResponse, include_in_schema=False)
-async def new_strategy_builder_page(
-    request: Request,
-    user: User = Depends(_require_user),
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    templates_list = (
-        await session.scalars(
-            select(StrategyTemplate)
-            .where(StrategyTemplate.user_id == user.id, StrategyTemplate.archived_at.is_(None))
-            .order_by(StrategyTemplate.category.asc(), StrategyTemplate.name.asc())
-        )
-    ).all()
-    return templates.TemplateResponse(
-        request,
-        "hilal/dashboard/builder.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page=(
-                "check_market"
-                if request.query_params.get("mode") == "scanner"
-                else "strategy_builder"
-            ),
-            title="Strategy Builder",
-            strategy=None,
-            version=None,
-            templates=templates_list,
-            builtin_templates=builtin_template_payloads(),
-            monitor_cards=await _monitor_cards_context(session, user),
-            builder_screening=await _builder_screening_context(session, user, settings),
-        ),
-    )
+#: The assistant page is gone. Both of its addresses forward to the canvas.
+#:
+#: It was one page with two jobs — a chat box that asked somebody to describe a monitor
+#: in words, and the same page opened on a monitor they already had — and it was the
+#: second place a monitor could be authored. Two authoring surfaces is how the canvas and
+#: the assistant came to offer different rules for the same product: the canvas is drawn
+#: from the platform's own contract, so every condition it offers is one the compiler can
+#: run, and nothing there depends on a model being available or on it having understood a
+#: sentence.
+#:
+#: The addresses stay as permanent redirects rather than becoming 404s. Both are written
+#: into payment email that has already been sent, into Telegram buttons, into WhatsApp
+#: replies and into saved bookmarks, and none of those can be corrected after the fact —
+#: the same rule `LEGACY_HOME_PATH` follows in `core/dashboard_paths.py`.
+#:
+#: The one-time Scanner went with the page. It was a mode of it (`?mode=scanner`), it had
+#: no other front door, and it is not rebuilt elsewhere.
+
+
+@router.get(LEGACY_ASSISTANT_PATH, include_in_schema=False, name="legacy_assistant_page")
+async def legacy_assistant_page() -> RedirectResponse:
+    """Where a monitor used to be described in words. The canvas draws one now."""
+
+    return RedirectResponse(MONITOR_PATH, status_code=308)
 
 
 @router.get(
@@ -2287,50 +2298,21 @@ async def verified_strategy_page(
 
 @router.get(
     "/dashboard/strategies/{strategy_id}/builder",
-    response_class=HTMLResponse,
     include_in_schema=False,
+    name="legacy_assistant_edit_page",
 )
-async def strategy_builder_edit_page(
-    request: Request,
-    strategy_id: UUID,
-    user: User = Depends(_require_user),
-    session: AsyncSession = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    strategy = await session.get(Strategy, strategy_id)
-    if strategy is None or strategy.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Strategy not found")
-    version = await session.scalar(
-        select(StrategyVersion)
-        .where(StrategyVersion.strategy_id == strategy.id)
-        .order_by(StrategyVersion.version_number.desc())
-        .limit(1)
-    )
-    templates_list = (
-        await session.scalars(
-            select(StrategyTemplate)
-            .where(StrategyTemplate.user_id == user.id, StrategyTemplate.archived_at.is_(None))
-            .order_by(StrategyTemplate.category.asc(), StrategyTemplate.name.asc())
-        )
-    ).all()
-    return templates.TemplateResponse(
-        request,
-        "hilal/dashboard/builder.html",
-        await _context(
-            request=request,
-            session=session,
-            settings=settings,
-            user=user,
-            page="strategy_builder",
-            title=f"Edit {strategy.name}",
-            strategy=strategy,
-            version=version,
-            templates=templates_list,
-            builtin_templates=builtin_template_payloads(),
-            monitor_cards=await _monitor_cards_context(session, user),
-            builder_screening=await _builder_screening_context(session, user, settings),
-        ),
-    )
+async def legacy_assistant_edit_page(strategy_id: UUID) -> RedirectResponse:
+    """Where one monitor used to be edited. The canvas opens it now.
+
+    The monitor is named in the address, so the redirect carries it: somebody following
+    an old link lands on their own monitor rather than on an empty board. Whether that
+    monitor can be drawn is settled by the canvas, which says so plainly when it cannot.
+
+    Nothing about the monitor is read here. Checking ownership before forwarding would
+    tell a stranger which ids are real, and the canvas refuses an id nobody owns anyway.
+    """
+
+    return RedirectResponse(monitor_edit_path(strategy_id), status_code=308)
 
 
 @router.get(
@@ -2479,7 +2461,12 @@ async def prepare_capability_repair(
     except ValueError:
         await session.rollback()
         return _redirect(f"{_AFTER_MONITOR_ACTION}?error=repair_revision_unavailable")
-    return _redirect(f"/dashboard/strategies/{strategy.id}/builder?message=repair_revision_ready")
+    # The corrected version is already prepared and waiting on the monitor's own card.
+    # This used to send people to the assistant page to look at it; that page is gone,
+    # and the canvas cannot draw a version it did not draw, so the honest destination is
+    # the monitor itself.
+    del strategy
+    return _redirect(f"{_AFTER_MONITOR_ACTION}?message=repair_revision_ready")
 
 
 @router.post(
@@ -2555,9 +2542,9 @@ async def restore_capability_extension(
 
 #: `/dashboard/create-monitor` is the visual canvas, and only the canvas.
 #:
-#: It used to be registered here as a second front door onto the older strategy builder —
-#: the same page `/dashboard/strategies/new` serves. That builder is still at its own
-#: address; what is gone is the alias, because the canvas answers here now
+#: It used to be registered here as a second front door onto the older assistant page —
+#: the same page `/dashboard/strategies/new` served. That page is gone entirely now and
+#: its address forwards here, so there is one page where a monitor is authored
 #: (`MONITOR_PATH`, served by `routers/dashboard_test.py`). Two routers cannot both own
 #: one address: which page answered would depend on the order they were registered in,
 #: which is not a decision anybody made.
@@ -2569,10 +2556,9 @@ async def restore_capability_extension(
 #: which is the shape this repository keeps producing: one thing, several front doors,
 #: and no way to remove it without missing one. Both refuse now.
 #:
-#: What is *not* removed is the one-time scan itself. It is a mode of the builder
-#: (`/dashboard/strategies/new?mode=scanner`), it is reached from inside the builder and
-#: from the Telegram buttons that used to come through here, and nothing asked for the
-#: feature to go — only the menu entry and the page behind it.
+#: The one-time scan is gone with them. It was a mode of the assistant page
+#: (`/dashboard/strategies/new?mode=scanner`) and had no front door of its own, so
+#: deleting that page removed it. Nothing rebuilds it elsewhere.
 _SCANNER_PAGE_GONE = "Trading Assistant was removed. Build a monitor instead."
 
 

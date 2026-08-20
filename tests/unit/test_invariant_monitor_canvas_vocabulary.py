@@ -198,10 +198,130 @@ def test_the_contract_is_read_from_one_place():
         )
         # Every other call the canvas makes is to its own endpoints — never to a second
         # copy of the catalogue under a different address.
+        #
+        # An address the *server* handed over is allowed and is the better shape: the
+        # page reads it off its own root element and appends nothing but an id, so the
+        # address has one owner in `core/dashboard_paths.py` rather than being typed
+        # again here. Only that one placeholder is allowed, by name.
         for url in re.findall(r"""fetch\(\s*[`"']([^`"']+)""", source):
+            if url.startswith("${boardUrl}/"):
+                assert "dataset.boardUrl" in source, (
+                    f"{path.name} uses a board address the server never handed it"
+                )
+                continue
             assert url.startswith("/api/v1/dashboard/monitor-canvas/"), (
                 f"{path.name} calls {url!r}, which is not one of the canvas's own endpoints"
             )
+
+
+#: Every field of the board the server stores, in the two names it travels under.
+#:
+#: The board is sent to `/activate` by `planForServer` and handed back by the reopen
+#: endpoint, and `planFromServer` turns it into what the page draws. Three functions, one
+#: shape — so a field added on one side and forgotten on another is a rule that quietly
+#: stops coming back when somebody presses "Change it".
+BOARD_FIELDS = (
+    ("mechanic", "mechanic"),
+    ("values", "values"),
+    ("required", "required"),
+    ("op", "op"),
+    ("children", "children"),
+    ("watchlist_id", "watchlistId"),
+    ("symbols", "symbols"),
+    ("channels", "channels"),
+    ("cooldown_minutes", "cooldownMinutes"),
+)
+
+
+@pytest.mark.parametrize(("sent", "drawn"), BOARD_FIELDS)
+def test_every_field_the_board_is_sent_with_is_read_back(sent: str, drawn: str) -> None:
+    """What a person drew has to survive being saved and opened again.
+
+    Parametrised over the whole board rather than over one field: a monitor that came
+    back missing its cooldown, or missing which coins it watches, would look like a
+    working board and would be switched on watching something else.
+    """
+
+    page = (STATIC / "hm-monitor-test.js").read_text(encoding="utf-8")
+    plan = (STATIC / "hm-monitor-plan.js").read_text(encoding="utf-8")
+
+    written = page.split("function planForServer")[1]
+    assert sent in written, f"the board is never sent with {sent!r}"
+
+    read = plan.split("export function planFromServer")[1]
+    assert sent in read, f"a saved board's {sent!r} is never read back"
+    assert drawn in read, f"a saved board's {sent!r} is never drawn as {drawn!r}"
+
+
+def test_a_monitor_with_no_saved_board_is_never_drawn_as_an_empty_one() -> None:
+    """The one thing the reopen path must never do.
+
+    An empty board under somebody's monitor name can be switched on, and switching it on
+    would replace their rules with nothing. Both halves are held here: the reader refuses
+    rather than returning a half-built board, and the page shows the server's sentence
+    instead of a board when there is none.
+    """
+
+    plan = (STATIC / "hm-monitor-plan.js").read_text(encoding="utf-8")
+    page = (STATIC / "hm-monitor-test.js").read_text(encoding="utf-8")
+    markup = MONITOR_TEMPLATE.read_text(encoding="utf-8")
+
+    read = plan.split("export function planFromServer")[1].split("\nexport ")[0]
+    assert "return null" in read, "an unreadable board must refuse, not part-build"
+
+    assert "opened && opened.plan ? planFromServer(opened.plan) : null" in page
+    assert "data-open-notice" in page
+    assert "data-open-notice" in markup
+    # And the way out is on the page, not only in the sentence.
+    assert "data-open-notice-fresh" in markup
+
+    # A board that could not be opened is never treated as the monitor being changed.
+    # Switching it on there would replace that person's rules with a board that was
+    # never theirs.
+    assert "const monitorId = opening ? asked : \"\";" in page
+    # And the way out never clears the board: at that point it is whatever new monitor
+    # this person had already started, and nothing else holds a copy of it.
+    assert "startOver" not in page
+    assert "startOver" not in plan
+
+
+def test_a_board_being_changed_is_kept_apart_from_a_new_one() -> None:
+    """Opening a monitor must not overwrite a half-drawn new monitor in the same browser.
+
+    Neither is recoverable once overwritten, so they are kept under different keys.
+    """
+
+    plan = (STATIC / "hm-monitor-plan.js").read_text(encoding="utf-8")
+
+    assert "function storageKeyFor" in plan
+    assert "this.storageKey = storageKeyFor(this.monitorId)" in plan
+    # And nothing writes to the shared key directly any more.
+    assert "setItem(STORAGE_KEY," not in plan
+
+
+def test_an_unfinished_edit_says_it_is_one_and_can_be_put_back() -> None:
+    """A half-finished change looks exactly like the monitor, so it has to say so.
+
+    Undo cannot rescue somebody here: the history starts empty on a fresh page, so an
+    edit made yesterday has nothing behind it. The board the monitor really runs is kept
+    for that reason alone.
+    """
+
+    plan = (STATIC / "hm-monitor-plan.js").read_text(encoding="utf-8")
+    page = (STATIC / "hm-monitor-test.js").read_text(encoding="utf-8")
+    markup = MONITOR_TEMPLATE.read_text(encoding="utf-8")
+
+    assert "holdsUnsavedEdit" in plan
+    assert "putBackTheSavedMonitor()" in plan
+    assert "forgetDraft()" in plan
+
+    assert "store.holdsUnsavedEdit" in page
+    assert "store.putBackTheSavedMonitor()" in page
+    # And a saved change stops being called an unfinished one.
+    assert "if (changed) store.forgetDraft();" in page
+
+    assert "data-draft-notice" in markup
+    assert "data-draft-notice-restore" in markup
 
 
 def test_the_canvas_ships_no_second_colour_or_type_scale():

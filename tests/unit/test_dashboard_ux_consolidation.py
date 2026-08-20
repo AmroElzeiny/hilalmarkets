@@ -134,26 +134,28 @@ def test_settings_offer_channels_a_schedule_and_a_threshold_and_decide_none_of_t
     assert not (ROOT / "templates/hilal/dashboard/settings.html").exists()
 
 
-def test_builder_uses_ai_sheet_and_minimizable_canvas_assistant():
-    builder = _read("templates/hilal/dashboard/builder.html")
-    script = _read("static/ai-setup-chat.js")
+def test_a_monitor_is_authored_on_one_page_with_no_assistant_on_it():
+    """The assistant page is gone, and nothing has quietly grown a replacement.
 
-    assert "AI sheet" in builder
-    assert "Your Watchlist sheet" not in builder
-    assert "Live translation" not in builder
-    assert "Advanced Controls" not in builder
-    assert "data-ai-minimize-chat" in builder
-    assert 'classList.toggle("assistant-minimized")' in script
-    heading = builder.split(
-        '<section class="guided-builder-heading"',
-        1,
-    )[1].split("</section>", 1)[0]
-    assert "guided-builder-heading-line" in heading
-    assert "guided-builder-heading-actions" in heading
-    assert "Market assistant" in heading
-    assert "guided-starts" not in heading
-    assert "ai-chat-guided-starts" in builder
-    assert 'class="guided-starts ai-chat-guided-starts"' in builder
+    This used to check the shape of that page: its "AI sheet", its minimisable chat, its
+    heading. Consolidation went one step further — there is one authoring page now, the
+    canvas — so the thing worth holding is that the canvas has no chat box on it and no
+    second page has appeared beside it.
+    """
+
+    assert not (ROOT / "templates/hilal/dashboard/builder.html").exists()
+    assert not (ROOT / "templates/hilal/dashboard/partials/builder_workspace.html").exists()
+    assert not (ROOT / "static/ai-setup-chat.js").exists()
+    assert not (ROOT / "static/ai-setup-chat.css").exists()
+    assert not (ROOT / "static/hilalmarkets-builder.js").exists()
+    assert not (ROOT / "static/hilalmarkets-builder.css").exists()
+
+    canvas = _read("templates/hilal/dashboard_test/monitor.html")
+    for assistant in ("data-ai-setup-chat", "ai-chat-composer", "Describe your setup"):
+        assert assistant not in canvas, assistant
+    # And it is still the canvas: the board, and the library every condition comes from.
+    assert "data-monitor-root" in canvas
+    assert "data-open-library" in canvas
 
 
 def test_dashboard_shell_has_notification_center_and_cache_busted_brand_assets():
@@ -361,18 +363,16 @@ def test_requested_home_market_passport_and_scanner_refinements_are_bound():
     assert "Reviewer record" not in brain
 
     assert ".opportunity-journey-progress" in dashboard_styles
-    assert 'data-dashboard-page="check_market"' in dashboard_styles
     assert ".passport-select-control" in dashboard_styles
     assert "position: relative;" in dashboard_styles
     assert "position: static !important;" in dashboard_styles
-    scanner_styles = dashboard_styles.split(
-        'data-dashboard-page="check_market"',
-        1,
-    )[1]
-    assert "background: var(--hm-surface);" in scanner_styles
-    assert "background: #cbfa4d !important;" in scanner_styles
-    assert "background-image: none !important;" in scanner_styles
-    assert "color: var(--hm-ink) !important;" in scanner_styles
+
+    # The Scanner's own styles used to be checked here, keyed on
+    # `data-dashboard-page="check_market"`. The Scanner was a mode of the assistant page
+    # and both are gone, so no page can carry that value any more — a rule for it is
+    # weight on every dashboard load and a test for it can only ever be satisfied by
+    # keeping dead CSS alive.
+    assert 'data-dashboard-page="check_market"' not in dashboard_styles
 
 
 def test_opportunity_cards_use_the_shared_real_asset_logo_loader():

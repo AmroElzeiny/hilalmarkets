@@ -16,6 +16,7 @@ from ai_market_monitor.core.dashboard_paths import (
     COMPLIANCE_CHANGES_PATH,
     LIFECYCLES_PATH,
     MARKET_PATH,
+    MONITOR_PATH,
     SETTINGS_PATH,
     SUBSCRIPTION_PATH,
     SUPPORT_PATH,
@@ -625,7 +626,7 @@ class WhatsAppConversationService:
                     "Plans. It does not execute trades or promise outcomes. Send MENU to continue."
                 ),
             )
-        setup_url = await self._dashboard_url(connection, "/dashboard/strategies/new")
+        setup_url = await self._dashboard_url(connection, MONITOR_PATH)
         return WhatsAppSessionText(
             to=message.wa_id,
             body=(
@@ -709,7 +710,7 @@ class WhatsAppConversationService:
         paths = {
             "lifecycles": LIFECYCLES_PATH,
             "check": MARKET_PATH,
-            "create": "/dashboard/strategies/new",
+            "create": MONITOR_PATH,
             "settings": SETTINGS_PATH,
             "billing": SUBSCRIPTION_PATH,
             "support": SUPPORT_PATH,
@@ -757,7 +758,7 @@ class WhatsAppConversationService:
             ).all()
         )
         if not strategies:
-            url = await self._dashboard_url(connection, "/dashboard/strategies/new")
+            url = await self._dashboard_url(connection, MONITOR_PATH)
             return WhatsAppSessionText(
                 to=connection.wa_id,
                 body=f"You have no Watchlists yet. Create one securely: {url}",

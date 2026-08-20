@@ -1,8 +1,8 @@
 {% extends "hilal/base_dashboard.html" %}
 {% from "hilal/macros/coin_logo.html" import coin_logo %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-request-wait">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-watch-test.css') }}?v=20260820-request-wait">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-canvas-only">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-watch-test.css') }}?v=20260820-canvas-only">
 {% endblock %}
 {% block content %}
 
@@ -380,4 +380,4 @@
 </dialog>
 
 {% endblock %}
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-opportunities-test.js') }}?v=20260820-request-wait"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-opportunities-test.js') }}?v=20260820-canvas-only"></script>{% endblock %}

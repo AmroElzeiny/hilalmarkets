@@ -9,6 +9,7 @@ from sqlalchemy.exc import StatementError
 
 from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.core.csrf import csrf_token
+from ai_market_monitor.core.dashboard_paths import MONITOR_PATH
 from ai_market_monitor.db.models import (
     Alert,
     AlertDelivery,
@@ -939,8 +940,12 @@ async def test_dashboard_publish_marks_monitor_active(test_context):
         strategy = await session.get(Strategy, UUID(payload["strategy"]["id"]))
         assert strategy.status == StrategyStatus.ACTIVE
         assert strategy.active_version_id == UUID(payload["version"]["id"])
-    monitors = await test_context["client"].get("/dashboard/strategies/new#monitors")
-    assert ">active<" in monitors.text
+    # The page a person really uses to see their monitors. This used to read a section of
+    # the assistant page that was marked `hidden`, so it was asserting on markup nobody
+    # could see; that page is gone.
+    monitors = await test_context["client"].get("/dashboard/monitors")
+    assert monitors.status_code == 200
+    assert "Watching" in monitors.text
     detail = await test_context["client"].get(f"/dashboard/strategies/{payload['strategy']['id']}")
     assert "<strong>active</strong>" in detail.text
 
@@ -967,7 +972,9 @@ async def test_dashboard_publish_marks_monitor_active(test_context):
         follow_redirects=False,
     )
     assert deleted.status_code == 303
-    assert deleted.headers["location"] == "/dashboard/monitor?message=monitor_deleted"
+    # The canvas's own address, from the one place that owns it. Written here by hand it
+    # went stale the moment the page moved to `/dashboard/create-monitor`.
+    assert deleted.headers["location"] == f"{MONITOR_PATH}?message=monitor_deleted"
     canvas = await test_context["client"].get(deleted.headers["location"])
     assert canvas.status_code == 200
     # The confirmation is a sentence, never the key the code passes around.
@@ -1479,14 +1486,10 @@ async def test_advanced_dashboard_pages_render(test_context):
     await _signup(test_context, "dashboard-pages@example.com")
 
     for path, expected in [
-        ("/dashboard/strategies/new", "Market assistant"),
-        ("/dashboard/strategies/new", "AI sheet"),
-        ("/dashboard/strategies/new", "Preview mechanics"),
-        ("/dashboard/strategies/new", "Visual Strategy Canvas"),
-        ("/dashboard/strategies/new", "Search condition library"),
-        ("/dashboard/strategies/new", "Monitor Overview"),
-        ("/dashboard/strategies/new", "Proof &amp; Review"),
-        ("/dashboard/strategies/new", "Six-Month High Breakout"),
+        # The assistant page is gone. Its address forwards to the canvas, which is the
+        # one page a monitor is authored on, so what it must render is the board.
+        ("/dashboard/strategies/new", "data-monitor-root"),
+        ("/dashboard/strategies/new", "Add condition"),
         # `/dashboard/integrations` is the older name for Connections and 308s to it, so
         # this follows the redirect the way a browser would.
         ("/dashboard/integrations", "Connections"),
@@ -1590,10 +1593,12 @@ async def test_strategy_cockpit_validation_forecast_suggestion_and_preferences(t
 
     page = await test_context["client"].get("/dashboard/cockpit")
     assert page.status_code == 404
-    monitors = await test_context["client"].get("/dashboard/strategies/new#monitors")
+    # Same move: the health and latency figures were read off a hidden section of the
+    # assistant page. They are on the Watchlists page, which is where they are read now.
+    monitors = await test_context["client"].get("/dashboard/strategies")
     assert monitors.status_code == 200
-    assert "My Monitors" in monitors.text
-    assert "Health" in monitors.text
+    assert "Watchlists" in monitors.text
+    assert "Technical health" in monitors.text
     assert "Latency" in monitors.text
     assert "Alert Quality Inbox" not in monitors.text
 

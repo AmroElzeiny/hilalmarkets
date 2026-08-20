@@ -36,6 +36,53 @@ async def test_the_page_renders_for_somebody_with_no_lists(test_context):
     assert "Answer a few questions" not in body
 
 
+async def test_the_page_says_so_when_the_platform_is_not_checking_the_market(test_context):
+    """The switch that stops every monitor is said out loud, on the page itself.
+
+    Live scanning is off in this deployment, as it is in the test settings. Nothing said
+    so anywhere: the page showed "Not looked yet" and left a person waiting on a first
+    check that no scheduled job was ever going to create.
+    """
+
+    await _signup_and_verify(test_context, email="wl-not-checking@example.com")
+    body = (await test_context["client"].get(PAGE)).text
+
+    assert "We are not checking the market right now." in body
+    assert "not something you did" in body
+    # And never the name of the switch that did it.
+    assert "SCANNING_ENABLED" not in body
+
+
+async def test_home_says_so_too_rather_than_saying_a_monitor_is_watching(test_context):
+    """Home's band and the Monitors banner are one sentence from one owner."""
+
+    await _signup_and_verify(test_context, email="wl-home-checking@example.com")
+    body = (await test_context["client"].get("/home")).text
+
+    assert "We are not checking the market right now." in body
+    # The band is the element that answers "is anything happening right now", so the
+    # claim is checked there rather than anywhere on the page — other text says true
+    # things about watching, such as what a screening change means for a coin.
+    band = body.split('class="m-now"', 1)[1].split("</section>", 1)[0]
+    for claim in ("is watching", "are watching"):
+        assert claim not in band, claim
+
+
+async def test_publishing_does_not_say_the_market_is_being_checked(test_context):
+    """The sentence somebody reads at the moment they switch a monitor on.
+
+    It said "It is checking the market now" while nothing was checking, and the card one
+    screen later said "Not looked yet". This is where the wrong impression started.
+    """
+
+    await _signup_and_verify(test_context, email="wl-published@example.com")
+    body = (await test_context["client"].get(f"{PAGE}?message=monitor_published")).text
+
+    assert "It is checking the market now" not in body
+    assert "not checking the market right now" in body
+    assert "starts on its own as soon as we are" in body
+
+
 async def test_the_old_address_still_reaches_the_page(test_context):
     """`/dashboard/watchlists` is written into sent email and saved bookmarks."""
 
@@ -152,16 +199,8 @@ def test_a_naive_time_is_not_read_as_a_different_hour(test_context):
     assert how_long_ago(naive, now=NOW) == "2 hours ago"
 
 
-def test_a_list_that_never_ran_reports_nothing_rather_than_the_words_not_yet():
-    """`last_checked` is empty when there was no check, not the string "Not yet".
-
-    `how_long_ago` answers a missing moment with a display string, and a string is
-    truthy. Any page guarding on this field instead of on the exact moment beside it
-    then renders "Looked Not yet". One page guarded correctly and the next one did not,
-    so the trap is removed at the source and held shut here.
-    """
-
-    from ai_market_monitor.api.routers.dashboard_test import _watchlist_view
+def _never_finished_card(scan: object) -> dict:
+    """One monitor whose most recent check, whatever state it is in, never finished."""
 
     class _Strategy:
         id = "11111111-1111-1111-1111-111111111111"
@@ -172,24 +211,85 @@ def test_a_list_that_never_ran_reports_nothing_rather_than_the_words_not_yet():
         class status:  # noqa: N801 - a stand-in for the stored enum
             value = "draft"
 
+    return {
+        "strategy": _Strategy(),
+        # A score high enough that reading it would produce "Working well" — so a test
+        # that passes here cannot be passing because the score happened to be zero.
+        "health": type("H", (), {"score": 95, "main_issue": None})(),
+        "latest_scan": scan,
+        "methodology": None,
+        "main_bottleneck": None,
+        "eligible_asset_count": 0,
+        "pending_repair": None,
+    }
+
+
+#: Every shape a most-recent check can have while never having produced a reading.
+#:
+#: `None` is only the easiest one. A queued, running, failed or abandoned job is a row
+#: that exists with an empty `completed_at`, and a reader that asks "is there a row?"
+#: instead of "did a check finish?" answers yes for all four.
+_NO_FINISHED_CHECK = [
+    pytest.param(None, id="no-job-at-all"),
+    pytest.param(type("J", (), {"completed_at": None})(), id="queued"),
+    pytest.param(type("J", (), {"completed_at": None})(), id="running"),
+    pytest.param(type("J", (), {"completed_at": None})(), id="failed"),
+    pytest.param(type("J", (), {"completed_at": None})(), id="abandoned"),
+]
+
+
+@pytest.mark.parametrize("scan", _NO_FINISHED_CHECK)
+@pytest.mark.parametrize("scanning_enabled", [True, False])
+def test_a_list_that_never_finished_a_check_reports_nothing_rather_than_not_yet(
+    scan, scanning_enabled
+):
+    """`last_checked` is empty until a check *finished*, never the string "Not yet".
+
+    `how_long_ago` answers a missing moment with a display string, and a string is
+    truthy. Any page guarding on this field instead of on the exact moment beside it
+    then renders "Looked Not yet". One page guarded correctly and the next one did not,
+    so the trap is removed at the source and held shut here.
+
+    The rule is about a *finished* check, not about a job row. Guarding on the row let a
+    queued or failed first check render "Looked Not yet" on the front page, and scored a
+    monitor that had never produced a single reading — the exact number this page exists
+    to stop showing.
+    """
+
+    from ai_market_monitor.api.routers.dashboard_test import _watchlist_view
+
     view = _watchlist_view(
-        {
-            "strategy": _Strategy(),
-            "health": type("H", (), {"score": 0, "main_issue": None})(),
-            "latest_scan": None,
-            "methodology": None,
-            "main_bottleneck": None,
-            "eligible_asset_count": 0,
-            "pending_repair": None,
-        }
+        _never_finished_card(scan), scanning_enabled=scanning_enabled
     )
 
     assert view["last_checked"] is None
     assert view["last_checked_exact"] is None
-    # And the state it is really in is still said in words.
+    # And the state it is really in is still said in words, never as a score.
     assert view["working"]["label"] == "Not looked yet"
+    assert "95" not in view["working"]["detail"]
     # Nothing is waiting to be fixed, so the card offers nothing about a fix.
     assert view["repair_id"] is None
+
+
+@pytest.mark.parametrize("scan", _NO_FINISHED_CHECK)
+def test_a_first_check_is_never_promised_while_nothing_is_checking(scan):
+    """"It has not checked for the first time" reads as *soon*, and soon can be false.
+
+    While live scanning is switched off, no first check is coming for any monitor of any
+    person. Saying the first-check sentence anyway is how somebody waited on work that
+    nothing was ever going to run.
+    """
+
+    from ai_market_monitor.api.routers.dashboard_test import _watchlist_view
+
+    off = _watchlist_view(_never_finished_card(scan), scanning_enabled=False)
+    assert off["working"]["detail"] == (
+        "Hilal Markets is not checking the market at the moment. "
+        "Nothing is wrong with this list."
+    )
+
+    on = _watchlist_view(_never_finished_card(scan), scanning_enabled=True)
+    assert "not checking the market at the moment" not in on["working"]["detail"]
 
 
 def test_a_waiting_fix_is_named_so_the_card_can_offer_it():
@@ -225,7 +325,8 @@ def test_a_waiting_fix_is_named_so_the_card_can_offer_it():
             "main_bottleneck": None,
             "eligible_asset_count": 0,
             "pending_repair": type("R", (), {"id": repair_id})(),
-        }
+        },
+        scanning_enabled=True,
     )
 
     assert view["needs_repair"] is True
@@ -254,3 +355,53 @@ def test_the_monitors_page_offers_both_answers_to_a_waiting_fix():
     ).read_text(encoding="utf-8")
     assert "repair:" in questions
     assert "repair_discard:" in questions
+
+
+def test_change_it_opens_the_canvas_on_that_monitor():
+    """"Change it" opened the older assistant page. That page is gone.
+
+    One page authors a monitor now — the canvas — and the same page changes one, so this
+    is the address the card carries. The link is found by the marker rather than by the
+    address, because the popup that explains what is holding a monitor back offers the
+    same way out and used to find it by matching on `/builder`.
+    """
+
+    from pathlib import Path
+
+    from ai_market_monitor.api.routers.dashboard_test import _watchlist_view
+    from ai_market_monitor.core.dashboard_paths import monitor_edit_path
+
+    class _Strategy:
+        id = "33333333-3333-3333-3333-333333333333"
+        name = "A monitor to change"
+        description = None
+        active_version_id = None
+
+        class status:  # noqa: N801 - a stand-in for the stored enum
+            value = "active"
+
+    view = _watchlist_view(
+        {
+            "strategy": _Strategy(),
+            "health": type("H", (), {"score": 0, "main_issue": None})(),
+            "latest_scan": None,
+            "methodology": None,
+            "main_bottleneck": None,
+            "eligible_asset_count": 0,
+            "pending_repair": None,
+        },
+        scanning_enabled=True,
+    )
+
+    assert view["edit_url"] == monitor_edit_path(_Strategy.id)
+    assert "/builder" not in view["edit_url"]
+
+    root = Path(__file__).resolve().parents[2] / "src/ai_market_monitor"
+    markup = (root / "templates/hilal/dashboard_test/watchlists.html").read_text(
+        encoding="utf-8"
+    )
+    assert 'href="{{ item.edit_url }}" data-w-edit' in markup
+
+    questions = (root / "static/hm-watchlists-test.js").read_text(encoding="utf-8")
+    assert "[data-w-edit]" in questions
+    assert '/builder"' not in questions

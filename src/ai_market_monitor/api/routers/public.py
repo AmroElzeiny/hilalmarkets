@@ -882,6 +882,11 @@ async def deep_health(
     checks: dict[str, str] = {
         "database": "ok",
         "redis": "ok",
+        # Checking the market is the whole job. A deployment with live scanning switched
+        # off answers every other check with "ok" while doing nothing at all, so a
+        # monitor sat for hours saying "Not looked yet" and the only way to find out why
+        # was to read an environment file on the server. It is answerable from here now.
+        "market_scanning": "ok" if settings.scanning_enabled else "off",
         "sharia_admin_notifications": (
             "ok"
             if settings.telegram_enabled and settings.sharia_admin_telegram_chat_id

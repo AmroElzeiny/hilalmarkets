@@ -3,10 +3,10 @@ from pathlib import Path
 
 from ai_market_monitor.services.template_catalog import builtin_template_payloads
 
-BUILDER_TEMPLATE = Path("src/ai_market_monitor/templates/hilal/dashboard/builder.html")
-BUILDER_WORKSPACE = Path(
-    "src/ai_market_monitor/templates/hilal/dashboard/partials/builder_workspace.html"
-)
+#: The older assistant page and the workspace beside it are gone: one canvas authors a
+#: monitor now. The three tests that read their markup went with them, because a test
+#: whose subject has been deleted can only ever be rewritten to pass — and the code they
+#: guarded (about 3,700 lines of `dashboard.js`) was removed in the same change.
 
 APPROVED_BRAND_HEX = {
     "#1f6e97",
@@ -54,11 +54,6 @@ APPROVED_BRAND_RGB = {
     for value in APPROVED_BRAND_HEX
 }
 
-
-def _builder_markup() -> str:
-    return BUILDER_TEMPLATE.read_text() + BUILDER_WORKSPACE.read_text()
-
-
 def test_dashboard_js_includes_safe_render_helpers_and_no_invalid_math_syntax():
     source = Path("src/ai_market_monitor/static/dashboard.js").read_text()
 
@@ -74,132 +69,6 @@ def test_dashboard_js_includes_safe_render_helpers_and_no_invalid_math_syntax():
 
     assert "Math.max(.values)" not in source
     assert "Math.min(.values)" not in source
-
-
-def test_strategy_canvas_uses_progressive_disclosure_components():
-    source = Path("src/ai_market_monitor/static/dashboard.js").read_text()
-    template = _builder_markup()
-
-    for helper in (
-        "function renderStrategyCanvas",
-        "function renderMonitorCard",
-        "function renderUniverseCard",
-        "function renderLogicGroupCard",
-        "function renderConditionCard",
-        "function renderRightPanel",
-        "function openConditionDrawer",
-        "function openConditionLibrary",
-        "function updateBuilderStatus",
-        "function renderValidationChecklist",
-        "function renderPromptUnderstandingPreview",
-    ):
-        assert helper in source
-
-    for marker in (
-        'class="builder-app-header"',
-        'class="builder-left-rail"',
-        'class="builder-canvas"',
-        'class="builder-right-panel"',
-        'id="condition-library-modal"',
-        'id="condition-editor-drawer"',
-        'class="builder-mobile-stepper"',
-        'class="advanced-schema-panel"',
-    ):
-        assert marker in template
-
-    assert "Edit condition fields" not in template
-    assert 'data-publish-schema disabled' in template
-
-
-def test_strategy_canvas_keeps_schema_and_api_compatibility_hooks():
-    source = Path("src/ai_market_monitor/static/dashboard.js").read_text()
-    template = _builder_markup()
-
-    for hook in (
-        "loadInitialSchema()",
-        "schemaFromForm(schema)",
-        "hydrateBuilderForm(schema)",
-        'api("/scan-now/interpret"',
-        'api("/cockpit/strategies/validate"',
-        'api("/scan-now"',
-        "publishStrategyVersion(strategyId",
-    ):
-        assert hook in source
-
-    for field_name in (
-        "name",
-        "direction",
-        "exchange",
-        "quote",
-        "base_timeframe",
-        "trigger_mode",
-        "include_symbols",
-        "alert_channels",
-    ):
-        assert f'name="{field_name}"' in template
-
-
-def test_hilalmarkets_dashboard_interaction_system_is_present():
-    template = _builder_markup()
-    base = Path(
-        "src/ai_market_monitor/templates/hilal/base_dashboard.html"
-    ).read_text()
-    settings = Path(
-        "src/ai_market_monitor/templates/hilal/dashboard_test/settings.html"
-    ).read_text(encoding="utf-8")
-    support = Path(
-        "src/ai_market_monitor/templates/hilal/dashboard_test/support.html"
-    ).read_text(encoding="utf-8")
-    script = Path("src/ai_market_monitor/static/dashboard.js").read_text()
-    styles = Path("src/ai_market_monitor/static/hilalmarkets.css").read_text()
-    builder_styles = Path(
-        "src/ai_market_monitor/static/hilalmarkets-builder.css"
-    ).read_text()
-
-    assert "Market assistant" in template
-    assert "Advanced Controls" not in template
-    assert "data-ai-setup-chat" in template
-    assert "creation-card-top" in template
-    assert "builder-header-status" in template
-    assert "builder-bottom-bar" not in template
-    assert 'name="theme"' not in template
-    # Settings saves as you go, so the thing to check is that it says so, not that it has
-    # a Save button. Help still takes pictures with the message.
-    assert "data-g-saved" in settings
-    assert "data-h-files" in support
-    assert "api.iconify.design" not in template
-    assert "strategy-board-dialog" in template
-    assert "data-open-strategy-board" in template
-    assert "data-template-categories" in template
-    assert 'data-builder-right-tab="coverage"' in template
-    assert 'data-board-tab="coverage"' in template
-    assert 'data-builder-prompt-part="goal"' in template
-    assert 'data-add-prompt-section="optional"' in template
-    assert 'data-add-prompt-section="avoid"' in template
-    assert 'data-add-prompt-section="extra"' in template
-    assert 'data-add-prompt-section="notes"' not in template
-    assert "data-prompt-example-chip" in template
-    assert "data-improve-builder-prompt" in template
-    assert "data-check-builder-meaning" not in template
-    assert "Show canvas" in template
-    assert "Open workflow board" not in template
-    assert "selectedTemplateCategories" in script
-    assert "templatePromptParts" in script
-    assert "applyTemplateToPrompt" in script
-    assert "updateTemplateFilter" in script
-    assert "renderStrategyBoard" in script
-    assert "renderCoveragePanel" in script
-    assert "submitInterpretationFeedback" in script
-    assert 'api("/strategies/interpret/feedback"' in script
-    assert "strategy-board-arrows" in script
-    assert "findConditionByKey" in script
-    assert "builderUiController?.isAiInterpreted?.()" not in script
-    assert "hilalmarkets.css" in base
-    assert "traceedge-polish.css" not in base + template
-    assert "hilalmarkets-bridge.css" not in base + template
-    assert "--emerald-800" in styles
-    assert ".guided-builder-heading" in builder_styles
-    assert "prefers-reduced-motion" in styles
 
 
 def test_builtin_templates_have_explicit_dashboard_categories():
@@ -244,14 +113,17 @@ def test_authenticated_dashboard_has_no_legacy_blue_theme():
 
 def test_hilalmarkets_runtime_icons_do_not_require_remote_iconify():
     sources = [
-        Path("src/ai_market_monitor/static/ai-setup-chat.js").read_text(),
         Path("src/ai_market_monitor/static/dashboard.js").read_text(),
         Path("src/ai_market_monitor/static/hilalmarkets-icons.js").read_text(),
+        # The canvas is where a monitor is drawn now, so it is the surface that must not
+        # be waiting on a remote icon host. It was not checked here at all while the
+        # assistant page was.
+        Path("src/ai_market_monitor/static/hm-monitor-test.js").read_text(encoding="utf-8"),
     ]
 
     assert all("api.iconify.design" not in source for source in sources)
     assert "window.icon" in sources[0]
-    assert "window.icon" in sources[1]
+    assert "window.icon" in sources[2]
 
 
 def test_notification_channels_are_decided_once_and_a_locked_one_says_why():

@@ -353,14 +353,27 @@ async def test_a_rate_limited_ai_call_is_never_shown_as_a_screening_failure(test
         )
 
 
-async def test_authenticated_builder_exposes_only_targeted_evaluator_selectors(test_context):
+async def test_the_authenticated_setup_chat_the_evaluator_drove_is_gone(test_context):
+    """There is no signed-in chat on the website for the browser evaluator to drive.
+
+    It lived on the assistant page, which has been deleted: a monitor is drawn on the
+    canvas now. The marker going missing is the point of this test — a run that still
+    looked for it would fail on a page that is working exactly as intended, so the
+    absence is asserted here instead of being discovered in a browser run.
+
+    The evaluator's other half — the API tests in this file — is untouched, because the
+    setup-chat service is still used by Telegram.
+    """
+
     await _signup(test_context, "evaluator-selectors@example.com")
-    response = await test_context["client"].get("/dashboard/strategies/new")
+    # The address forwards to the canvas now, so the browser's own behaviour is followed.
+    response = await test_context["client"].get(
+        "/dashboard/strategies/new", follow_redirects=True
+    )
     assert response.status_code == 200
-    assert 'data-evaluator-target="authenticated-ai-setup-chat"' in response.text
-    assert 'data-testid="new-ai-setup-chat"' in response.text
-    assert 'data-testid="ai-setup-structured-preview"' in response.text
-    assert 'data-testid="ai-setup-approval"' in response.text
+    assert 'data-evaluator-target="authenticated-ai-setup-chat"' not in response.text
+    assert 'data-testid="new-ai-setup-chat"' not in response.text
     assert 'data-evaluator-target="public-support-chat"' not in response.text
+    assert "data-monitor-root" in response.text
 
 

@@ -386,8 +386,11 @@ DASHBOARD_NAVIGATION = (
                 "watchlists_page",
                 "monitors",
                 "radar",
+                # The pages that keep this entry lit while somebody is on them.
+                # `strategy_builder` was the assistant page, which is gone: the canvas is
+                # its own entry below, and lighting Monitors from a page that no longer
+                # exists is a rule nothing can ever satisfy.
                 (
-                    "strategy_builder",
                     "strategy_detail",
                     "strategy_verify",
                     "strategy_versions",

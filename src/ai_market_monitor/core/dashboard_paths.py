@@ -57,16 +57,51 @@ MARKET_PATH: Final[str] = "/dashboard/market"
 #: already says "Create a monitor", and the guide's own step is called
 #: ``nav-create-monitor``.
 #:
-#: This address was already taken — by the older strategy builder, registered in
+#: This address was already taken — by the older assistant page, registered in
 #: ``routers/dashboard.py`` as a second front door onto ``/dashboard/strategies/new``.
 #: One address, two pages, and which one answered depended on the order the routers
-#: happened to be registered in. The alias is gone and this is the only page here.
+#: happened to be registered in. The alias is gone, that page is gone, and this is the
+#: one place a monitor is authored: made here, and changed here.
 MONITOR_PATH: Final[str] = "/dashboard/create-monitor"
 
 #: The address the canvas used to answer at, kept as a permanent redirect rather than
 #: deleted — the same rule ``LEGACY_HOME_PATH`` above follows. It is written into saved
 #: bookmarks and into the "put a monitor away" redirect that has already been sent.
 LEGACY_MONITOR_PATH: Final[str] = "/dashboard/monitor"
+
+#: The older assistant page: a chat box that asked somebody to describe a monitor in
+#: words. It is gone, and this address forwards to the canvas.
+#:
+#: Kept rather than deleted because it is written into payment email that has already
+#: been sent, into Telegram buttons and into saved bookmarks — the same rule
+#: ``LEGACY_HOME_PATH`` above follows. It was also the platform's *only* front door onto
+#: authoring for a long time, so it is the address most likely to be sitting in somebody's
+#: browser history.
+LEGACY_ASSISTANT_PATH: Final[str] = "/dashboard/strategies/new"
+
+
+def monitor_edit_path(monitor_id: object) -> str:
+    """The canvas, opened on a monitor somebody already has.
+
+    One page and one address for authoring, whether a monitor is being made or changed.
+    A second address for "change" is how the two drift into two different pages with the
+    same job — which is exactly what happened last time, and why the assistant page and
+    the canvas both claimed to be where a monitor is built.
+    """
+
+    return f"{MONITOR_PATH}?monitor={monitor_id}"
+
+
+#: Where the canvas asks its own questions. The router mounts itself here and the page is
+#: handed the address rather than assembling one, so there is one owner for it.
+#:
+#: ``/api/v1`` is added by ``main.py`` when the router is included, which is why the two
+#: are written separately.
+MONITOR_CANVAS_PREFIX: Final[str] = "/dashboard/monitor-canvas"
+MONITOR_CANVAS_API: Final[str] = f"/api/v1{MONITOR_CANVAS_PREFIX}"
+
+#: Where one monitor's board is read from. The canvas adds ``/{monitor_id}``.
+MONITOR_BOARD_URL: Final[str] = f"{MONITOR_CANVAS_API}/monitors"
 
 #: The monitors somebody has.
 #:

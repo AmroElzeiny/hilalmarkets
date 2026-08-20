@@ -1,7 +1,7 @@
 {% extends "hilal/base_dashboard.html" %}
 {% from "hilal/macros/coin_logo.html" import coin_logo_block %}
 {% block page_styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260820-request-wait">
+<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260820-canvas-only">
 {% endblock %}
 {% block content %}
 {% macro monitor_filter() %}
@@ -58,7 +58,7 @@
    marker existed only on the non-default tabs, and the guide on the page a customer
    actually lands on pointed at nothing. #}
 <article class="panel readiness-command" data-hm-guide-target="activity-updates-panel" data-observability-root data-poll-seconds="{{ observability_poll_seconds }}">
-  <div class="panel-head"><div><h2>What is closest right now?</h2><p>Progress comes from approved deterministic rules, never an AI confidence score.</p></div><div class="activity-panel-actions"><span class="badge badge-eligible">Live evidence</span><a class="btn btn-primary btn-sm" href="/dashboard/strategies/new"><span data-icon="plus" data-icon-class="icon-sm"></span>New Watchlist</a></div></div>
+  <div class="panel-head"><div><h2>What is closest right now?</h2><p>Progress comes from approved deterministic rules, never an AI confidence score.</p></div><div class="activity-panel-actions"><span class="badge badge-eligible">Live evidence</span><a class="btn btn-primary btn-sm" href="{{ monitor_path }}"><span data-icon="plus" data-icon-class="icon-sm"></span>New Watchlist</a></div></div>
   <div class="radar-filter-row readiness-filters">
     {{ monitor_filter() }}
     <label class="field"><span>State</span><span class="hm-select-control" data-hm-select><select class="select" data-radar-state><option value="">All states</option><option value="forming">Forming</option><option value="confirmation_pending">Confirmation pending</option><option value="near_miss">Near miss</option><option value="confirmed">Confirmed</option><option value="invalidated">Invalidated</option><option value="expired">Expired</option><option value="provider_data_error">Provider/data error</option></select></span></label>
@@ -118,4 +118,4 @@
     being fetched nothing else on the page could run, so a slow or unreachable source left
     this page loading for ever with no message. Deferred scripts still run in order, so
     dashboard.js keeps seeing the chart library, and the page finishes loading either way. -#}
-{% block page_scripts %}{% if settings.chart_library_cdn_url %}<script src="{{ settings.chart_library_cdn_url }}" defer></script>{% endif %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260820-request-wait" defer></script>{% endblock %}
+{% block page_scripts %}{% if settings.chart_library_cdn_url %}<script src="{{ settings.chart_library_cdn_url }}" defer></script>{% endif %}<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260820-canvas-only" defer></script>{% endblock %}

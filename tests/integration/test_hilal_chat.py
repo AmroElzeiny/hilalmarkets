@@ -19,6 +19,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
+from ai_market_monitor.core.dashboard_paths import MONITOR_PATH
 from ai_market_monitor.db.models import (
     AIBudgetCounter,
     HilalChatConversation,
@@ -63,9 +64,12 @@ async def _csrf(test_context) -> str:
 #: Every page on the design path. The Passport and the report are reached *from* the
 #: market page, so a person who followed a coin there and then wanted to ask about it
 #: is exactly who Hilal is for.
+#: `/dashboard/monitor` used to be here. It is the canvas's *older* address and has been
+#: a permanent redirect for a while, so this was asking a redirect whether it carried the
+#: assistant — which it never does, because it carries no page at all.
 DESIGN_PATH = (
     "/dashboard/market",
-    "/dashboard/monitor",
+    MONITOR_PATH,
     "/dashboard/market/btc",
     "/dashboard/market/btc/report",
 )
@@ -116,7 +120,7 @@ async def test_hilal_is_on_no_other_dashboard_page(test_context):
 async def test_the_canvas_still_carries_no_assistant_inside_it(test_context):
     """`dashboard-test-monitor-rules.md` A3/A4: nothing in the canvas itself."""
     await _signed_in(test_context, email="hilal-canvas@example.com")
-    page = await test_context["client"].get("/dashboard/monitor")
+    page = await test_context["client"].get(MONITOR_PATH)
     assert page.status_code == 200
     board = page.text[page.text.index("m-board") : page.text.index("m-readout")]
     assert "hilal" not in board.lower()

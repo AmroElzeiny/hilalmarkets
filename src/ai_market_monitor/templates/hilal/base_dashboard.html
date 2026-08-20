@@ -5,7 +5,7 @@
   {#- First script on the page, deliberately. It puts a time limit on every request this
       product sends to its own server, and it can only do that for a request sent after
       it has run. See `static/hm-request.js`. -#}
-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260820-request-wait"></script>
+  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260820-canvas-only"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
@@ -33,45 +33,39 @@
   <meta name="description" content="Hilal Markets - Shariah-screened crypto spot intelligence and guided monitoring.">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260820-request-wait">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260820-canvas-only">
   {# One owner for the cookie banner and its settings window, which this template includes below. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260820-request-wait">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260820-request-wait">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260820-canvas-only">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260820-canvas-only">
   {% block page_styles %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260820-request-wait">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260820-request-wait">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260820-canvas-only">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260820-canvas-only">
   {#- The shell — the side menu and the topbar — after the sheet it replaces, because it
       is the one owner of both and nothing above may still be describing them. -#}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260820-request-wait">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260820-request-wait">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260820-canvas-only">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260820-canvas-only">
   {#- A page whose styles must win over the shared dashboard sheets loads them here.
       `page_styles` above is deliberately kept before them for pages that only add. -#}
   {% block page_styles_late %}{% endblock %}
   {% if hilal_chat|default(false) and settings.hilal_chat_enabled %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260820-request-wait">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260820-canvas-only">
   {% endif %}
 </head>
-{#- The page guide's identity is decided on the server, not parsed from the URL. Where one
-    route owns two workflows, the mode is part of the key so the right guide is loaded. -#}
-{#- `check_market` is the Scanner half of the builder. The route names it that so the
-    side menu highlights "Check market", and this map has to agree: while it did not,
-    the Scanner page carried no guide identity at all and the Scanner guide could
-    never open. One route, two workflows, and two files that each named them
-    differently. -#}
+{#- The page guide's identity is decided on the server, not parsed from the URL. -#}
+{#- The assistant page is gone, and the Scanner went with it: the Scanner was a mode of
+    that page and had no address of its own. Both of their guide keys are gone too — a
+    guide whose steps point at markers no page draws can never open, and leaving it here
+    would look like a working guide nobody could reach. -#}
 {%- set guide_page_key = {
   'main': 'dashboard-today',
   'screened_market': 'screened-market',
   'asset_passport': 'asset-passport',
   'watchlists': 'watch-plans',
   'activity': 'activity',
-  'check_market': 'strategy-builder-scanner',
   'integrations': 'integrations',
   'billing': 'billing',
   'settings': 'settings'
 }.get(page, '') -%}
-{%- if page == 'strategy_builder' -%}
-  {%- set guide_page_key = 'strategy-builder-scanner' if request.query_params.get('mode') == 'scanner' else 'strategy-builder-monitor' -%}
-{%- endif -%}
 {% set shell_prefs = (dashboard_preference.notification_preferences if dashboard_preference else {}) or {} %}
 <body class="dashboard-body hilal-dashboard theme-light app-body" data-brand-system="hilal-markets-v2" data-dashboard-page="{{ page }}" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-csrf-token="{{ dashboard_csrf_token or '' }}" data-dashboard-notifications="{{ 'true' if shell_prefs.get('dashboard_notifications_enabled', True) else 'false' }}" data-dashboard-notification-sound="{{ shell_prefs.get('dashboard_notification_sound', 'chime') }}" data-forming-notifications="{{ 'true' if shell_prefs.get('forming_dashboard_notifications', False) else 'false' }}" data-forming-notification-sound="{{ shell_prefs.get('forming_notification_sound', 'pulse') }}" data-testid="dashboard-root"{% if guide_page_key %} data-hm-guide-page="{{ guide_page_key }}" data-hm-guide-new-user="{{ 'true' if (onboarding_complete is defined and not onboarding_complete) else 'false' }}"{% endif %}>
   <div class="app-shell">
@@ -118,7 +112,11 @@
           'telegram_connected': 'Telegram is connected. We can reach you there now.',
           'account_created': 'Your account is ready.'
         } %}
-        {% if message %}<div class="notice notice-success" role="status" tabindex="-1" data-page-status><span data-icon="check" data-icon-class="icon"></span><div><strong>Done</strong><p>{{ dashboard_messages.get(message, message.replace('_', ' ').title()) }}</p></div></div>{% endif %}
+        {#- A message that would promise the market is being checked is replaced while
+            that is not true. The replacement is written in `product_language.py`, not
+            here: which messages make that promise, and what they say instead, is a
+            product decision and a template cannot be tested on one. -#}
+        {% if message %}<div class="notice notice-success" role="status" tabindex="-1" data-page-status><span data-icon="check" data-icon-class="icon"></span><div><strong>Done</strong><p>{{ (dashboard_message_overrides or {}).get(message) or dashboard_messages.get(message, message.replace('_', ' ').title()) }}</p></div></div>{% endif %}
         {% if error %}<div class="notice notice-error" role="alert" tabindex="-1" data-page-status><span data-icon="alert" data-icon-class="icon"></span><div><strong>Needs attention</strong><p>{{ dashboard_error_messages.get(error, error.replace('_', ' ').title()) }}</p></div></div>{% endif %}
         {% block content %}{% endblock %}
       </div>
@@ -137,19 +135,19 @@
   {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
   {% include "hilal/partials/cookie_banner.html" %}
   <div class="dash-toast" id="dash-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260820-request-wait"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260820-request-wait"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260820-canvas-only"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260820-canvas-only"></script>
   {#- The side menu and the topbar. One owner for their state: `hilalmarkets.js` and
       `dashboard.js` each used to run their own copy of the minimize logic against the
       same class, from two different stored values. -#}
-  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260820-request-wait"></script>
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260820-request-wait"></script>
-  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260820-request-wait"></script>
-  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260820-request-wait"></script>{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260820-request-wait"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260820-request-wait" defer></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260820-request-wait" defer></script>
-  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260820-request-wait"></script>{% endif %}
+  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260820-canvas-only"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260820-canvas-only"></script>
+  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260820-canvas-only"></script>
+  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260820-canvas-only"></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260820-canvas-only"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260820-canvas-only" defer></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260820-canvas-only" defer></script>
+  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260820-canvas-only"></script>{% endif %}
   <script>
     (() => {
       const pageStatus = document.querySelector("[data-page-status]");

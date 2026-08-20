@@ -806,37 +806,11 @@ body.hilal-dashboard .ai-chat-chip { border-color: var(--hm-hairline); backgroun
 body.hilal-dashboard .ai-chat-chip:hover,
 body.hilal-dashboard .ai-chat-chip.selected { border-color: var(--hm-apple); background: var(--hm-apple-soft); }
 
-body.hilal-dashboard[data-dashboard-page="check_market"] .ai-chat-message.assistant .ai-chat-bubble {
-  border-color: var(--hm-hairline);
-  background: var(--hm-surface);
-  color: var(--hm-ink);
-}
-
-body.hilal-dashboard[data-dashboard-page="check_market"] .ai-chat-message.assistant .ai-chat-bubble :where(strong, p, span, small, li, a, code) {
-  color: var(--hm-ink);
-}
-
-body.hilal-dashboard[data-dashboard-page="check_market"] .ai-chat-composer {
-  border-color: var(--hm-hairline-strong);
-  background: var(--hm-surface);
-}
-
-body.hilal-dashboard[data-dashboard-page="check_market"] .ai-chat-composer > small {
-  color: var(--hm-copy);
-}
-
-body.hilal-dashboard[data-dashboard-page="check_market"] .ai-chat-composer button[type="submit"] {
-  border-color: #cbfa4d;
-  background: #cbfa4d !important;
-  background-image: none !important;
-  color: var(--hm-ink) !important;
-  box-shadow: none;
-}
-
-body.hilal-dashboard[data-dashboard-page="check_market"] .ai-chat-composer button[type="submit"] :where(svg, path) {
-  color: var(--hm-ink);
-  stroke: currentColor;
-}
+/* Six rules for the Scanner page used to sit here, keyed on the page name it set on the
+   body. No page sets that name any more: the Scanner was a mode of the assistant page,
+   and both are gone. A rule whose page cannot exist is not a style, it is weight on every
+   dashboard load. The name itself is deliberately not written here, so that searching for
+   it finds nothing at all. */
 
 body.hilal-dashboard .ai-preview-title { align-items: center; }
 body.hilal-dashboard .ai-preview-title h2 { color: var(--hm-ink); font-size: 1.05rem; }

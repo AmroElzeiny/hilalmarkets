@@ -200,9 +200,10 @@ def test_no_two_steps_repeat_the_same_explanation() -> None:
 def test_the_page_key_comes_from_the_server_not_the_url() -> None:
     shell = DASHBOARD_SHELL.read_text(encoding="utf-8")
     assert 'data-hm-guide-page="{{ guide_page_key }}"' in shell
-    assert "guide_page_key = 'strategy-builder-scanner' if" in shell, (
-        "one route owns two workflows; the mode must be part of the key"
-    )
+    # The key is looked up from `page`, which the router sets. Nothing reads the address
+    # bar. There used to be one exception — the assistant page, where `?mode=scanner`
+    # picked a second guide — and that page is gone, so the exception is gone with it.
+    assert "request.query_params" not in shell.split("set guide_page_key")[1].split("%}")[0]
     assert "hilalmarkets-guide.js" in shell
     assert "hilalmarkets-guide.css" in shell
 

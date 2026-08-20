@@ -20,6 +20,18 @@
 const STORAGE_KEY = "hm.monitor.draft.v2";
 const HISTORY_LIMIT = 60;
 
+/**
+ * Where a board is kept in this browser.
+ *
+ * A new monitor and each monitor being changed get their own key. One shared key meant
+ * that opening a monitor to change it would overwrite a half-drawn new monitor sitting
+ * in the same browser, and pressing Back would then show the wrong board under the
+ * right name. Neither is recoverable, so they are kept apart.
+ */
+function storageKeyFor(monitorId) {
+  return monitorId ? `${STORAGE_KEY}:${monitorId}` : STORAGE_KEY;
+}
+
 /** Parameters that belong on the card face rather than only in the settings panel. */
 const HEADLINE_PARAMETERS = new Set(["threshold", "direction"]);
 
@@ -54,18 +66,67 @@ export function emptyPlan() {
 /* ── The store ─────────────────────────────────────────────────────────────── */
 
 export class PlanStore {
-  constructor({ limits, reachableChannels } = {}) {
+  constructor({ limits, reachableChannels, monitorId, opening } = {}) {
     this.limits = limits || { max_depth: 6, max_nodes: 24, arity: {} };
     /* Which ways of being told can really reach this person, decided by the server and
        handed over. `null` means nobody asked, and the checks then say nothing about it
        rather than guessing that everything works. */
     this.reachableChannels = reachableChannels || null;
-    this.plan = restore() || emptyPlan();
+    /* Which monitor is being changed, or `null` for a new one. It picks the storage key
+       and it is sent back when the board is switched on, so the server writes a new
+       version of the same monitor rather than a second monitor. */
+    this.monitorId = monitorId || null;
+    this.storageKey = storageKeyFor(this.monitorId);
+    /* The board this monitor is really running on, kept so it can be put back.
+       A person who has drawn nothing of their own yet sees exactly what their monitor
+       runs; an edit they started and did not finish wins over it, because losing that
+       edit silently is worse than showing it. Kept rather than dropped for that reason:
+       once the edit is on the board, nothing else holds a copy of the monitor. */
+    this.opening = opening || null;
+    const stored = restore(this.storageKey);
+    this.plan = stored || opening || emptyPlan();
+    /* Whether what is on the board is an edit they had not finished, rather than the
+       monitor as it stands. The page says so, because the two look identical. */
+    this.holdsUnsavedEdit = Boolean(stored && opening);
     this.past = [];
     this.future = [];
     this.listeners = new Set();
     this.savedAt = null;
     this.canStore = undefined;
+  }
+
+  /**
+   * Put back the monitor as it is really running, throwing the unfinished edit away.
+   *
+   * Only offered where there is something to put back. Undo cannot do this: the history
+   * starts empty on a fresh page, so the edit a person made yesterday has nothing behind
+   * it to step back to.
+   */
+  putBackTheSavedMonitor() {
+    if (!this.opening) return false;
+    this.past.push(JSON.stringify(this.plan));
+    this.future.length = 0;
+    this.plan = JSON.parse(JSON.stringify(this.opening));
+    this.holdsUnsavedEdit = false;
+    this.persist();
+    this.emit({ structural: true, announce: "Your monitor is back as it is running." });
+    return true;
+  }
+
+  /**
+   * Forget the stored draft for this board.
+   *
+   * Called once a change has really been saved: what is stored is now the same as what
+   * the monitor runs, and keeping it would make every later visit look like an
+   * unfinished edit.
+   */
+  forgetDraft() {
+    try {
+      window.localStorage.removeItem(this.storageKey);
+    } catch {
+      // A browser that will not store also will not have anything to forget.
+    }
+    this.holdsUnsavedEdit = false;
   }
 
   subscribe(listener) {
@@ -129,7 +190,7 @@ export class PlanStore {
 
   persist() {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.plan));
+      window.localStorage.setItem(this.storageKey, JSON.stringify(this.plan));
       this.savedAt = new Date();
       this.canStore = true;
     } catch {
@@ -424,6 +485,24 @@ export class PlanStore {
   }
 
   /**
+   * Fill in the name of the list already chosen, without it counting as a change.
+   *
+   * Deliberately not a `commit`. Learning what a list is called is not something the
+   * person did: putting it in the history would offer them an "Undo" that undoes a word
+   * they never typed, and it would mark a board they have not touched as edited.
+   */
+  labelWatchlist(watchlistId, name) {
+    const universe = this.plan.universe || {};
+    if (!watchlistId || universe.watchlistId !== watchlistId) return false;
+    const label = String(name || "");
+    if (universe.watchlistName === label) return false;
+    universe.watchlistName = label;
+    this.persist();
+    this.emit({ structural: false });
+    return true;
+  }
+
+  /**
    * The coins somebody named, in the order they added them.
    *
    * Kept as plain tickers — "BTC", not "BTC/USDT". The trading pair is the server's to
@@ -470,9 +549,9 @@ export class PlanStore {
   }
 }
 
-function restore() {
+function restore(key = STORAGE_KEY) {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const plan = JSON.parse(raw);
     if (!plan || plan.version !== 2 || !plan.nodes || !plan.nodes[plan.rootId]) return null;
@@ -487,6 +566,84 @@ function restore() {
   } catch {
     return null;
   }
+}
+
+/**
+ * A board the server kept, back in the shape this page draws.
+ *
+ * The server stores the board exactly as this page sent it, so this is a reshaping and
+ * nothing more: the same cards, the same values, the same groups. Nothing is worked out
+ * from the compiled rules, because nothing turns those back into cards — a second reader
+ * that tried would be a second opinion about what each card meant.
+ *
+ * Where a card is missing the one thing that makes it a card — its condition — the whole
+ * board is refused rather than opened with a hole in it. A board opened with a card
+ * nobody can see would be switched on with a rule nobody agreed to.
+ *
+ * Returns `null` when the board cannot be read. The page says so; it never shows an
+ * empty canvas in place of a monitor that has rules on it.
+ */
+export function planFromServer(sent) {
+  if (!sent || typeof sent !== "object" || !sent.root) return null;
+  const plan = emptyPlan();
+  plan.nodes = {};
+
+  const build = (node, parentId) => {
+    if (!node || typeof node !== "object") return null;
+    const id = nextId(node.kind === "group" ? "g" : "r");
+    if (node.kind === "group") {
+      const own = { id, kind: "group", op: node.op || "and", parent: parentId, children: [], dx: 0, dy: 0 };
+      plan.nodes[id] = own;
+      for (const child of Array.isArray(node.children) ? node.children : []) {
+        const childId = build(child, id);
+        if (childId === null) return null;
+        own.children.push(childId);
+      }
+      return id;
+    }
+    if (!node.mechanic) return null;
+    plan.nodes[id] = {
+      id,
+      kind: "rule",
+      mechanic: node.mechanic,
+      values: { ...(node.values || {}) },
+      required: node.required !== false,
+      parent: parentId,
+      dx: 0,
+      dy: 0,
+    };
+    return id;
+  };
+
+  // The outermost card is always a group here, the same way the board always has one.
+  // A saved board whose whole monitor is a single rule is wrapped, so what is drawn has
+  // the same shape whether it holds one card or twenty.
+  const root = sent.root.kind === "group" ? sent.root : { kind: "group", op: "and", children: [sent.root] };
+  const rootId = build(root, null);
+  if (rootId === null) return null;
+  plan.rootId = rootId;
+
+  const universe = sent.universe || {};
+  plan.universe = {
+    mode: universe.mode || "eligible_market",
+    watchlistId: universe.watchlist_id || null,
+    // The list's name is not stored with the board — the list can be renamed, and a name
+    // copied at save time would go stale. The page fills it in from the person's own
+    // Favorites lists once those have loaded.
+    watchlistName: "",
+    symbols: Array.isArray(universe.symbols) ? [...universe.symbols] : [],
+    dx: 0,
+    dy: 0,
+  };
+
+  const alert = sent.alert || {};
+  plan.alert = {
+    channels: Array.isArray(alert.channels) ? [...alert.channels] : [],
+    cooldownMinutes: Number.isFinite(alert.cooldown_minutes) ? alert.cooldown_minutes : 15,
+    dx: 0,
+    dy: 0,
+  };
+  return plan;
 }
 
 /**

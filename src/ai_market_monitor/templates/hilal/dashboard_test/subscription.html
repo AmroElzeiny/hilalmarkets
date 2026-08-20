@@ -1,7 +1,7 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-request-wait">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260820-request-wait">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-canvas-only">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260820-canvas-only">
 {% endblock %}
 {% block content %}
 
@@ -419,5 +419,5 @@
 <script id="s-plan-facts" type="application/json">{{ plan_cards|tojson }}</script>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260820-request-wait"></script>
+<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260820-canvas-only"></script>
 {% endblock %}

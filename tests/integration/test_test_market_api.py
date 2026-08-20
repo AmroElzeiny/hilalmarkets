@@ -259,14 +259,16 @@ async def test_saved_assets_are_consolidated_into_market_while_scanner_stays_dis
     watchlists = await test_context["client"].get("/dashboard/monitors")
     saved_assets = await test_context["client"].get("/dashboard/saved-assets")
     # Trading Assistant was removed and both of its addresses answer 404. The one-time
-    # scan itself is unchanged — it is a mode of the builder, and that is where the
-    # buttons that used to come through here point now.
+    # scan has gone too: it was a mode of the assistant page and had no front door of its
+    # own, so deleting that page removed it. The assistant page's address forwards to the
+    # canvas, which is where a monitor is made.
     scanner = await test_context["client"].get(
         "/dashboard/check-market",
         follow_redirects=False,
     )
-    builder_scanner = await test_context["client"].get(
-        "/dashboard/strategies/new?mode=scanner"
+    former_scanner = await test_context["client"].get(
+        "/dashboard/strategies/new?mode=scanner",
+        follow_redirects=False,
     )
 
     assert watchlists.status_code == 200
@@ -280,4 +282,5 @@ async def test_saved_assets_are_consolidated_into_market_while_scanner_stays_dis
     # Favorites, in one included dialog, is where a person's kept coins live now.
     assert "data-favorites-dialog" in market.text
     assert scanner.status_code == 404
-    assert builder_scanner.status_code == 200
+    assert former_scanner.status_code == 308
+    assert former_scanner.headers["location"] == "/dashboard/create-monitor"

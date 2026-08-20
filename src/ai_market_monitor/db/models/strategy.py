@@ -118,6 +118,20 @@ class StrategyVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     semantic_diff: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
     change_summary: Mapped[str | None] = mapped_column(Text)
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: The board a person drew on the canvas, exactly as they sent it.
+    #:
+    #: `schema_json` above is what the monitor *runs*; it is compiled, and nothing turns
+    #: it back into cards. Without the board, "Change it" could only ever open an empty
+    #: canvas, which would look like the monitor had been thrown away. So the drawing is
+    #: kept beside the thing it compiled to, written in the same transaction, and read
+    #: back by the canvas when somebody opens the monitor again.
+    #:
+    #: It is deliberately the *sent* board (`services/monitor_canvas.CanvasPlan`) and not
+    #: a second description of the rules: one shape, one owner, no second opinion about
+    #: what a card meant. ``None`` means this version was not drawn on the canvas — a
+    #: monitor made in Telegram, or one made before the canvas kept its board. The canvas
+    #: says so plainly rather than guessing a board that would monitor something else.
+    canvas_plan_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
     strategy: Mapped[Strategy] = relationship(back_populates="versions", foreign_keys=[strategy_id])
     conditions: Mapped[list["StrategyCondition"]] = relationship(

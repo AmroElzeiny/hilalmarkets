@@ -18,6 +18,17 @@ import pytest
 from pydantic import AnyHttpUrl
 
 from ai_market_monitor.core.config import get_settings
+from ai_market_monitor.core.dashboard_paths import (
+    CONNECTIONS_PATH,
+    HOME_PATH,
+    MARKET_PATH,
+    MONITOR_PATH,
+    MONITORS_PATH,
+    OPPORTUNITIES_PATH,
+    SETTINGS_PATH,
+    SUBSCRIPTION_PATH,
+    SUPPORT_PATH,
+)
 from tests.integration.test_dashboard_web import _signup_and_verify
 
 
@@ -156,16 +167,20 @@ async def test_the_menu_never_points_at_an_older_copy_of_a_page(test_context):
         for href in re.findall(r'class="nav-item hm-nav-link[^"]*"\s+href="([^"]+)"', menu)
     ]
 
+    # Read from `dashboard_paths.py`, never written out again here. Spelling the
+    # addresses a second time is what made this test wrong: `/dashboard/monitor` became
+    # `/dashboard/create-monitor` and only the copy in this file still said the old one,
+    # so the check that exists to catch a stale link had gone stale itself.
     assert opened == [
-        "/home",
-        "/dashboard/market",
-        "/dashboard/monitors",
-        "/dashboard/monitor",
-        "/dashboard/opportunities",
-        "/dashboard/connections",
-        "/dashboard/subscription",
-        "/dashboard/settings",
-        "/dashboard/support",
+        HOME_PATH,
+        MARKET_PATH,
+        MONITORS_PATH,
+        MONITOR_PATH,
+        OPPORTUNITIES_PATH,
+        CONNECTIONS_PATH,
+        SUBSCRIPTION_PATH,
+        SETTINGS_PATH,
+        SUPPORT_PATH,
     ], opened
 
 
@@ -180,7 +195,10 @@ async def test_the_monitors_page_offers_its_create_action_from_the_topbar(test_c
 
     topbar = page.split('<header class="topbar hm-top"', 1)[1].split("</header>", 1)[0]
     assert "Create a monitor" in topbar
-    assert "/dashboard/monitor" in topbar
+    # The address comes from its one owner. Written out here it read
+    # `/dashboard/monitor`, which is a *prefix* of the real one and of `/dashboard/
+    # monitors` besides — so this assertion would have passed on the wrong page.
+    assert f'href="{MONITOR_PATH}"' in topbar.replace("http://testserver", "")
 
     # And the page under it draws no action of its own, in either of its two layouts.
     body = page.split("</header>", 1)[1]

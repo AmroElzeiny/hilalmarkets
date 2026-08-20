@@ -353,14 +353,13 @@ def test_registry_categories_provider_badges_and_builder_markup():
     assert {"min_body_percent", "confirmation_required"}.issubset(
         parameter["name"] for parameter in pattern["parameters"]
     )
-    dashboard = Path(
-        "src/ai_market_monitor/templates/hilal/dashboard/partials/"
-        "builder_workspace.html"
-    ).read_text()
-    script = Path("src/ai_market_monitor/static/dashboard.js").read_text()
-    assert "Search condition library" in dashboard
-    assert "Advanced raw condition" in dashboard
-    assert "Explain This Rule" in script
+    # The condition library a person really searches is on the canvas now. The older
+    # assistant page carried one too, and this used to check that one; that page is gone.
+    canvas = Path(
+        "src/ai_market_monitor/templates/hilal/dashboard_test/monitor.html"
+    ).read_text(encoding="utf-8")
+    assert "data-open-library" in canvas
+    assert "data-library-search" in canvas
 
 
 class _ContextProvider:

@@ -49,6 +49,18 @@ body.hilal-dashboard .hm-m .m-saved .icon-sm { color: inherit; }
 
 body.hilal-dashboard .hm-m .m-universe-banner { align-items: flex-start; }
 
+/* Shown only when a monitor somebody opened cannot be drawn here. It carries its own
+   way out, so the page never leaves a person on a board that is not their monitor with
+   nothing to press. */
+body.hilal-dashboard .hm-m .m-open-notice { align-items: flex-start; }
+
+body.hilal-dashboard .hm-m .m-open-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-2);
+  margin-top: var(--t-3);
+}
+
 /* ── The stage: toolbar, board, inspector and readout as one surface ───────── */
 
 body.hilal-dashboard .hm-m .m-stage {

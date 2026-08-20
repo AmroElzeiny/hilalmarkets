@@ -237,39 +237,45 @@ async def test_setup_chat_api_refuses_unrelated_and_serves_market_snapshot(test_
     assert snapshot.json()["captured_at"]
 
 
-async def test_setup_chat_html_is_mobile_ready_and_does_not_expose_api_key(test_context):
+async def test_no_page_on_the_website_serves_the_setup_chat_any_more(test_context):
+    """The assistant page is gone; the setup-chat service behind it is not.
+
+    Telegram still runs a conversation through the same service, so the endpoints in this
+    file stay. What was removed is the only *web page* that offered a chat box for
+    authoring, because a monitor is drawn on the canvas now. Both of its addresses
+    forward there, and nothing of the chat comes with them.
+    """
+
     await _signup(test_context, "ai-chat-html@example.com")
     test_context["settings"].openai_api_key = SecretStr("must-never-appear-in-html")
-    response = await test_context["client"].get("/dashboard/strategies/new")
-    assert response.status_code == 200
-    assert 'data-testid="ai-setup-chat"' in response.text
-    assert 'data-testid="setup-entry-screen"' not in response.text
-    assert 'data-ai-open-canvas' in response.text
-    assert 'href="/dashboard/scan-now"' not in response.text
-    assert "ai-chat-hero" not in response.text
-    assert 'class="ai-chat-composer"' in response.text
-    assert "data-ai-chat-input" in response.text
-    assert "ai-setup-chat.css" in response.text
-    assert "ai-setup-chat.js" in response.text
-    assert "must-never-appear-in-html" not in response.text
+
+    for address in ("/dashboard/strategies/new", "/dashboard/strategies/new?mode=scanner"):
+        moved = await test_context["client"].get(address, follow_redirects=False)
+        assert moved.status_code == 308, address
+        assert moved.headers["location"] == "/dashboard/create-monitor", address
+
+    landed = await test_context["client"].get(
+        "/dashboard/strategies/new", follow_redirects=True
+    )
+    assert landed.status_code == 200
+    assert "data-monitor-root" in landed.text
+    for gone in (
+        'data-testid="ai-setup-chat"',
+        "data-ai-chat-input",
+        "ai-setup-chat.css",
+        "ai-setup-chat.js",
+    ):
+        assert gone not in landed.text, gone
+    assert "must-never-appear-in-html" not in landed.text
 
 
-async def test_the_scanner_survives_the_removal_of_its_old_pages(test_context):
-    """Trading Assistant is gone; the one-time scan it opened is not.
-
-    It had two addresses, `/dashboard/scan-now` and `/dashboard/check-market`, and both
-    refuse now. The scan itself is a mode of the builder and is reached there — which is
-    where the Telegram buttons that used to come through those addresses point.
-    """
+async def test_the_trading_assistant_addresses_still_refuse(test_context):
+    """Both were deleted earlier and neither may quietly come back."""
 
     await _signup(test_context, "ai-chat-scanner-redirect@example.com")
     for gone in ("/dashboard/scan-now", "/dashboard/check-market"):
         response = await test_context["client"].get(gone, follow_redirects=False)
         assert response.status_code == 404, gone
-
-    scanner = await test_context["client"].get("/dashboard/strategies/new?mode=scanner")
-    assert scanner.status_code == 200
-    assert "ai-setup-chat.js" in scanner.text
 
 
 async def test_unknown_fragment_can_enter_certified_mechanic_queue(test_context):

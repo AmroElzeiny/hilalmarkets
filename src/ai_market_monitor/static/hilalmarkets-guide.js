@@ -148,55 +148,18 @@
         {
           target: "plans-create",
           title: "Start a new Watchlist",
-          body: "Describe what you want watched in your own words. The rules are built for you and shown before anything is activated.",
+          body: "Open the canvas and put the conditions you want together. Nothing runs until you switch it on.",
           placement: "bottom",
         },
       ],
     },
 
-    "strategy-builder-monitor": {
-      id: "strategy-builder-monitor",
-      version: 1,
-      steps: [
-        {
-          target: "builder-setup-chat",
-          title: "Describe it in words",
-          body: "Write the market behaviour you want followed. Ask questions here too — the chat answers from your draft, not from guesses.",
-          placement: "right",
-        },
-        {
-          target: "builder-canvas",
-          title: "Your rules, exactly",
-          body: "Everything understood from your words appears here as exact rules. Check it matches before you go further.",
-          placement: "left",
-        },
-        {
-          target: "builder-open-canvas",
-          title: "Edit it visually",
-          body: "The same rules open in the Visual Canvas when you would rather arrange them yourself. Both views hold one set of rules.",
-          placement: "bottom",
-        },
-      ],
-    },
-
-    "strategy-builder-scanner": {
-      id: "strategy-builder-scanner",
-      version: 1,
-      steps: [
-        {
-          target: "builder-setup-chat",
-          title: "Describe the scan",
-          body: "A Scanner checks the market once, right now. Write what you want found and the rules are built from your words.",
-          placement: "right",
-        },
-        {
-          target: "builder-canvas",
-          title: "Your rules, exactly",
-          body: "The scan runs on exactly these rules and nothing else. Read them first, so the result answers the question you meant.",
-          placement: "left",
-        },
-      ],
-    },
+    /* The two builder guides are gone with the page they described. They walked people
+     * through a chat box that asked them to describe a monitor in words, and through the
+     * Scanner mode beside it. Neither page exists any more; the canvas is where a monitor
+     * is made now, and it coaches on the board itself rather than through this overlay.
+     * A guide whose steps name markers no page draws can never open, so leaving them
+     * here would be dead weight that reads like a working guide. */
 
     activity: {
       id: "activity",

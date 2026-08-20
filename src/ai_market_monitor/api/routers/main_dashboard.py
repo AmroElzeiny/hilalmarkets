@@ -60,7 +60,11 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.services.lifecycle_dashboard import lifecycle_cards
 from ai_market_monitor.services.notification_preferences import offered_channels
-from ai_market_monitor.services.product_language import how_long_ago
+from ai_market_monitor.services.product_language import (
+    MarketCheckingNotice,
+    how_long_ago,
+    market_checking_notice,
+)
 from ai_market_monitor.services.setup_observability import SetupObservabilityService
 from ai_market_monitor.services.sharia_screening import (
     DEFAULT_ALLOWED_STATUSES,
@@ -72,7 +76,13 @@ router = APIRouter(tags=["main-dashboard"])
 #: Kept as a name because it reads well at the call sites below, but it is the shared
 #: address rather than a second copy of the string. See `core/dashboard_paths.py`.
 MAIN_PATH = HOME_PATH
-NEW_WATCHLIST_PATH = "/dashboard/strategies/new"
+
+#: Where a person goes to make a monitor. The canvas — the only place one is authored.
+#:
+#: It was `/dashboard/strategies/new`, the older assistant page, written as its own
+#: string in four files. That page is gone, and this is the shared address rather than a
+#: fifth copy of a string. See `core/dashboard_paths.py`.
+NEW_WATCHLIST_PATH = MONITOR_PATH
 COMPLIANCE_PATH = "/dashboard/compliance"
 CONNECTIONS_PATH = "/dashboard/connections"
 
@@ -250,14 +260,32 @@ def _headline(
     close_count: int,
     active_lists: int,
     total_lists: int,
+    checking: MarketCheckingNotice | None,
 ) -> dict[str, Any]:
     """What is happening right now, in one sentence a beginner can read.
 
-    Five states, and each one is a true thing to say. The order matters: a person with
+    Six states, and each one is a true thing to say. The order matters: a person with
     something ready is told that first, and somebody with no list at all is never shown
     a market summary they cannot act on.
+
+    The "we are not checking" state comes before all of them, because it changes what
+    every other sentence on this page means. This band told people "Your monitor is
+    watching." while the platform was not looking at the market at all, and the card
+    below it said "Not looked yet" — one page, two answers, and the true one nowhere.
     """
 
+    if checking is not None:
+        return {
+            "tone": checking.tone,
+            "icon": "pause",
+            "headline": checking.title,
+            "detail": checking.detail,
+            "action": {
+                "label": "See your monitors" if total_lists else "Make your first monitor",
+                "href": MONITORS_PATH if total_lists else NEW_WATCHLIST_PATH,
+                "icon": "arrow" if total_lists else "plus",
+            },
+        }
     if ready_count:
         return {
             "tone": "success",
@@ -439,7 +467,11 @@ async def main_dashboard_page(
     close_count = sum(1 for item in opportunities if item["state"]["kind"] == "close")
     closest = opportunities[0] if opportunities else None
 
-    lists = [_watchlist_view(item) for item in await _monitor_cards_context(session, user)]
+    checking = market_checking_notice(scanning_enabled=settings.scanning_enabled)
+    lists = [
+        _watchlist_view(item, scanning_enabled=settings.scanning_enabled)
+        for item in await _monitor_cards_context(session, user)
+    ]
     active_lists = sum(1 for item in lists if item["status"] == "Watching")
     attention_lists = [
         item for item in lists if item["working"]["tone"] in {"warning", "danger"}
@@ -495,6 +527,7 @@ async def main_dashboard_page(
         close_count=close_count,
         active_lists=active_lists,
         total_lists=len(lists),
+        checking=checking,
     )
     now["checked"] = how_long_ago(looked_at)
     now["checked_exact"] = looked_at

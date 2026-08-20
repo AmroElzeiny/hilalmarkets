@@ -12,6 +12,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.dashboard_paths import MONITOR_PATH
 from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
     BillingEvent,
@@ -97,7 +98,7 @@ class PaymentEmailRenderer:
         )
         limits = _main_limits(plan_limits)
         dashboard_url = f"{base_url}/dashboard"
-        create_watch_plan_url = f"{base_url}/dashboard/strategies/new"
+        create_watch_plan_url = f"{base_url}{MONITOR_PATH}"
         billing_url = f"{base_url}/dashboard/billing"
         support_url = f"{base_url}/dashboard/support"
         terms_url = f"{base_url}/terms"

@@ -113,6 +113,7 @@ It is written before any code, on purpose. The request asked for the rules first
 | H2 | Shariah status is only ever what the platform's own review assigned. Never inferred, never implied by colour. |
 | H3 | New information may be added only if it is **main** — something a person acts on. No filler tiles. |
 | H4 | Anything the page cannot honestly say, it does not say. "Not looked yet" is a real answer and must be available. |
+| H4a | While the platform is not checking the market at all, no surface may say a monitor is watching, and none may promise a first check. The words come from `market_checking_notice` and `checking_message_overrides` in `services/product_language.py` — one owner, so the band, the banner and the "done" message cannot give three accounts of one silence. |
 | H5 | Never imply Hilal Markets buys, sells, advises, or guarantees anything. |
 
 ## I. Quality bar

@@ -215,7 +215,7 @@ def test_touching_three_components_is_treated_as_cross_component() -> None:
             paths=(
                 "src/ai_market_monitor/api/routers/dashboard_api.py",
                 "src/ai_market_monitor/db/models/system_brain.py",
-                "src/ai_market_monitor/static/ai-setup-chat.js",
+                "src/ai_market_monitor/static/hm-monitor-test.js",
             ),
         )
     )

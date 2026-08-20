@@ -18,7 +18,12 @@ import re
 
 import pytest
 
-from ai_market_monitor.core.dashboard_paths import LEGACY_MONITOR_PATH, MONITOR_PATH
+from ai_market_monitor.core.dashboard_paths import (
+    LEGACY_ASSISTANT_PATH,
+    LEGACY_MONITOR_PATH,
+    MONITOR_PATH,
+    monitor_edit_path,
+)
 from ai_market_monitor.db.models.enums import DeliveryChannel
 from tests.integration.test_dashboard_web import _signup_and_verify
 
@@ -36,7 +41,11 @@ async def test_the_canvas_has_its_own_page(test_context):
     assert "hm-monitor-test.js" in page
     assert "hm-monitor-test.css" in page
     assert 'data-monitor-root' in page
-    assert "<h1>Monitor</h1>" in page
+    # The heading carries a marker now, because the name of the monitor being changed
+    # replaces the word once a board has been opened.
+    assert "<h1 data-page-title>Monitor</h1>" in page
+    # A new monitor, so there is nothing to open and nothing to say about opening.
+    assert 'data-monitor-id=""' in page
 
 
 def test_the_side_menu_offers_the_canvas_right_after_the_monitors():
@@ -235,7 +244,7 @@ async def test_a_client_without_compression_still_gets_the_page(test_context):
     )
     assert response.status_code == 200
     assert "content-encoding" not in response.headers
-    assert "<h1>Monitor</h1>" in response.text
+    assert "<h1 data-page-title>Monitor</h1>" in response.text
 
 
 async def test_the_canvas_answers_at_the_address_a_person_came_to_use(test_context):
@@ -257,11 +266,34 @@ async def test_the_old_canvas_address_still_opens_the_canvas(test_context):
     assert response.headers["location"] == MONITOR_PATH
 
 
-async def test_the_new_address_is_not_shared_with_the_older_builder(test_context):
-    """It used to serve the older strategy builder as well. One address, one page."""
+async def test_the_older_assistant_address_now_opens_the_canvas(test_context):
+    """That page is gone. Its address forwards here rather than answering with nothing.
+
+    It is written into payment email that has already been sent, into Telegram buttons
+    and into saved bookmarks, none of which can be corrected after the fact — so it
+    forwards, exactly as the canvas's own older address does.
+    """
     await _signup_and_verify(test_context, email="monitor-one-owner@example.com")
 
-    canvas = (await test_context["client"].get(MONITOR_PATH)).text
-    builder = (await test_context["client"].get("/dashboard/strategies/new")).text
-    assert "data-monitor-root" in canvas
-    assert "data-monitor-root" not in builder
+    moved = await test_context["client"].get(
+        LEGACY_ASSISTANT_PATH, follow_redirects=False
+    )
+    assert moved.status_code == 308
+    assert moved.headers["location"] == MONITOR_PATH
+
+    landed = await test_context["client"].get(LEGACY_ASSISTANT_PATH, follow_redirects=True)
+    assert "data-monitor-root" in landed.text
+    # And nothing of that page came with it.
+    assert "data-ai-setup-chat" not in landed.text
+
+
+async def test_the_older_edit_address_opens_the_canvas_on_that_monitor(test_context):
+    """A link to "edit this monitor" from before the change lands on that monitor."""
+    await _signup_and_verify(test_context, email="monitor-legacy-edit@example.com")
+
+    monitor_id = "11111111-2222-3333-4444-555555555555"
+    moved = await test_context["client"].get(
+        f"/dashboard/strategies/{monitor_id}/builder", follow_redirects=False
+    )
+    assert moved.status_code == 308
+    assert moved.headers["location"] == monitor_edit_path(monitor_id)
