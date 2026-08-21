@@ -36,6 +36,24 @@ COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 fail() { printf '\n\033[1;31mFAILED: %s\033[0m\n' "$1" >&2; exit 1; }
 
+# One owner for "which containers are running", and it always answers with full
+# 64-character ids.
+#
+# `docker ps -q` prints 12-character short ids; `docker compose ps -q` prints full ones.
+# The checks below decide "is this container ours?" by comparing the two lists with
+# `grep -Fxq`, which matches whole lines only — so a short id can never equal a full one,
+# and any check that forgot `--no-trunc` reported this project's *own* containers as
+# intruders belonging to a foreign stack.
+#
+# On 21 Aug 2026 that is exactly what happened: check 0b refused a deploy because
+# `hilalmarkets-db-1` — this deployment's own database, on this deployment's own volume —
+# did not appear to be ours. Check 0 passed only because it happened to pass `--no-trunc`
+# itself. The two checks disagreed about what a container id is.
+#
+# Going through this function means no caller has to remember the flag, and no future
+# check can reintroduce the disagreement.
+docker_ids() { docker ps -q --no-trunc "$@"; }
+
 step "0/9  Checking no other container owns the web ports"
 # A container from an older Compose project can keep holding ports 80 and 443 forever.
 # When that happens this project's caddy silently stays in "Created" state, the old
@@ -45,7 +63,13 @@ step "0/9  Checking no other container owns the web ports"
 # on 19 Aug 2026: a caddy left over from the "tracedge" project name held both ports.
 # Compose itself is asked which containers are ours, so no second copy of Compose's
 # project-naming rules is written here.
-OUR_CONTAINERS="$("${COMPOSE[@]}" ps -aq 2>/dev/null || true)"
+#
+# Normalised to full ids through `docker inspect` rather than trusted from whichever
+# command produced them, so this list is the same shape as everything `docker_ids`
+# returns even if a future Compose release changes what `ps -q` prints.
+OUR_CONTAINERS="$(
+  "${COMPOSE[@]}" ps -aq 2>/dev/null | xargs -r docker inspect -f '{{.Id}}' 2>/dev/null || true
+)"
 OUR_PROJECT="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' \
   $(echo "$OUR_CONTAINERS" | head -1) 2>/dev/null || true)"
 for port in 80 443; do
@@ -71,7 +95,7 @@ Let's Encrypt is not asked for new ones:
 
 HINT
     fail "another container owns port $port"
-  done < <(docker ps --filter "publish=$port" --no-trunc --format '{{.ID}}')
+  done < <(docker_ids --filter "publish=$port")
 done
 echo "ports 80 and 443 belong to this deployment only"
 
@@ -116,7 +140,7 @@ retire it the same way, so it cannot take the web ports back.
 
 HINT
   fail "another container is running PostgreSQL"
-done < <(docker ps -q)
+done < <(docker_ids)
 echo "this deployment owns its database folder alone"
 
 step "1/9  Checking the server has nothing that only exists here"
