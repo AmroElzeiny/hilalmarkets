@@ -2423,12 +2423,6 @@ class RuleBasedStrategyInterpreter:
                     f"{capability.label} requires {capability.provider_required or 'external'} "
                     "data that is not configured for live activation."
                 )
-            elif capability.key in {"btc_trend_filter", "eth_trend_filter"}:
-                code = "cross_market_filter"
-                reason = (
-                    f"{capability.label} is recognized, but is not executable in the "
-                    "current deterministic scanner."
-                )
             elif capability.key in {"market_cap_minimum", "meme_coin_exclusion"}:
                 code = "external_data_required"
                 reason = f"{capability.label} requires external market metadata before activation."

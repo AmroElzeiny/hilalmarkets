@@ -179,28 +179,45 @@ async def test_a_pre_launch_stage_never_advertises_pricing_or_checkout(
     assert "pricing" in exposure.hidden_pages
 
 
-async def test_the_shipped_stage_hides_pricing_from_the_public_site(
+async def test_the_shipped_stage_shows_pricing_because_the_product_has_launched(
     test_context: dict,
 ) -> None:
-    """The default deployment is pre-launch, so pricing must not be reachable."""
+    """The site is live, so pricing is a page a visitor can reach and find.
+
+    This used to assert the opposite, and it was right to at the time. It asserted it
+    by reading the shipped default rather than by naming the stage it meant, so on the
+    day the product launched the test failed while nothing was broken.
+    """
 
     client: AsyncClient = test_context["client"]
     settings: Settings = test_context["settings"]
-    assert settings.waitlist_mode is True
+    assert settings.waitlist_mode is False
+    assert settings.stage_exposure.advertises_pricing
 
     landing = await client.get("/")
     assert landing.status_code == 200
     sitemap = (await client.get("/sitemap.xml")).text
-    assert "/pricing" not in sitemap
+    assert "/pricing" in sitemap
+
+    pricing = await client.get("/pricing", follow_redirects=False)
+    assert pricing.status_code == 200
 
 
-async def test_pricing_redirects_to_the_waitlist_while_pre_launch(
-    test_context: dict,
+async def test_pricing_redirects_to_the_waitlist_when_the_site_is_pulled_back(
+    waitlist_context: dict,
 ) -> None:
-    client: AsyncClient = test_context["client"]
+    """The one switch that closes the public site without a deploy still works."""
+
+    settings: Settings = waitlist_context["settings"]
+    assert settings.waitlist_mode is True
+
+    client: AsyncClient = waitlist_context["client"]
     response = await client.get("/pricing", follow_redirects=False)
     assert response.status_code in {301, 302, 303, 307, 308}
     assert "waitlist" in response.headers.get("location", "")
+
+    sitemap = (await client.get("/sitemap.xml")).text
+    assert "/pricing" not in sitemap
 
 
 # --------------------------------------------------------------------------

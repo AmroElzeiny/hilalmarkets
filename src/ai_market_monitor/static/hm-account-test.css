@@ -201,6 +201,9 @@ body.hilal-dashboard .hm-s .s-now-mark {
 body.hilal-dashboard .hm-s .s-now-mark .icon { width: 26px; height: 26px; color: var(--t-accent); }
 body.hilal-dashboard .hm-s .s-now-copy { display: flex; min-width: 220px; flex: 1; flex-direction: column; gap: var(--t-1); }
 body.hilal-dashboard .hm-s .s-now-copy h1 { font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2rem); }
+/* When the plan ends and whether it charges again. One quiet sentence under the name,
+   not a row of tiles in a vocabulary nobody says out loud. */
+body.hilal-dashboard .hm-s .s-now-ending { color: var(--t-copy); font-size: .88rem; }
 body.hilal-dashboard .hm-s .s-now-actions { display: flex; flex-wrap: wrap; gap: var(--t-2); }
 
 /* What the plan lets you do, and how much of it is gone. */
@@ -698,6 +701,9 @@ body.hilal-dashboard .hm-g .g-choice-icon img { width: 20px; height: 20px; objec
 body.hilal-dashboard .hm-g .g-choice-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 1px; text-align: start; }
 body.hilal-dashboard .hm-g .g-choice-copy strong { color: var(--t-ink-strong); font-family: var(--hm-font-display); font-size: .9rem; font-weight: 500; }
 body.hilal-dashboard .hm-g .g-choice-copy small { color: var(--t-copy); font-size: .76rem; line-height: 1.45; }
+/* Why a choice is greyed out. The router has always built this sentence; without a rule
+   to draw it the page showed a dead control and no way to understand it. */
+body.hilal-dashboard .hm-g .g-choice-why { color: var(--t-copy); font-size: .76rem; line-height: 1.45; text-wrap: pretty; }
 
 /* The tick is a second signal beside the border colour, and it is drawn in ink rather
    than in apple green: `brand guide.md` section 10 keeps the brand accent and product

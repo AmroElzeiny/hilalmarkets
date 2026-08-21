@@ -1509,7 +1509,10 @@ async def test_advanced_dashboard_pages_render(test_context):
     assert "Latest Setups" not in dashboard.text
     assert "Strategy Cockpit" not in dashboard.text
     assert "Coverage score" not in dashboard.text
-    assert "Let us set up your first monitor." in dashboard.text
+    # The way out for somebody with nothing yet. Not the headline: live scanning is off
+    # in the test settings, and the band that says so wins over every other sentence
+    # here — see `tests/unit/test_invariant_market_checking_visible.py`.
+    assert "Make your first monitor" in dashboard.text
     assert "data-open-sidebar" in dashboard.text
     assert "data-close-sidebar" in dashboard.text
     assert 'action="/logout"' in dashboard.text

@@ -217,7 +217,11 @@ def test_the_card_asks_whether_a_check_finished_not_whether_a_row_exists():
     )
     body = ast.unparse(function)
 
-    assert "scan.completed_at" not in body, (
+    assert "completed_at" not in body, (
         "read the resolved moment, never the row's field at the point of use"
     )
     assert "checked_at" in body
+    # And which row that moment comes from is not this page's decision either. See
+    # `tests/unit/test_invariant_monitor_scan_state.py`: the newest row and the last
+    # finished check are two different rows on any monitor that is running.
+    assert "scan_state.last_checked_at" in body

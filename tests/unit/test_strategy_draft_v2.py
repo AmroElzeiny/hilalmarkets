@@ -31,6 +31,7 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     StrategyDraftV2,
     StrategyPatch,
     UnresolvedFieldV2,
+    percentage_runtime_parameters,
 )
 from ai_market_monitor.services.strategy_patch_extractor import (
     deterministic_strategy_patch,
@@ -58,7 +59,13 @@ def _condition(
                 role="measured_value",
                 kind="market_metric",
                 name="percentage_change",
-                parameters={"formula": formula.value},
+                # The whole measurement, not just its name. This fixture used to store
+                # `{"formula": ...}` alone — the exact shape that made every percentage
+                # rule measure 0.00% — so it could not have caught the defect.
+                parameters=percentage_runtime_parameters(
+                    formula,
+                    reference_field="open",
+                ),
             )
         ],
         operator=operator,
@@ -188,7 +195,10 @@ def test_later_deterministic_condition_appends_without_deleting_existing_rule():
             FormulaKind.LOOKBACK_REFERENCE_LEVEL,
             Comparator.GREATER_THAN,
             None,
-            "highest_high of previous 20 candles",
+            # The trader's own words, not the machine's name for the level. This read
+            # "highest_high" while the level itself was named from those words too —
+            # which is why the runtime could never evaluate it.
+            "highest high of previous 20 candles",
         ),
     ],
 )

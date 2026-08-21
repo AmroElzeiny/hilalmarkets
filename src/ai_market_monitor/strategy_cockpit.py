@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from ai_market_monitor.core.plans import timeframe_to_minutes
 from ai_market_monitor.engine.condition_registry import CONDITION_REGISTRY
 from ai_market_monitor.schemas.strategy import (
     Comparator,
@@ -516,11 +517,14 @@ def _provider_finding(rule: ConditionRule) -> DiagnosticFinding | None:
 
 
 def _timeframe_minutes(timeframe: str) -> int:
-    if timeframe.endswith("m"):
-        return int(timeframe[:-1])
-    if timeframe.endswith("h"):
-        return int(timeframe[:-1]) * 60
-    return 1440
+    """How many minutes one candle covers, from the one table that knows.
+
+    The hand-written version this replaces ended in a bare ``return 1440``: any period it
+    did not recognise — including a typo — became a daily candle in silence, and the
+    weekly opportunity forecast built on it was then wrong by a factor of hundreds.
+    """
+
+    return timeframe_to_minutes(timeframe)
 
 
 def _mutable_rule_nodes(group: dict[str, Any]) -> list[dict[str, Any]]:

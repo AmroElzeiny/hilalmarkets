@@ -18,6 +18,7 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.services.alert_emails import alert_email_address
+from ai_market_monitor.services.alert_limits import CHOSEN_CHANNEL_NOT_CONNECTED
 from ai_market_monitor.services.alert_presentation import AlertPresentation
 from ai_market_monitor.services.email_delivery import email_delivery_available
 from ai_market_monitor.services.notification_preferences import NotificationPreferenceService
@@ -51,13 +52,14 @@ class NotificationDispatcher:
             self.session, self.settings
         ).current(alert.user_id)
         requested |= preference.channels
-        requested = await NotificationPreferenceService(
+        decision = await NotificationPreferenceService(
             self.session, self.settings
-        ).allowed_channels(
+        ).delivery_decision(
             alert.user_id,
             requested,
             alert=alert,
         )
+        requested = decision.channels
         if DeliveryChannel.TELEGRAM in requested:
             connection = await self.session.scalar(
                 select(TelegramConnection).where(
@@ -92,8 +94,37 @@ class NotificationDispatcher:
                     status=DeliveryStatus.PENDING,
                 )
             )
+        self._record_silence(alert, deliveries, decision.blocked_by)
         await self.session.flush()
         return deliveries
+
+    @staticmethod
+    def _record_silence(
+        alert: Alert,
+        deliveries: list[AlertDelivery],
+        blocked_by: str | None,
+    ) -> None:
+        """Write down why an alert was sent nowhere, so a screen can say it later.
+
+        An alert row with no delivery beside it and no reason on it is the product losing
+        its own decision. It happened fifty times in a row on one monitor: every message
+        was withheld because an hourly limit had been reached, none of it was recorded,
+        and the owner was left with a monitor that had simply gone quiet.
+
+        Silence has a second cause, and it needs its own words. The gate can allow a
+        channel that then queues nothing: Telegram with no live connection, or email on
+        an account with no address. Nothing was refused, so ``blocked_by`` is empty — and
+        the alert would fall through here with no reason at all, which is the very hole
+        this exists to close. The person's chosen way of being told is simply not
+        connected, and that is a different thing to fix from a limit they set.
+
+        Never written over a reason already there — the scanner records its own
+        suppressions before this point, and its answer is the earlier one.
+        """
+
+        if deliveries or alert.suppressed_reason:
+            return
+        alert.suppressed_reason = (blocked_by or CHOSEN_CHANNEL_NOT_CONNECTED)[:160]
 
     async def enqueue_user_alert(
         self,
@@ -109,13 +140,14 @@ class NotificationDispatcher:
             ).channels
         else:
             requested = set(channels)
-        requested = await NotificationPreferenceService(
+        decision = await NotificationPreferenceService(
             self.session, self.settings
-        ).allowed_channels(
+        ).delivery_decision(
             alert.user_id,
             requested,
             alert=alert,
         )
+        requested = decision.channels
         deliveries: list[AlertDelivery] = []
         if DeliveryChannel.TELEGRAM in requested:
             connection = await self.session.scalar(
@@ -150,6 +182,7 @@ class NotificationDispatcher:
                     f"dashboard:{alert.user_id}",
                 )
             )
+        self._record_silence(alert, deliveries, decision.blocked_by)
         await self.session.flush()
         return deliveries
 

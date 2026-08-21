@@ -106,9 +106,19 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A ai_market_monitor.worker.app beat --loglevel=INFO
+    # `--schedule` points at a volume on purpose. Celery beat remembers when each task
+    # last ran in this file, and a task whose interval is a day only fires a day after
+    # beat *started*. The file used to sit in the container's own writable layer, so
+    # every deploy recreated it and every daily task began its countdown again. This
+    # project deploys far more often than once a day, so the nightly tasks — scan
+    # history cleanup among them — had effectively never run: two-month-old scan jobs
+    # were still in the database under a thirty-day retention rule.
+    command: >-
+      celery -A ai_market_monitor.worker.app beat --loglevel=INFO
+      --schedule /app/beat/celerybeat-schedule
     volumes:
       - exports_data:/app/exports
+      - beat_schedule:/app/beat
 
   db:
     logging: *default_logging
@@ -147,3 +157,5 @@ volumes:
     name: ${POSTGRES_VOLUME_NAME:?Set POSTGRES_VOLUME_NAME in .env.production}
   redis_data:
   exports_data:
+  #: When each scheduled task last ran. See the `--schedule` note on `scheduler` above.
+  beat_schedule:

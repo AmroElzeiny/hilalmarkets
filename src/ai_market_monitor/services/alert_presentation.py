@@ -9,6 +9,7 @@ from ai_market_monitor.core.dashboard_paths import (
 )
 from ai_market_monitor.db.models import Alert
 from ai_market_monitor.db.models.enums import AlertType
+from ai_market_monitor.services.product_language import freshness_words as _freshness_words
 from ai_market_monitor.services.sharia_screening import sharia_evidence_from_proof
 
 
@@ -294,7 +295,6 @@ class AlertPresentation:
             if trust_factors
             else "All major proof-quality factors are healthy."
         )
-        latency = proof.get("data_latency_ms")
         market_data_timestamp = _parse_timestamp(proof.get("market_data_timestamp"))
         created_at = _aware(alert.created_at)
         setup_age = "n/a"
@@ -333,7 +333,7 @@ class AlertPresentation:
             ),
             targets=targets,
             reward_to_risk=str(proof.get("reward_to_risk") or risk.get("reward_to_risk") or "n/a"),
-            data_freshness=f"{latency} ms" if latency is not None else "n/a",
+            data_freshness=_freshness_words(proof),
             trust_score=float(trust_score) if isinstance(trust_score, int | float) else None,
             trust_grade=str(trust_payload.get("grade") or "n/a"),
             trust_summary=trust_summary,

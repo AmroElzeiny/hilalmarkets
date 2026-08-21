@@ -1,5 +1,8 @@
+import inspect
 from collections.abc import Callable
+from functools import lru_cache
 from math import exp, log, sqrt
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from ai_market_monitor.services.interfaces import Candle
@@ -7,6 +10,51 @@ from ai_market_monitor.services.interfaces import Candle
 
 class IndicatorWarmupError(ValueError):
     pass
+
+
+#: What a compiled rule carries **about itself**, not about the reading it takes.
+#:
+#: The compiler puts these beside an operand's real settings so that context conditions
+#: and price-action readers — which take a whole dictionary — can see them. An indicator
+#: takes named arguments instead, so the same bag made every indicator call fail. They
+#: are listed once, here, because this is the only place that has to tell the two apart.
+#:
+#: ``threshold`` and ``timeframe`` are on this list on purpose. Both are real settings a
+#: person chooses, and neither is a setting of the *reading*: the threshold becomes the
+#: number on the other side of the comparison, and the timeframe chooses which candles
+#: are handed in.
+RULE_PARAMETERS: frozenset[str] = frozenset(
+    {
+        "threshold",
+        "timeframe",
+        "trigger_timeframe",
+        "context_timeframes",
+        "confirmation_timeframes",
+        "reference_timeframe",
+        "reference_definition",
+        "comparator",
+        "direction",
+        "movement_direction",
+        "strategy_bias",
+        "formula",
+        "unit",
+        "scale",
+        "closed_only",
+    }
+)
+
+
+@lru_cache(maxsize=512)
+def _accepted_arguments(function: Callable[..., Any]) -> frozenset[str]:
+    """The setting names this indicator really takes."""
+
+    parameters = inspect.signature(function).parameters
+    return frozenset(
+        name
+        for name, parameter in parameters.items()
+        if parameter.kind
+        in {inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD}
+    ) - {"candles"}
 
 
 def _field_values(candles: list[Candle], field: str) -> list[float]:
@@ -1890,10 +1938,37 @@ class IndicatorRegistry:
         }
 
     def calculate(self, name: str, candles: list[Candle], **parameters) -> float:
+        """One indicator reading, given only the settings that indicator has.
+
+        A compiled rule carries two different things in one bag: the settings of the
+        reading (``period``, ``field``) and facts about the **rule** around it — which
+        way it is compared, on which candle size, against which number. Splatting the
+        whole bag at the indicator meant every rule built from a registered indicator
+        died on ``rsi() got an unexpected keyword argument 'threshold'``. "RSI above 70"
+        — the most ordinary rule a beginner can ask for — could never be evaluated.
+
+        So the rule's own facts are dropped here, by name, and everything else must be a
+        setting the indicator really has. An unknown setting is refused rather than
+        quietly ignored: ignoring it would read something the person did not ask for.
+        """
+
         function = self._functions.get(name)
         if function is None:
             raise KeyError(f"Unsupported indicator: {name}")
-        return float(function(candles, **parameters))
+        accepted = _accepted_arguments(function)
+        unknown = sorted(
+            key
+            for key in parameters
+            if key not in accepted and key not in RULE_PARAMETERS
+        )
+        if unknown:
+            raise KeyError(f"{name} has no setting called {', '.join(unknown)}")
+        return float(
+            function(
+                candles,
+                **{key: value for key, value in parameters.items() if key in accepted},
+            )
+        )
 
     def supports(self, name: str) -> bool:
         return name in self._functions

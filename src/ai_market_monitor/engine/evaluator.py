@@ -15,6 +15,11 @@ from ai_market_monitor.engine.context_conditions import (
     context_metric,
     evaluate_time_condition,
 )
+from ai_market_monitor.engine.data_freshness import (
+    DataFreshness,
+    candle_lateness_ms,
+    measure_freshness,
+)
 from ai_market_monitor.engine.indicators import (
     IndicatorRegistry,
     IndicatorWarmupError,
@@ -24,7 +29,13 @@ from ai_market_monitor.engine.indicators import (
     volume_ratio,
     vwap,
 )
-from ai_market_monitor.engine.market_filters import MarketFilterEngine
+from ai_market_monitor.engine.market_filters import (
+    MarketFilterEngine,
+    base_asset_of,
+    is_leveraged_token,
+    is_stablecoin_base,
+    listing_age_days,
+)
 from ai_market_monitor.engine.models import (
     ConditionEvaluation,
     ConditionTreeEvaluation,
@@ -37,6 +48,10 @@ from ai_market_monitor.engine.price_action import (
     evaluate_price_action,
     supports_price_action,
 )
+from ai_market_monitor.engine.reference_levels import (
+    evaluate_reference_level,
+    supports_reference_level,
+)
 from ai_market_monitor.engine.risk import RiskCalculation, RiskCalculationError, RiskCalculator
 from ai_market_monitor.engine.scoring import NearMissScoringEngine
 from ai_market_monitor.schemas.strategy import (
@@ -48,6 +63,7 @@ from ai_market_monitor.schemas.strategy import (
     StrategyDefinition,
     StrategyDirection,
 )
+from ai_market_monitor.schemas.strategy_draft_v2 import measurement_for
 from ai_market_monitor.services.interfaces import Candle
 
 
@@ -126,6 +142,7 @@ class StrategyRuleEngine:
             timeframe: self._history(candles, evaluation_time, strategy.trigger_mode.value)
             for timeframe, candles in candle_sets.items()
         }
+        freshness = self._freshness(evaluation_time, filtered_candles)
         market_filters = self.filters.evaluate(strategy, market, filtered_candles, evaluation_time)
         if not market_filters.passed:
             conditions: list[ConditionEvaluation] = []
@@ -144,7 +161,7 @@ class StrategyRuleEngine:
                 timeframe=strategy.base_timeframe,
                 evaluation_time=evaluation_time,
                 market_data_timestamp=self._latest_timestamp(filtered_candles),
-                data_latency_ms=self._latency_ms(evaluation_time, filtered_candles),
+                data_latency_ms=freshness.lateness_ms,
                 market_data_provider=market_data_provider,
                 candle_closed=self._base_candle_closed(strategy, filtered_candles),
                 conditions=conditions,
@@ -158,6 +175,8 @@ class StrategyRuleEngine:
                 setup_transition=None,
                 reliability_warnings=list(market_filters.reasons),
                 chart_reference=chart_reference,
+                data_candles_behind=freshness.candles_behind,
+                data_freshness_timeframe=freshness.timeframe,
             )
         risk_result: RiskCalculation | None = None
         risk_validation: ConditionEvaluation | None = None
@@ -169,10 +188,36 @@ class StrategyRuleEngine:
                 account_balance,
             )
         category = str(market.metadata.get("category") or "").strip().casefold()
+        base_asset = base_asset_of(market)
         market_context = {
             **dict((condition_context or {}).get("market_context", {})),
             "market_cap_minimum": market.market_cap,
+            # Four cards the Builder offers that nothing here ever answered. Each was
+            # offered, compiled, and then reported "unavailable" on every candle of
+            # every coin, because this is the only producer of `market_context` and it
+            # wrote two keys. The readings all come from the market snapshot already in
+            # hand, and from `market_filters`, which is the module the scanner's own
+            # universe filter asks — so a card and the filter can never disagree.
+            #
+            # Both exclusions read the way `meme_coin_exclusion` above does: **true
+            # means the coin passes**, so "Leveraged token exclusion: yes" means this
+            # is not a leveraged token.
+            "stablecoin_exclusion": not is_stablecoin_base(base_asset),
+            "leveraged_token_exclusion": not is_leveraged_token(base_asset),
         }
+        if market.quote_volume_24h is not None:
+            # The card "Minimum 24h quote volume" — how much money changed hands in a
+            # day. The scan's own universe filter reads it straight off the snapshot;
+            # the rule asking for it got nothing at all.
+            market_context["quote_volume_24h"] = market.quote_volume_24h
+        # Absent, not guessed, when nobody recorded the value. A rule about the spread
+        # or the listing age must report that it could not be answered rather than be
+        # answered with a number nobody measured.
+        age_days = listing_age_days(market, evaluation_time)
+        if age_days is not None:
+            market_context["listing_age_filter"] = age_days
+        if market.spread_bps is not None:
+            market_context["spread_filter"] = market.spread_bps
         if category:
             market_context["meme_coin_exclusion"] = category not in {
                 "meme",
@@ -182,7 +227,9 @@ class StrategyRuleEngine:
         merged_context = {
             **(condition_context or {}),
             "evaluation_time": evaluation_time,
-            "data_latency_ms": self._latency_ms(evaluation_time, filtered_candles),
+            "data_latency_ms": freshness.lateness_ms,
+            "data_candles_behind": freshness.candles_behind,
+            "data_freshness_timeframe": freshness.timeframe,
             "market_context": market_context,
         }
         merged_context["risk_context"] = self._risk_context(
@@ -250,7 +297,7 @@ class StrategyRuleEngine:
             timeframe=strategy.base_timeframe,
             evaluation_time=evaluation_time,
             market_data_timestamp=self._latest_timestamp(filtered_candles),
-            data_latency_ms=self._latency_ms(evaluation_time, filtered_candles),
+            data_latency_ms=freshness.lateness_ms,
             market_data_provider=market_data_provider,
             candle_closed=self._base_candle_closed(strategy, filtered_candles),
             conditions=conditions,
@@ -268,6 +315,8 @@ class StrategyRuleEngine:
             ),
             reliability_warnings=list(market.metadata.get("reliability_warnings", [])),
             chart_reference=chart_reference,
+            data_candles_behind=freshness.candles_behind,
+            data_freshness_timeframe=freshness.timeframe,
         )
 
     def _evaluate_node(
@@ -890,11 +939,7 @@ class StrategyRuleEngine:
         }
         candles = candle_sets.get(condition.timeframe, [])
         market_timestamp = candles[-1].timestamp if candles else None
-        latency = (
-            int((evaluation_time - ensure_aware(market_timestamp)).total_seconds() * 1000)
-            if market_timestamp
-            else None
-        )
+        latency = self._timeframe_lateness_ms(evaluation_time, condition.timeframe, candles)
         if not candles:
             return self._unavailable(
                 condition, evaluation_time, "missing_history", market_timestamp, latency
@@ -1041,6 +1086,17 @@ class StrategyRuleEngine:
             name = operand.name or ""
             return self.indicators.calculate(name, candles, **operand.parameters)
         if operand.kind == OperandKind.PRICE_ACTION:
+            # A reference *level* is a number, not a pattern, and it is filed under this
+            # kind only because the compiler has nowhere else to put it. Reading it here
+            # is what makes "breaks above the last candle's high" work at all: the name
+            # used to fall through to the pattern table, which has never held it, and
+            # every such rule ended as an error instead of an answer.
+            if supports_reference_level(operand.name):
+                return evaluate_reference_level(
+                    operand.name or "",
+                    candles,
+                    operand.parameters,
+                )
             return self._price_action(operand, candles)
         if operand.kind == OperandKind.CANDLE_PATTERN:
             return self._candle_pattern(operand, candles)
@@ -1065,6 +1121,18 @@ class StrategyRuleEngine:
             if operand.name in {"average_candle_volume", "min_average_candle_volume"}:
                 period = int(_operand_parameter(operand, "period", min(20, len(candles))))
                 return sum(candle.volume for candle in candles[-period:]) / period
+            if supports_price_action(operand.name):
+                # A reading this engine can make from the candles in front of it, filed
+                # under the wrong kind. `sweep_and_reclaim` is the one that mattered:
+                # every producer of it writes `market_metric`, the reader for it lives in
+                # price action, and the gap sent it to `context_metric`, which answered
+                # "unavailable" for ever. The card "Price dips under a level then comes
+                # back" could not fire on any coin.
+                #
+                # Safe to try here because no capability filed as a market metric shares
+                # a name with a price-action reading — held by
+                # `tests/unit/test_invariant_every_card_evaluates.py`.
+                return self._price_action(operand, candles)
             return context_metric(
                 operand.name or "",
                 dict(operand.parameters),
@@ -1087,15 +1155,55 @@ class StrategyRuleEngine:
         candles: list[Candle],
         candle_sets: dict[str, list[Candle]],
     ) -> float:
-        """Evaluate the explicit percentage formula stored in the strategy DSL."""
+        """Evaluate the explicit percentage formula stored in the strategy DSL.
+
+        The formula name decides what is read. It used to be the other way round: the
+        two candle fields were read out of the stored parameters and the formula name
+        only chose between three code paths, with a fall-through that compared a
+        candle's close with its own close. Every producer that stored the formula name
+        and nothing else — the Guided Builder and the monitor canvas both did —
+        therefore measured exactly ``0.00%`` on every candle of every coin, so no rule
+        asking for a rise could ever be true. ``measurement_for`` is the one owner of
+        what each formula means; a stored field is honoured only where the formula
+        leaves that choice to the trader, and an unknown formula is refused rather than
+        measured as nothing.
+        """
 
         parameters = operand.parameters
         formula = str(parameters.get("formula", ""))
+        measurement = measurement_for(formula)
+        if measurement is None:
+            # Not a warm-up. Warm-up means "not enough candles yet", which resolves on
+            # its own and is shown as "forming". A formula nothing can measure never
+            # resolves, and showing it as forming tells the owner to keep waiting for
+            # something that will never arrive.
+            raise ContextDataUnavailable(
+                f"this rule names a move we cannot measure: {formula or 'nothing'}"
+            )
         direction = str(parameters.get("direction", "signed"))
-        reference_field = str(parameters.get("reference_field", "close"))
-        current_field = str(parameters.get("current_field", "close"))
+        stored_reference = parameters.get("reference_field")
+        stored_current = parameters.get("current_field")
+        reference_field = (
+            str(stored_reference)
+            if measurement.reference_is_chosen and stored_reference
+            else measurement.reference_field
+        )
+        if reference_field is None:
+            # `reference_to_current` measures the move away from an earlier price the
+            # trader names — yesterday's open, a swing high, the top of a stretch. With
+            # nothing named there is no measurement, and the old default of `close`
+            # against the same candle's close made it silently zero. Also not a warm-up:
+            # no number of extra candles will supply a reference nobody chose.
+            raise ContextDataUnavailable(
+                "this rule does not say which earlier price the move is measured from"
+            )
+        current_field = (
+            str(stored_current)
+            if measurement.current_is_chosen and stored_current
+            else measurement.current_field
+        )
         reference_timeframe = str(parameters.get("reference_timeframe", ""))
-        raw_lookback = parameters.get("lookback", 1)
+        raw_lookback = parameters.get("lookback", measurement.default_lookback)
         if not isinstance(raw_lookback, int | float | str):
             raise IndicatorWarmupError("percentage change lookback must be numeric")
         lookback = int(raw_lookback)
@@ -1104,26 +1212,42 @@ class StrategyRuleEngine:
             raise IndicatorWarmupError("percentage change requires candle data")
 
         current = float(getattr(candles[-1], current_field))
-        if formula == "close_to_close":
-            if len(candles) <= lookback:
-                raise IndicatorWarmupError(
-                    f"close-to-close percentage change requires {lookback + 1} candles"
+        if measurement.same_candle:
+            # "This candle moved X%" — both readings come from the newest trigger
+            # candle, never from another timeframe's newest candle.
+            reference = float(getattr(candles[-1], reference_field))
+        elif measurement.reference_is_chosen:
+            if lookback < 1:
+                # The card asks "how many candles back", minimum 1, and explains that
+                # "1 means the candle before this one". Nought candles back is the
+                # candle being judged, which is not an earlier price at all.
+                raise ContextDataUnavailable(
+                    "this rule does not say how many candles back the earlier price is"
                 )
-            reference = float(getattr(candles[-lookback - 1], reference_field))
-        elif formula == "reference_to_current":
-            if len(reference_candles) < lookback:
+            if len(reference_candles) <= lookback:
                 raise IndicatorWarmupError(
-                    f"reference percentage change requires {lookback} reference candles"
+                    f"reference percentage change requires {lookback + 1} reference candles"
                 )
-            window = reference_candles[-lookback:]
+            # The window ends **before** the candle being judged. It used to be
+            # `reference_candles[-lookback:]`, which ends *on* it, so the default
+            # `lookback = 1` compared the newest close with itself and the card
+            # "Move away from an earlier price" answered exactly 0.00% on every coin
+            # for ever. `window[0]` is the candle `lookback` bars back, the same bar
+            # `close_to_close` reads for the same lookback.
+            window = reference_candles[-lookback - 1 : -1]
             if reference_field in {"swing_high", "high"}:
                 reference = max(float(candle.high) for candle in window)
             elif reference_field in {"swing_low", "low"}:
                 reference = min(float(candle.low) for candle in window)
             else:
-                reference = float(getattr(window[-1], reference_field))
+                reference = float(getattr(window[0], reference_field))
         else:
-            reference = float(getattr(reference_candles[-1], reference_field))
+            if len(candles) <= lookback:
+                raise IndicatorWarmupError(
+                    f"{measurement.runtime_name} percentage change requires "
+                    f"{lookback + 1} candles"
+                )
+            reference = float(getattr(candles[-lookback - 1], reference_field))
 
         if reference == 0:
             raise IndicatorWarmupError("percentage change reference value is zero")
@@ -1659,11 +1783,7 @@ class StrategyRuleEngine:
     ) -> tuple[RiskCalculation | None, ConditionEvaluation]:
         candles = candle_sets.get(strategy.base_timeframe, [])
         market_timestamp = candles[-1].timestamp if candles else None
-        latency = (
-            int((evaluation_time - ensure_aware(market_timestamp)).total_seconds() * 1000)
-            if market_timestamp
-            else None
-        )
+        latency = self._timeframe_lateness_ms(evaluation_time, strategy.base_timeframe, candles)
         required = {
             "maximum_stop_percent": strategy.risk.maximum_stop_percent,
             "minimum_reward_to_risk": strategy.risk.minimum_reward_to_risk,
@@ -1802,7 +1922,7 @@ class StrategyRuleEngine:
             **dict(condition_context.get("risk_context", {})),
             "maximum_data_latency": max(
                 0,
-                int((evaluation_time - ensure_aware(current.timestamp)).total_seconds() * 1000),
+                self._timeframe_lateness_ms(evaluation_time, strategy.base_timeframe, candles) or 0,
             ),
             "minimum_candle_liquidity": (
                 current.quote_volume
@@ -1825,6 +1945,13 @@ class StrategyRuleEngine:
             atr_value = 0
         if atr_value > 0:
             values["volatility_atr_percent"] = atr_value / current.close * 100
+        # "Stop can be placed by ATR multiple" — a yes or no, and the answer is yes
+        # exactly when the market's typical swing size can be measured at all. No
+        # producer wrote this key, so the card was offered in the Builder and then
+        # reported "unavailable" on every candle of every coin, with risk on and with
+        # risk off. It is set before the `calculation is None` return below so it is
+        # answered whether or not the monitor also runs the risk model.
+        values["atr_stop"] = atr_value > 0
         if calculation is None:
             return values
         stop_distance = abs(calculation.entry_price - calculation.stop_price)
@@ -1929,6 +2056,28 @@ class StrategyRuleEngine:
         return max(timestamps) if timestamps else None
 
     @staticmethod
+    def _timeframe_lateness_ms(
+        evaluation_time: datetime, timeframe: str, candles: list[Candle]
+    ) -> int | None:
+        """How late one period's data was, measured past the candle's close.
+
+        Every caller used to write ``evaluation_time - candles[-1].timestamp`` by hand.
+        That is the age of the candle's *opening*, which is one whole candle older than
+        the candle, so it reported lateness that no monitor could ever avoid.
+        """
+
+        if not candles:
+            return None
+        try:
+            return candle_lateness_ms(
+                newest_candle_open=ensure_aware(candles[-1].timestamp),
+                timeframe=timeframe,
+                now=evaluation_time,
+            )
+        except ValueError:
+            return None
+
+    @staticmethod
     def _base_candle_closed(
         strategy: StrategyDefinition, candle_sets: dict[str, list[Candle]]
     ) -> bool | None:
@@ -1936,11 +2085,32 @@ class StrategyRuleEngine:
         return candles[-1].is_closed if candles else None
 
     @staticmethod
+    def _freshness(
+        evaluation_time: datetime, candle_sets: dict[str, list[Candle]]
+    ) -> DataFreshness:
+        """How fresh this whole check was — the answer for its **worst** feed.
+
+        A rule that reads a five-minute candle and an hourly one is only as current as
+        the more stale of the two, so the worst is what the check is graded on. Comparing
+        raw milliseconds across periods would pick the hourly feed every time simply
+        because its candles are longer, which is not the same question.
+        """
+
+        worst: DataFreshness | None = None
+        for timeframe, candles in candle_sets.items():
+            lateness = StrategyRuleEngine._timeframe_lateness_ms(
+                evaluation_time, timeframe, candles
+            )
+            if lateness is None:
+                continue
+            measured = measure_freshness(lateness_ms=lateness, timeframe=timeframe)
+            if worst is None or (measured.candles_behind or 0) > (worst.candles_behind or 0):
+                worst = measured
+        return worst or DataFreshness(None, None, None)
+
+    @staticmethod
     def _latency_ms(evaluation_time: datetime, candle_sets: dict[str, list[Candle]]) -> int | None:
-        latest = StrategyRuleEngine._latest_timestamp(candle_sets)
-        if latest is None:
-            return None
-        return int((evaluation_time - ensure_aware(latest)).total_seconds() * 1000)
+        return StrategyRuleEngine._freshness(evaluation_time, candle_sets).lateness_ms
 
 
 def _net_reward_to_risk(

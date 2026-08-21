@@ -86,8 +86,14 @@ class SuccessfulPreviewer:
         )
 
 
-@pytest_asyncio.fixture
-async def test_context() -> AsyncIterator[dict]:
+async def _build_context(**overrides: object) -> AsyncIterator[dict]:
+    """One app, built the way the running product builds it.
+
+    ``overrides`` are settings this particular test needs to differ. Everything else
+    stays at the shipped default, so a test can never pass by accident on a posture the
+    product has left behind.
+    """
+
     engine = create_async_engine(
         "sqlite+aiosqlite://",
         poolclass=StaticPool,
@@ -129,6 +135,7 @@ async def test_context() -> AsyncIterator[dict]:
         },
         disclaimer_version="test-2026-06",
         trial_days=7,
+        **overrides,  # type: ignore[arg-type]
     )
 
     async def override_session() -> AsyncIterator[AsyncSession]:
@@ -155,3 +162,26 @@ async def test_context() -> AsyncIterator[dict]:
 
     app.dependency_overrides.clear()
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def test_context() -> AsyncIterator[dict]:
+    """The product as it is shipped today: launched, public, pricing visible."""
+
+    async for context in _build_context():
+        yield context
+
+
+@pytest_asyncio.fixture
+async def waitlist_context() -> AsyncIterator[dict]:
+    """The product pulled back to the waitlist.
+
+    Still a supported posture after launch — it is the one switch that can close the
+    public site without a deploy — so what it does must stay covered. It is asked for
+    here explicitly, because tests that merely *assumed* it kept asserting a pre-launch
+    site for as long as pre-launch happened to be the default, and then failed on the
+    day the product went live rather than the day the behaviour broke.
+    """
+
+    async for context in _build_context(public_waitlist_mode=True):
+        yield context

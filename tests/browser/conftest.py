@@ -813,6 +813,15 @@ def assert_hilal_brand_palette(page: Page) -> None:
         "73,111,143",
         "184,120,32",
         "185,74,74",
+        # Four colours that hilalmarkets-brand.css has always declared and this list
+        # never learned. `--hm-control-line` is the edge of every secondary button, so
+        # /home failed this check for a colour the brand file itself defines. The
+        # others would have done the same the moment they reached a tested page.
+        # `test_the_approved_palette_holds_every_brand_token` keeps the two in step.
+        "121,130,141",  # --hm-control-line
+        "188,220,236",  # --hm-info-line
+        "118,123,131",  # --hm-on-ink-line
+        "174,180,189",  # --hm-on-ink-soft
     }
     unexpected = page.evaluate(
         """approvedValues => {

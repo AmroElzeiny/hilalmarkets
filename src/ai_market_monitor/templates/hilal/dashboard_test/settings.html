@@ -1,7 +1,7 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-canvas-only">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260820-canvas-only">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-cards">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260820-cards">
 {% endblock %}
 {% block content %}
 
@@ -62,6 +62,9 @@
 
       <div class="g-row is-stacked">
         <div class="g-choices" role="group" aria-label="Where we send you messages">
+          {#- The reason a box is greyed out has been built by the router all along and
+              was never drawn, so the page showed a dead control and no way to understand
+              it. It is inside the button so a screen reader reaches it with the name. -#}
           {% for channel in alert_channels %}
           <button class="g-choice"
                   type="button"
@@ -72,6 +75,7 @@
             <span class="g-choice-icon" aria-hidden="true"><span data-icon="{{ channel.icon }}" data-icon-class="icon"></span></span>
             <span class="g-choice-copy">
               <strong>{{ channel.label }}</strong>
+              {% if channel.why_not %}<span class="g-choice-why">{{ channel.why_not }}</span>{% endif %}
             </span>
             <span class="g-choice-tick" aria-hidden="true"><span data-icon="check" data-icon-class="icon-sm"></span></span>
           </button>
@@ -189,7 +193,10 @@
       <div class="g-row">
         <div class="g-row-copy">
           <strong>Maximum messages per hour</strong>
-          <span>The most we will send you in one hour. Anything past it waits for the next hour.</span>
+          {#- "Anything past it waits for the next hour" was not true: nothing waited and
+              nothing was kept. A market message an hour late is also worse than none, so
+              the behaviour is the honest one and this sentence now matches it. -#}
+          <span>The most we will send you in one hour, across all your monitors. Anything past it is not sent, and we tell you on the monitor when that happens.</span>
         </div>
         <div class="g-row-control">
           <span class="g-number">
@@ -405,6 +412,7 @@
             <span class="g-choice-icon" aria-hidden="true"><span data-icon="{{ channel.icon }}" data-icon-class="icon"></span></span>
             <span class="g-choice-copy">
               <strong>{{ channel.label }}</strong>
+              {% if channel.why_not %}<span class="g-choice-why">{{ channel.why_not }}</span>{% endif %}
             </span>
             <span class="g-choice-tick" aria-hidden="true"><span data-icon="check" data-icon-class="icon-sm"></span></span>
           </button>
@@ -550,5 +558,5 @@
 </dialog>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-settings-test.js') }}?v=20260820-canvas-only"></script>
+<script type="module" src="{{ url_for('static', path='/hm-settings-test.js') }}?v=20260820-cards"></script>
 {% endblock %}

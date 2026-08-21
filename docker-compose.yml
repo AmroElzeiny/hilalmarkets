@@ -83,7 +83,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A ai_market_monitor.worker.app beat --loglevel=INFO
+    # `--schedule` points at a volume on purpose. Celery beat remembers when each task
+    # last ran in this file, and a task whose interval is a day only fires a day after
+    # beat *started*. The file used to sit in the container's own writable layer, so
+    # every rebuild recreated it and every daily task began its countdown again — the
+    # nightly scan-history cleanup had effectively never run.
+    command: >-
+      celery -A ai_market_monitor.worker.app beat --loglevel=INFO
+      --schedule /app/beat/celerybeat-schedule
+    volumes:
+      - beat_schedule:/app/beat
 
   db:
     image: postgres:16-alpine
@@ -115,3 +124,5 @@ volumes:
   postgres_data:
     external: true
     name: ${POSTGRES_VOLUME_NAME:?set POSTGRES_VOLUME_NAME to the authoritative PostgreSQL volume}
+  #: When each scheduled task last ran. See the `--schedule` note on `scheduler` above.
+  beat_schedule:

@@ -54,6 +54,7 @@ from ai_market_monitor.schemas.strategy import (
     ConditionRule,
     StrategyDefinition,
 )
+from ai_market_monitor.services.alert_limits import effective_alerts_per_hour
 from ai_market_monitor.services.entitlements import (
     EntitlementError,
     EntitlementService,
@@ -844,13 +845,23 @@ class ScanPersistenceService:
             if configured_budget is not None or plan_alert_budget is not None
             else None
         )
+        # The hourly limit on the Settings page has to reach this gate, or the control is
+        # a lie: the number frozen in the monitor stopped it after fifty messages, the
+        # owner raised the Settings number, and nothing changed because nothing here had
+        # ever read it. `effective_alerts_per_hour` owns how the two compose.
+        account_preference = await NotificationPreferenceService(
+            self.session, self.settings
+        ).current(strategy.user_id)
         decision = await AlertFatigueGuard(self.session).check(
             result,
             user_id=strategy.user_id,
             strategy_version_id=version.id,
             alert_type=alert_type,
             cooldown_seconds=definition.alerts.cooldown_seconds,
-            maximum_alerts_per_hour=definition.alerts.maximum_alerts_per_hour,
+            maximum_alerts_per_hour=effective_alerts_per_hour(
+                monitor_limit=definition.alerts.maximum_alerts_per_hour,
+                account_limit=account_preference.maximum_alerts_per_hour,
+            ),
             daily_alert_budget=daily_budget,
             weekly_alert_budget=plan_weekly_alert_budget,
         )

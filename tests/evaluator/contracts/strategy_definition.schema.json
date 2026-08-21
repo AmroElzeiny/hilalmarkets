@@ -14,7 +14,8 @@
               "telegram",
               "whatsapp",
               "discord",
-              "web"
+              "web",
+              "email"
             ],
             "type": "string"
           },

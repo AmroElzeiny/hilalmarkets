@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import math
-from datetime import datetime, timedelta
+from datetime import datetime
 from statistics import fmean, pstdev
 from typing import Any
 
 import httpx
 
 from ai_market_monitor.core.config import Settings, get_settings
+from ai_market_monitor.engine.data_freshness import (
+    timeframe_duration as _timeframe_duration,
+)
 from ai_market_monitor.engine.indicators import IndicatorWarmupError, adx, ema
 from ai_market_monitor.engine.models import ensure_aware
 from ai_market_monitor.schemas.strategy import (
@@ -232,7 +235,18 @@ class ProviderContextService:
             values["pair_correlation_btc"] = abs(correlation) >= float(
                 requests.get("pair_correlation_btc", {}).get("threshold", 0.7)
             )
-            values["correlation_filter"] = values["pair_correlation_btc"]
+            # `correlation_filter` is the card the Builder offers, and that card asks the
+            # trader for their own number ("at least 0.7"). It must therefore receive the
+            # *measurement*, so the trader's comparator and threshold decide the answer.
+            #
+            # It used to receive `pair_correlation_btc` — a yes/no already decided here
+            # against a hard-coded 0.7, because the threshold was looked up under the
+            # sibling's key and the request is filed under this one. The comparator then
+            # compared that yes/no with the trader's number as if it were a number
+            # (`True >= 0.95` is true), so a monitor asking for correlation of at least
+            # 0.95 fired at a measured 0.82, and one asking for at least 0.3 stayed
+            # silent at a measured 0.5. Strength, not sign, matching the sibling above.
+            values["correlation_filter"] = abs(correlation)
             values["pair_beta_btc"] = beta >= float(
                 requests.get("pair_beta_btc", {}).get("minimum_beta", 1)
             )
@@ -798,13 +812,7 @@ def _float(value: Any) -> float | None:
         return None
 
 
-def timeframe_duration(timeframe: str) -> timedelta:
-    value = int(timeframe[:-1])
-    unit = timeframe[-1]
-    if unit == "m":
-        return timedelta(minutes=value)
-    if unit == "h":
-        return timedelta(hours=value)
-    if unit == "d":
-        return timedelta(days=value)
-    raise ValueError(f"Unsupported timeframe: {timeframe}")
+#: Re-exported from the one owner of "how long is a candle". Two byte-identical copies of
+#: this parser lived here and in ``services.market_preview``, and a third in ``core.plans``
+#: counted minutes instead — three chances for the same period to be sized differently.
+timeframe_duration = _timeframe_duration

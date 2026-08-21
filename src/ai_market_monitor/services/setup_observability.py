@@ -44,9 +44,9 @@ from ai_market_monitor.db.models.enums import (
     ScanOutcome,
     SetupLifecycleState,
 )
+from ai_market_monitor.engine.data_freshness import measure_freshness, timeframe_duration
 from ai_market_monitor.engine.models import EvaluationResult
 from ai_market_monitor.schemas.strategy import ConditionGroup, ConditionRule, StrategyDefinition
-from ai_market_monitor.services.market_preview import timeframe_duration
 from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.strategy_cockpit import validate_strategy_conflicts
 
@@ -336,12 +336,18 @@ class SetupObservabilityService:
             else snapshot.last_changed_at,
             "last_evaluated_at": result.evaluation_time,
             "data_freshness_ms": max(0, result.data_latency_ms or 0),
+            # Late means "a newer candle had closed and we did not read it", which is a
+            # count, not a stopwatch reading. This used to compare the delay against a
+            # fixed 300 seconds, so every monitor on a five-minute candle or slower was
+            # marked "stale" on every single check, however current its data really was.
             "data_health": (
                 "error"
                 if state == "provider_data_error"
                 else "stale"
-                if (result.data_latency_ms or 0)
-                > self.settings.observability_candidate_stale_seconds * 1000
+                if not measure_freshness(
+                    lateness_ms=result.data_latency_ms,
+                    timeframe=result.data_freshness_timeframe or result.timeframe,
+                ).is_current
                 else "healthy"
             ),
             "next_candle_close_at": next_close,
@@ -1065,6 +1071,11 @@ class SetupObservabilityService:
             (item for item in reversed(events) if item.to_state == SetupLifecycleState.SUPPRESSED),
             None,
         )
+        # Why the alert itself was held back, written down by whichever gate refused it.
+        # Without this the branch below fell through to "no notification destination was
+        # attempted", which told people to switch a channel on when the real cause was a
+        # limit they had set — a wrong instruction, not merely a vague one.
+        withheld = next((item for item in alerts if item.suppressed_reason), None)
         if failed_delivery and not successful:
             category = "notification_delivery_failure"
             reason = f"The setup confirmed, but {failed_delivery.channel.value} delivery failed."
@@ -1073,6 +1084,12 @@ class SetupObservabilityService:
             reason = (
                 "The setup confirmed, but notification rules suppressed it: "
                 f"{suppressed.reason_code.replace('_', ' ')}."
+            )
+        elif withheld and not successful:
+            category = "cooldown_or_exclusion"
+            reason = (
+                "The setup produced an alert, but it was held back: "
+                f"{str(withheld.suppressed_reason).replace('_', ' ')}."
             )
         elif unavailable:
             category = "data_provider_issue"
@@ -1138,6 +1155,16 @@ class SetupObservabilityService:
             "evidence_availability": evidence,
             "primary_category": category,
             "primary_reason": reason,
+            # The exact code the refusing gate wrote down. `primary_category` groups a
+            # dozen different silences into one bucket; only the code can tell a reached
+            # hourly limit apart from a silenced coin, and those need opposite advice.
+            "withheld_code": (
+                suppressed.reason_code
+                if suppressed
+                else str(withheld.suppressed_reason)
+                if withheld and not successful
+                else None
+            ),
             "notification_successful": successful,
             "conditions": conditions,
             "condition_summary": {

@@ -466,12 +466,25 @@ class PublicKnowledgeService:
                 "private account details are never available to anonymous visitors."
             ),
             route_id="dashboard_entry",
+            # The same question in the same words as the waitlist version above. Both
+            # entries answer "how do I get in?", so both must answer to the words people
+            # use for it. This one knew only "create account" and "sign in", so on the
+            # live site "How do I get access to Hilal Markets?" — the most ordinary
+            # question a visitor asks — was answered with a description of the product
+            # instead of how to sign in.
+            #
+            # "private beta" is gone: the product has launched, so those words no longer
+            # point at the account flow, and while they did they pulled unrelated
+            # questions ("which markets are available in private beta?") to this entry.
             keywords=(
+                "get access",
+                "early access",
+                "sign up",
+                "join",
                 "create account",
                 "sign in",
                 "email verification code",
                 "reset password",
-                "private beta",
                 "dashboard access",
             ),
         )

@@ -1076,12 +1076,16 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "ATR stop placement",
         "risk",
         "risk",
-        "Stop can be placed by ATR multiple.",
+        "This coin's usual candle swing can be measured, so a stop can be set from it.",
         aliases=("atr stop", "average true range stop"),
         operand_kind="risk_metric",
         operand_name="atr_stop",
         # "can be placed" — this answers yes or no. It does not produce a number.
         default_comparator="is_true",
+        guidance=(
+            "ATR is the size of a typical candle for this coin. The answer is no only "
+            "when there is not enough price history to measure it."
+        ),
     ),
     # Volume and liquidity
     _cap(
@@ -1192,13 +1196,17 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "Minimum 24h quote volume",
         "market_filter",
         "market_filter",
-        "Market must meet 24h quote-volume minimum.",
+        "How much money was traded in this coin over the last 24 hours.",
         aliases=("24h volume", "minimum quote volume", "avoid low liquidity"),
         operand_kind="market_metric",
         operand_name="quote_volume_24h",
         # "must meet a minimum" — a traded volume compared against a number.
         default_comparator="gte",
         required_data=("ticker",),
+        guidance=(
+            "Counted in the money the pair is priced in, usually USDT. 1000000 means "
+            "one million dollars traded in a day."
+        ),
     ),
     _cap(
         "min_average_candle_volume",
@@ -1894,6 +1902,14 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         operand_name="fibonacci_extension_targets",
         # "Checks whether ... aligns" — a yes or no answer, per its own guidance below.
         default_comparator="is_true",
+        # It compares the monitor's **configured first target** with a Fibonacci
+        # extension, so without a configured target there is nothing to compare and the
+        # question has no answer. Every other card that reads the risk calculation
+        # declares that need this way; this one was missed, so the Builder offered it
+        # and it then reported "unavailable" on every candle of every monitor that did
+        # not switch trade settings on. Declared with its own family rather than given
+        # an invented value, because no other reading is the one this card names.
+        provider_required="risk_context",
         guidance="Checks whether the configured first target aligns with a common extension.",
     ),
     _cap(
@@ -2143,14 +2159,39 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         operand_kind="price_action",
         operand_name="percent_change_up",
         default_parameters={"direction": "up", "threshold_percent": 5, "lookback": 1},
-        # Unlike the rest of this file's price_action capabilities, this one measures
-        # a percentage, not a pattern match, so it keeps the numeric comparator set
-        # that _cap() otherwise stops defaulting to for operand_kind="price_action".
-        supported_comparators=("gt", "gte", "lt", "lte", "eq"),
+        # The trader's percentage is `threshold_percent`, and the reading named here
+        # answers **yes or no**: did the price move that far over that many candles.
+        # So the rule compares a yes/no, and the numeric comparators this card used to
+        # offer had nothing to compare. They did not merely produce nonsense — the
+        # answers came out backwards, because Python reads True as 1:
+        #
+        #   moved far enough, "more than 1"   -> 1 > 1  -> No  (it did move)
+        #   did not move,     "less than 3"   -> 0 < 3  -> Yes (it did not move)
+        #
+        # A monitor set to "dropped less than 3%" therefore alerted on every candle
+        # where nothing happened, and one set to "gained more than 1%" never alerted
+        # at all. `is_true` and `is_false` are the comparators this reading has.
+        default_comparator="is_true",
+        supported_comparators=("is_true", "is_false"),
         parameters=(
             CapabilityParameter("direction", "choice", "up", options=("up", "down")),
-            CapabilityParameter("threshold_percent", "number", 5),
-            CapabilityParameter("lookback", "integer", 1),
+            # These two questions *are* the rule, and the form showed both with no
+            # explanation at all beside a box labelled only by the field name.
+            CapabilityParameter(
+                "threshold_percent",
+                "number",
+                5,
+                description="How big the move has to be. 5 means five percent.",
+            ),
+            CapabilityParameter(
+                "lookback",
+                "integer",
+                1,
+                description=(
+                    "How many candles the move is measured across. "
+                    "1 means since the candle before this one."
+                ),
+            ),
             TIMEFRAME,
         ),
         intent_examples=(
@@ -2203,7 +2244,10 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "Stablecoin exclusion",
         "market_filter",
         "market_filter",
-        "Exclude stablecoin base assets.",
+        # Written as the thing that is true when the card passes, because the comparator
+        # beside it reads "happens" / "does not happen". "Exclude stablecoin base
+        # assets" put jargon on both sides of that and read as nothing at all.
+        "The coin is not a stablecoin, such as USDT or USDC.",
         aliases=("exclude stables", "stablecoin exclusion"),
         # An exclusion is a flag: this coin either is a stablecoin or it is not.
         default_comparator="is_true",
@@ -2214,7 +2258,7 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "Leveraged token exclusion",
         "market_filter",
         "market_filter",
-        "Exclude leveraged tokens.",
+        "The coin is the coin itself, not a 3x or 5x leveraged version of it.",
         aliases=("no leveraged tokens", "3l", "3s"),
         # An exclusion flag, like the stablecoin one above.
         default_comparator="is_true",
@@ -2225,30 +2269,42 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "Spread filter",
         "market_filter",
         "market_filter",
-        "Maximum spread in basis points.",
+        "How far apart the buying price and the selling price are right now.",
         aliases=("max spread", "spread bps"),
         # "Maximum" — a measured spread that must stay at or under a number.
         default_comparator="lte",
         required_data=("ticker", "order_book"),
+        guidance=(
+            "Counted in basis points, where 100 is one percent. A wide gap means it "
+            "costs more to buy and sell."
+        ),
     ),
     _cap(
         "listing_age_filter",
         "Listing age filter",
         "market_filter",
         "market_filter",
-        "Minimum market listing age.",
+        # The unit is in the sentence because the form's number box is labelled only
+        # "Value". Without it nobody could tell whether 30 meant days, weeks or months.
+        "How many days ago this coin was first listed on the exchange.",
         aliases=("listing age", "new listing"),
         # "Minimum" — a measured age that must reach a number.
         default_comparator="gte",
         required_data=("market_metadata",),
+        guidance="Counted in days. 30 means the coin has been listed for at least a month.",
     ),
     _cap(
         "correlation_filter",
         "Correlation filter",
         "advanced",
         "market_filter",
-        "Filter by correlation to another asset.",
-        aliases=("correlation", "bitcoin dominance"),
+        "How closely the coin moves with Bitcoin, from 0 to 1.",
+        # "bitcoin dominance" is a different measurement entirely — Bitcoin's share of
+        # the whole crypto market — and it already has its own card,
+        # `btc_dominance_trend`, which claims the phrase "btc dominance". Two cards
+        # answering to one phrase is how a person asks for one thing and is monitored
+        # for another.
+        aliases=("correlation", "moves with bitcoin", "tracks bitcoin"),
         operand_kind="market_metric",
         operand_name="correlation_filter",
         default_parameters={
@@ -2260,7 +2316,10 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         # compares it. It is the one filter in this group that is not a flag.
         default_comparator="gte",
         default_threshold=0.7,
-        guidance="Uses aligned closed-candle returns against BTC.",
+        guidance=(
+            "1 means the coin moves almost exactly with Bitcoin, 0 means the two "
+            "move with no relation. Measured from the closed candles of both."
+        ),
     ),
     _cap(
         "btc_trend_filter",
@@ -3373,6 +3432,17 @@ def _price_action_capabilities() -> list[CapabilitySpec]:
     return specs
 
 
+#: The time conditions that compare against a moment a person names, rather than an hour
+#: of the day. Read from the runtime's own list so the two cannot drift apart.
+_TIMESTAMP_BOUNDED_CONDITIONS: frozenset[str] = frozenset(
+    {
+        "condition_before_timestamp",
+        "condition_after_timestamp",
+        "condition_valid_until",
+    }
+)
+
+
 def _time_capabilities() -> list[CapabilitySpec]:
     existing = {capability.key for capability in CAPABILITIES}
     aliases = {
@@ -3439,6 +3509,16 @@ def _time_capabilities() -> list[CapabilitySpec]:
                 CapabilityParameter("timezone", "timezone", "UTC"),
                 CapabilityParameter("start_hour", "number", 0),
                 CapabilityParameter("end_hour", "number", 24),
+                # The three date-bounded conditions are the only ones here that compare
+                # against a moment somebody names. The runtime reads that moment from
+                # `timestamp`; nothing offered the field, so the form asked for hours of
+                # the day and the rule then refused itself every time it ran with
+                # "condition timestamp is required" — a demand no screen could satisfy.
+                *(
+                    (CapabilityParameter("timestamp", "text", None, True, "Date and time."),)
+                    if name in _TIMESTAMP_BOUNDED_CONDITIONS
+                    else ()
+                ),
             ),
             required_data=("candle_timestamp",),
             warmup_candles=1,

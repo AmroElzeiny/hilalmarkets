@@ -10,7 +10,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.db.models import Alert, AlertDelivery, DashboardPreference
 from ai_market_monitor.db.models.enums import AlertType, DeliveryChannel
+from ai_market_monitor.services.alert_limits import (
+    DELIVERY_BLOCK_DAILY_LIMIT,
+    DELIVERY_BLOCK_HOURLY_LIMIT,
+)
 from ai_market_monitor.services.email_delivery import email_delivery_available
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryDecision:
+    """Where one alert may be sent, and what stopped it if the answer is nowhere.
+
+    ``blocked_by`` is a stored code, never a sentence. The words a person reads are
+    chosen by ``product_language``; every surface looks them up from the same code so the
+    dashboard, an email and a Telegram reply cannot give three accounts of one silence.
+    """
+
+    channels: set[DeliveryChannel]
+    blocked_by: str | None = None
+
+    @property
+    def delivered_nowhere(self) -> bool:
+        return not self.channels
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,6 +317,34 @@ class NotificationPreferenceService:
         *,
         alert: Alert,
     ) -> set[DeliveryChannel]:
+        """Where this alert may be sent. Kept for callers that need only the set."""
+
+        return (await self.delivery_decision(user_id, requested, alert=alert)).channels
+
+    async def delivery_decision(
+        self,
+        user_id: UUID,
+        requested: set[DeliveryChannel],
+        *,
+        alert: Alert,
+    ) -> DeliveryDecision:
+        """Where this alert may be sent, **and what stopped it when the answer is
+        nowhere**.
+
+        Every refusal here used to be a bare ``set()``. Twelve different reasons — a
+        silenced coin, a paused monitor, an hourly limit, a quiet-hours schedule — all
+        left the same trace, which was no trace at all: the alert row stayed in the
+        database with no delivery beside it and nothing recording why. A person whose
+        hourly limit had been reached saw a monitor that simply stopped speaking, and the
+        one screen that could have explained it said "no notification destination was
+        attempted" and told them to switch a channel on, which was not the problem and
+        not a fix.
+
+        The reason is now carried out of here so the caller can write it down. A message
+        that was deliberately withheld is a fact about somebody's own settings, and they
+        are entitled to read it.
+        """
+
         preference = await self.current(user_id)
         mandatory_in_app = (
             {DeliveryChannel.WEB}
@@ -305,11 +354,11 @@ class NotificationPreferenceService:
         )
         if alert.alert_type == AlertType.COMPLIANCE:
             if not preference.compliance_alerts_enabled:
-                return mandatory_in_app
-            return (
-                requested
-                & (preference.compliance_alert_channels or {DeliveryChannel.WEB})
-            ) | mandatory_in_app
+                return DeliveryDecision(mandatory_in_app, "compliance_messages_off")
+            return DeliveryDecision(
+                (requested & (preference.compliance_alert_channels or {DeliveryChannel.WEB}))
+                | mandatory_in_app
+            )
         proof = alert.proof_receipt or {}
         setup_state = str(proof.get("setup_state") or "")
         incomplete_states = {"candidate_detected", "detected", "forming", "near_confirmation"}
@@ -317,27 +366,27 @@ class NotificationPreferenceService:
             alert.alert_type in {AlertType.NEAR_MISS, AlertType.FORMING}
             or (alert.alert_type == AlertType.LIFECYCLE and setup_state in incomplete_states)
         ):
-            return set()
+            return DeliveryDecision(set(), "near_miss_messages_off")
         score = proof.get("setup_completion_score", proof.get("completion_score"))
         if alert.alert_type in {AlertType.NEAR_MISS, AlertType.FORMING} and score is not None:
             try:
                 if float(score) < preference.near_miss_threshold:
-                    return set()
+                    return DeliveryDecision(set(), "below_near_miss_threshold")
             except (TypeError, ValueError):
-                return set()
+                return DeliveryDecision(set(), "below_near_miss_threshold")
         if alert.alert_type == AlertType.LIFECYCLE and not preference.lifecycle_enabled:
-            return set()
+            return DeliveryDecision(set(), "progress_messages_off")
         symbol = str(proof.get("symbol") or "").upper()
         if symbol_is_muted(symbol, preference.muted_symbols):
-            return set()
+            return DeliveryDecision(set(), "coin_silenced")
         if alert.strategy_version_id is not None and str(alert.strategy_version_id) in (
             preference.muted_strategy_ids or set()
         ):
-            return set()
+            return DeliveryDecision(set(), "monitor_silenced")
         if alert.strategy_version_id is not None and symbol:
             muted_strategy_symbols = preference.muted_strategy_symbols or {}
             if symbol in muted_strategy_symbols.get(str(alert.strategy_version_id), set()):
-                return set()
+                return DeliveryDecision(set(), "coin_silenced_on_this_monitor")
         if alert.strategy_version_id is not None:
             muted_until = (preference.muted_strategy_until or {}).get(
                 str(alert.strategy_version_id)
@@ -348,15 +397,15 @@ class NotificationPreferenceService:
                     if expiry.tzinfo is None:
                         expiry = expiry.replace(tzinfo=UTC)
                     if expiry > datetime.now(UTC):
-                        return set()
+                        return DeliveryDecision(set(), "monitor_silenced")
                 except ValueError:
-                    return set()
+                    return DeliveryDecision(set(), "monitor_silenced")
         if alert.setup_instance_id is not None and str(alert.setup_instance_id) in (
             preference.muted_setup_instance_ids or set()
         ):
-            return set()
+            return DeliveryDecision(set(), "opportunity_silenced")
         if not self._inside_schedule(preference):
-            return set()
+            return DeliveryDecision(set(), "outside_chosen_hours")
         since = datetime.now(UTC) - timedelta(hours=1)
         hourly_count = await self.session.scalar(
             select(func.count(func.distinct(Alert.id)))
@@ -364,7 +413,7 @@ class NotificationPreferenceService:
             .where(Alert.user_id == user_id, AlertDelivery.created_at >= since)
         )
         if (hourly_count or 0) >= preference.maximum_alerts_per_hour:
-            return set()
+            return DeliveryDecision(set(), DELIVERY_BLOCK_HOURLY_LIMIT)
         try:
             zone = ZoneInfo(preference.timezone)
         except ZoneInfoNotFoundError:
@@ -378,8 +427,11 @@ class NotificationPreferenceService:
             .where(Alert.user_id == user_id, AlertDelivery.created_at >= day_start_utc)
         )
         if (daily_count or 0) >= preference.maximum_alerts_per_day:
-            return set()
-        return (set(requested) & preference.channels) | mandatory_in_app
+            return DeliveryDecision(set(), DELIVERY_BLOCK_DAILY_LIMIT)
+        allowed = (set(requested) & preference.channels) | mandatory_in_app
+        if not allowed:
+            return DeliveryDecision(set(), "no_way_of_being_told_is_on")
+        return DeliveryDecision(allowed)
 
     @staticmethod
     def _inside_schedule(preference: NotificationPreference) -> bool:

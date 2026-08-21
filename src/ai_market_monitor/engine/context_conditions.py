@@ -213,7 +213,15 @@ def evaluate_time_condition(
         raw = parameters.get("timestamp")
         if not raw:
             raise ContextDataUnavailable("condition timestamp is required")
-        target = ensure_aware(datetime.fromisoformat(str(raw)))
+        try:
+            target = ensure_aware(datetime.fromisoformat(str(raw)))
+        except ValueError as exc:
+            # A date nobody can read is a missing measurement, not a crash. Letting the
+            # ValueError escape recorded the rule's failure as "ValueError", which tells
+            # the person nothing about the date they typed.
+            raise ContextDataUnavailable(
+                f"condition timestamp is not a date we can read: {str(raw)[:40]}"
+            ) from exc
         if name == "condition_after_timestamp":
             return timestamp >= target
         return timestamp <= target
@@ -316,9 +324,15 @@ def runtime_context_metric(
     if name == "alert_only_on_state_change":
         return bool(context.get("setup_state_changed", True))
     if name == "maximum_alert_lateness_condition":
-        return float(context.get("data_latency_ms", 0)) <= float(
-            parameters.get("maximum_lateness_ms", parameters.get("threshold", 60_000))
-        )
+        # A stated limit is the trader's own number and is honoured as written. Without
+        # one, "not late" can only mean "nothing newer had closed" — the count the
+        # freshness owner produces. The old default was a flat 60000 ms, which no
+        # monitor slower than one minute could ever satisfy, so the condition was
+        # permanently false for them and blocked every alert they would have sent.
+        stated = parameters.get("maximum_lateness_ms", parameters.get("threshold"))
+        if stated is None:
+            return int(context.get("data_candles_behind") or 0) == 0
+        return float(context.get("data_latency_ms", 0)) <= float(stated)
     if name == "setup_state_is":
         expected = str(parameters.get("state", parameters.get("expected_state", "forming")))
         actual = context.get("setup_state")

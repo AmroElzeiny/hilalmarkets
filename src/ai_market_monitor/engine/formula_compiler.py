@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
-from typing import Literal
+from typing import Literal, get_args
 
 from ai_market_monitor.db.models.enums import ConditionType, LogicalOperator
 from ai_market_monitor.engine.comparators import detect_comparator, find_comparator_for_value
@@ -38,13 +38,23 @@ from ai_market_monitor.schemas.strategy import (
     OperandKind,
     StrategyDirection,
 )
+from ai_market_monitor.schemas.strategy_draft_v2 import (
+    FORMULA_BY_RUNTIME_NAME,
+    percentage_runtime_parameters,
+)
 
+#: The percentage formulas this module can compile, named the way the stored rule names
+#: them. Every one must exist in the table that says what each formula measures — the
+#: assertion below is what stops a name being invented here that the runtime cannot read.
 FormulaKind = Literal[
     "open_to_close",
     "close_to_close",
     "high_to_low",
+    "low_to_high",
     "reference_to_current",
 ]
+assert set(get_args(FormulaKind)) <= set(FORMULA_BY_RUNTIME_NAME)
+
 FormulaDirection = Literal["up", "down", "signed"]
 
 _PERCENT_RE = re.compile(r"(?P<value>-?\d+(?:\.\d+)?)\s*%")
@@ -179,14 +189,23 @@ class PercentageFormulaSpec:
     source_fragment: str = ""
 
     def parameters(self) -> dict[str, CapabilityParameterValue]:
+        """The stored measurement, built by the one table that defines it.
+
+        The fields this spec parsed out of the trader's words are offered to that
+        table; it keeps the ones the formula leaves open and uses the formula's own
+        where it does not. Writing the dictionary here by hand is what let three
+        producers of the same operand drift apart.
+        """
+
         return {
-            "formula": self.formula,
+            **percentage_runtime_parameters(
+                FORMULA_BY_RUNTIME_NAME[self.formula],
+                reference_field=self.reference_field,
+                current_field=self.current_field,
+                lookback=self.lookback,
+            ),
             "direction": self.direction,
-            "reference_field": self.reference_field,
-            "current_field": self.current_field,
             "reference_timeframe": self.reference_timeframe or self.timeframe,
-            "lookback": self.lookback,
-            "scale": "percent",
             "closed_only": True,
         }
 

@@ -36,6 +36,7 @@ from ai_market_monitor.engine.capabilities import CapabilitySpec, all_capabiliti
 from ai_market_monitor.schemas.strategy import UNARY_COMPARATORS, Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
+    PERCENTAGE_MEASUREMENTS,
     FormulaKind,
     MovementDirection,
 )
@@ -280,6 +281,33 @@ def _percentage_mechanic(
     threshold_label: str,
     examples: tuple[str, ...],
 ) -> BuilderMechanic:
+    #: A formula that measures the move away from an *earlier* price cannot be measured
+    #: until somebody says which earlier price and how far back. The card used to ask
+    #: neither, so it compiled to a rule with no reference at all and the runtime
+    #: compared a candle's close with its own close — always 0%. These two questions are
+    #: the measurement, so the card asks them.
+    measurement = PERCENTAGE_MEASUREMENTS[formula]
+    reference_questions: tuple[BuilderParameter, ...] = ()
+    if measurement.reference_is_chosen:
+        reference_questions = (
+            _reference_field_parameter(
+                label="Which earlier price",
+                help_text="The price the move is measured from.",
+                default="close",
+            ),
+            BuilderParameter(
+                name="lookback",
+                label="How many candles back",
+                kind="integer",
+                required=True,
+                unit="count",
+                help="How far back that earlier price is. 1 means the candle before this one.",
+                minimum=1,
+                maximum=1000,
+                step=1,
+                default=1,
+            ),
+        )
     return BuilderMechanic(
         key=formula.value,
         version="1.0",
@@ -289,6 +317,7 @@ def _percentage_mechanic(
         formula=formula.value,
         parameters=(
             _direction_parameter(formula),
+            *reference_questions,
             _comparator_parameter(formula),
             _threshold_parameter(
                 formula,

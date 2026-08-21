@@ -251,6 +251,16 @@ class EvaluationResult:
     setup_transition: dict[str, Any] | None
     reliability_warnings: list[str]
     chart_reference: str | None = None
+    #: How many candles had closed since the newest one this check read, across every
+    #: period it read. ``0`` means nothing newer existed anywhere.
+    #:
+    #: ``data_latency_ms`` alone cannot answer that question: it is a length of time, and
+    #: whether a length of time is late depends entirely on the candle period. Readers
+    #: grading freshness use this count; the milliseconds stay as the raw measurement.
+    data_candles_behind: int | None = None
+    #: The period ``data_latency_ms`` was measured on. Not always the base timeframe — a
+    #: rule that also reads an hourly candle is only as fresh as its worst feed.
+    data_freshness_timeframe: str | None = None
 
     def proof_receipt(self) -> dict[str, Any]:
         required_conditions = [condition for condition in self.conditions if condition.mandatory]
@@ -306,6 +316,8 @@ class EvaluationResult:
                 self.market_data_timestamp.isoformat() if self.market_data_timestamp else None
             ),
             "data_latency_ms": self.data_latency_ms,
+            "data_candles_behind": self.data_candles_behind,
+            "data_freshness_timeframe": self.data_freshness_timeframe,
             "market_data_provider": self.market_data_provider,
             "candle_closed": self.candle_closed,
             "research_monitor": True,

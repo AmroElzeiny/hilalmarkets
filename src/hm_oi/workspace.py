@@ -237,6 +237,23 @@ def create_workspace(
     if not base_commit:
         raise WorkspaceRefused(f"Could not resolve the base commit {base!r}.")
 
+    existing_branch = _run(["rev-parse", "--verify", branch], root).returncode == 0
+    if existing_branch:
+        # The worktree is filled from the branch, so "what did this task change?" has to
+        # be measured from where that branch *started*, not from wherever the main line
+        # has since reached. `remove_workspace` keeps branches on purpose, so a task id
+        # used again after other work has landed was comparing its worktree against a
+        # main-line commit the branch had never seen.
+        #
+        # Every commit made to main in between then read as a change this task had made.
+        # One re-used task id reported 509 changed files, which sent 195 test modules —
+        # browser suites included — into the "adjacent tests" gate. They errored, the
+        # gate refused, and no task could ever complete. The reviewer was being shown
+        # the same 509 files as the diff to judge.
+        merge_base = _run(["merge-base", branch, base_commit], root)
+        if merge_base.returncode == 0 and merge_base.stdout.strip():
+            base_commit = merge_base.stdout.strip()
+
     if path.exists():
         existing = _run(["rev-parse", "--abbrev-ref", "HEAD"], path).stdout.strip()
         if existing != branch:
@@ -253,7 +270,6 @@ def create_workspace(
         )
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing_branch = _run(["rev-parse", "--verify", branch], root).returncode == 0
     arguments = ["worktree", "add"]
     if not existing_branch:
         arguments += ["-b", branch]

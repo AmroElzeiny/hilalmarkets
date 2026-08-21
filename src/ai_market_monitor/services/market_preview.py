@@ -10,6 +10,7 @@ import httpx
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models.enums import ScanOutcome
+from ai_market_monitor.engine.data_freshness import timeframe_duration
 from ai_market_monitor.engine.evaluator import StrategyRuleEngine
 from ai_market_monitor.engine.models import MarketSnapshot, ensure_aware
 from ai_market_monitor.provider_context import ProviderContextService
@@ -50,16 +51,28 @@ class CandleDataQuality:
     manifest_hash: str
 
 
-def timeframe_duration(timeframe: str) -> timedelta:
-    value = int(timeframe[:-1])
-    unit = timeframe[-1]
-    if unit == "m":
-        return timedelta(minutes=value)
-    if unit == "h":
-        return timedelta(hours=value)
-    if unit == "d":
-        return timedelta(days=value)
-    raise ValueError(f"Unsupported timeframe: {timeframe}")
+#: Re-exported so existing importers are unchanged. The length of a candle has one owner
+#: — :mod:`ai_market_monitor.engine.data_freshness` — because it was written out by hand
+#: in four modules, and one of those copies quietly treated any unrecognised period as a
+#: day rather than refusing it.
+__all__ = ["CandleDataQuality", "timeframe_duration"]
+
+
+#: Rows to ask an exchange for in one call. The upper bound is what public OHLCV
+#: endpoints allow; the lower one keeps a small ``limit`` over a wide window from
+#: turning into thousands of one-row calls.
+_MAXIMUM_PAGE_ROWS = 1000
+_MINIMUM_PAGE_ROWS = 200
+#: A hard stop on how many calls one window may cost, whatever the arithmetic says.
+_MAXIMUM_PAGES = 64
+
+
+def _page_budget(start_ms: int, end_ms: int, duration_ms: int, page_rows: int) -> int:
+    """How many calls it takes to walk this window, plus one for the moving end."""
+
+    candles = max(0, end_ms - start_ms) // max(1, duration_ms) + 1
+    needed = -(-candles // max(1, page_rows)) + 1
+    return max(1, min(_MAXIMUM_PAGES, needed))
 
 
 def assess_candle_data_quality(
@@ -270,29 +283,54 @@ class CcxtMarketDataProvider:
         end: datetime,
         limit: int,
     ) -> list[Candle]:
+        """The newest up-to ``limit`` candles inside ``[start, end]``.
+
+        The paging used to stop as soon as ``limit`` rows had been collected. An
+        exchange returns candles *forward* from ``since``, so stopping on a count
+        stopped at the **oldest** end of the window and the walk never reached ``end``.
+        Every reading therefore arrived about three candles stale — three hours behind
+        on an hourly monitor — while the scan itself had run seconds earlier. The walk
+        now ends where the caller asked it to end, and the newest ``limit`` are kept.
+        """
+
         client = await self._client(exchange)
         start = ensure_aware(start)
         end = ensure_aware(end)
         duration = timeframe_duration(timeframe)
         duration_ms = max(1, int(duration.total_seconds() * 1000))
-        cursor_ms = int(start.timestamp() * 1000)
+        start_ms = int(start.timestamp() * 1000)
         end_ms = int(end.timestamp() * 1000)
         maximum = max(1, min(50_000, limit))
+        # How many rows to ask for per call. Deliberately **not** "however many are
+        # still missing": that is what tied the walk's reach to the caller's count. The
+        # small headroom lets a window drawn as "the last N candles" finish in one call
+        # instead of two, which matters when a scan does this once per market.
+        page_rows = min(_MAXIMUM_PAGE_ROWS, max(maximum + 2, _MINIMUM_PAGE_ROWS))
+        # A window wider than the call budget can walk is started nearer its end. The
+        # caller asked for the newest candles up to `end`; spending the whole budget at
+        # the far side of a very long stretch would answer with the oldest instead, and
+        # answer confidently. No real caller draws such a window — every one of them
+        # sizes it to the count it wants — and this makes the promise true anyway.
+        reach_ms = _MAXIMUM_PAGES * page_rows * duration_ms
+        if end_ms - start_ms > reach_ms:
+            start_ms = end_ms - reach_ms
+        cursor_ms = start_ms
+        remaining_pages = _page_budget(start_ms, end_ms, duration_ms, page_rows)
         rows_by_timestamp: dict[int, list[Any]] = {}
-        while cursor_ms < end_ms and len(rows_by_timestamp) < maximum:
-            page_limit = min(1000, maximum - len(rows_by_timestamp))
+        while cursor_ms <= end_ms and remaining_pages > 0:
+            remaining_pages -= 1
             rows = await client.fetch_ohlcv(
                 symbol,
                 timeframe=timeframe,
                 since=cursor_ms,
-                limit=page_limit,
+                limit=page_rows,
             )
             if not rows:
                 break
             previous_cursor = cursor_ms
             for row in rows:
                 timestamp_ms = int(row[0])
-                if cursor_ms <= timestamp_ms <= end_ms:
+                if start_ms <= timestamp_ms <= end_ms:
                     rows_by_timestamp[timestamp_ms] = row
             cursor_ms = int(rows[-1][0]) + duration_ms
             if cursor_ms <= previous_cursor:

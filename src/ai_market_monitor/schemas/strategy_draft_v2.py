@@ -214,6 +214,159 @@ FORMULA_CONTRACTS: dict[FormulaKind, FormulaContract] = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class PercentageMeasurement:
+    """What one percentage formula actually measures, in one place.
+
+    A formula name is a *measurement*, not a label: ``open_to_close`` means "compare
+    this candle's close with this candle's open". Until this table existed, four
+    modules each wrote that meaning out again — the Builder, the Setup Chat schema, the
+    typed-message compiler and the runtime — and one of them wrote **nothing**. The
+    Builder and the canvas stored only ``{"formula": "open_to_close"}``, so the runtime
+    fell back to comparing a candle's close with its own close and measured exactly
+    ``0.00%`` for every coin on every candle. A monitor asking for a 0.1% rise could
+    never fire, and nothing anywhere reported a problem.
+
+    So the measurement is defined once, here, beside the contract that says what a
+    formula may carry. Producers ask for the parameters to store; the runtime asks what
+    to read. Neither writes its own copy.
+    """
+
+    #: The name the stored DSL uses for this formula. Shorter than the ``FormulaKind``
+    #: value because the runtime operand has always spelled it this way.
+    runtime_name: str
+    #: The candle field the move is measured **from**. ``None`` means only the trader
+    #: can say — see :attr:`reference_is_chosen`.
+    reference_field: str | None
+    #: The candle field the move is measured **to**.
+    current_field: str
+    #: Both readings come from the newest candle. A close-to-close move does not: its
+    #: reference is an earlier candle, so it reads across ``lookback`` bars.
+    same_candle: bool
+    #: Closed candles between the reference reading and the current one, when the
+    #: trader states no window of their own.
+    default_lookback: int = 1
+    #: The trader may name the reading the move ends on ("from the open to the high").
+    current_is_chosen: bool = False
+    #: The trader must name the earlier price the move starts from. A formula with this
+    #: set and nothing stated is refused rather than measured against a default — the
+    #: default was ``close``, which made the measurement zero.
+    reference_is_chosen: bool = False
+
+
+#: Every percentage formula and the exact move it measures. One owner.
+PERCENTAGE_MEASUREMENTS: dict[FormulaKind, PercentageMeasurement] = {
+    FormulaKind.OPEN_TO_CLOSE_PERCENTAGE: PercentageMeasurement(
+        runtime_name="open_to_close",
+        reference_field="open",
+        current_field="close",
+        same_candle=True,
+        current_is_chosen=True,
+    ),
+    FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE: PercentageMeasurement(
+        runtime_name="close_to_close",
+        reference_field="close",
+        current_field="close",
+        same_candle=False,
+    ),
+    FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE: PercentageMeasurement(
+        runtime_name="reference_to_current",
+        reference_field=None,
+        current_field="close",
+        same_candle=False,
+        current_is_chosen=True,
+        reference_is_chosen=True,
+    ),
+    FormulaKind.HIGH_TO_LOW_PERCENTAGE: PercentageMeasurement(
+        runtime_name="high_to_low",
+        reference_field="high",
+        current_field="low",
+        same_candle=True,
+    ),
+    FormulaKind.LOW_TO_HIGH_PERCENTAGE: PercentageMeasurement(
+        runtime_name="low_to_high",
+        reference_field="low",
+        current_field="high",
+        same_candle=True,
+    ),
+}
+
+#: ``FormulaKind`` → the name the stored DSL uses. Replaces four hand-written copies.
+RUNTIME_NAME_BY_FORMULA: dict[FormulaKind, str] = {
+    formula: measurement.runtime_name
+    for formula, measurement in PERCENTAGE_MEASUREMENTS.items()
+}
+
+#: The other direction, for readers of already-stored rules.
+FORMULA_BY_RUNTIME_NAME: dict[str, FormulaKind] = {
+    measurement.runtime_name: formula
+    for formula, measurement in PERCENTAGE_MEASUREMENTS.items()
+}
+
+#: Every spelling of a percentage formula a stored operand may carry. Both are accepted
+#: because both have been written to the database: the runtime name by the compiler and
+#: the ``FormulaKind`` value by earlier drafts.
+PERCENTAGE_FORMULA_NAMES: frozenset[str] = frozenset(
+    {*FORMULA_BY_RUNTIME_NAME, *(formula.value for formula in PERCENTAGE_MEASUREMENTS)}
+)
+
+
+def measurement_for(name: str | FormulaKind | None) -> PercentageMeasurement | None:
+    """The measurement a formula name stands for, or ``None`` if it names none.
+
+    Accepts either spelling — ``open_to_close`` or ``open_to_close_percentage`` — so a
+    caller never has to know which one the row it is holding was written with.
+    """
+
+    if name is None:
+        return None
+    raw = str(name)
+    formula = FORMULA_BY_RUNTIME_NAME.get(raw)
+    if formula is None:
+        try:
+            formula = FormulaKind(raw)
+        except ValueError:
+            return None
+    return PERCENTAGE_MEASUREMENTS.get(formula)
+
+
+def percentage_runtime_parameters(
+    formula: FormulaKind,
+    *,
+    reference_field: str | None = None,
+    current_field: str | None = None,
+    lookback: int | None = None,
+) -> dict[str, _CapabilityParameterValue]:
+    """Everything a producer must store so the runtime can measure this formula.
+
+    The stated arguments are the trader's own words and win where the formula leaves
+    the choice open. Where it does not — a high-to-low move is measured high to low —
+    the formula's own fields are used, because a stored field that disagreed with the
+    formula name would be two answers to one question.
+    """
+
+    measurement = PERCENTAGE_MEASUREMENTS[formula]
+    resolved_reference = (
+        reference_field
+        if measurement.reference_is_chosen and reference_field
+        else measurement.reference_field
+    )
+    resolved_current = (
+        current_field
+        if measurement.current_is_chosen and current_field
+        else measurement.current_field
+    )
+    parameters: dict[str, _CapabilityParameterValue] = {
+        "formula": measurement.runtime_name,
+        "current_field": resolved_current,
+        "lookback": int(lookback) if lookback is not None else measurement.default_lookback,
+        "scale": "percent",
+    }
+    if resolved_reference is not None:
+        parameters["reference_field"] = resolved_reference
+    return parameters
+
+
 class OperandV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -27,7 +27,6 @@ from ai_market_monitor.db.models.enums import (
     AlertType,
     ConnectionStatus,
     DeliveryStatus,
-    ScanJobStatus,
     StrategyStatus,
     SubscriptionStatus,
     TrialStatus,
@@ -35,6 +34,7 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.engine.dedup import stable_event_hash
 from ai_market_monitor.services.entitlements import PlanCatalogService
+from ai_market_monitor.services.monitor_scan_state import CHECK_FINISHED_STATUSES
 
 QUALIFYING_ALERT_TYPES = {
     AlertType.FORMING,
@@ -684,7 +684,10 @@ class TrialLifecycleService:
                 Strategy.user_id == trial.user_id,
                 ScanJob.scheduled_for >= cycle.starts_at,
                 ScanJob.scheduled_for < cycle.ends_at,
-                ScanJob.status.in_([ScanJobStatus.SUCCEEDED, ScanJobStatus.PARTIAL]),
+                # The same list the dashboard reads, imported rather than repeated. Two
+                # copies of "which states mean the market was really read" is how one
+                # screen counted a canceled job as a check and the next one did not.
+                ScanJob.status.in_(CHECK_FINISHED_STATUSES),
             )
         )
         if total_jobs:

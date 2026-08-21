@@ -128,10 +128,13 @@ from ai_market_monitor.services.product_language import (
     gap_in_words,
     how_long_ago,
     how_often,
+    monitor_issue_words,
+    monitor_working_words,
     number_in_words,
     opportunity_presentation,
     watchlist_presentation,
     why_no_message,
+    why_not_sent,
 )
 from ai_market_monitor.services.risk_disclaimer import (
     has_accepted as has_accepted_risk_note,
@@ -386,7 +389,7 @@ def _watchlist_view(item: dict, *, scanning_enabled: bool) -> dict:
 
     strategy = item["strategy"]
     health = item["health"]
-    scan = item["latest_scan"]
+    scan_state = item["scan_state"]
     methodology = item["methodology"]
     blocker = item["main_bottleneck"]
 
@@ -394,13 +397,26 @@ def _watchlist_view(item: dict, *, scanning_enabled: bool) -> dict:
         strategy.status.value,
         has_approved_version=bool(strategy.active_version_id),
     )
-    score = int(round(float(getattr(health, "score", 0) or 0)))
+    # `edge_health` returns a plain dictionary, and this read used `getattr`. `getattr`
+    # on a dictionary never finds a key, so the score read 0 for every monitor in the
+    # product and the issue sentence read `None` — which is why every card that had ever
+    # finished a check said "Needs a look. Most checks are not arriving.", including one
+    # whose 1419 checks had all arrived. Nothing failed; the default was simply wrong.
+    #
+    # It is read as the mapping it is, so a payload that stops carrying these keys
+    # breaks loudly here instead of quietly scoring every monitor zero.
+    score = int(round(float(health["score"] or 0)))
 
     # "Has it ever looked?" is answered by a check that *finished*, never by the mere
     # existence of a job row. A queued, running or failed job is a row whose
     # `completed_at` is still empty, so reading the row alone answered "yes" for a
     # monitor that had never produced a single reading — and then scored it.
-    checked_at = getattr(scan, "completed_at", None) if scan is not None else None
+    #
+    # Which row that is, is not this page's decision either. It is
+    # `services/monitor_scan_state.py`, because the newest row and the last finished
+    # check are two different rows on any monitor that is running: the newest one is the
+    # check still in progress, and reading it said "Not looked yet" forever.
+    checked_at = scan_state.last_checked_at
 
     # "Is it working?" is one question with three honest answers, and the third one —
     # "it has not looked yet" — is the one the older page could not say. It showed a
@@ -412,26 +428,34 @@ def _watchlist_view(item: dict, *, scanning_enabled: bool) -> dict:
             "label": "Not looked yet",
             "detail": first_check_words(
                 scanning_enabled=scanning_enabled,
-                check_started=scan is not None,
+                # "The first check is running now" is only true while one really is
+                # queued or running. A job that failed and left nothing behind is a row
+                # that exists, and it used to make the page promise a check in progress.
+                check_started=scan_state.is_checking_now,
             ),
         }
-    elif score >= 80:
-        working = {
-            "tone": "success",
-            "label": "Working well",
-            "detail": "Every check it needs is arriving.",
-        }
-    elif score >= 50:
-        working = {
-            "tone": "warning",
-            "label": "Working, with a gap",
-            "detail": getattr(health, "main_issue", None) or "Some checks are not arriving.",
-        }
     else:
+        # Which of the three answers the score means is decided in `product_language`,
+        # not here. The weekly note in the notification list answers the same question
+        # about the same monitor, and it used to answer it with "Edge Health: 40/100."
+        said = monitor_working_words(score)
         working = {
-            "tone": "danger",
-            "label": "Needs a look",
-            "detail": getattr(health, "main_issue", None) or "Most checks are not arriving.",
+            "tone": said.tone,
+            "label": said.label,
+            "detail": (
+                "Every check it needs is arriving."
+                if said.tone == "success"
+                # In the product's own words, never the health payload's. Its sentence
+                # is written for an engineer reading the cockpit — "Average recorded
+                # latency is 653784 ms." — and this page is read by a beginner.
+                else monitor_issue_words(
+                    health["main_issue_component"],
+                    # Whether a blocking rule is known changes the answer completely, and
+                    # the payload is the side that knows. Without it the card told people
+                    # to wait for history they already had.
+                    blocker_known=bool(health.get("main_issue_blocker_known")),
+                )
+            ),
         }
 
     return {
@@ -1258,7 +1282,14 @@ async def opportunities_page(
             # read is not an answer, and inventing one here would be worse than silence.
             view["can_ask_why"] = False
             continue
-        answer = why_no_message(record.get("primary_category"))
+        # The exact code the refusing gate wrote down, when there is one. Its category
+        # only says "we held the message back"; the code says which of the reader's own
+        # settings did it, and each of those needs different advice. Falling back to the
+        # category keeps every older record answerable.
+        withheld = record.get("withheld_code")
+        answer = (
+            why_not_sent(withheld) if withheld else why_no_message(record.get("primary_category"))
+        )
         view["why"] = {
             "headline": answer.headline,
             "meaning": answer.meaning,

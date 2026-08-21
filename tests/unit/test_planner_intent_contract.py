@@ -1131,11 +1131,17 @@ _BOOLEAN_ONLY_CAPABILITY_KEYS = tuple(
     )
 )
 
+#: Price-action capabilities that really do return a measured number.
+#:
+#: `percent_change_lookback` was listed here and does not belong: the reading it names
+#: answers yes or no ("did the price move that far?"), and the trader's percentage is
+#: its own `threshold_percent` setting. Offering it gt/gte/lt/lte gave the comparator a
+#: yes/no to compare with a number, which Python reads as 1 or 0, so the answers came
+#: out backwards. It is a boolean card and is covered by the slice above instead.
 _NUMERIC_PRICE_ACTION_KEYS = (
     "level_strength_score",
     "level_distance_percent",
     "dynamic_trendline",
-    "percent_change_lookback",
 )
 
 
@@ -1260,25 +1266,29 @@ def test_candle_pattern_condition_without_a_stated_comparator_compiles() -> None
     assert condition.operator == Comparator.IS_TRUE
 
 
-def test_capability_condition_that_needs_a_comparator_still_asks_for_one() -> None:
+@pytest.mark.parametrize("capability_key", _NUMERIC_PRICE_ACTION_KEYS)
+def test_capability_condition_that_needs_a_comparator_still_asks_for_one(
+    capability_key: str,
+) -> None:
     """The carved-out numeric exception must not silently regress to is_true.
 
-    percent_change_lookback shares operand_kind="price_action" with the sweep and
-    candle-pattern capabilities above, but it measures a percentage: "up 5%" is not a
-    yes/no pattern, so leaving the comparator unstated must still fail closed exactly
-    as it did before this fix.
+    These share operand_kind="price_action" with the sweep and candle-pattern
+    capabilities above, but each returns a *measured number* — a score, a distance, a
+    slope. Leaving the comparator unstated must still fail closed.
+
+    The example used to be percent_change_lookback, which turned out not to be one of
+    these at all: its reading answers yes or no and its percentage is its own
+    `threshold_percent` setting. Parametrized over the whole numeric slice now, so the
+    rule is asserted for every such card rather than for one hand-picked example.
     """
 
-    message = "Find coins up 5% today"
+    message = "Alert me when the level score is high"
     envelope = _envelope(
         message,
         {
             "action": "add_condition",
             "condition": {
-                "capability_key": "percent_change_lookback",
-                # "up" grounds this role independently of the comparator question this
-                # test is about; see the equivalent note in the candle-pattern test above.
-                "movement_direction": "up",
+                "capability_key": capability_key,
                 "trigger_timeframe": "15m",
                 "threshold": 5,
             },
@@ -1289,7 +1299,7 @@ def test_capability_condition_that_needs_a_comparator_still_asks_for_one() -> No
             envelope,
             draft=StrategyDraftV2(),
             message=message,
-            source_turn_id="turn-percent-no-comparator",
+            source_turn_id="turn-numeric-no-comparator",
             shortlist=build_capability_shortlist(message),
         )
     assert failure.value.code == "INTENT_INCOMPLETE"

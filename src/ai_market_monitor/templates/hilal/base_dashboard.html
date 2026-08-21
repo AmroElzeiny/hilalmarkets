@@ -5,7 +5,7 @@
   {#- First script on the page, deliberately. It puts a time limit on every request this
       product sends to its own server, and it can only do that for a request sent after
       it has run. See `static/hm-request.js`. -#}
-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260820-canvas-only"></script>
+  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260820-cards"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
@@ -33,22 +33,22 @@
   <meta name="description" content="Hilal Markets - Shariah-screened crypto spot intelligence and guided monitoring.">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260820-canvas-only">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260820-cards">
   {# One owner for the cookie banner and its settings window, which this template includes below. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260820-canvas-only">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260820-canvas-only">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260820-cards">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260820-cards">
   {% block page_styles %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260820-canvas-only">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260820-canvas-only">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260820-cards">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260820-cards">
   {#- The shell — the side menu and the topbar — after the sheet it replaces, because it
       is the one owner of both and nothing above may still be describing them. -#}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260820-canvas-only">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260820-canvas-only">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260820-cards">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260820-cards">
   {#- A page whose styles must win over the shared dashboard sheets loads them here.
       `page_styles` above is deliberately kept before them for pages that only add. -#}
   {% block page_styles_late %}{% endblock %}
   {% if hilal_chat|default(false) and settings.hilal_chat_enabled %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260820-canvas-only">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260820-cards">
   {% endif %}
 </head>
 {#- The page guide's identity is decided on the server, not parsed from the URL. -#}
@@ -135,19 +135,19 @@
   {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
   {% include "hilal/partials/cookie_banner.html" %}
   <div class="dash-toast" id="dash-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260820-canvas-only"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260820-canvas-only"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260820-cards"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260820-cards"></script>
   {#- The side menu and the topbar. One owner for their state: `hilalmarkets.js` and
       `dashboard.js` each used to run their own copy of the minimize logic against the
       same class, from two different stored values. -#}
-  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260820-canvas-only"></script>
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260820-canvas-only"></script>
-  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260820-canvas-only"></script>
-  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260820-canvas-only"></script>{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260820-canvas-only"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260820-canvas-only" defer></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260820-canvas-only" defer></script>
-  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260820-canvas-only"></script>{% endif %}
+  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260820-cards"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260820-cards"></script>
+  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260820-cards"></script>
+  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260820-cards"></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260820-cards"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260820-cards" defer></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260820-cards" defer></script>
+  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260820-cards"></script>{% endif %}
   <script>
     (() => {
       const pageStatus = document.querySelector("[data-page-status]");

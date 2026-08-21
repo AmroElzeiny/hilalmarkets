@@ -25,6 +25,7 @@ from ai_market_monitor.schemas.strategy import (
     UniverseDefinition,
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import (
+    RUNTIME_NAME_BY_FORMULA,
     CapabilityParameterValue,
     ConditionNodeType,
     ConditionNodeV2,
@@ -43,12 +44,11 @@ class StrategyV2CompileError(ValueError):
         self.code = code
 
 
+#: What each formula calls itself in the stored rule. The percentage half is read from
+#: the table that owns what those formulas measure, so the name and the measurement can
+#: never be changed apart from one another.
 _FORMULA_RUNTIME_NAME = {
-    FormulaKind.OPEN_TO_CLOSE_PERCENTAGE: "open_to_close",
-    FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE: "close_to_close",
-    FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE: "reference_to_current",
-    FormulaKind.HIGH_TO_LOW_PERCENTAGE: "high_to_low",
-    FormulaKind.LOW_TO_HIGH_PERCENTAGE: "low_to_high",
+    **RUNTIME_NAME_BY_FORMULA,
     FormulaKind.PREVIOUS_CANDLE_REFERENCE: "previous_candle",
     FormulaKind.FIXED_REFERENCE_LEVEL: "fixed_reference_level",
     FormulaKind.LOOKBACK_REFERENCE_LEVEL: "lookback_reference_level",

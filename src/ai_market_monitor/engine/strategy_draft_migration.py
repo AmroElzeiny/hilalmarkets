@@ -11,6 +11,7 @@ from ai_market_monitor.schemas.strategy import (
     StrategyDirection,
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import (
+    FORMULA_BY_RUNTIME_NAME,
     ConditionNodeType,
     ConditionNodeV2,
     DraftMode,
@@ -191,20 +192,20 @@ def _migrate_operand(operand: Any) -> OperandV2:
     )
 
 
+#: A stored formula name back to the formula it is. The percentage half is read from
+#: the table that owns those names rather than copied out again.
+_FORMULA_BY_STORED_NAME: dict[str, FormulaKind] = {
+    **FORMULA_BY_RUNTIME_NAME,
+    "previous_candle": FormulaKind.PREVIOUS_CANDLE_REFERENCE,
+    "fixed_reference_level": FormulaKind.FIXED_REFERENCE_LEVEL,
+    "lookback_reference_level": FormulaKind.LOOKBACK_REFERENCE_LEVEL,
+    "cross": FormulaKind.CROSS,
+    "sweep_and_reclaim": FormulaKind.SWEEP_AND_RECLAIM,
+}
+
+
 def _formula_kind(value: Any, capability_key: str | None) -> FormulaKind:
-    mapping = {
-        "open_to_close": FormulaKind.OPEN_TO_CLOSE_PERCENTAGE,
-        "close_to_close": FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE,
-        "reference_to_current": FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE,
-        "high_to_low": FormulaKind.HIGH_TO_LOW_PERCENTAGE,
-        "low_to_high": FormulaKind.LOW_TO_HIGH_PERCENTAGE,
-        "previous_candle": FormulaKind.PREVIOUS_CANDLE_REFERENCE,
-        "fixed_reference_level": FormulaKind.FIXED_REFERENCE_LEVEL,
-        "lookback_reference_level": FormulaKind.LOOKBACK_REFERENCE_LEVEL,
-        "cross": FormulaKind.CROSS,
-        "sweep_and_reclaim": FormulaKind.SWEEP_AND_RECLAIM,
-    }
-    return mapping.get(str(value), FormulaKind.CAPABILITY)
+    return _FORMULA_BY_STORED_NAME.get(str(value), FormulaKind.CAPABILITY)
 
 
 def _legacy_condition_blocks(
@@ -218,19 +219,7 @@ def _legacy_condition_blocks(
         ]
     parameters = {**node.resolved_parameters, **node.left.parameters}
     formula = str(parameters.get("formula") or "")
-    known_formulas = {
-        "open_to_close",
-        "close_to_close",
-        "reference_to_current",
-        "high_to_low",
-        "low_to_high",
-        "previous_candle",
-        "fixed_reference_level",
-        "lookback_reference_level",
-        "cross",
-        "sweep_and_reclaim",
-    }
-    if formula in known_formulas or node.capability_key:
+    if formula in _FORMULA_BY_STORED_NAME or node.capability_key:
         return []
     return [
         UnsupportedRequirementV2(

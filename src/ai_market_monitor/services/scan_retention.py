@@ -35,24 +35,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import ScanJob
 from ai_market_monitor.db.models.enums import ScanJobStatus
+from ai_market_monitor.services.monitor_scan_state import (
+    CHECK_IN_FLIGHT_STATUSES,
+    CHECK_TERMINAL_STATUSES,
+)
 
 logger = structlog.get_logger(__name__)
 
 #: A job in one of these states is finished. Nothing will write to it again, so it is
 #: eligible for removal once it is old enough.
-TERMINAL_STATUSES: frozenset[ScanJobStatus] = frozenset(
-    {
-        ScanJobStatus.SUCCEEDED,
-        ScanJobStatus.PARTIAL,
-        ScanJobStatus.FAILED,
-        ScanJobStatus.CANCELED,
-    }
-)
+#:
+#: Taken from `services/monitor_scan_state.py` rather than listed here. This file wrote
+#: the same two lists out by hand, and one of them — "still claimed by the system" — is
+#: the same set the dashboard reads to say a check is running now. Two copies is how the
+#: two drift.
+TERMINAL_STATUSES: frozenset[ScanJobStatus] = frozenset(CHECK_TERMINAL_STATUSES)
 
 #: A job in one of these states is still claimed by the system. Only age proves otherwise.
-PENDING_STATUSES: frozenset[ScanJobStatus] = frozenset(
-    {ScanJobStatus.QUEUED, ScanJobStatus.RUNNING}
-)
+PENDING_STATUSES: frozenset[ScanJobStatus] = frozenset(CHECK_IN_FLIGHT_STATUSES)
 
 #: Written onto a job that aged out of pending, so the reason survives in the row itself
 #: rather than only in a log line that rotates away.

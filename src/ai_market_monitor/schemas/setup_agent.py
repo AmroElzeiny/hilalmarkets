@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, TypedDict
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -31,10 +31,13 @@ from ai_market_monitor.schemas.setup_authorization import (
     ClarificationContract,
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import (
+    FORMULA_BY_RUNTIME_NAME,
     STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
     FormulaKind,
     RequirementAssessmentV2,
     RequirementStateV2,
+    measurement_for,
+    percentage_runtime_parameters,
 )
 from ai_market_monitor.schemas.strict_mode import StrictModel as _StrictModel
 
@@ -194,6 +197,63 @@ def _canonical_formula_identifier(value: object) -> object:
     return next(iter(found)) if len(found) == 1 else value
 
 
+#: The candle readings a trader may name as the start of a "move away from" rule.
+_STATED_REFERENCE_FIELDS = frozenset(
+    {"open", "high", "low", "close", "swing_high", "swing_low"}
+)
+
+
+class _StatedReference(TypedDict, total=False):
+    reference_field: str
+    current_field: str
+    lookback: int
+
+
+def _stated_percentage_reference(
+    raw_node: dict[str, object],
+    operands: list[object],
+) -> _StatedReference:
+    """What the trader's own draft says about where a percentage move is measured from.
+
+    Kept rather than dropped. The earlier version of this function replaced the whole
+    operand with a fixed dictionary, so a reference the trader really did state — "from
+    yesterday's open", "from the swing high" — was thrown away before the rule ever ran.
+    """
+
+    stated = _StatedReference()
+    raw_lookback = raw_node.get("lookback")
+    if isinstance(raw_lookback, int) and raw_lookback >= 1:
+        stated["lookback"] = raw_lookback
+    for raw_operand in operands:
+        if not isinstance(raw_operand, dict):
+            continue
+        parameters = raw_operand.get("parameters")
+        if not isinstance(parameters, dict):
+            continue
+        reference = parameters.get("reference_field")
+        if (
+            "reference_field" not in stated
+            and isinstance(reference, str)
+            and reference in _STATED_REFERENCE_FIELDS
+        ):
+            stated["reference_field"] = reference
+        current = parameters.get("current_field")
+        if (
+            "current_field" not in stated
+            and isinstance(current, str)
+            and current in _STATED_REFERENCE_FIELDS
+        ):
+            stated["current_field"] = current
+        operand_lookback = parameters.get("lookback")
+        if (
+            "lookback" not in stated
+            and isinstance(operand_lookback, int)
+            and operand_lookback >= 1
+        ):
+            stated["lookback"] = operand_lookback
+    return stated
+
+
 def _canonicalize_core_operand_metadata(
     raw_node: dict[str, object],
 ) -> list[object]:
@@ -209,48 +269,29 @@ def _canonicalize_core_operand_metadata(
         # Let ConditionNodeV2 reject the malformed formula. Canonical metadata must
         # never throw before schema validation can produce the classified failure.
         return list(operands)
-    percentage_formulas: dict[object, dict[str, object]] = {
-        "open_to_close_percentage": {
-            "formula": "open_to_close",
-            "reference_field": "open",
-            "current_field": "close",
-            "lookback": 1,
-            "scale": "percent",
-            "closed_only": True,
-        },
-        "close_to_close_percentage": {
-            "formula": "close_to_close",
-            "reference_field": "close",
-            "current_field": "close",
-            "lookback": 1,
-            "scale": "percent",
-            "closed_only": True,
-        },
-        "reference_to_current_percentage": {
-            "formula": "reference_to_current",
-            "scale": "percent",
-        },
-        "high_to_low_percentage": {
-            "formula": "high_to_low",
-            "reference_field": "high",
-            "current_field": "low",
-            "scale": "percent",
-        },
-        "low_to_high_percentage": {
-            "formula": "low_to_high",
-            "reference_field": "low",
-            "current_field": "high",
-            "scale": "percent",
-        },
-    }
-    if formula in percentage_formulas:
+    # What each percentage formula measures is read from the one table that owns it.
+    # This function used to hold its own copy, and that copy said nothing at all about
+    # `reference_to_current` — no earlier price, no window — so the runtime compared a
+    # candle's close with its own close and the rule measured 0% for ever.
+    measurement = measurement_for(formula)
+    if measurement is not None:
+        stated = _stated_percentage_reference(raw_node, operands)
         return [
             {
                 "role": "measured_value",
                 "kind": "market_metric",
                 "name": "percentage_change",
                 "unit": "percent",
-                "parameters": percentage_formulas[formula],
+                "parameters": {
+                    **percentage_runtime_parameters(
+                        FORMULA_BY_RUNTIME_NAME.get(str(formula))
+                        or FormulaKind(str(formula)),
+                        reference_field=stated.get("reference_field"),
+                        current_field=stated.get("current_field"),
+                        lookback=stated.get("lookback"),
+                    ),
+                    "closed_only": True,
+                },
             }
         ]
     if formula == "sweep_and_reclaim":
@@ -276,12 +317,7 @@ def _canonicalize_core_operand_metadata(
             parameters = (
                 dict(operand["parameters"]) if isinstance(operand.get("parameters"), dict) else {}
             )
-            if formula in percentage_formulas:
-                if not operand.get("field") and not operand.get("name"):
-                    operand["name"] = "percentage_change"
-                for key, value in percentage_formulas[formula].items():
-                    parameters.setdefault(key, value)
-            elif formula == "sweep_and_reclaim":
+            if formula == "sweep_and_reclaim":
                 if not operand.get("field") and not operand.get("name"):
                     operand["name"] = "sweep_and_reclaim"
                 parameters.setdefault("pierce_required", True)

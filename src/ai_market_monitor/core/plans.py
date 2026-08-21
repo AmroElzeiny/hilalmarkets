@@ -1,6 +1,9 @@
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
+
+from ai_market_monitor.schemas.timeframes import TIMEFRAME_MINUTES
 
 UNLIMITED_SYMBOL_CAP = 100_000
 PUBLIC_PLAN_CODES = ("demo", "trader", "pro")
@@ -635,13 +638,31 @@ def get_plan_definition(code: str) -> PlanDefinition:
         raise ValueError(f"Unknown plan code: {code}") from exc
 
 
+#: A period written the way this product writes them: a count and a unit, nothing else.
+_PERIOD_PATTERN = re.compile(r"^(\d+)([mhd])$")
+
+_UNIT_MINUTES: dict[str, int] = {"m": 1, "h": 60, "d": 1440}
+
+
 def timeframe_to_minutes(timeframe: str) -> int:
-    unit = timeframe[-1]
-    value = int(timeframe[:-1])
-    if unit == "m":
-        return value
-    if unit == "h":
-        return value * 60
-    if unit == "d":
-        return value * 1440
-    raise ValueError(f"Unsupported timeframe: {timeframe}")
+    """How many minutes a period covers, for any period this product writes.
+
+    Deliberately wider than :func:`ai_market_monitor.engine.data_freshness.timeframe_minutes`,
+    and the two answer different questions. That one asks "how long is a candle we can
+    actually evaluate", so it must refuse anything outside the executable list. This one
+    also has to size a scan interval and a plan limit, and those are written in periods
+    like ``3d`` that are real lengths of time but not candles anybody trades on.
+
+    What both refuse is a period that is not a period. The copy this replaces ended in a
+    bare ``return 1440``, so ``banana`` and a typo were sized as a day without a word.
+    Where the two overlap they agree, and a test asserts that for every supported period.
+    """
+
+    normalized = str(timeframe or "").strip().casefold()
+    known = TIMEFRAME_MINUTES.get(normalized)
+    if known is not None:
+        return known
+    match = _PERIOD_PATTERN.match(normalized)
+    if match is None:
+        raise ValueError(f"Unsupported timeframe: {timeframe}")
+    return int(match.group(1)) * _UNIT_MINUTES[match.group(2)]

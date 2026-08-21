@@ -45,14 +45,20 @@ from ai_market_monitor.engine.builder_contract import (
     builder_mechanics,
     find_mechanic,
 )
+from ai_market_monitor.engine.reference_levels import (
+    lookback_level_name,
+    previous_candle_level_name,
+)
 from ai_market_monitor.schemas.setup_authorization import AuthorizedPatchOperation
 from ai_market_monitor.schemas.strategy import Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
+    PERCENTAGE_MEASUREMENTS,
     ConditionNodeType,
     ConditionNodeV2,
     FormulaKind,
     MovementDirection,
     OperandV2,
+    percentage_runtime_parameters,
 )
 
 
@@ -78,15 +84,14 @@ class BuilderPlan:
     rendered: str
 
 
-#: How each percentage formula names itself to the runtime. Taken from the compiler's own
-#: table rather than written out again.
-_PERCENTAGE_RUNTIME: dict[FormulaKind, str] = {
-    FormulaKind.OPEN_TO_CLOSE_PERCENTAGE: "open_to_close",
-    FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE: "close_to_close",
-    FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE: "reference_to_current",
-    FormulaKind.HIGH_TO_LOW_PERCENTAGE: "high_to_low",
-    FormulaKind.LOW_TO_HIGH_PERCENTAGE: "low_to_high",
-}
+#: The percentage formulas, read from the one table that says what each one measures.
+#:
+#: This used to be a hand-written copy of the compiler's names, and it stored *only* the
+#: name — no reference field, no current field. The runtime then fell back to comparing
+#: a candle's close with its own close, so every percentage card built here measured
+#: 0.00% forever. Nothing is written out again now: `percentage_runtime_parameters`
+#: supplies the whole measurement.
+_PERCENTAGE_RUNTIME: frozenset[FormulaKind] = frozenset(PERCENTAGE_MEASUREMENTS)
 
 _PRICE_OPERAND_FORMULAS: frozenset[FormulaKind] = frozenset(
     {
@@ -173,6 +178,14 @@ def offered_mechanics(
     )
 
 
+#: Shapes a required free-text field really expects, for the availability probe only.
+#: Never stored, never shown; it exists so the probe can answer its own question.
+_PROBE_TEXT: dict[str, str] = {
+    "timestamp": "2026-01-01T00:00:00+00:00",
+    "timezone": "UTC",
+}
+
+
 def _probe_values(mechanic: BuilderMechanic) -> dict[str, Any]:
     """Plausible values for every field, used only to test that the form can build."""
 
@@ -188,6 +201,12 @@ def _probe_values(mechanic: BuilderMechanic) -> dict[str, Any]:
             values[parameter.name] = float(parameter.minimum if parameter.minimum else 1)
         elif parameter.kind == "boolean":
             values[parameter.name] = False
+        elif parameter.required:
+            # A required field this probe cannot fill is not evidence that the form is
+            # broken — it is evidence that the probe never learned to fill it. Text and
+            # timezone fields were missing here, so every mechanic with a required one
+            # was quietly marked "needs the assistant" and vanished from the Builder.
+            values[parameter.name] = _PROBE_TEXT.get(parameter.name, "probe")
     if mechanic.operators:
         values["comparator"] = mechanic.operators[0].value
     if mechanic.directions and mechanic.parameter("direction") is not None:
@@ -465,13 +484,29 @@ def _build(
         payload["node_id"] = node_id
 
     if formula in _PERCENTAGE_RUNTIME:
+        measurement = PERCENTAGE_MEASUREMENTS[formula]
+        stated_lookback = read.get("lookback")
+        parameters = percentage_runtime_parameters(
+            formula,
+            reference_field=(
+                str(read["reference_field"]) if read.get("reference_field") else None
+            ),
+            lookback=int(stated_lookback) if stated_lookback is not None else None,
+        )
         payload["threshold"] = read["threshold"]
+        if stated_lookback is not None:
+            payload["lookback"] = int(stated_lookback)
+        if measurement.reference_is_chosen:
+            payload["reference_definition"] = (
+                f"{parameters['reference_field']} of the candle "
+                f"{parameters['lookback']} back"
+            )
         payload["operands"] = [
             OperandV2(
                 role="measured_value",
                 kind="market_metric",
                 name="percentage_change",
-                parameters={"formula": _PERCENTAGE_RUNTIME[formula]},
+                parameters=parameters,
             )
         ]
     elif formula is FormulaKind.SWEEP_AND_RECLAIM:
@@ -503,7 +538,9 @@ def _build(
             OperandV2(
                 role="right",
                 kind="reference",
-                name=f"lookback_{level}",
+                # Named by the module that also reads it, so a card can never store a
+                # level the runtime has no answer for.
+                name=lookback_level_name(level),
                 parameters={"lookback": int(read["lookback"]), "reference_field": level},
             ),
         ]
@@ -515,7 +552,7 @@ def _build(
             OperandV2(
                 role="right",
                 kind="reference",
-                name=f"previous_candle_{level}",
+                name=previous_candle_level_name(level),
                 parameters={"reference_field": level},
             ),
         ]
@@ -588,6 +625,13 @@ def render_condition_sentence(
     if formula in _PERCENTAGE_RUNTIME:
         side = DIRECTION_LABELS[direction][0]
         parts.append(f"price {side} by {comparison} {values['threshold']:g} percent")
+        if PERCENTAGE_MEASUREMENTS[formula].reference_is_chosen:
+            # Which earlier price, and how far back, is the measurement itself. Leaving
+            # it out of the sentence let a person approve "price up by at least 2
+            # percent" without ever being told what it was two percent away from.
+            parts.append(
+                f"from the {level} of the candle {int(values['lookback'])} back"
+            )
     elif formula is FormulaKind.SWEEP_AND_RECLAIM:
         parts.append(f"price sweeps the previous candle {level} and reclaims it")
     elif formula is FormulaKind.FIXED_REFERENCE_LEVEL:

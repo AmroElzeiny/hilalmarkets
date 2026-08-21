@@ -14,6 +14,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from ai_market_monitor.db.models.enums import ScanJobStatus
+from ai_market_monitor.engine.models import ensure_aware
+from ai_market_monitor.services.monitor_scan_state import (
+    CHECK_FINISHED_STATUSES,
+    CHECK_IN_FLIGHT_STATUSES,
+    NO_SCANS,
+    MonitorScanState,
+)
 from ai_market_monitor.services.product_language import (
     how_long_ago,
     watchlist_presentation,
@@ -199,7 +207,18 @@ def test_a_naive_time_is_not_read_as_a_different_hour(test_context):
     assert how_long_ago(naive, now=NOW) == "2 hours ago"
 
 
-def _never_finished_card(scan: object) -> dict:
+#: The shape `edge_health` really returns: a plain dictionary, not an object.
+#:
+#: These tests used a stand-in object with attributes, and the card read the payload
+#: with `getattr`. `getattr` never finds a dictionary key, so in production the score
+#: read 0 for every monitor and the issue sentence read nothing — while these tests, and
+#: only these tests, saw the number they had put there. A fake of the wrong shape is how
+#: a reader stays broken with its tests green.
+_HEALTH_HIGH = {"score": 95, "main_issue": "x", "main_issue_component": "Data coverage"}
+_HEALTH_LOW = {"score": 0, "main_issue": "x", "main_issue_component": "Data coverage"}
+
+
+def _never_finished_card(scan_state: object) -> dict:
     """One monitor whose most recent check, whatever state it is in, never finished."""
 
     class _Strategy:
@@ -215,8 +234,8 @@ def _never_finished_card(scan: object) -> dict:
         "strategy": _Strategy(),
         # A score high enough that reading it would produce "Working well" — so a test
         # that passes here cannot be passing because the score happened to be zero.
-        "health": type("H", (), {"score": 95, "main_issue": None})(),
-        "latest_scan": scan,
+        "health": _HEALTH_HIGH,
+        "scan_state": scan_state,
         "methodology": None,
         "main_bottleneck": None,
         "eligible_asset_count": 0,
@@ -224,24 +243,38 @@ def _never_finished_card(scan: object) -> dict:
     }
 
 
+def _unfinished(status: ScanJobStatus | None) -> MonitorScanState:
+    """The scanning state of a monitor that has never completed a check."""
+
+    if status is None:
+        return NO_SCANS
+    row = type("J", (), {"status": status, "completed_at": None, "scheduled_for": None})()
+    return MonitorScanState(
+        last_completed=None,
+        in_flight=row if status in CHECK_IN_FLIGHT_STATUSES else None,
+        latest=row,
+    )
+
+
 #: Every shape a most-recent check can have while never having produced a reading.
 #:
-#: `None` is only the easiest one. A queued, running, failed or abandoned job is a row
-#: that exists with an empty `completed_at`, and a reader that asks "is there a row?"
-#: instead of "did a check finish?" answers yes for all four.
+#: `None` is only the easiest one. A queued, running, failed or canceled job is a row
+#: that exists without a finished check behind it, and a reader that asks "is there a
+#: row?" instead of "did a check finish?" answers yes for all of them.
 _NO_FINISHED_CHECK = [
-    pytest.param(None, id="no-job-at-all"),
-    pytest.param(type("J", (), {"completed_at": None})(), id="queued"),
-    pytest.param(type("J", (), {"completed_at": None})(), id="running"),
-    pytest.param(type("J", (), {"completed_at": None})(), id="failed"),
-    pytest.param(type("J", (), {"completed_at": None})(), id="abandoned"),
+    pytest.param(_unfinished(None), id="no-job-at-all"),
+    *(
+        pytest.param(_unfinished(status), id=status.value)
+        for status in ScanJobStatus
+        if status not in CHECK_FINISHED_STATUSES
+    ),
 ]
 
 
-@pytest.mark.parametrize("scan", _NO_FINISHED_CHECK)
+@pytest.mark.parametrize("scan_state", _NO_FINISHED_CHECK)
 @pytest.mark.parametrize("scanning_enabled", [True, False])
 def test_a_list_that_never_finished_a_check_reports_nothing_rather_than_not_yet(
-    scan, scanning_enabled
+    scan_state, scanning_enabled
 ):
     """`last_checked` is empty until a check *finished*, never the string "Not yet".
 
@@ -259,7 +292,7 @@ def test_a_list_that_never_finished_a_check_reports_nothing_rather_than_not_yet(
     from ai_market_monitor.api.routers.dashboard_test import _watchlist_view
 
     view = _watchlist_view(
-        _never_finished_card(scan), scanning_enabled=scanning_enabled
+        _never_finished_card(scan_state), scanning_enabled=scanning_enabled
     )
 
     assert view["last_checked"] is None
@@ -271,8 +304,8 @@ def test_a_list_that_never_finished_a_check_reports_nothing_rather_than_not_yet(
     assert view["repair_id"] is None
 
 
-@pytest.mark.parametrize("scan", _NO_FINISHED_CHECK)
-def test_a_first_check_is_never_promised_while_nothing_is_checking(scan):
+@pytest.mark.parametrize("scan_state", _NO_FINISHED_CHECK)
+def test_a_first_check_is_never_promised_while_nothing_is_checking(scan_state):
     """"It has not checked for the first time" reads as *soon*, and soon can be false.
 
     While live scanning is switched off, no first check is coming for any monitor of any
@@ -282,13 +315,13 @@ def test_a_first_check_is_never_promised_while_nothing_is_checking(scan):
 
     from ai_market_monitor.api.routers.dashboard_test import _watchlist_view
 
-    off = _watchlist_view(_never_finished_card(scan), scanning_enabled=False)
+    off = _watchlist_view(_never_finished_card(scan_state), scanning_enabled=False)
     assert off["working"]["detail"] == (
         "Hilal Markets is not checking the market at the moment. "
         "Nothing is wrong with this list."
     )
 
-    on = _watchlist_view(_never_finished_card(scan), scanning_enabled=True)
+    on = _watchlist_view(_never_finished_card(scan_state), scanning_enabled=True)
     assert "not checking the market at the moment" not in on["working"]["detail"]
 
 
@@ -319,8 +352,8 @@ def test_a_waiting_fix_is_named_so_the_card_can_offer_it():
     view = _watchlist_view(
         {
             "strategy": _Strategy(),
-            "health": type("H", (), {"score": 0, "main_issue": None})(),
-            "latest_scan": None,
+            "health": _HEALTH_LOW,
+            "scan_state": NO_SCANS,
             "methodology": None,
             "main_bottleneck": None,
             "eligible_asset_count": 0,
@@ -383,8 +416,8 @@ def test_change_it_opens_the_canvas_on_that_monitor():
     view = _watchlist_view(
         {
             "strategy": _Strategy(),
-            "health": type("H", (), {"score": 0, "main_issue": None})(),
-            "latest_scan": None,
+            "health": _HEALTH_LOW,
+            "scan_state": NO_SCANS,
             "methodology": None,
             "main_bottleneck": None,
             "eligible_asset_count": 0,
@@ -405,3 +438,202 @@ def test_change_it_opens_the_canvas_on_that_monitor():
     questions = (root / "static/hm-watchlists-test.js").read_text(encoding="utf-8")
     assert "[data-w-edit]" in questions
     assert '/builder"' not in questions
+
+
+# --------------------------------------------------------------------------------
+# Through the real database, because the bug was in the query, not in the words.
+# --------------------------------------------------------------------------------
+
+
+async def _card_for(session, strategy):
+    """The Monitors card the product would build for this monitor, right now."""
+
+    from ai_market_monitor.api.routers.dashboard import _monitor_cards_context
+    from ai_market_monitor.api.routers.dashboard_test import _watchlist_view
+    from ai_market_monitor.db.models import User
+
+    user = await session.get(User, strategy.user_id)
+    cards = await _monitor_cards_context(session, user)
+    card = next(item for item in cards if item["strategy"].id == strategy.id)
+    return card, _watchlist_view(card, scanning_enabled=True)
+
+
+def _scan_job(version_id, *, status, created_at, completed_at, key):
+    from ai_market_monitor.db.models import ScanJob
+
+    return ScanJob(
+        strategy_version_id=version_id,
+        idempotency_key=key,
+        job_type="live",
+        status=status,
+        scheduled_for=created_at,
+        created_at=created_at,
+        completed_at=completed_at,
+        symbols_planned=119,
+        symbols_scanned=119,
+    )
+
+
+async def test_a_monitor_reports_the_finished_check_while_the_next_one_runs(test_context):
+    """The shape every live monitor is in, almost all of the time.
+
+    The scheduler queues the next check every interval, so the newest row is nearly
+    always the one still running. The page read that newest row, found no finishing time
+    on it and said "Not looked yet" — for hours, for days, about a monitor that had
+    finished a check every few minutes the whole time. This is that exact database.
+    """
+
+    from tests.integration.test_scanner_pipeline import _active_strategy
+
+    async with test_context["session_factory"]() as session:
+        strategy, version = await _active_strategy(session)
+        finished_at = datetime.now(UTC) - timedelta(minutes=6)
+        session.add(
+            _scan_job(
+                version.id,
+                status=ScanJobStatus.SUCCEEDED,
+                created_at=finished_at - timedelta(minutes=3),
+                completed_at=finished_at,
+                key="finished-check",
+            )
+        )
+        session.add(
+            _scan_job(
+                version.id,
+                status=ScanJobStatus.RUNNING,
+                created_at=datetime.now(UTC) - timedelta(minutes=1),
+                completed_at=None,
+                key="check-still-running",
+            )
+        )
+        await session.flush()
+
+        card, view = await _card_for(session, strategy)
+
+        # `ensure_aware` because SQLite gives the moment back without its timezone
+        # while PostgreSQL keeps it. The card reads whichever the database hands it.
+        assert ensure_aware(view["last_checked_exact"]) == finished_at
+        assert view["last_checked"] == how_long_ago(finished_at)
+        assert view["working"]["label"] != "Not looked yet"
+        # And the row still running is reported as what it is, on the older page.
+        assert card["last_check_label"] == "Running"
+        assert card["scan_state"].is_checking_now is True
+
+
+async def test_a_check_that_read_nothing_is_not_a_check(test_context):
+    """`failed` and `canceled` stamp a finishing time and read no market at all.
+
+    Counting them puts "Looked 3 minutes ago" on a monitor whose every attempt was
+    thrown away — the same untrue sentence as "Not looked yet", pointing the other way.
+    """
+
+    from tests.integration.test_scanner_pipeline import _active_strategy
+
+    for index, status in enumerate((ScanJobStatus.FAILED, ScanJobStatus.CANCELED)):
+        async with test_context["session_factory"]() as session:
+            strategy, version = await _active_strategy(session)
+            session.add(
+                _scan_job(
+                    version.id,
+                    status=status,
+                    created_at=datetime.now(UTC) - timedelta(minutes=5),
+                    completed_at=datetime.now(UTC) - timedelta(minutes=3),
+                    key=f"threw-it-away-{index}",
+                )
+            )
+            await session.flush()
+
+            _card, view = await _card_for(session, strategy)
+
+            assert view["last_checked_exact"] is None, status
+            assert view["last_checked"] is None, status
+            assert view["working"]["label"] == "Not looked yet", status
+
+
+async def test_the_page_never_shows_a_beginner_the_health_payloads_own_words(test_context):
+    """The card says what is wrong in the product's words, not the cockpit's.
+
+    The payload writes for an engineer — "Average recorded latency is 653784 ms." — and
+    that sentence became reachable the moment the card could read the payload at all.
+    """
+
+    from tests.integration.test_scanner_pipeline import _active_strategy
+
+    async with test_context["session_factory"]() as session:
+        strategy, version = await _active_strategy(session)
+        session.add(
+            _scan_job(
+                version.id,
+                status=ScanJobStatus.SUCCEEDED,
+                created_at=datetime.now(UTC) - timedelta(minutes=4),
+                completed_at=datetime.now(UTC) - timedelta(minutes=2),
+                key="one-finished-check",
+            )
+        )
+        await session.flush()
+
+        card, view = await _card_for(session, strategy)
+
+        detail = view["working"]["detail"]
+        assert detail != card["health"]["main_issue"]
+        for machine_word in ("ms.", "latency", "evaluation", "/100", "%"):
+            assert machine_word not in detail.lower(), detail
+        # The sentence that was printed for every monitor, including ones whose every
+        # check had arrived.
+        assert "not arriving" not in detail
+
+async def test_the_rendered_page_says_when_it_last_looked(test_context):
+    """The bug as it was reported: the page itself, in a browser, for hours.
+
+    A monitor that had finished a check every few minutes showed "Not looked yet" on
+    this page and "Checked Not yet" on Home. Both are asserted here on the real HTML,
+    because that is where a person met the problem.
+    """
+
+    from sqlalchemy import select
+
+    from ai_market_monitor.db.models import User
+    from tests.integration.test_scanner_pipeline import _active_strategy
+
+    await _signup_and_verify(test_context, email="wl-looked@example.com")
+
+    async with test_context["session_factory"]() as session:
+        strategy, version = await _active_strategy(session)
+        # The signed-up account is the one whose page is fetched below, so the monitor
+        # is put on it. `_active_strategy` makes its own user, which nobody can sign in as.
+        owner = await session.scalar(
+            select(User).where(User.display_name != "Scanner User")
+        )
+        strategy.user_id = owner.id
+        finished_at = datetime.now(UTC) - timedelta(minutes=8)
+        session.add(
+            _scan_job(
+                version.id,
+                status=ScanJobStatus.SUCCEEDED,
+                created_at=finished_at - timedelta(minutes=3),
+                completed_at=finished_at,
+                key="rendered-finished-check",
+            )
+        )
+        session.add(
+            _scan_job(
+                version.id,
+                status=ScanJobStatus.QUEUED,
+                created_at=datetime.now(UTC),
+                completed_at=None,
+                key="rendered-next-check",
+            )
+        )
+        await session.commit()
+
+    expected = how_long_ago(finished_at)
+
+    monitors = await test_context["client"].get(PAGE)
+    assert monitors.status_code == 200
+    assert expected in monitors.text
+    assert "Not looked yet" not in monitors.text
+
+    home = await test_context["client"].get("/home")
+    assert home.status_code == 200
+    assert expected in home.text
+    assert "Not looked yet" not in home.text

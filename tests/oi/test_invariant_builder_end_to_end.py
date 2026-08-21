@@ -35,6 +35,24 @@ from hm_oi.workspace import Workspace, remove_workspace, worktree_path
 
 TASK_ID = "oi0-e2e-probe"
 
+#: The seeded module's name is assembled here rather than written out, and that is not
+#: cosmetic. `discover_adjacent_tests` finds the tests covering a changed file by
+#: searching every test module for the changed file's name. This file necessarily
+#: contains that name — it is the file that writes the module — so the harness selected
+#: **this very test** as adjacent to the change it was running, re-entered it inside the
+#: worktree, and recorded the re-entry's errors as "the fix broke something next to it".
+#: The task could then never complete, and case 1 failed on every run.
+#:
+#: Assembling the stem keeps the bare token out of this file's text, so the only
+#: adjacent test found is the seeded regression test itself, which is the honest answer.
+#: The discovery rule is deliberately left as it is: it matches on text so that a module
+#: named only inside a string — a monkeypatch target, an importorskip — still counts as
+#: a reference. Narrowing that to real imports would quietly shrink the safety gate
+#: every autonomous change has to pass.
+_MODULE_STEM = "oi" + "_probe_boundary"
+MODULE_NAME = f"{_MODULE_STEM}.py"
+TEST_NAME = f"test_{_MODULE_STEM}.py"
+
 #: The defect. `at_least` compares the wrong way round, so a value that meets the
 #: threshold is reported as not meeting it.
 BROKEN_MODULE = '''\
@@ -50,12 +68,12 @@ def meets_threshold(value: float, minimum: float) -> bool:
 FIXED_MODULE = BROKEN_MODULE.replace("return value > minimum", "return value >= minimum")
 
 #: Asserts the rule across the family, not the one reported number.
-REGRESSION_TEST = '''\
+REGRESSION_TEST = f'''\
 """The boundary belongs to 'at least', for every threshold."""
 
 import pytest
 
-from seeded_defect import meets_threshold
+from {_MODULE_STEM} import meets_threshold
 
 
 @pytest.mark.parametrize("threshold", (0.0, 1.0, 17.0, 99.5))
@@ -72,10 +90,6 @@ def test_a_value_below_the_threshold_does_not(threshold: float) -> None:
 def test_a_value_above_the_threshold_does(threshold: float) -> None:
     assert meets_threshold(threshold + 0.5, threshold) is True
 '''
-
-MODULE_NAME = "seeded_defect.py"
-TEST_NAME = "test_seeded_defect.py"
-
 
 @pytest.fixture
 def clean_worktree():

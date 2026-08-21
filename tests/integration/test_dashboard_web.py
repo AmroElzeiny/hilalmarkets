@@ -107,7 +107,13 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
 
     dashboard = await test_context["client"].get("/home")
     assert dashboard.status_code == 200
-    assert "Let us set up your first monitor." in dashboard.text
+    # A brand-new account is offered the one thing it can do. The *headline* is not
+    # asserted: live scanning is off in the test settings, and the band that says so
+    # wins over every other sentence on this page — see
+    # `tests/unit/test_invariant_market_checking_visible.py`. This line used to demand
+    # "Let us set up your first monitor.", which that rule made unreachable, and it had
+    # been failing ever since.
+    assert "Make your first monitor" in dashboard.text
     assert "Coverage score" not in dashboard.text
     assert 'class="dashboard-body hilal-dashboard theme-' in dashboard.text
 

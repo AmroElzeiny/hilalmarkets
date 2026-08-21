@@ -13,6 +13,7 @@ from ai_market_monitor.schemas.strategy import UNARY_COMPARATORS
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
     GROUP_ARITY,
+    PERCENTAGE_MEASUREMENTS,
     ApprovalBindingV2,
     ConditionNodeType,
     ConditionNodeV2,
@@ -483,30 +484,24 @@ def _operand_contract_errors(node: ConditionNodeV2) -> list[str]:
 
     if node.formula == FormulaKind.CAPABILITY:
         return []
-    percentage_formulas = {
-        FormulaKind.OPEN_TO_CLOSE_PERCENTAGE,
-        FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE,
-        FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE,
-        FormulaKind.HIGH_TO_LOW_PERCENTAGE,
-        FormulaKind.LOW_TO_HIGH_PERCENTAGE,
-    }
-    if node.formula in percentage_formulas:
+    if node.formula in PERCENTAGE_MEASUREMENTS:
         if len(node.operands) != 1:
             return [f"formula_operand_mismatch:{node.node_id}:percentage_count"]
         operand = node.operands[0]
-        expected = {
-            FormulaKind.OPEN_TO_CLOSE_PERCENTAGE: "open_to_close",
-            FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE: "close_to_close",
-            FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE: "reference_to_current",
-            FormulaKind.HIGH_TO_LOW_PERCENTAGE: "high_to_low",
-            FormulaKind.LOW_TO_HIGH_PERCENTAGE: "low_to_high",
-        }[node.formula]
+        measurement = PERCENTAGE_MEASUREMENTS[node.formula]
+        expected = measurement.runtime_name
         if (
             operand.kind != "market_metric"
             or operand.name != "percentage_change"
             or operand.parameters.get("formula") not in {expected, node.formula.value}
         ):
             return [f"formula_operand_mismatch:{node.node_id}:percentage_shape"]
+        if measurement.reference_is_chosen and not operand.parameters.get("reference_field"):
+            # A move measured "away from an earlier price" is not a measurement until
+            # somebody says which earlier price. A draft that reached the runtime
+            # without one was measured against the same candle's close — always zero —
+            # so it is refused here instead, while a person can still answer.
+            return [f"formula_operand_mismatch:{node.node_id}:percentage_reference_missing"]
     if node.formula == FormulaKind.SWEEP_AND_RECLAIM:
         if len(node.operands) != 1:
             return [f"formula_operand_mismatch:{node.node_id}:sweep_count"]

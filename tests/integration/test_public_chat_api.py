@@ -295,7 +295,11 @@ async def test_public_chat_answer_is_grounded_and_stores_only_redacted_audit(tes
         "/api/v1/public-chat/answers",
         headers={"X-CSRF-Token": token},
         json={
-            "question": "Which markets are available in private beta?",
+            # Asked the way a visitor to the live site asks it. The wording used to be
+            # "available in private beta", and "private beta" is a keyword on the
+            # *account access* fact, so once the product launched the question was
+            # answered — correctly — from a different fact than the one under test.
+            "question": "Which markets are supported?",
             "session_id": "session_1234567890",
             "client_message_id": "public-chat-grounded-1",
             "source_page": "/features",
@@ -333,18 +337,22 @@ async def test_public_chat_answer_is_grounded_and_stores_only_redacted_audit(tes
     ],
 )
 async def test_the_support_assistant_never_sends_a_visitor_to_an_account_page(
-    test_context,
+    waitlist_context,
     question,
 ):
-    """Pre-launch, "sign in" is an instruction a visitor cannot follow.
+    """With the site pulled back, "sign in" is an instruction a visitor cannot follow.
 
     The assistant answers from server-owned facts, so the fix is in the fact itself:
     while the site is invite-only, the only way in it knows about is the waitlist. Asked
     six different ways, it must never name sign-in, sign-up, an account or the dashboard.
+
+    Asked of a waitlist-mode app on purpose. It used to read the shipped default, which
+    made it a test of what the deployment happened to be rather than of what the
+    assistant does — so it failed on the day the product launched, with nothing broken.
     """
 
-    assert test_context["settings"].public_waitlist_mode is True
-    client = test_context["client"]
+    assert waitlist_context["settings"].waitlist_mode is True
+    client = waitlist_context["client"]
     token = await _bootstrap(client)
     response = await client.post(
         "/api/v1/public-chat/answers",
@@ -372,9 +380,11 @@ async def test_the_support_assistant_never_sends_a_visitor_to_an_account_page(
 
 
 async def test_the_support_assistant_answers_how_to_get_access_with_the_waitlist(
-    test_context,
+    waitlist_context,
 ):
-    client = test_context["client"]
+    """Pulled back to the waitlist, the only way in the assistant knows is the waitlist."""
+
+    client = waitlist_context["client"]
     token = await _bootstrap(client)
     response = await client.post(
         "/api/v1/public-chat/answers",
@@ -390,6 +400,37 @@ async def test_the_support_assistant_answers_how_to_get_access_with_the_waitlist
     payload = response.json()
     assert payload["status"] == "answered"
     assert "waitlist" in payload["message"].casefold()
+
+
+async def test_the_support_assistant_answers_how_to_get_access_with_the_account_flow(
+    test_context,
+):
+    """The other half of the same rule, on the site as it is shipped today.
+
+    The product is live, so "how do I sign up?" has a real answer and the assistant must
+    give it. Without this, the pair of tests above could be satisfied by an assistant
+    that only ever talks about a waitlist, which is what it did before launch.
+    """
+
+    assert test_context["settings"].waitlist_mode is False
+    client = test_context["client"]
+    token = await _bootstrap(client)
+    response = await client.post(
+        "/api/v1/public-chat/answers",
+        headers={"X-CSRF-Token": token},
+        json={
+            "question": "How do I get access to Hilal Markets?",
+            "session_id": "session_access_00000002",
+            "client_message_id": "public-chat-access-launched-1",
+            "source_page": "/",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "answered"
+    message = payload["message"].casefold()
+    assert "waitlist" not in message
+    assert "sign in" in message or "account" in message
 
 
 @pytest.mark.parametrize(

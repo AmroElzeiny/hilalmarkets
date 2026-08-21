@@ -17,6 +17,48 @@ STABLECOIN_BASES = {
 LEVERAGED_TOKEN_MARKERS = ("UP", "DOWN", "BULL", "BEAR", "3L", "3S", "5L", "5S")
 
 
+def is_stablecoin_base(base_asset: str) -> bool:
+    """Is this coin a stablecoin? One owner, because two lists disagreed.
+
+    The Cockpit's own preview of "which coins will this monitor watch" carried a second,
+    shorter list. A coin the scanner excluded could therefore be shown to the owner as
+    included, which is a promise the product then broke on every scan.
+    """
+
+    return base_asset.upper() in STABLECOIN_BASES
+
+
+def is_leveraged_token(base_asset: str) -> bool:
+    """Is this a leveraged token — a 3x or 5x product rather than the coin itself?
+
+    Matters twice over here: leverage is outside what this product covers at all, and
+    the Cockpit's copy of this test knew only six of the eight markers. It missed ``5L``
+    and ``5S``, so five-times leveraged tokens were filtered out by the scanner while
+    the screen that explains the filtering said they were kept.
+    """
+
+    return any(base_asset.upper().endswith(marker) for marker in LEVERAGED_TOKEN_MARKERS)
+
+
+def base_asset_of(market: MarketSnapshot) -> str:
+    """The coin being watched, however the snapshot happens to spell it."""
+
+    return (market.base_asset or market.symbol.upper().split("/")[0]).upper()
+
+
+def listing_age_days(market: MarketSnapshot, evaluation_time: datetime) -> float | None:
+    """How many days this market has existed, or ``None`` when nobody recorded it.
+
+    ``None`` is never turned into a number. A market whose listing date is unknown is
+    unknown, and a rule about listing age must say so rather than treat "not recorded"
+    as "old enough".
+    """
+
+    if market.listed_at is None:
+        return None
+    return (evaluation_time - market.listed_at).total_seconds() / 86400
+
+
 class MarketFilterEngine:
     def evaluate(
         self,
@@ -29,7 +71,7 @@ class MarketFilterEngine:
         universe = strategy.universe
         symbol = market.symbol.upper()
         quote = market.quote_asset.upper()
-        base = (market.base_asset or symbol.split("/")[0]).upper()
+        base = base_asset_of(market)
         if market.exchange.lower() != universe.exchange.lower():
             reasons.append("exchange_not_selected")
         if quote not in {item.upper() for item in universe.quote_currencies}:
@@ -40,9 +82,9 @@ class MarketFilterEngine:
             reasons.append("symbol_not_in_allowlist")
         if symbol in {item.upper() for item in universe.exclude_symbols}:
             reasons.append("symbol_blocklisted")
-        if universe.exclude_stablecoins and base in STABLECOIN_BASES:
+        if universe.exclude_stablecoins and is_stablecoin_base(base):
             reasons.append("stablecoin_base_excluded")
-        if universe.exclude_leveraged_tokens and self._is_leveraged_token(base):
+        if universe.exclude_leveraged_tokens and is_leveraged_token(base):
             reasons.append("leveraged_token_excluded")
         if universe.min_quote_volume_24h is not None and (
             market.quote_volume_24h is None
@@ -61,12 +103,11 @@ class MarketFilterEngine:
         ):
             reasons.append("spread_above_maximum")
         if universe.min_listing_age_days is not None:
-            if market.listed_at is None:
+            age_days = listing_age_days(market, evaluation_time)
+            if age_days is None:
                 reasons.append("listing_age_unavailable")
-            else:
-                age_days = (evaluation_time - market.listed_at).total_seconds() / 86400
-                if age_days < universe.min_listing_age_days:
-                    reasons.append("listing_too_new")
+            elif age_days < universe.min_listing_age_days:
+                reasons.append("listing_too_new")
         if universe.min_market_cap is not None and (
             market.market_cap is None or market.market_cap < universe.min_market_cap
         ):
@@ -86,7 +127,3 @@ class MarketFilterEngine:
             "historical_candles": len(base_history),
         }
         return MarketFilterResult(passed=not reasons, reasons=reasons, metrics=metrics)
-
-    @staticmethod
-    def _is_leveraged_token(base_asset: str) -> bool:
-        return any(base_asset.endswith(marker) for marker in LEVERAGED_TOKEN_MARKERS)

@@ -45,9 +45,15 @@ from ai_market_monitor.db.models.enums import (
     StrategyStatus,
     StrategyVersionStatus,
 )
+from ai_market_monitor.engine.data_freshness import measure_freshness
+from ai_market_monitor.engine.market_filters import is_leveraged_token, is_stablecoin_base
 from ai_market_monitor.market_context import MarketRegimeAnalyzer
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.product_language import (
+    monitor_issue_words,
+    monitor_working_words,
+)
 from ai_market_monitor.strategy_cockpit import (
     forecast_from_structure,
     health_status,
@@ -408,16 +414,14 @@ class StrategyCockpitService:
                 reason = "not_in_allowlist"
             elif symbol in exclude_override:
                 reason = "manual_blocklist"
-            elif universe.exclude_stablecoins and base in {
-                "USDT",
-                "USDC",
-                "DAI",
-                "FDUSD",
-                "TUSD",
-                "PYUSD",
-            }:
+            # These two questions are answered by `engine/market_filters`, the same
+            # module the scanner asks. This screen used to carry its own shorter
+            # answers: a stablecoin list missing BUSD and USDP, and a leveraged-token
+            # test missing "5L" and "5S". So a five-times leveraged token was listed
+            # here as a coin the monitor would watch, and then dropped by every scan.
+            elif universe.exclude_stablecoins and is_stablecoin_base(base):
                 reason = "stablecoin_base"
-            elif universe.exclude_leveraged_tokens and _looks_leveraged(base):
+            elif universe.exclude_leveraged_tokens and is_leveraged_token(base):
                 reason = "leveraged_token"
             if symbol in include_override:
                 reason = None
@@ -1251,11 +1255,24 @@ class StrategyCockpitService:
         )
         if recent is not None:
             return None
+        # The same words the Monitors card uses, from the same owner. This note is read
+        # by the person who owns the monitor, and it used to say "Edge Health: 40/100.
+        # Main issue: Average recorded latency is 653784 ms." — a term from inside the
+        # machine, a number this product decided not to show a beginner, and a sentence
+        # written for an engineer. The card and the note now agree, because one function
+        # decides both.
+        said = monitor_working_words(float(health["score"]))
         notification = DashboardNotification(
             user_id=strategy.user_id,
             level="warning" if health["score"] < 70 else "info",
             title=f"{strategy.name} weekly health",
-            body=(f"Edge Health: {health['score']:.0f}/100. Main issue: {health['main_issue']}"),
+            body=(
+                f"{said.label}. "
+                + monitor_issue_words(
+                    health["main_issue_component"],
+                    blocker_known=bool(health.get("main_issue_blocker_known")),
+                )
+            ),
             action_label="Open monitor review",
             action_url=action_url,
             created_at=datetime.now(UTC),
@@ -1297,6 +1314,18 @@ class StrategyCockpitService:
             "components": components,
             "explanation": explanation,
             "main_issue": weak["explanation"],
+            # The weakest component's *name*, beside its sentence. The name is the
+            # stable part, and it is what a beginner-facing screen needs in order to say
+            # the same thing in its own words instead of repeating an engineer's. Every
+            # reader used to re-derive "which one is weakest" or, more often, print the
+            # engineer's sentence.
+            "main_issue_component": weak["name"],
+            # Whether the weakest component already knows what is in the way. Two very
+            # different sentences hang off this, and both surfaces read it from here
+            # rather than each deciding for itself.
+            "main_issue_blocker_known": bool(
+                (weak.get("details") or {}).get("blocker_known")
+            ),
             "suggested_action": suggested_action,
             "sample_size": sample_size,
             "trend": [
@@ -1355,17 +1384,21 @@ class StrategyCockpitService:
                 else "No recent scan evidence exists."
             ),
         )
-        average_latency = (
-            sum(scan.data_freshness_ms for scan in scans) / scan_count if scan_count else None
-        )
+        # How often a check read a candle the market had already moved past, counted in
+        # candles rather than in milliseconds. Milliseconds cannot answer this on their
+        # own: whether a delay is late depends entirely on the candle period, and the
+        # thresholds here used to be a flat 5 s and 60 s. A five-minute monitor reading
+        # the newest candle the moment it closed still scored 0.3 out of 1, so every
+        # monitor slower than a minute carried a permanent, untrue "the prices it read
+        # were not the newest ones" on its card.
+        measured = [
+            measure_freshness(lateness_ms=scan.data_freshness_ms, timeframe=scan.timeframe)
+            for scan in scans
+        ]
+        known = [item for item in measured if item.is_known]
+        current_scans = sum(1 for item in known if item.is_current)
         freshness_ratio = (
-            1
-            if average_latency is not None and average_latency <= 5_000
-            else 0.7
-            if average_latency is not None and average_latency <= 60_000
-            else 0.3
-            if average_latency is not None
-            else 0
+            sum(item.ratio for item in known) / len(known) if known else _FRESHNESS_UNKNOWN_RATIO
         )
         freshness = _component(
             "Data freshness",
@@ -1373,9 +1406,10 @@ class StrategyCockpitService:
             8,
             _ratio_status(freshness_ratio),
             (
-                f"Average recorded latency is {average_latency:.0f} ms."
-                if average_latency is not None
-                else "Latency evidence is unavailable."
+                f"{current_scans} of {len(known)} recent evaluations read the newest "
+                "closed candle."
+                if known
+                else "Data lateness evidence is unavailable."
             ),
         )
         confirmed = sum(1 for scan in scans if scan.outcome == ScanOutcome.CONFIRMED)
@@ -1409,6 +1443,12 @@ class StrategyCockpitService:
                 else "No condition history exists yet."
             ),
         )
+        # Whether a blocking rule is actually known, kept as a fact rather than left to
+        # be guessed from the sentence beside it. "Not enough history yet" and "one rule
+        # is almost never true" are opposite pieces of news, and the beginner-facing card
+        # was printing the first for monitors that had months of history and a rule that
+        # could never be true.
+        conditions["details"] = {"blocker_known": top is not None}
         terminal = [setup for setup in setups if setup.state in TERMINAL_STATES]
         progressed = [
             setup
@@ -1476,16 +1516,32 @@ class StrategyCockpitService:
         )
         regime_component["details"] = regime
         latest_alert_at = max((alert.created_at for alert in alerts), default=None)
+        # `None` when no alert exists, and the score treats that as the longest silence.
+        # The *sentence* may not: "Last alert evidence is 30.0 day(s) old." was printed
+        # for a monitor switched on an hour ago, describing evidence that has never
+        # existed. A missing measurement is reported as missing, never as a number.
         silent_days = (
-            (now - _aware(latest_alert_at)).total_seconds() / 86_400 if latest_alert_at else 30
+            (now - _aware(latest_alert_at)).total_seconds() / 86_400
+            if latest_alert_at
+            else None
         )
-        silence_ratio = 1 if silent_days <= 14 else 0.6 if silent_days <= 21 else 0.2
+        silence_ratio = (
+            1
+            if silent_days is not None and silent_days <= 14
+            else 0.6
+            if silent_days is not None and silent_days <= 21
+            else 0.2
+        )
         silent = _component(
             "Silent-monitor risk",
             silence_ratio * 5,
             5,
             _ratio_status(silence_ratio),
-            f"Last alert evidence is {silent_days:.1f} day(s) old.",
+            (
+                f"Last alert evidence is {silent_days:.1f} day(s) old."
+                if silent_days is not None
+                else "No alert has been sent yet, so there is no alert evidence to age."
+            ),
         )
         alerts_per_day = len(alerts) / 30
         spam_ratio = 1 if alerts_per_day <= 10 else 0.6 if alerts_per_day <= 30 else 0.2
@@ -1964,6 +2020,11 @@ def _component(
     }
 
 
+#: Scored when no scan carried a period we can size. Not zero: never having measured
+#: lateness is not the same as having measured it and found the data late.
+_FRESHNESS_UNKNOWN_RATIO = 0.6
+
+
 def _ratio_status(ratio: float) -> str:
     if ratio >= 0.8:
         return "healthy"
@@ -2035,10 +2096,6 @@ def _comparison_notes(left: dict[str, Any], right: dict[str, Any]) -> list[str]:
 
 def _canonical_symbol(symbol: str) -> str:
     return symbol.upper().replace("-", "/").split(":", 1)[0].strip()
-
-
-def _looks_leveraged(base: str) -> bool:
-    return any(base.endswith(marker) for marker in ("UP", "DOWN", "BULL", "BEAR", "3L", "3S"))
 
 
 def _most_common(counter: Counter[str]) -> str | None:

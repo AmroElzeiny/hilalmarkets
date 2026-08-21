@@ -23,7 +23,9 @@
           <article><span data-icon="coins" data-icon-class="icon"></span><span>Market</span><strong>{{ proof.symbol or 'Not recorded' }}</strong></article>
           <article><span data-icon="clock" data-icon-class="icon"></span><span>Timeframe</span><strong>{{ proof.timeframe or 'Not recorded' }}</strong></article>
           <article><span data-icon="database" data-icon-class="icon"></span><span>Exchange</span><strong>{{ proof.exchange or 'Not recorded' }}</strong></article>
-          <article><span data-icon="activity" data-icon-class="icon"></span><span>Data freshness</span><strong>{% if proof.data_latency_ms is defined %}{{ proof.data_latency_ms }} ms{% else %}Not recorded{% endif %}</strong></article>
+          {#- In words, decided by `product_language.freshness_words`, never a raw count
+              of milliseconds. This tile used to print "341593 ms". -#}
+          <article><span data-icon="activity" data-icon-class="icon"></span><span>Data freshness</span><strong>{{ data_freshness_words or 'Not recorded' }}</strong></article>
           {% if sharia_proof %}
             <article><span data-icon="compliance" data-icon-class="icon"></span><span>Screening at evaluation</span><strong>{{ (sharia_asset.status or sharia_proof.status or 'Not recorded')|replace('_', ' ')|title }}</strong></article>
             <article><span data-icon="methodology" data-icon-class="icon"></span><span>Methodology</span><strong>{{ sharia_proof.methodology_code or 'Recorded methodology' }}{% if sharia_proof.methodology_version %} v{{ sharia_proof.methodology_version }}{% endif %}</strong></article>

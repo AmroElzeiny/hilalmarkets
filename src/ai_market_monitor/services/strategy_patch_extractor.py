@@ -13,6 +13,11 @@ from ai_market_monitor.core.config import Settings
 from ai_market_monitor.engine.boolean_expression import BooleanNode, parse_boolean_expression
 from ai_market_monitor.engine.comparators import comparator_alternation, detect_comparator
 from ai_market_monitor.engine.formula_compiler import parse_percentage_formula
+from ai_market_monitor.engine.reference_levels import (
+    lookback_level_name,
+    previous_candle_level_name,
+    reference_field,
+)
 from ai_market_monitor.engine.turn_fragments import (
     TurnFragmentReport,
     classify_turn,
@@ -20,6 +25,7 @@ from ai_market_monitor.engine.turn_fragments import (
 )
 from ai_market_monitor.schemas.strategy import Comparator, StrategyDirection
 from ai_market_monitor.schemas.strategy_draft_v2 import (
+    FORMULA_BY_RUNTIME_NAME,
     STRATEGY_SOURCE_FRAGMENT_MAX_LENGTH,
     CapabilityParameterValue,
     ConditionNodeType,
@@ -38,6 +44,7 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     StrategyPatchExtraction,
     StrategyUniverseV2,
     UnresolvedFieldV2,
+    percentage_runtime_parameters,
 )
 from ai_market_monitor.services.agent_tools import strict_json_schema
 from ai_market_monitor.services.ai_model_routing import select_setup_model
@@ -614,12 +621,7 @@ def _deterministic_condition(
         default_direction=report.direction or StrategyDirection.BOTH,
     )
     if formula is not None:
-        formula_kind = {
-            "open_to_close": FormulaKind.OPEN_TO_CLOSE_PERCENTAGE,
-            "close_to_close": FormulaKind.CLOSE_TO_CLOSE_PERCENTAGE,
-            "reference_to_current": FormulaKind.REFERENCE_TO_CURRENT_PERCENTAGE,
-            "high_to_low": FormulaKind.HIGH_TO_LOW_PERCENTAGE,
-        }[formula.formula]
+        formula_kind = FORMULA_BY_RUNTIME_NAME[formula.formula]
         if formula.direction == "up":
             movement_direction = MovementDirection.UP
         elif formula.direction == "down":
@@ -727,12 +729,9 @@ def _low_to_high_percentage_condition(
                 role="measured_value",
                 kind="market_metric",
                 name="percentage_change",
-                parameters={
-                    "formula": "low_to_high",
-                    "reference_field": "low",
-                    "current_field": "high",
-                    "scale": "percent",
-                },
+                parameters=percentage_runtime_parameters(
+                    FormulaKind.LOW_TO_HIGH_PERCENTAGE
+                ),
             )
         ],
         operator=comparator,
@@ -770,7 +769,15 @@ def _deterministic_reference_condition(
         comparator = detect_comparator(lookback.group("operator"))
         if comparator is None:
             return None
-        reference_name = lookback.group("reference").casefold().replace(" ", "_")
+        # "highest high" and "lowest low" are the words; `high` and `low` are the
+        # readings. Naming the level from the words produced `highest_high`, which no
+        # reader has ever been able to evaluate, so the rule ended as an error every
+        # time instead of watching the breakout it describes.
+        spoken = lookback.group("reference").casefold()
+        try:
+            reference_name = lookback_level_name("high" if "high" in spoken else "low")
+        except ValueError:
+            return None
         return _reference_node(
             source_turn_id=source_turn_id,
             text=text,
@@ -785,7 +792,7 @@ def _deterministic_reference_condition(
             reference_name=reference_name,
             reference_parameters={"lookback": int(lookback.group("count"))},
             reference_definition=(
-                f"{reference_name} of previous {lookback.group('count')} candles"
+                f"{spoken} of previous {lookback.group('count')} candles"
             ),
         )
 
@@ -802,7 +809,13 @@ def _deterministic_reference_condition(
         comparator = detect_comparator(previous.group("operator"))
         if comparator is None:
             return None
-        right = previous.group("right").casefold()
+        spoken = previous.group("right").casefold()
+        # "the previous candle's price" means its close. Pasting the spoken word into
+        # the level's name built `previous_candle_price`, which is not a candle reading
+        # and which the runtime refused every time the rule ran.
+        previous_field = reference_field(spoken)
+        if previous_field is None:
+            return None
         return _reference_node(
             source_turn_id=source_turn_id,
             text=text,
@@ -814,9 +827,9 @@ def _deterministic_reference_condition(
             context_timeframes=context_timeframes,
             confirmation_timeframes=confirmation_timeframes,
             left_field=previous.group("left").casefold(),
-            reference_name=f"previous_candle_{right}",
-            reference_parameters={"lookback": 1, "field": right},
-            reference_definition=f"previous closed candle {right}",
+            reference_name=previous_candle_level_name(previous_field),
+            reference_parameters={"lookback": 1, "field": previous_field},
+            reference_definition=f"previous closed candle {previous_field}",
         )
 
     fixed = re.search(

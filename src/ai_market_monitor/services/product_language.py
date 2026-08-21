@@ -1,9 +1,12 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from ai_market_monitor.core.plans import timeframe_to_minutes
 from ai_market_monitor.db.models.enums import SetupLifecycleState
+from ai_market_monitor.engine.data_freshness import freshness_from_proof
 
 
 @dataclass(frozen=True)
@@ -216,6 +219,96 @@ def checking_message_overrides(*, scanning_enabled: bool) -> dict[str, str]:
     """
 
     return {} if scanning_enabled else dict(_CHECKING_CLAIMS)
+
+
+#: What is holding a monitor back, said in words a beginner knows.
+#:
+#: Keyed by the health component's own name, which is the stable part. The sentence the
+#: health payload carries beside it — "Average recorded latency is 653784 ms.", "0
+#: confirmed and 0 forming evaluations in the last 30 days." — is written for an
+#: engineer reading the cockpit, and reached the Monitors card the moment that card
+#: could read the payload at all.
+_MONITOR_ISSUE_WORDS: dict[str, str] = {
+    "Data coverage": "Some coins could not be read from the exchange.",
+    "Data freshness": "The prices it read were not the newest ones.",
+    "Frequency health": "It has not found a match yet.",
+    "Condition pass health": (
+        "There is not enough history yet to say which rule stops it most."
+    ),
+    "Lifecycle completion": "No opportunity has run all the way to its end yet.",
+    "Alert quality feedback": "Nobody has said yet whether its alerts were useful.",
+    "Proof completeness": "Some alerts do not have a full record behind them.",
+    "Market-regime fit": "It has not been compared with the wider market yet.",
+    "Silent-monitor risk": "It has not sent an alert for a long time.",
+    "Alert spam risk": "It is sending a lot of alerts.",
+}
+
+#: Said when the health payload names a component this list does not know.
+#:
+#: Never "Most checks are not arriving." That sentence was the old fallback, and it was
+#: printed for every monitor — including one whose every single check had arrived.
+_UNKNOWN_MONITOR_ISSUE = "Something about this monitor needs a look."
+
+
+#: What to say instead when the health payload already knows what is in the way.
+#:
+#: "There is not enough history yet" is advice to wait. It was printed for monitors that
+#: had been checking the market every few minutes for weeks and whose rule was never
+#: once true — so the one screen that could have shown the problem told the owner that
+#: nothing was wrong yet. A known blocker and no history at all are opposite pieces of
+#: news and must not share a sentence.
+_MONITOR_ISSUE_WORDS_WITH_BLOCKER: dict[str, str] = {
+    "Condition pass health": (
+        "One of its rules is almost never true, so nothing gets through."
+    ),
+}
+
+
+def monitor_issue_words(component: str | None, *, blocker_known: bool = False) -> str:
+    """The one thing most in the way of this monitor, in plain words.
+
+    One owner, because the same sentence belongs on the card, in an email and in a
+    Telegram reply. A page that writes its own version of it is a second opinion about
+    the same monitor.
+
+    ``blocker_known`` is the health payload's own answer to "do we know which rule is
+    stopping it", never a guess made at the call site.
+    """
+
+    if not component:
+        return _UNKNOWN_MONITOR_ISSUE
+    if blocker_known:
+        known = _MONITOR_ISSUE_WORDS_WITH_BLOCKER.get(component)
+        if known is not None:
+            return known
+    return _MONITOR_ISSUE_WORDS.get(component, _UNKNOWN_MONITOR_ISSUE)
+
+
+@dataclass(frozen=True)
+class MonitorWorkingWords:
+    """How well a monitor is doing, as something a person would say."""
+
+    tone: str
+    label: str
+
+
+def monitor_working_words(score: float) -> MonitorWorkingWords:
+    """"Is it working?", answered from the health score in the product's own words.
+
+    One owner, because two surfaces answer this question about the same monitor: the
+    card on the Monitors page and the weekly note in the notification list. The note
+    used to write its own answer — "Edge Health: 40/100." — which is both a term from
+    inside the machine and the very number this product decided not to show a beginner.
+
+    The score itself never leaves this function. A number out of a hundred, given to
+    somebody who cannot say what it counts, is not information.
+    """
+
+    if score >= 80:
+        return MonitorWorkingWords("success", "Working well")
+    if score >= 50:
+        return MonitorWorkingWords("warning", "Working, with a gap")
+    return MonitorWorkingWords("danger", "Needs a look")
 
 
 def first_check_words(*, scanning_enabled: bool, check_started: bool) -> str:
@@ -631,6 +724,172 @@ UNKNOWN_WHY = WhyNoMessage(
     "Nothing to do.",
     "neutral",
 )
+
+
+#: Why one message was held back, keyed by the code the delivery gate recorded.
+#:
+#: The gate refuses for a dozen different reasons and used to leave the same trace for
+#: all of them — none. Every one of these is a fact about a setting the reader chose
+#: themselves, so every one of them names the setting and says what to change. "We held
+#: the message back" on its own is not an answer a person can act on.
+_WHY_NOT_SENT: dict[str, WhyNoMessage] = {
+    "hourly_message_limit_reached": WhyNoMessage(
+        "You had already had your messages for this hour",
+        "You set a limit on how many messages we send in one hour, and this one came "
+        "after that limit was reached.",
+        "Raise “Maximum messages per hour” in Settings if you want more of them.",
+        "warning",
+    ),
+    "daily_message_limit_reached": WhyNoMessage(
+        "You had already had your messages for today",
+        "You set a limit on how many messages we send in one day, and this one came "
+        "after that limit was reached.",
+        "Raise “Maximum messages per day” in Settings if you want more of them.",
+        "warning",
+    ),
+    "outside_chosen_hours": WhyNoMessage(
+        "It happened outside the hours you chose",
+        "You told us which days and hours to message you, and this one happened at "
+        "another time.",
+        "Change the days and hours in Settings if you want to hear about these.",
+        "information",
+    ),
+    "coin_silenced": WhyNoMessage(
+        "You silenced this coin",
+        "You asked us not to message you about this coin, on any of your monitors.",
+        "Un-silence the coin in Settings if you want to hear about it again.",
+        "information",
+    ),
+    "coin_silenced_on_this_monitor": WhyNoMessage(
+        "You silenced this coin on this monitor",
+        "You asked us not to message you about this coin from this one monitor.",
+        "Un-silence it on the monitor if you want to hear about it again.",
+        "information",
+    ),
+    "monitor_silenced": WhyNoMessage(
+        "You silenced this monitor",
+        "You asked us to stop messaging you from this monitor, so nothing was sent.",
+        "Un-silence the monitor when you want it to speak again.",
+        "information",
+    ),
+    "opportunity_silenced": WhyNoMessage(
+        "You silenced this one opportunity",
+        "You asked us to stop messaging you about this particular opportunity.",
+        "Un-silence it if you want to hear about it again.",
+        "information",
+    ),
+    "near_miss_messages_off": WhyNoMessage(
+        "You turned off “nearly there” messages",
+        "This one was close but not complete, and you asked us not to send those.",
+        "Turn “nearly there” messages back on in Settings if you want them.",
+        "information",
+    ),
+    "below_near_miss_threshold": WhyNoMessage(
+        "It was not close enough for you",
+        "You set how close something must get before we tell you, and this one did not "
+        "reach it.",
+        "Lower that number in Settings if you want to hear about these earlier.",
+        "information",
+    ),
+    "progress_messages_off": WhyNoMessage(
+        "You turned off progress messages",
+        "This was an update about something you already know about, and you asked us "
+        "not to send those.",
+        "Turn progress messages back on in Settings if you want them.",
+        "information",
+    ),
+    "compliance_messages_off": WhyNoMessage(
+        "You turned off screening messages",
+        "This was about a coin's screening status changing, and you asked us not to "
+        "send those.",
+        "Turn screening messages back on in Settings if you want them.",
+        "information",
+    ),
+    "no_way_of_being_told_is_on": WhyNoMessage(
+        "There was nowhere to send it",
+        "This one was ready to tell you about, but no way of being told was switched on.",
+        "Turn on at least one way of being told.",
+        "warning",
+    ),
+    "chosen_channel_not_connected": WhyNoMessage(
+        "The way you chose is not connected",
+        "You picked a way of being told, but nothing is set up behind it yet — Telegram "
+        "is not linked, or there is no email address on your account.",
+        "Open the Connections page and finish setting up the way you chose.",
+        "warning",
+    ),
+    "duplicate_event_hash": WhyNoMessage(
+        "We had already told you about this one",
+        "The same thing on the same coin and the same candle had already been sent, so "
+        "we did not send it twice.",
+        "Nothing to do.",
+        "information",
+    ),
+    "symbol_cooldown": WhyNoMessage(
+        "We had just messaged you about this coin",
+        "Your monitor waits a while before messaging about the same coin again, and "
+        "that wait had not finished.",
+        "Shorten the wait on the monitor if you want to hear about it sooner.",
+        "information",
+    ),
+    "maximum_alerts_per_hour": WhyNoMessage(
+        "This monitor had already sent its messages for the hour",
+        "This monitor has its own limit on how many messages it sends in an hour, and "
+        "it had reached it.",
+        "Raise “Maximum messages per hour” in Settings, which this monitor now follows.",
+        "warning",
+    ),
+    "daily_alert_budget": WhyNoMessage(
+        "This monitor had already sent its messages for the day",
+        "This monitor has its own limit on how many messages it sends in a day, and it "
+        "had reached it.",
+        "Raise the daily limit if you want more of them.",
+        "warning",
+    ),
+    "weekly_alert_budget": WhyNoMessage(
+        "Your plan's messages for this week were used up",
+        "Your plan includes a number of messages each week, and they had all been sent.",
+        "Your plan's count starts again at the beginning of next week.",
+        "warning",
+    ),
+    "trial_alert_limit_reached": WhyNoMessage(
+        "Your trial's messages were used up",
+        "A trial includes a set number of messages, and they had all been sent.",
+        "Nothing to do while the trial runs.",
+        "warning",
+    ),
+}
+
+
+def freshness_words(proof: Mapping[str, Any]) -> str:
+    """How fresh the numbers behind one alert were, in words a person can act on.
+
+    One owner, because three surfaces show this about the same alert: the proof page, the
+    email it becomes, and the Telegram message. Two of them printed the raw measurement —
+    "341593 ms" — which is not information to somebody who cannot say what it should have
+    been. Whether the data was fresh does not depend on that count at all, only on
+    whether a newer candle had closed unread.
+    """
+
+    freshness = freshness_from_proof(proof)
+    if not freshness.is_known:
+        return "Not recorded"
+    if freshness.is_current:
+        return "The newest closed candle"
+    candles = "candle" if freshness.candles_behind == 1 else "candles"
+    return f"{freshness.candles_behind} {candles} behind the newest"
+
+
+def why_not_sent(code: str | None) -> WhyNoMessage:
+    """Why one message was held back, in words a beginner can act on.
+
+    One owner, because the same silence is explained on the monitor card, on the
+    opportunity page and in the message list. The code comes from whichever gate refused
+    — the scanner's own fatigue guard or the delivery gate — and both write theirs down
+    in the same place, so neither surface has to guess.
+    """
+
+    return _WHY_NOT_SENT.get(str(code or "").strip().lower(), UNKNOWN_WHY)
 
 
 def why_no_message(category: str | None) -> WhyNoMessage:

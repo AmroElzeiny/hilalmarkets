@@ -73,7 +73,6 @@ from ai_market_monitor.db.models import (
     Plan,
     PublishedAssetAssessment,
     ReferralRelationship,
-    ScanJob,
     SetupInstance,
     ShariaMethodology,
     Strategy,
@@ -124,9 +123,11 @@ from ai_market_monitor.services.monitor_operations import (
     MonitorOperationError,
     MonitorOperationService,
 )
+from ai_market_monitor.services.monitor_scan_state import scan_state_for_version
 from ai_market_monitor.services.payment_emails import PaymentEmailRenderer
 from ai_market_monitor.services.product_language import (
     checking_message_overrides,
+    freshness_words,
     market_checking_notice,
 )
 from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
@@ -555,23 +556,30 @@ async def _monitor_cards_context(session: AsyncSession, user: User) -> list[dict
             limit=300,
             persist=False,
         )
-        latest_scan = None
-        if strategy.active_version_id:
-            latest_scan = await session.scalar(
-                select(ScanJob)
-                .where(ScanJob.strategy_version_id == strategy.active_version_id)
-                .order_by(ScanJob.created_at.desc())
-                .limit(1)
-            )
+        # One reader for "what has this monitor's scanning done", because the question
+        # has two halves and the newest row cannot answer both. See
+        # `services/monitor_scan_state.py`: the newest row of a live monitor is almost
+        # always the check that has not finished yet, so reading it said "Not looked
+        # yet" about a monitor that had completed dozens of checks.
+        scan_state = await scan_state_for_version(session, strategy.active_version_id)
+        finished = scan_state.last_completed
         latency_label = "No completed scan yet"
-        if latest_scan and latest_scan.completed_at and latest_scan.scheduled_for:
+        if finished is not None and finished.completed_at and finished.scheduled_for:
             seconds = max(
                 0,
-                int((latest_scan.completed_at - latest_scan.scheduled_for).total_seconds()),
+                int((finished.completed_at - finished.scheduled_for).total_seconds()),
             )
             latency_label = f"{seconds}s scan latency"
-        elif latest_scan:
-            latency_label = latest_scan.status.value.replace("_", " ").title()
+        elif scan_state.latest is not None:
+            latency_label = scan_state.latest.status.value.replace("_", " ").title()
+        # What the most recent check is doing, in one string, decided here rather than
+        # in a template. A template that decides things cannot be tested, and this one
+        # was reading `.status.value` off a row whose meaning it had to guess.
+        last_check_label = (
+            scan_state.latest.status.value.replace("_", " ").title()
+            if scan_state.latest is not None
+            else "Not run yet"
+        )
         pending_repair = None
         dynamic_extensions = []
         if strategy.active_version_id:
@@ -627,8 +635,9 @@ async def _monitor_cards_context(session: AsyncSession, user: User) -> list[dict
                 "strategy": strategy,
                 "health": health,
                 "main_bottleneck": bottlenecks.get("main_bottleneck"),
-                "latest_scan": latest_scan,
+                "scan_state": scan_state,
                 "latency_label": latency_label,
+                "last_check_label": last_check_label,
                 "pending_repair": pending_repair,
                 "dynamic_extensions": dynamic_extensions,
                 "sharia_universe": sharia_universe,
@@ -2852,6 +2861,11 @@ async def alert_proof_page(
                 title="Alert proof",
                 alert=alert,
                 proof=alert.proof_receipt or {},
+                # In words, not milliseconds. This tile printed "341593 ms", which tells
+                # a reader nothing unless they already know what it should have been —
+                # and since lateness is measured past a candle's close it can be
+                # negative, which as a raw number would have read as "-180000 ms".
+                data_freshness_words=freshness_words(alert.proof_receipt or {}),
                 proof_hash=proof_hash,
                 version=version,
                 strategy=strategy,

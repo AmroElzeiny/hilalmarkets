@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ai_market_monitor.engine.data_freshness import freshness_from_proof
+
 
 @dataclass(frozen=True, slots=True)
 class ScoreFactor:
@@ -160,20 +162,22 @@ def _condition_factor(
 
 
 def _data_freshness_factor(proof: dict[str, Any], maximum: float) -> ScoreFactor:
-    latency = proof.get("data_latency_ms")
-    if not isinstance(latency, int | float):
-        return ScoreFactor(
-            "Data freshness", maximum * 0.6, maximum, "unknown", "Latency unavailable."
-        )
-    if latency <= 5_000:
-        score, status = maximum, "passed"
-    elif latency <= 60_000:
-        score, status = maximum * 0.7, "partial"
-    elif latency <= 300_000:
-        score, status = maximum * 0.35, "stale"
-    else:
-        score, status = 0, "failed"
-    return ScoreFactor("Data freshness", score, maximum, status, f"Data latency: {latency} ms.")
+    """Was this alert built on the newest candle, or on one the market had moved past?
+
+    Graded in candles, never in bare milliseconds. The thresholds here used to be 5 s,
+    60 s and 300 s of absolute age, which is a scale for tick data: a five-minute monitor
+    reading a candle the instant it closed still scored "stale", and an hourly one scored
+    zero every single time. See :mod:`ai_market_monitor.engine.data_freshness`.
+    """
+
+    freshness = freshness_from_proof(proof)
+    return ScoreFactor(
+        "Data freshness",
+        maximum * freshness.ratio,
+        maximum,
+        freshness.status,
+        freshness.explain(),
+    )
 
 
 def _candle_factor(proof: dict[str, Any], maximum: float) -> ScoreFactor:

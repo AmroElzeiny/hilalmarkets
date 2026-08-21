@@ -1,7 +1,7 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-canvas-only">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260820-canvas-only">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260820-cards">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260820-cards">
 {% endblock %}
 {% block content %}
 
@@ -58,6 +58,13 @@
         <div class="s-now-copy">
           <p class="t-eyebrow">You are on</p>
           <h1>{{ entitlement.plan.name }}</h1>
+          {#- How this access ends, in one sentence. The router has always worked this
+              sentence out and sent it, and this page never drew it, so the page said
+              what the plan allows and never said when it stops or whether it charges
+              again. On a paid product that is the one fact a person most needs. -#}
+          {% if renewal_sentence %}
+          <p class="s-now-ending">{{ renewal_sentence }}</p>
+          {% endif %}
         </div>
         <div class="s-now-actions">
           <a class="t-action" href="#s-plans"><span data-icon="layers" data-icon-class="icon-sm"></span>See other plans</a>
@@ -419,5 +426,5 @@
 <script id="s-plan-facts" type="application/json">{{ plan_cards|tojson }}</script>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260820-canvas-only"></script>
+<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260820-cards"></script>
 {% endblock %}
