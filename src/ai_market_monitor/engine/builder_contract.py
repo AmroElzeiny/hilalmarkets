@@ -28,11 +28,17 @@ the Builder can say "not yet" instead of silently offering the nearest thing tha
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Literal
 
-from ai_market_monitor.engine.capabilities import CapabilitySpec, all_capabilities
+from ai_market_monitor.engine.capabilities import (
+    CapabilitySpec,
+    all_capabilities,
+    parameter_semantic_unit,
+    parameter_value_range,
+)
 from ai_market_monitor.schemas.strategy import UNARY_COMPARATORS, Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
@@ -550,8 +556,60 @@ def core_mechanics() -> tuple[BuilderMechanic, ...]:
 #: Registry parameter names the platform fills in itself. A person is never asked for
 #: them, so they never become form fields.
 _PLATFORM_OWNED_PARAMETERS = frozenset(
-    {"formula", "reference_field", "current_field", "scale", "direction", "comparator", "timeframe"}
+    {
+        "formula",
+        "reference_field",
+        "current_field",
+        "scale",
+        "direction",
+        "comparator",
+        "timeframe",
+        # Which internal feed answers this card, and which bag its value is filed under.
+        # They belong to the platform's own plumbing, and nothing a trader can choose
+        # depends on them — but they were being drawn as form fields and written into the
+        # rule's sentence: "BTC trend filter for alts happens with context category
+        # cross_market, provider cross_market on the 15m candle".
+        "context_category",
+        "provider",
+    }
 )
+
+
+#: What each missing feed is, in words a beginner reads.
+#:
+#: 143 of the 512 cards are withdrawn because something they need is not connected, and
+#: every one of them showed the reader the platform's own internal name for it —
+#: "(risk_context)", "(universe_ranking)", "(token_categories)". Two of them were not
+#: market data at all: `alert_behavior` is the account's own past alerts and
+#: `setup_lifecycle` is how long a setup has been running, so the sentence was also
+#: untrue. The product is built for beginners; an internal field name is never an answer.
+FEED_IN_PLAIN_WORDS: dict[str, str] = {
+    "alert_behavior": "your own past alerts",
+    "cross_market": "the prices of other coins",
+    "crypto_index": "a whole-market index",
+    "derivatives": "futures market numbers",
+    "event_feed": "news and events",
+    "macro_market": "the wider financial markets",
+    "market_breadth": "how many coins are rising or falling",
+    "market_cap_provider": "how big a coin is by market value",
+    "order_book": "the live buy and sell orders",
+    "risk_context": "your trade size and stop settings",
+    "setup_lifecycle": "how long a setup has been running",
+    "token_categories": "which group a coin belongs to",
+    "universe_ranking": "how coins rank against each other",
+}
+
+
+def _plain_feed_names(missing: Iterable[str]) -> str:
+    """The missing feeds as a readable list. Falls back to the name spelled out."""
+
+    names = [
+        FEED_IN_PLAIN_WORDS.get(str(feed), str(feed).replace("_", " "))
+        for feed in sorted(set(missing))
+    ]
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + f" and {names[-1]}"
 
 
 def _capability_parameters(spec: CapabilitySpec) -> tuple[BuilderParameter, ...]:
@@ -599,31 +657,33 @@ def _capability_parameters(spec: CapabilitySpec) -> tuple[BuilderParameter, ...]
                 label=name.replace("_", " ").capitalize(),
                 kind=kind,
                 required=name in required or bool(declaration and declaration.required),
-                unit=str(rules.get("x-semantic-unit") or _unit_for(name)),
+                unit=str(rules.get("x-semantic-unit") or parameter_semantic_unit(name)),
                 help=(declaration.description if declaration else "")
                 or str(rules.get("description") or ""),
-                choices=tuple(BuilderChoice(str(item), str(item)) for item in enum),
-                minimum=_number_or_none(rules.get("minimum")),
-                maximum=_number_or_none(rules.get("maximum")),
+                # The value stays exactly as the contract writes it; only what the reader
+                # sees is made readable. A beginner picking a trading session was being
+                # shown "london_session".
+                choices=tuple(
+                    BuilderChoice(str(item), str(item).replace("_", " ").capitalize())
+                    for item in enum
+                ),
+                # The schema first, then whatever the parameter's own role fixes. Native
+                # mechanics do not come with a capability schema at all, so without the
+                # second half their number boxes would still accept anything.
+                minimum=(
+                    _number_or_none(rules.get("minimum"))
+                    if rules.get("minimum") is not None
+                    else (parameter_value_range(name)[0] if kind in {"integer", "number"} else None)
+                ),
+                maximum=(
+                    _number_or_none(rules.get("maximum"))
+                    if rules.get("maximum") is not None
+                    else (parameter_value_range(name)[1] if kind in {"integer", "number"} else None)
+                ),
                 default=default,
             )
         )
     return tuple(fields)
-
-
-def _unit_for(name: str) -> str:
-    lowered = name.casefold()
-    if lowered in {"period", "lookback", "window", "candles", "length"}:
-        return "count"
-    if "percent" in lowered or lowered.endswith("_pct"):
-        return "percent"
-    if lowered in {"price", "price_level", "level"}:
-        return "price"
-    if "multiplier" in lowered or lowered.endswith("_multiple"):
-        return "multiple"
-    if "timeframe" in lowered:
-        return "timeframe"
-    return "none"
 
 
 def _number_or_none(value: Any) -> float | None:
@@ -668,11 +728,11 @@ def _capability_mechanic(
     elif spec.availability != "available":
         reason = "This rule is not switched on for your account yet."
     elif missing_providers:
-        feeds = ", ".join(sorted(missing_providers))
+        feeds = _plain_feed_names(missing_providers)
         reason = (
-            f"This rule needs market data Hilal Markets does not receive yet ({feeds}). "
-            "You can still set it up; it cannot be approved for monitoring until the "
-            "data feed is connected."
+            f"Hilal Markets cannot read {feeds} yet, and this rule needs it. You can "
+            "still set it up; it cannot be approved for monitoring until that is "
+            "connected."
         )
     operators = tuple(
         BuilderChoice(item.value, COMPARATOR_LABELS[item][0], COMPARATOR_LABELS[item][1])

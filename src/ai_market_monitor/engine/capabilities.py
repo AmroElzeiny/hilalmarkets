@@ -4,8 +4,13 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from ai_market_monitor.engine.candle_patterns import pattern_names
-from ai_market_monitor.engine.context_conditions import TIME_CONDITION_NAMES
+from ai_market_monitor.engine.context_conditions import (
+    TIME_CONDITION_NAMES,
+    time_condition_fields,
+)
+from ai_market_monitor.engine.indicators import INDICATOR_MINIMUM_PERIOD
 from ai_market_monitor.engine.price_action import PRICE_ACTION_NAMES
+from ai_market_monitor.engine.technical_patterns import PATTERN_PARAMETER_RANGES
 from ai_market_monitor.schemas.strategy import (
     MEASURED_COMPARATORS,
     UNARY_COMPARATORS,
@@ -67,6 +72,12 @@ class CapabilityParameter:
     #: Force role evidence even when nothing else shares this unit. For a parameter whose
     #: meaning changes the rule completely if mistaken.
     requires_role_phrase: bool = False
+    #: The range this number is allowed to take. Without them the Builder renders a box
+    #: with no bounds at all, and `start_hour = 100` was accepted as an hour of the day.
+    #: They reach the form through the generated JSON schema, which is the one contract
+    #: the compiler already enforces.
+    minimum: float | None = None
+    maximum: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -241,6 +252,28 @@ def _json_type(parameter_type: str) -> str:
     }.get(parameter_type, "string")
 
 
+def _time_parameters(name: str) -> tuple[CapabilityParameter, ...]:
+    """Form fields for a time condition, taken from the runtime's own table.
+
+    The runtime is the only thing that knows which settings it reads, so it is the only
+    thing allowed to say which settings are offered. Every caller goes through here.
+    """
+
+    return tuple(
+        CapabilityParameter(
+            field.name,
+            field.type,
+            field.default,
+            field.required,
+            field.description,
+            field.options,
+            minimum=field.minimum,
+            maximum=field.maximum,
+        )
+        for field in time_condition_fields(name)
+    )
+
+
 def _parameter_schema(
     parameters: tuple[CapabilityParameter, ...],
     defaults: dict[str, Any],
@@ -252,7 +285,7 @@ def _parameter_schema(
         item: dict[str, Any] = {
             "type": _json_type(parameter.type),
             "description": parameter.description,
-            "x-semantic-unit": _parameter_semantic_unit(parameter.name),
+            "x-semantic-unit": parameter_semantic_unit(parameter.name),
             # The words that can name this role. The registry owns them so every reader
             # shares one vocabulary instead of hand-writing a subset that drifts.
             "x-source-aliases": list(
@@ -266,6 +299,15 @@ def _parameter_schema(
             item["default"] = parameter.default
         if parameter.options:
             item["enum"] = list(parameter.options)
+        # What the capability said, and where it said nothing, what the parameter's own
+        # role fixes. A capability that declares its own range always wins.
+        role_minimum, role_maximum = parameter_value_range(parameter.name)
+        minimum = parameter.minimum if parameter.minimum is not None else role_minimum
+        maximum = parameter.maximum if parameter.maximum is not None else role_maximum
+        if minimum is not None and item["type"] in {"number", "integer"}:
+            item["minimum"] = minimum
+        if maximum is not None and item["type"] in {"number", "integer"}:
+            item["maximum"] = maximum
         properties[parameter.name] = item
         if parameter.required:
             required.append(parameter.name)
@@ -335,8 +377,13 @@ def _role_aliases(name: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(item for item in aliases if item))
 
 
-def _parameter_semantic_unit(name: str) -> str:
-    """Registry-owned unit used when grounding trader-controlled values."""
+def parameter_semantic_unit(name: str) -> str:
+    """What kind of thing a parameter of this name is. **One owner.**
+
+    The Builder used to carry its own copy of these rules, and the two disagreed: the
+    copy had no ``symbol`` case at all and fell back to ``"none"`` where this returns
+    ``"plain"``. Every caller reads this one now.
+    """
 
     lowered = name.casefold()
     if lowered in {"period", "lookback", "window", "candles", "length"}:
@@ -352,6 +399,46 @@ def _parameter_semantic_unit(name: str) -> str:
     if "symbol" in lowered:
         return "symbol"
     return "plain"
+
+
+#: Counts of candles. Nought of them, or minus three of them, is not a smaller window —
+#: it is not a window at all, so the form refuses it rather than the runtime discovering
+#: it later. Names ending in ``_period``/``_bars`` are included, which covers
+#: ``rsi_period``, ``ema_period``, ``long_period``, ``pivot_bars`` and the rest.
+_COUNT_NAMES: frozenset[str] = frozenset(
+    {"period", "lookback", "window", "candles", "length", "bars", "confirmation_candles"}
+)
+
+#: A share of one candle's own high-to-low range, so it cannot leave 0 to 100. This is
+#: arithmetic, not a preference: `candle_shape` computes it as `body / range * 100`.
+_BODY_SHARE_NAMES: frozenset[str] = frozenset({"min_body_percent", "max_body_percent"})
+
+
+def parameter_value_range(name: str) -> tuple[float | None, float | None]:
+    """The range a field of this role can take, where its meaning fixes it.
+
+    Only the cases where a bound is a fact rather than a preference. **654 of the 677
+    number boxes the Builder offers had no range at all**, which is how an "hour of the
+    day" accepted 100 — the form promised the value was usable and the disappointment
+    arrived much later, or never, as a rule that quietly matched nothing.
+    A threshold is deliberately left open: it is the trader's own number and its range
+    belongs to whatever is being measured, which can legitimately be negative.
+    """
+
+    lowered = name.casefold()
+    if lowered in _BODY_SHARE_NAMES:
+        return 0.0, 100.0
+    if lowered.endswith("_hour") or lowered == "hour":
+        return 0.0, 24.0
+    if lowered in _COUNT_NAMES or lowered.endswith(("_period", "_bars", "_lookback")):
+        return 1.0, None
+    # Distances and ratios are magnitudes; which side of the level they apply to is a
+    # separate field. A negative one reverses a comparison nobody asked to reverse.
+    if lowered.endswith("_ratio") or lowered == "tolerance_percent":
+        return 0.0, None
+    if lowered.endswith(("_tolerance_percent", "_buffer_percent", "_prominence_percent")):
+        return 0.0, None
+    return None, None
 
 
 def _resource_cost(warmup_candles: int, provider_required: str | None) -> str:
@@ -625,18 +712,56 @@ PERIOD = CapabilityParameter("period", "integer", 20, False, "Indicator lookback
 LOOKBACK = CapabilityParameter("lookback", "integer", 20, False, "Closed-candle lookback.")
 THRESHOLD = CapabilityParameter("threshold", "number", None, True, "Required threshold.")
 TIMEFRAME = CapabilityParameter("timeframe", "timeframe", "15m", False, "Evaluation timeframe.")
-PATTERN_LOOKBACK = CapabilityParameter(
-    "lookback", "integer", 80, False, "Closed-candle pattern search window."
+def _pattern_parameter(
+    name: str, kind: str, default: Any, description: str
+) -> CapabilityParameter:
+    """A chart-pattern setting, carrying the range the reader will enforce.
+
+    Every one of these used to be declared with no range at all, while
+    ``technical_patterns`` held the real one and refused anything outside it with a bare
+    ``ValueError``. The trader saw a plain number box, typed a number it invited, and the
+    condition came back in the **error** state with no code and nothing to act on. The
+    range now comes from the code that enforces it, so the two cannot disagree.
+    """
+
+    low, high = PATTERN_PARAMETER_RANGES[name]
+    return CapabilityParameter(
+        name, kind, default, False, description, minimum=low, maximum=high
+    )
+
+
+PATTERN_LOOKBACK = _pattern_parameter(
+    "lookback", "integer", 80, "Closed-candle pattern search window."
 )
-PIVOT_BARS = CapabilityParameter(
-    "pivot_bars", "integer", 2, False, "Bars on each side required to confirm a pivot."
+PIVOT_BARS = _pattern_parameter(
+    "pivot_bars", "integer", 2, "Bars on each side required to confirm a pivot."
 )
-BREAKOUT_BUFFER = CapabilityParameter(
+BREAKOUT_BUFFER = _pattern_parameter(
     "breakout_buffer_percent",
     "number",
     0.0,
-    False,
     "Extra close distance beyond the neckline or pattern boundary.",
+)
+SHOULDER_TOLERANCE = _pattern_parameter(
+    "shoulder_tolerance_percent", "number", 5.0, "How unequal the two shoulders may be."
+)
+HEAD_PROMINENCE = _pattern_parameter(
+    "head_prominence_percent", "number", 1.0, "How far the head must stand above the shoulders."
+)
+MAXIMUM_SPACING_RATIO = _pattern_parameter(
+    "maximum_spacing_ratio", "number", 3.0, "How uneven the gaps between the peaks may be."
+)
+LEVEL_TOLERANCE = _pattern_parameter(
+    "level_tolerance_percent", "number", 2.0, "How close the two peaks must be to count as equal."
+)
+MINIMUM_DEPTH = _pattern_parameter(
+    "minimum_depth_percent", "number", 1.0, "How deep the dip between the two peaks must be."
+)
+FLAT_SLOPE = _pattern_parameter(
+    "flat_slope_percent_per_bar", "number", 0.15, "How flat a line has to be to count as flat."
+)
+MINIMUM_SLOPE = _pattern_parameter(
+    "minimum_slope_percent_per_bar", "number", 0.02, "How steep the rising or falling line must be."
 )
 
 
@@ -1451,9 +1576,9 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         parameters=(
             PATTERN_LOOKBACK,
             PIVOT_BARS,
-            CapabilityParameter("shoulder_tolerance_percent", "number", 5.0),
-            CapabilityParameter("head_prominence_percent", "number", 1.0),
-            CapabilityParameter("maximum_spacing_ratio", "number", 3.0),
+            SHOULDER_TOLERANCE,
+            HEAD_PROMINENCE,
+            MAXIMUM_SPACING_RATIO,
             BREAKOUT_BUFFER,
             TIMEFRAME,
         ),
@@ -1503,9 +1628,9 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         parameters=(
             PATTERN_LOOKBACK,
             PIVOT_BARS,
-            CapabilityParameter("shoulder_tolerance_percent", "number", 5.0),
-            CapabilityParameter("head_prominence_percent", "number", 1.0),
-            CapabilityParameter("maximum_spacing_ratio", "number", 3.0),
+            SHOULDER_TOLERANCE,
+            HEAD_PROMINENCE,
+            MAXIMUM_SPACING_RATIO,
             BREAKOUT_BUFFER,
             TIMEFRAME,
         ),
@@ -1550,9 +1675,9 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         parameters=(
             PATTERN_LOOKBACK,
             PIVOT_BARS,
-            CapabilityParameter("shoulder_tolerance_percent", "number", 5.0),
-            CapabilityParameter("head_prominence_percent", "number", 1.0),
-            CapabilityParameter("maximum_spacing_ratio", "number", 3.0),
+            SHOULDER_TOLERANCE,
+            HEAD_PROMINENCE,
+            MAXIMUM_SPACING_RATIO,
             BREAKOUT_BUFFER,
             TIMEFRAME,
         ),
@@ -1594,9 +1719,9 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         parameters=(
             PATTERN_LOOKBACK,
             PIVOT_BARS,
-            CapabilityParameter("shoulder_tolerance_percent", "number", 5.0),
-            CapabilityParameter("head_prominence_percent", "number", 1.0),
-            CapabilityParameter("maximum_spacing_ratio", "number", 3.0),
+            SHOULDER_TOLERANCE,
+            HEAD_PROMINENCE,
+            MAXIMUM_SPACING_RATIO,
             BREAKOUT_BUFFER,
             TIMEFRAME,
         ),
@@ -1632,8 +1757,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         parameters=(
             PATTERN_LOOKBACK,
             PIVOT_BARS,
-            CapabilityParameter("level_tolerance_percent", "number", 2.0),
-            CapabilityParameter("minimum_depth_percent", "number", 1.0),
+            LEVEL_TOLERANCE,
+            MINIMUM_DEPTH,
             BREAKOUT_BUFFER,
             TIMEFRAME,
         ),
@@ -1670,8 +1795,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         parameters=(
             PATTERN_LOOKBACK,
             PIVOT_BARS,
-            CapabilityParameter("level_tolerance_percent", "number", 2.0),
-            CapabilityParameter("minimum_depth_percent", "number", 1.0),
+            LEVEL_TOLERANCE,
+            MINIMUM_DEPTH,
             BREAKOUT_BUFFER,
             TIMEFRAME,
         ),
@@ -1704,8 +1829,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
             parameters=(
                 PATTERN_LOOKBACK,
                 PIVOT_BARS,
-                CapabilityParameter("flat_slope_percent_per_bar", "number", 0.15),
-                CapabilityParameter("minimum_slope_percent_per_bar", "number", 0.02),
+                FLAT_SLOPE,
+                MINIMUM_SLOPE,
                 BREAKOUT_BUFFER,
                 TIMEFRAME,
             ),
@@ -2125,6 +2250,12 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         # `evaluate_time_condition` returns a bool for "time_window": the candle is
         # either inside the window or it is not.
         default_comparator="is_true",
+        # Declared with no fields at all until now. The reader asks for `start_hour` and
+        # `end_hour`, found neither, and fell back to 0 and 24 — the whole day — so a
+        # card whose entire job is to narrow the clock answered **yes** on every candle
+        # of every coin, for ever, and no screen offered any way to narrow it.
+        parameters=_time_parameters("time_window"),
+        default_parameters={"timezone": "UTC"},
         required_data=("candle_timestamp",),
     ),
     _cap(
@@ -2132,12 +2263,15 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "Killzone/session filter",
         "session_time",
         "market_filter",
-        "Signal candle timestamp must fall inside a named killzone.",
+        "Only allow the rule during the hours you choose.",
         aliases=("killzone", "ny killzone", "london killzone"),
         operand_kind="market_metric",
         operand_name="time_window",
-        # Same operand as the window above, so the same yes/no answer.
+        # Same operand as the window above, so the same yes/no answer — and it was
+        # missing the same fields, with the same result: always yes.
         default_comparator="is_true",
+        parameters=_time_parameters("time_window"),
+        default_parameters={"timezone": "UTC"},
         required_data=("candle_timestamp",),
     ),
     _cap(
@@ -3203,7 +3337,16 @@ def _extended_indicator_capabilities() -> list[CapabilitySpec]:
             default_threshold=threshold,
             parameters=tuple(
                 CapabilityParameter(
-                    name, "number" if isinstance(value, float) else "integer", value
+                    name,
+                    "number" if isinstance(value, float) else "integer",
+                    value,
+                    # Where the measure itself cannot be taken over a window this small,
+                    # the form must not offer one. See INDICATOR_MINIMUM_PERIOD.
+                    minimum=(
+                        INDICATOR_MINIMUM_PERIOD.get(operand)
+                        if name == "period" and operand in INDICATOR_MINIMUM_PERIOD
+                        else None
+                    ),
                 )
                 for name, value in parameters.items()
                 if isinstance(value, (int, float))
@@ -3465,7 +3608,14 @@ def _time_capabilities() -> list[CapabilitySpec]:
             aliases=aliases.get(name, (name.replace("_", " "),)),
             operand_kind="market_metric",
             operand_name=name,
-            default_parameters={"timezone": "UTC"},
+            # Only where the condition really reads a timezone. Sending it to the preset
+            # sessions is what buried Europe/London and America/New_York: the key was
+            # always present, so the reader's own preset could never be reached.
+            default_parameters=(
+                {"timezone": "UTC"}
+                if any(field.name == "timezone" for field in time_condition_fields(name))
+                else {}
+            ),
             default_comparator=(
                 "gte"
                 if name
@@ -3505,10 +3655,14 @@ def _time_capabilities() -> list[CapabilitySpec]:
                 }
                 else ("is_true", "is_false")
             ),
+            # Every one of these used to be given the same three fields — timezone,
+            # start_hour, end_hour — whatever the condition actually reads. See
+            # TIME_CONDITION_FIELDS for what that cost: a "day of week" card that always
+            # meant Monday, three session cards that were all "always true", and two
+            # conditions that could never be true at all. The runtime's own table is the
+            # single owner now, so the form offers exactly what the reader reads.
             parameters=(
-                CapabilityParameter("timezone", "timezone", "UTC"),
-                CapabilityParameter("start_hour", "number", 0),
-                CapabilityParameter("end_hour", "number", 24),
+                *_time_parameters(name),
                 # The three date-bounded conditions are the only ones here that compare
                 # against a moment somebody names. The runtime reads that moment from
                 # `timestamp`; nothing offered the field, so the form asked for hours of

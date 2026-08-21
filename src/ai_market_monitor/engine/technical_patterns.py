@@ -28,6 +28,43 @@ class PatternEvidence:
     pivot_indexes: tuple[int, ...] = ()
 
 
+#: What each setting of a chart pattern is allowed to be. **One owner.**
+#:
+#: These numbers were written inline at each call below, and nothing else knew them. The
+#: Builder therefore drew a number box with no range on it, accepted whatever was typed,
+#: and the refusal arrived at scan time as a bare ``ValueError`` — which reaches the
+#: trader as a condition in the **error** state carrying no error code and no sentence
+#: they could act on. A ``lookback`` of 5 and a ``pivot_bars`` of 20 are both things the
+#: form invited somebody to enter.
+#:
+#: The registry declares the form's boxes from this table, so the range the form allows
+#: and the range the reader enforces are the same range.
+PATTERN_PARAMETER_RANGES: dict[str, tuple[float, float]] = {
+    "lookback": (12, 500),
+    "pivot_bars": (1, 8),
+    "shoulder_tolerance_percent": (0.1, 25.0),
+    "head_prominence_percent": (0.05, 25.0),
+    "maximum_spacing_ratio": (1.0, 8.0),
+    "breakout_buffer_percent": (0.0, 5.0),
+    "level_tolerance_percent": (0.1, 15.0),
+    "minimum_depth_percent": (0.05, 30.0),
+    "flat_slope_percent_per_bar": (0.001, 2.0),
+    "minimum_slope_percent_per_bar": (0.001, 2.0),
+}
+
+
+def _setting(parameters: dict[str, Any], name: str, fallback: float) -> float:
+    """One setting, refused rather than clamped when it is outside its own range."""
+
+    low, high = PATTERN_PARAMETER_RANGES[name]
+    return _bounded_float(parameters.get(name, fallback), low, high)
+
+
+def _count_setting(parameters: dict[str, Any], name: str, fallback: int) -> int:
+    low, high = PATTERN_PARAMETER_RANGES[name]
+    return _bounded_int(parameters.get(name, fallback), int(low), int(high))
+
+
 def evaluate_technical_pattern(
     name: str,
     candles: list[Candle],
@@ -36,8 +73,8 @@ def evaluate_technical_pattern(
     if name not in TECHNICAL_PATTERN_NAMES:
         raise ValueError(f"Unsupported technical pattern: {name}")
     parameters = parameters or {}
-    lookback = _bounded_int(parameters.get("lookback", 80), 12, 500)
-    pivot_bars = _bounded_int(parameters.get("pivot_bars", 2), 1, 8)
+    lookback = _count_setting(parameters, "lookback", 80)
+    pivot_bars = _count_setting(parameters, "pivot_bars", 2)
     minimum = max(12, pivot_bars * 6 + 3)
     if len(candles) < minimum:
         raise IndicatorWarmupError(
@@ -64,19 +101,11 @@ def _head_and_shoulders(
     *,
     inverse: bool,
 ) -> PatternEvidence:
-    pivot_bars = _bounded_int(parameters.get("pivot_bars", 2), 1, 8)
-    shoulder_tolerance = _bounded_float(
-        parameters.get("shoulder_tolerance_percent", 5.0), 0.1, 25.0
-    )
-    head_prominence = _bounded_float(
-        parameters.get("head_prominence_percent", 1.0), 0.05, 25.0
-    )
-    maximum_spacing_ratio = _bounded_float(
-        parameters.get("maximum_spacing_ratio", 3.0), 1.0, 8.0
-    )
-    breakout_buffer = _bounded_float(
-        parameters.get("breakout_buffer_percent", 0.0), 0.0, 5.0
-    ) / 100
+    pivot_bars = _count_setting(parameters, "pivot_bars", 2)
+    shoulder_tolerance = _setting(parameters, "shoulder_tolerance_percent", 5.0)
+    head_prominence = _setting(parameters, "head_prominence_percent", 1.0)
+    maximum_spacing_ratio = _setting(parameters, "maximum_spacing_ratio", 3.0)
+    breakout_buffer = _setting(parameters, "breakout_buffer_percent", 0.0) / 100
     highs, lows = _pivot_indexes(candles, pivot_bars)
     pivots = lows if inverse else highs
     if len(pivots) < 3:
@@ -141,16 +170,10 @@ def _double_pattern(
     *,
     bottom: bool,
 ) -> PatternEvidence:
-    pivot_bars = _bounded_int(parameters.get("pivot_bars", 2), 1, 8)
-    level_tolerance = _bounded_float(
-        parameters.get("level_tolerance_percent", 2.0), 0.1, 15.0
-    )
-    minimum_depth = _bounded_float(
-        parameters.get("minimum_depth_percent", 1.0), 0.05, 30.0
-    )
-    breakout_buffer = _bounded_float(
-        parameters.get("breakout_buffer_percent", 0.0), 0.0, 5.0
-    ) / 100
+    pivot_bars = _count_setting(parameters, "pivot_bars", 2)
+    level_tolerance = _setting(parameters, "level_tolerance_percent", 2.0)
+    minimum_depth = _setting(parameters, "minimum_depth_percent", 1.0)
+    breakout_buffer = _setting(parameters, "breakout_buffer_percent", 0.0) / 100
     highs, lows = _pivot_indexes(candles, pivot_bars)
     pivots = lows if bottom else highs
     if len(pivots) < 2:
@@ -188,16 +211,10 @@ def _triangle(
     parameters: dict[str, Any],
     name: str,
 ) -> PatternEvidence:
-    pivot_bars = _bounded_int(parameters.get("pivot_bars", 2), 1, 8)
-    flat_tolerance = _bounded_float(
-        parameters.get("flat_slope_percent_per_bar", 0.15), 0.001, 2.0
-    )
-    minimum_slope = _bounded_float(
-        parameters.get("minimum_slope_percent_per_bar", 0.02), 0.001, 2.0
-    )
-    breakout_buffer = _bounded_float(
-        parameters.get("breakout_buffer_percent", 0.0), 0.0, 5.0
-    ) / 100
+    pivot_bars = _count_setting(parameters, "pivot_bars", 2)
+    flat_tolerance = _setting(parameters, "flat_slope_percent_per_bar", 0.15)
+    minimum_slope = _setting(parameters, "minimum_slope_percent_per_bar", 0.02)
+    breakout_buffer = _setting(parameters, "breakout_buffer_percent", 0.0) / 100
     highs, lows = _pivot_indexes(candles, pivot_bars)
     if len(highs) < 2 or len(lows) < 2:
         return PatternEvidence(False, False)

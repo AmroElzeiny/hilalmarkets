@@ -92,6 +92,48 @@ PATTERN_BARS: dict[str, int] = {
 }
 
 
+#: Patterns that are read from the newest candle alone.
+#:
+#: This used to be written out inline inside :func:`detect_candle_pattern`, as a second
+#: hand-kept copy of what :func:`_single_pattern` already knows how to read. The two
+#: drifted, and the drift was silent: ``green_candle`` was on the inline list and
+#: ``bullish_candle`` — the same reading, ``close > open`` — was not. So
+#: ``bullish_candle`` and ``bearish_candle`` were sent to the two-candle reader, which
+#: has no branch for them, and returned **no** on every candle of every coin for ever,
+#: while ``green_candle`` and ``red_candle`` answered correctly beside them.
+#:
+#: One list, named here, used by the router. A pattern the single reader can answer and
+#: this list does not name is a pattern nobody can ever trigger, so
+#: ``tests/unit/test_invariant_every_pattern_can_fire.py`` proves the two agree.
+SINGLE_CANDLE_PATTERNS: frozenset[str] = frozenset(
+    {
+        "green_candle",
+        "red_candle",
+        "bullish_candle",
+        "bearish_candle",
+        "doji",
+        "dragonfly_doji",
+        "gravestone_doji",
+        "long_legged_doji",
+        "hammer",
+        "hanging_man",
+        "shooting_star",
+        "inverted_hammer",
+        "pin_bar",
+        "spinning_top_bullish",
+        "spinning_top_bearish",
+        "marubozu_bullish",
+        "marubozu_bearish",
+        "belt_hold_bullish",
+        "belt_hold_bearish",
+        "long_upper_shadow",
+        "long_lower_shadow",
+        "strong_close_near_high",
+        "strong_close_near_low",
+    }
+)
+
+
 def pattern_names() -> tuple[str, ...]:
     basics = {
         "bullish_engulfing",
@@ -451,35 +493,7 @@ def detect_candle_pattern(
 ) -> bool:
     parameters = parameters or {}
     confirmation_required = bool(parameters.get("confirmation_required", False))
-    required = PATTERN_BARS.get(
-        name,
-        2
-        if name
-        not in {
-            "green_candle",
-            "red_candle",
-            "doji",
-            "dragonfly_doji",
-            "gravestone_doji",
-            "long_legged_doji",
-            "hammer",
-            "hanging_man",
-            "shooting_star",
-            "inverted_hammer",
-            "pin_bar",
-            "spinning_top_bullish",
-            "spinning_top_bearish",
-            "marubozu_bullish",
-            "marubozu_bearish",
-            "belt_hold_bullish",
-            "belt_hold_bearish",
-            "long_upper_shadow",
-            "long_lower_shadow",
-            "strong_close_near_high",
-            "strong_close_near_low",
-        }
-        else 1,
-    )
+    required = PATTERN_BARS.get(name, 1 if name in SINGLE_CANDLE_PATTERNS else 2)
     total_required = required + (1 if confirmation_required else 0)
     if len(candles) < total_required:
         raise IndicatorWarmupError(f"{name} requires {total_required} candles")

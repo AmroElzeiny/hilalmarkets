@@ -50,7 +50,7 @@ from ai_market_monitor.engine.reference_levels import (
     previous_candle_level_name,
 )
 from ai_market_monitor.schemas.setup_authorization import AuthorizedPatchOperation
-from ai_market_monitor.schemas.strategy import Comparator
+from ai_market_monitor.schemas.strategy import UNARY_COMPARATORS, Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     PERCENTAGE_MEASUREMENTS,
     ConditionNodeType,
@@ -101,6 +101,27 @@ _PRICE_OPERAND_FORMULAS: frozenset[FormulaKind] = frozenset(
         FormulaKind.CROSS,
     }
 )
+
+def _readable(value: Any) -> Any:
+    """One setting, as a reader would say it.
+
+    ``True`` and ``False`` are Python's words, not a trader's. The sentence the Builder
+    writes back for somebody to read and approve was saying "with confirmation required
+    False" to a person who has never seen code.
+    """
+
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    if isinstance(value, str) and "_" in value:
+        # A picked option keeps the platform's spelling as its stored value, and that
+        # spelling was going straight into the sentence: "session asia_session",
+        # "mode break_high", "component price_above_cloud". The stored value is
+        # untouched; only the reading of it changes.
+        return value.replace("_", " ")
+    return value
+
 
 #: Words for each candle field, used when a rule is written out for the person.
 _FIELD_WORDS: dict[str, str] = {
@@ -645,12 +666,21 @@ def render_condition_sentence(
         parts.append(f"price is {comparison} the previous candle {level}")
     else:
         threshold = values.get("threshold")
-        measured = f"{mechanic.label} is {comparison}"
+        # "happens" and "does not happen" are whole verbs already, so the linking "is"
+        # in front of one produced "Bollinger re-entry **is happens** on the 15m candle".
+        # That sentence is not a debug string: it is what the Builder writes back for the
+        # trader to read and approve, and 262 of the 369 cards read that way, because
+        # every yes/no card uses one of those two comparisons.
+        measured = (
+            f"{mechanic.label} {comparison}"
+            if comparator.value in UNARY_COMPARATORS
+            else f"{mechanic.label} is {comparison}"
+        )
         parts.append(
             f"{measured} {threshold:g}" if isinstance(threshold, int | float) else measured
         )
         extras = [
-            f"{name.replace('_', ' ')} {value}"
+            f"{name.replace('_', ' ')} {_readable(value)}"
             for name, value in sorted(values.items())
             if name not in {"comparator", "direction", "timeframe", "threshold"}
         ]

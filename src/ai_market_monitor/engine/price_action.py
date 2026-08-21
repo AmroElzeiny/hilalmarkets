@@ -168,6 +168,11 @@ def supports_price_action(name: str | None) -> bool:
     return bool(name and name in PRICE_ACTION_NAMES)
 
 
+#: How many recent candles may hold the break, in a "break then come back" reading. The
+#: level itself is taken from the window before these, never including them.
+_RETEST_BREAK_BARS = 3
+
+
 def _prior(candles: list[Candle], lookback: int) -> tuple[Candle, list[Candle]]:
     if len(candles) < lookback + 1:
         raise IndicatorWarmupError(f"price action requires {lookback + 1} candles")
@@ -678,12 +683,34 @@ def evaluate_price_action(
         "retest_after_breakout",
         "break_and_retest_confirmed",
         "pullback_to_breakout_level",
+        "retest_after_breakdown",
     }:
-        broke = any(candle.close > prior_high for candle in candles[-4:-1])
-        return broke and current.low <= prior_high * (1 + tolerance) and current.close > prior_high
-    if name == "retest_after_breakdown":
-        broke = any(candle.close < prior_low for candle in candles[-4:-1])
-        return broke and current.high >= prior_low * (1 - tolerance) and current.close < prior_low
+        # The level a break is measured against has to be the level that existed
+        # **before** the break.
+        #
+        # This used to compare against `prior_high` — the highest high of the whole prior
+        # window — and then ask whether one of the last three candles *of that same
+        # window* had closed above it. A candle's close can never be above the highest
+        # high of a window the candle is inside, so `broke` was False on every candle, of
+        # every coin, on every timeframe. All four of these cards were impossible to
+        # trigger, and nothing could see it: they were offered, they compiled, they
+        # evaluated, and they answered a perfectly ordinary "no" for ever.
+        #
+        # So the level comes from the part of the window before those three candles, and
+        # the three candles are what may have broken it.
+        recent = prior[-_RETEST_BREAK_BARS:]
+        base = prior[:-_RETEST_BREAK_BARS]
+        if not base:
+            raise IndicatorWarmupError(
+                f"{name.replace('_', ' ')} needs more than {_RETEST_BREAK_BARS + 1} candles"
+            )
+        if name == "retest_after_breakdown":
+            level = min(candle.low for candle in base)
+            broke = any(candle.close < level for candle in recent)
+            return broke and current.high >= level * (1 - tolerance) and current.close < level
+        level = max(candle.high for candle in base)
+        broke = any(candle.close > level for candle in recent)
+        return broke and current.low <= level * (1 + tolerance) and current.close > level
 
     timezone = str(parameters.get("timezone", "UTC"))
     if name == "reference_period_sweep":

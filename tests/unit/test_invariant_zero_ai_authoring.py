@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 
 from ai_market_monitor.engine.builder_contract import (
+    FEED_IN_PLAIN_WORDS,
     builder_mechanics,
     capability_mechanics,
     find_mechanic,
@@ -97,6 +98,13 @@ def test_every_mechanic_blocked_on_data_names_the_feed_it_needs() -> None:
 
     That is an infrastructure fact, not an AI dependency, and it is stated in words with
     the feed named — never as "ask the assistant".
+
+    This used to require the platform's **own** name for the feed to appear in the
+    sentence, so all 143 refusals read "(risk_context)", "(universe_ranking)",
+    "(token_categories)" to a beginner. The rule was right and the wording was wrong: the
+    reason must identify the feed, in words the reader knows. It is checked here against
+    the same table the sentence is built from, so a feed added without a plain-words name
+    fails this rather than leaking its internal name to a screen.
     """
 
     blocked = [item for item in mechanic_catalog(LAUNCH_PROVIDERS) if not item.available]
@@ -107,7 +115,14 @@ def test_every_mechanic_blocked_on_data_names_the_feed_it_needs() -> None:
         assert not item.provider_requirements_met, item.key
         reason = item.unavailable_reason or ""
         assert "assistant" not in reason.casefold(), item.key
-        assert any(feed in reason for feed in item.provider_requirements), (item.key, reason)
+        assert any(
+            FEED_IN_PLAIN_WORDS.get(feed, feed.replace("_", " ")) in reason
+            for feed in item.provider_requirements
+        ), (item.key, reason)
+        # And the internal name itself never reaches the reader.
+        assert not any(feed in reason for feed in item.provider_requirements), (
+            f"{item.key} shows the platform's internal feed name to a beginner: {reason}"
+        )
 
 
 def test_difficulty_is_described_and_never_used_to_hide_a_mechanic() -> None:

@@ -12,6 +12,21 @@ class IndicatorWarmupError(ValueError):
     pass
 
 
+class IndicatorDomainError(ValueError):
+    """A setting this measure cannot be taken with, whatever the market does.
+
+    Different from a warm-up: waiting for more candles will never help. Raised in plain
+    words so what reaches the trader is a sentence and not an exception class name.
+    """
+
+
+#: The smallest window an indicator can be measured over, where that is more than one.
+#: Owned beside the measures themselves, because it is the arithmetic in these functions
+#: that decides it, and read by the capability registry so the form never offers a window
+#: the measure cannot use. ``choppiness_index`` divides by ``log(period)``.
+INDICATOR_MINIMUM_PERIOD: dict[str, int] = {"choppiness_index": 2}
+
+
 #: What a compiled rule carries **about itself**, not about the reading it takes.
 #:
 #: The compiler puts these beside an operand's real settings so that context conditions
@@ -1415,6 +1430,15 @@ def normalized_atr(candles: list[Candle], *, period: int = 14) -> float:
 
 
 def choppiness_index(candles: list[Candle], *, period: int = 14) -> float:
+    # The formula divides by log(period), which is nought when the window is one candle.
+    # The Builder offered a window of one — every count field's smallest sensible value —
+    # and the trader got a condition in the error state reading only "ZeroDivisionError".
+    # Refused here in words, and INDICATOR_MINIMUM_PERIOD keeps the form from offering it.
+    if period < INDICATOR_MINIMUM_PERIOD["choppiness_index"]:
+        raise IndicatorDomainError(
+            "the choppiness measure compares a window against itself, so it needs at "
+            "least two candles"
+        )
     if len(candles) < period + 1:
         raise IndicatorWarmupError(f"choppiness_index({period}) requires {period + 1} candles")
     recent = candles[-period - 1 :]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -43,6 +44,214 @@ TIME_CONDITION_NAMES = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class TimeConditionField:
+    """One setting a time condition actually reads."""
+
+    name: str
+    type: str
+    default: Any = None
+    required: bool = False
+    description: str = ""
+    options: tuple[str, ...] = ()
+    minimum: float | None = None
+    maximum: float | None = None
+
+
+_TIMEZONE = TimeConditionField(
+    "timezone", "text", "UTC", description="Which clock to read the time on."
+)
+_START_HOUR = TimeConditionField(
+    "start_hour",
+    "number",
+    0,
+    description="Hour of the day the window opens, from 0 to 24.",
+    minimum=0,
+    maximum=24,
+)
+_END_HOUR = TimeConditionField(
+    "end_hour",
+    "number",
+    24,
+    description="Hour of the day the window closes, from 0 to 24.",
+    minimum=0,
+    maximum=24,
+)
+_DAYS = TimeConditionField(
+    "days",
+    "text",
+    None,
+    required=True,
+    description="Which day of the week this rule is allowed to run on.",
+    options=(
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    ),
+)
+#: Sessions a window can be measured against. The values are the condition names
+#: `_session_bounds` knows, so the form can never offer a session the reader cannot read.
+SESSION_CHOICES: tuple[str, ...] = (
+    "asia_session",
+    "london_session",
+    "new_york_session",
+    "specific_utc_session",
+)
+_SESSION = TimeConditionField(
+    "session",
+    "text",
+    None,
+    required=True,
+    description="Which trading session this window belongs to.",
+    options=SESSION_CHOICES,
+)
+_MINUTES = TimeConditionField(
+    "minutes",
+    "number",
+    30,
+    description="How many minutes long the window is.",
+    minimum=1,
+    maximum=1440,
+)
+
+#: The three conditions below exist so a trader can name their own window, so the hours
+#: are theirs to give and there is no sensible stand-in. They used to default to 0 and
+#: 24 — the whole day — which meant a beginner who accepted the form as it opened got a
+#: "time window" filter that let every candle through and looked like it was working.
+_CHOSEN_START_HOUR = TimeConditionField(
+    "start_hour",
+    "number",
+    None,
+    required=True,
+    description="Hour of the day the window opens, from 0 to 24.",
+    minimum=0,
+    maximum=24,
+)
+_CHOSEN_END_HOUR = TimeConditionField(
+    "end_hour",
+    "number",
+    None,
+    required=True,
+    description="Hour of the day the window closes, from 0 to 24.",
+    minimum=0,
+    maximum=24,
+)
+
+_HOUR_WINDOW = (_TIMEZONE, _CHOSEN_START_HOUR, _CHOSEN_END_HOUR)
+
+#: Conditions whose window is the trader's to state. Named here so the reader refuses
+#: rather than standing in for them.
+_TRADER_CHOSEN_WINDOWS: frozenset[str] = frozenset(
+    {"time_window", "specific_hour_range", "specific_utc_session"}
+)
+
+#: The opposite: sessions whose hours are the session's own and were never a setting.
+_PRESET_SESSIONS: frozenset[str] = frozenset(
+    {"asia_session", "london_session", "new_york_session"}
+)
+
+#: **One owner for what each time condition needs.**
+#:
+#: Every condition below was previously given the same three fields — timezone,
+#: start_hour and end_hour — whatever it actually read. The damage ran in both
+#: directions and no test could see it, because each half was self-consistent:
+#:
+#: * A field the reader wanted but the form never offered was silently replaced by a
+#:   default inside the reader. ``day_of_week`` read ``days`` and, finding nothing,
+#:   fell back to ``[0]`` — so every "day of week" monitor anybody ever built meant
+#:   **Monday**, with no way to see it or change it.
+#: * A field the form always sent overrode a preset the reader held. ``start_hour=0``
+#:   and ``end_hour=24`` are the whole day, so "London Session", "New York Session" and
+#:   "Asia Session" all collapsed to *always true* and became the same card. The same
+#:   two values turned ``avoid_low_liquidity_hours`` and ``session_expired`` into
+#:   ``not (always true)`` — conditions that could **never** be met, on any candle, for
+#:   any coin.
+#:
+#: `capabilities.py` builds the form from this table and `evaluate_time_condition`
+#: reads exactly these names, so the offer and the reading cannot drift apart again.
+TIME_CONDITION_FIELDS: dict[str, tuple[TimeConditionField, ...]] = {
+    "day_of_week": (_TIMEZONE, _DAYS),
+    "weekend_filter": (_TIMEZONE,),
+    "weekday_only": (_TIMEZONE,),
+    # These three are the ones that genuinely ask the trader for an hour window.
+    "time_window": _HOUR_WINDOW,
+    "specific_hour_range": _HOUR_WINDOW,
+    "specific_utc_session": _HOUR_WINDOW,
+    # Presets. Offering hours here is what made all three identical.
+    "asia_session": (),
+    "london_session": (),
+    "new_york_session": (),
+    # A window measured from the edge of a session the trader picks.
+    "session_open_window": (_SESSION, _MINUTES),
+    "first_n_minutes_of_session": (_SESSION, _MINUTES),
+    "session_close_window": (_SESSION, _MINUTES),
+    "last_n_minutes_of_session": (_SESSION, _MINUTES),
+    "session_expired": (_SESSION,),
+    "avoid_low_liquidity_hours": (
+        _TIMEZONE,
+        TimeConditionField(
+            "start_hour",
+            "number",
+            21,
+            description="Hour the quiet stretch starts, from 0 to 24.",
+            minimum=0,
+            maximum=24,
+        ),
+        TimeConditionField(
+            "end_hour",
+            "number",
+            0,
+            description="Hour the quiet stretch ends, from 0 to 24.",
+            minimum=0,
+            maximum=24,
+        ),
+    ),
+    "avoid_daily_reset": (
+        _TIMEZONE,
+        TimeConditionField(
+            "reset_hour",
+            "number",
+            0,
+            description="The hour the exchange's day rolls over.",
+            minimum=0,
+            maximum=24,
+        ),
+        TimeConditionField(
+            "buffer_minutes",
+            "number",
+            15,
+            description="How many minutes either side of that hour to stay out of.",
+            minimum=1,
+            maximum=720,
+        ),
+    ),
+}
+
+
+def time_condition_fields(name: str) -> tuple[TimeConditionField, ...]:
+    """The settings this time condition reads. Timezone only, unless stated above."""
+
+    return TIME_CONDITION_FIELDS.get(name, (_TIMEZONE,))
+
+
+def _is_number(value: Any) -> bool:
+    """True for a real number a trader could have typed. A bool is not one."""
+
+    if isinstance(value, bool) or value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    try:
+        float(str(value))
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def _hour_value(timestamp: datetime, timezone: str) -> float:
     local = ensure_aware(timestamp).astimezone(ZoneInfo(timezone))
     return local.hour + local.minute / 60 + local.second / 3600
@@ -61,6 +270,14 @@ def _session_bounds(name: str, parameters: dict[str, Any]) -> tuple[float, float
         "specific_utc_session": (0.0, 24.0, "UTC"),
     }
     start, end, timezone = defaults.get(name, (0.0, 24.0, "UTC"))
+    if name in _PRESET_SESSIONS:
+        # A named session's hours are the session's, not a setting. No screen has ever
+        # offered these three fields for these three cards, so a stored value on one of
+        # them can only be the 0/24/UTC the old form injected into every time rule — the
+        # values that made Asia, London and New York the same "always yes" card. Ignoring
+        # them here is what lets monitors saved before the fix heal on deploy instead of
+        # keeping the old meaning until somebody rebuilds them by hand.
+        return start, end, timezone
     return (
         float(parameters.get("start_hour", start)),
         float(parameters.get("end_hour", end)),
@@ -80,7 +297,13 @@ def evaluate_time_condition(
     timezone = str(parameters.get("timezone", context.get("timezone", "UTC")))
     local = timestamp.astimezone(ZoneInfo(timezone))
     if name == "day_of_week":
-        expected = parameters.get("days", parameters.get("day", [0]))
+        expected = parameters.get("days", parameters.get("day"))
+        # No day chosen is not "Monday". It used to be: the default `[0]` meant every
+        # day-of-week monitor ever built ran on Mondays only, and the screen that built
+        # it never showed a day at all. A rule whose meaning was never stated is refused
+        # so the misunderstanding stays visible.
+        if expected is None or expected == [] or expected == "":
+            raise ContextDataUnavailable("this rule does not say which day of the week")
         if not isinstance(expected, list):
             expected = [expected]
         normalized = {
@@ -109,7 +332,15 @@ def evaluate_time_condition(
         "london_session",
         "new_york_session",
     }:
-        start, end, zone = _session_bounds(name, {**parameters, "timezone": timezone})
+        if name in _TRADER_CHOSEN_WINDOWS and not (
+            _is_number(parameters.get("start_hour")) and _is_number(parameters.get("end_hour"))
+        ):
+            raise ContextDataUnavailable("this rule does not say which hours the window covers")
+        # `parameters` is passed through untouched on purpose. Merging the resolved
+        # timezone in used to hand `_session_bounds` a `timezone` key on every call, so
+        # its own presets — Europe/London for the London session, America/New_York for
+        # New York — could never be reached and every session was read on UTC.
+        start, end, zone = _session_bounds(name, parameters)
         return _inside_hours(_hour_value(timestamp, zone), start, end)
     if name in {
         "session_open_window",
@@ -118,10 +349,14 @@ def evaluate_time_condition(
         "last_n_minutes_of_session",
         "session_expired",
     }:
-        start, end, zone = _session_bounds(
-            str(parameters.get("session", "specific_utc_session")),
-            {**parameters, "timezone": timezone},
-        )
+        session = str(parameters.get("session") or "")
+        # "Which session?" has no sensible default. It used to fall back to
+        # `specific_utc_session`, whose bounds are the whole day, which made
+        # `session_expired` mean "outside the whole day" — false on every candle for
+        # ever — and pinned every open/close window to midnight UTC.
+        if session not in SESSION_CHOICES:
+            raise ContextDataUnavailable("this rule does not say which trading session")
+        start, end, zone = _session_bounds(session, parameters)
         value = _hour_value(timestamp, zone)
         minutes = float(parameters.get("minutes", parameters.get("window_minutes", 30))) / 60
         if name in {"session_open_window", "first_n_minutes_of_session"}:
