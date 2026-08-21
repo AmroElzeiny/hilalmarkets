@@ -31,7 +31,7 @@ from ai_market_monitor.db.models import (
     ShariaMonitoringRun,
     SourceSnapshot,
 )
-from ai_market_monitor.db.models.enums import ShariaMethodologyStatus
+from ai_market_monitor.db.models.enums import ReviewCaseType, ShariaMethodologyStatus
 from ai_market_monitor.services import sharia_dossier_state as dossier_state
 from ai_market_monitor.services.provider_reliability import ProviderCallError
 from ai_market_monitor.services.provider_runtime import provider_call, provider_request
@@ -788,7 +788,7 @@ class ShariaResearchPipeline:
                 f"{'FAS' if external.source_family == 'fasset_shariah_reports' else 'SC'}-"
                 f"{asset.symbol}-{str(dossier.id)[:8].upper()}"
             ),
-            case_type="initial_asset_review",
+            case_type=ReviewCaseType.INITIAL_ASSET_REVIEW,
             state="ready_for_review",
             publication_state="unpublished",
             canonical_asset_id=asset.id,

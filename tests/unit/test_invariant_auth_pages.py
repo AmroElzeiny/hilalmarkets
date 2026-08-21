@@ -33,6 +33,7 @@ from ai_market_monitor.core.copy_rules import (
     FORBIDDEN_CLAIM_PHRASES,
     SHARIA_SPELLING_PATTERN,
 )
+from tests.support.contrast import contrast, flatten
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src" / "ai_market_monitor"
@@ -102,40 +103,6 @@ def _without_print_rules(css: str) -> str:
         index = cursor + 1
 
 
-# ---------------------------------------------------------------------------
-# Contrast, computed rather than trusted.
-# ---------------------------------------------------------------------------
-
-
-def _channel(value: float) -> float:
-    value /= 255.0
-    return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
-
-
-def _luminance(colour: str) -> float:
-    raw = colour.lstrip("#")
-    red, green, blue = (int(raw[index : index + 2], 16) for index in (0, 2, 4))
-    return 0.2126 * _channel(red) + 0.7152 * _channel(green) + 0.0722 * _channel(blue)
-
-
-def contrast(first: str, second: str) -> float:
-    high, low = sorted((_luminance(first), _luminance(second)), reverse=True)
-    return (high + 0.05) / (low + 0.05)
-
-
-def _flatten(colour: str, alpha: float, behind: str) -> str:
-    """A translucent colour as the eye actually sees it, over its background."""
-
-    top = colour.lstrip("#")
-    bottom = behind.lstrip("#")
-    parts = []
-    for index in (0, 2, 4):
-        over = int(top[index : index + 2], 16)
-        under = int(bottom[index : index + 2], 16)
-        parts.append(round(over * alpha + under * (1 - alpha)))
-    return "#" + "".join(f"{part:02x}" for part in parts)
-
-
 #: Every colour these pages may paint, and where it comes from.
 #:
 #: This is the rule "no new main colours" written so a machine can check it. Each entry
@@ -172,8 +139,8 @@ PALETTE = {
 }
 
 #: A card on the near-black panel: white at 4.5% and 4%, flattened.
-JOURNEY_CARD = _flatten("#ffffff", 0.045, PALETTE["ink"])
-TRUST_CARD = _flatten("#ffffff", 0.04, PALETTE["ink"])
+JOURNEY_CARD = flatten("#ffffff", 0.045, PALETTE["ink"])
+TRUST_CARD = flatten("#ffffff", 0.04, PALETTE["ink"])
 
 #: (what, foreground, background, minimum). Every pair the four pages paint.
 #:

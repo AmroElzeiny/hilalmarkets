@@ -144,6 +144,10 @@ app.conf.update(
             "task": "ai_market_monitor.process_sharia_authority_imports",
             "schedule": settings.sharia_source_scan_interval_hours * 60 * 60,
         },
+        "resolve-official-sources-daily": {
+            "task": "ai_market_monitor.resolve_official_sources",
+            "schedule": 24 * 60 * 60,
+        },
         "send-sharia-review-reminders-hourly": {
             "task": "ai_market_monitor.send_sharia_review_reminders",
             "schedule": 60 * 60,
@@ -484,6 +488,11 @@ def process_sc_malaysia_imports() -> dict:
 @app.task(name="ai_market_monitor.process_sharia_authority_imports")
 def process_sharia_authority_imports() -> dict:
     return _run_async_task(_process_sharia_authority_imports())
+
+
+@app.task(name="ai_market_monitor.resolve_official_sources")
+def resolve_official_sources() -> dict:
+    return _run_async_task(_resolve_official_sources())
 
 
 @app.task(name="ai_market_monitor.send_sharia_review_reminders")
@@ -1235,6 +1244,13 @@ async def _process_sharia_authority_imports() -> dict:
                     )
                     return (0, 1)
 
+        # Prove each verified asset's official links before research reads them.
+        # ``research_initial_asset`` selects *only* sources marked verified, so an asset
+        # whose news and community pages have never been proved is researched from its
+        # authority snapshot and nothing else. Running the resolver first is what gives
+        # that research something to read.
+        source_resolution = await _resolve_official_sources()
+
         research_results = await asyncio.gather(
             *(
                 research_one(external_id, external_symbol)
@@ -1258,10 +1274,45 @@ async def _process_sharia_authority_imports() -> dict:
             "package_enrichment_considered": package_enrichment["considered"],
             "telegram_attempts_processed": delivered,
             "auto_publication": auto_publication,
+            "official_sources": source_resolution,
             "remaining_imports_enabled": settings.sharia_process_remaining_imports,
         }
     finally:
         await provider.close()
+
+
+async def _resolve_official_sources() -> dict:
+    """Find and prove every asset's official news and community pages.
+
+    Runs on its own daily, and again inside the authority import sweep so that newly
+    approved identities get their links proved before anything researches them.
+
+    A failure here is reported and never raised. Losing the links for one sweep leaves
+    the previous, already-proved ones in place; letting the exception escape would take
+    down the import run that carries the actual Sharia evidence.
+    """
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.sharia_source_resolution import (
+        SourceResolutionService,
+    )
+
+    if not settings.sharia_source_resolution_enabled:
+        return {"status": "disabled"}
+    async with SessionFactory() as session:
+        try:
+            sweep = await SourceResolutionService(session, settings).resolve_pending()
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.exception("Official source resolution failed")
+            return {"status": "failed"}
+    return {
+        "status": "completed",
+        "assets_checked": len(sweep.assets),
+        "links_proved": sweep.proved,
+        "sent_to_a_person": sweep.escalated,
+    }
 
 
 async def _process_package_enrichment_queue() -> dict[str, int]:

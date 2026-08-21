@@ -3,7 +3,6 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 from pydantic import HttpUrl, ValidationError
@@ -51,6 +50,7 @@ from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningService,
     methodology_is_development_only,
 )
+from ai_market_monitor.services.sharia_source_catalog import normalized_url
 from ai_market_monitor.telegram.adapter import TelegramDeliveryError, TelegramHttpAdapter
 from ai_market_monitor.telegram.types import TelegramButton, TelegramOutboundMessage
 
@@ -1425,13 +1425,11 @@ class ShariaGovernanceService:
         *,
         admin_user_id: UUID,
     ) -> OfficialSource:
-        normalized_url = _normalized_source_url(
-            context.external.source_url
-        )
+        normalized = normalized_url(context.external.source_url)
         source = await self.session.scalar(
             select(OfficialSource).where(
                 OfficialSource.canonical_asset_id == context.asset.id,
-                OfficialSource.normalized_url == normalized_url,
+                OfficialSource.normalized_url == normalized,
             )
         )
         if source is None:
@@ -1443,7 +1441,7 @@ class ShariaGovernanceService:
                     f"{context.asset.name}"
                 ),
                 source_url=context.external.source_url,
-                normalized_url=normalized_url,
+                normalized_url=normalized,
                 priority=5,
                 verification_state="verified",
                 verified_by_user_id=admin_user_id,
@@ -2810,17 +2808,6 @@ def _hash_json(value: object) -> str:
     ).hexdigest()
 
 
-def _normalized_source_url(value: str) -> str:
-    parsed = urlsplit(value.strip())
-    return urlunsplit(
-        (
-            parsed.scheme.casefold(),
-            parsed.netloc.casefold(),
-            parsed.path or "/",
-            "",
-            "",
-        )
-    )
 
 
 def _as_utc(value: datetime) -> datetime:

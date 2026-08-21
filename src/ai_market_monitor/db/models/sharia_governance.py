@@ -121,6 +121,22 @@ class OfficialSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    #: How much this link is worth as evidence, 0 to 1. It ranks candidates and
+    #: decides when the machine gives up and asks a person. It is never read as, and
+    #: never contributes to, a Sharia status.
+    confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    #: Which layer proposed this link — curated, identity, or convention. Kept so a
+    #: reviewer can see whether a person wrote the address down or a rule guessed it.
+    discovery_layer: Mapped[str | None] = mapped_column(String(32))
+    #: When the link was last fetched and proved. ``NULL`` means never checked, which
+    #: is a different thing from checked and failed.
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: The newest dated item found on the page. A news source whose newest item is old
+    #: has stopped being a way to hear about the project, whatever its HTTP status.
+    content_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: What the last proof actually found: status, robots, readability, freshness.
+    #: A diagnostic, so it truncates rather than raising.
+    check_detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
 
 class SourceSnapshot(UUIDPrimaryKeyMixin, Base):

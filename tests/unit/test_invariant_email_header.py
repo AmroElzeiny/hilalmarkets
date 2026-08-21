@@ -54,6 +54,7 @@ from ai_market_monitor.services.product_language import (
     UNKNOWN_MESSAGE_KIND,
     every_message_kind,
 )
+from tests.support.contrast import contrast
 
 BASE_URL = "https://hilalmarkets.com"
 STATIC = Path("src/ai_market_monitor/static")
@@ -305,8 +306,8 @@ def test_an_unknown_purpose_gets_no_chip_rather_than_an_invented_one():
 def test_the_chip_colours_are_readable_on_the_header():
     """Measured, not assumed. Apple green is invisible on white and fine on near-black."""
 
-    assert _contrast(APPLE, INK_RAISED) >= 4.5
-    assert _contrast(SURFACE, INK) >= 4.5
+    assert contrast(APPLE, INK_RAISED) >= 4.5
+    assert contrast(SURFACE, INK) >= 4.5
 
 
 # ── One frame ────────────────────────────────────────────────────────────────
@@ -338,14 +339,3 @@ def test_every_email_really_is_the_shared_frame(name: str):
     assert html.count("<!doctype") == 1
 
 
-def _contrast(foreground: str, background: str) -> float:
-    return (_luminance(foreground) + 0.05) / (_luminance(background) + 0.05)
-
-
-def _luminance(colour: str) -> float:
-    red, green, blue = (int(colour[index : index + 2], 16) / 255 for index in (1, 3, 5))
-    channels = [
-        value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
-        for value in (red, green, blue)
-    ]
-    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]

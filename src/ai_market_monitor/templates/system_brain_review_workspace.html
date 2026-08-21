@@ -43,6 +43,32 @@
       </details>
     </article>
 
+    {# A link-gap job asks somebody to find an address. Without somewhere to put it the
+       job could never be finished, and the queue could only grow. What is typed here is
+       fetched straight away and refused if it does not work — a person can paste a page
+       that moved, and the review that reads it later cannot tell who typed it. #}
+    {% if case.case_type == 'official_source_gap' %}
+    <article class="brain-panel">
+      <div class="brain-panel-title"><i data-icon="alert"></i><div><h3>Add the missing page</h3><p>Paste the project's own address. It is checked before it is saved.</p></div></div>
+      <ul class="brain-findings">
+        {% for item in case.requested_evidence %}<li><i data-icon="alert"></i><span>{{ item }}</span></li>{% endfor %}
+      </ul>
+      <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/official-sources" class="brain-source-form" data-guarded-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Kind of page
+          <select name="category" required>
+            <option value="official_news">Official news</option>
+            <option value="official_community">Official community</option>
+            <option value="official_website">Official website</option>
+            <option value="official_documentation">Official documentation</option>
+          </select>
+        </label>
+        <label class="wide">Address<input name="source_url" type="url" inputmode="url" maxlength="1000" required placeholder="https://project.example/blog"></label>
+        <button class="brain-action-button" type="submit"><i data-icon="check"></i>Check and save</button>
+      </form>
+    </article>
+    {% endif %}
+
     <article class="brain-panel brain-case-reason">
       <div class="brain-panel-title"><i data-icon="alert"></i><div><h3>{{ detail.why_case.trigger }}</h3></div></div>
       <dl class="brain-facts brain-facts-four">

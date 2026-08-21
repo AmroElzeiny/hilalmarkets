@@ -25,7 +25,11 @@ from ai_market_monitor.db.models import (
     TelegramNotificationAttempt,
     User,
 )
-from ai_market_monitor.db.models.enums import ShariaMethodologyStatus, UserRole
+from ai_market_monitor.db.models.enums import (
+    ReviewCaseType,
+    ShariaMethodologyStatus,
+    UserRole,
+)
 from ai_market_monitor.schemas.sharia_methodology import MethodologyRulesDefinition
 
 
@@ -128,7 +132,8 @@ class ShariaAdminDashboardService:
             "generated_at": now,
             "metrics": {
                 "pending_initial_reviews": sum(
-                    row.case_type == "initial_asset_review" for row in open_cases
+                    row.case_type == ReviewCaseType.INITIAL_ASSET_REVIEW
+                    for row in open_cases
                 ),
                 "waiting_over_six_hours": sum(
                     _aware(row.created_at) <= now - timedelta(hours=6) for row in open_cases
@@ -142,7 +147,8 @@ class ShariaAdminDashboardService:
                     row.is_active and row.publication_state == "published" for row in publications
                 ),
                 "material_source_changes": sum(
-                    row.case_type == "material_source_change" for row in open_cases
+                    row.case_type == ReviewCaseType.MATERIAL_SOURCE_CHANGE
+                    for row in open_cases
                 ),
                 "ai_human_reviews": sum(
                     bool((row.output or {}).get("human_review_required")) for row in ai_rows

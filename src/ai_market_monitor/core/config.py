@@ -206,6 +206,17 @@ class Settings(BaseSettings):
     #: owner, not to make a stuck queue move.
     sharia_pack_evidence_max_age_days: int = Field(default=90, ge=1, le=3650)
     sharia_identity_discovery_batch_size: int = Field(default=250, ge=1, le=500)
+    #: Whether the layered resolver may look for an asset's news and community pages.
+    #: Turning it off stops new links being proposed; it withdraws nothing already
+    #: proved, and the human tasks it raised stay open.
+    sharia_source_resolution_enabled: bool = True
+    #: How many assets one resolver sweep may work through. Each asset costs a handful
+    #: of fetches against somebody else's site, so this is kept small on purpose and
+    #: the sweep simply continues where it left off next time.
+    sharia_source_resolution_batch_size: int = Field(default=25, ge=1, le=200)
+    #: How long a proved link is trusted before it is fetched again. A source that
+    #: went dead between sweeps is caught here rather than at review time.
+    sharia_source_recheck_days: int = Field(default=30, ge=1, le=365)
     sharia_external_rights_enforcement: bool = True
     sharia_ai_enrichment_enabled: bool = True
     sharia_ai_enrichment_official_sources_only: bool = True

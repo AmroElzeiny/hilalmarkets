@@ -73,6 +73,29 @@ class ShariaMethodologyStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class ReviewCaseType(StrEnum):
+    """Every kind of thing a reviewer can be asked to look at.
+
+    One owner. The review queue used to carry its own private list of which kinds it
+    would show, and the two drifted in both directions: it offered filters for
+    ``evidence_refresh`` and ``methodology_change``, which nothing has ever created, and
+    a newly added kind was invisible until somebody remembered to add it there too. A
+    case a reviewer cannot find is a case nobody works on.
+    """
+
+    #: A new asset arrived from an authority list and needs its first decision.
+    INITIAL_ASSET_REVIEW = "initial_asset_review"
+    #: An official source changed in a way that may change the answer.
+    MATERIAL_SOURCE_CHANGE = "material_source_change"
+    #: The identity itself is in doubt — which coin is this, exactly.
+    SOURCE_IDENTITY_CONFLICT = "source_identity_conflict"
+    #: A reader told us a published fact looks wrong.
+    USER_FACTUAL_REPORT = "user_factual_report"
+    #: The machine could not find an asset's official news or community page, or found
+    #: that one it used to rely on has gone.
+    OFFICIAL_SOURCE_GAP = "official_source_gap"
+
+
 class ShariaAssetStatus(StrEnum):
     ELIGIBLE = "eligible"
     ELIGIBLE_WITH_QUALIFICATIONS = "eligible_with_qualifications"

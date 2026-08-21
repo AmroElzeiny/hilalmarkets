@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.contrast import contrast
+
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "Hilal-Markets-Website" / "src"
 STYLES = FRONTEND / "index.css"
@@ -39,19 +41,8 @@ PAGES = {"ContactPage.tsx": CONTACT, "LegalPage.tsx": LEGAL}
 # --------------------------------------------------------------------------- #
 #  Contrast, computed                                                          #
 # --------------------------------------------------------------------------- #
-def _channel(value: float) -> float:
-    return value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
-
-
-def luminance(colour: str) -> float:
-    raw = colour.lstrip("#")
-    red, green, blue = (int(raw[index : index + 2], 16) / 255 for index in (0, 2, 4))
-    return 0.2126 * _channel(red) + 0.7152 * _channel(green) + 0.0722 * _channel(blue)
-
-
-def contrast(foreground: str, background: str) -> float:
-    first, second = luminance(foreground), luminance(background)
-    return (max(first, second) + 0.05) / (min(first, second) + 0.05)
+#  The sum itself lives in `tests/support/contrast.py`. It used to live here as well,
+#  with a slightly different curve from the other two copies in this suite.
 
 
 def _token(name: str) -> str:

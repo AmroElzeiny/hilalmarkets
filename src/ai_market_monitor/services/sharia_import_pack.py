@@ -22,7 +22,7 @@ from ai_market_monitor.db.models import (
     SourceSnapshot,
     TelegramNotificationAttempt,
 )
-from ai_market_monitor.db.models.enums import ShariaMethodologyStatus
+from ai_market_monitor.db.models.enums import ReviewCaseType, ShariaMethodologyStatus
 from ai_market_monitor.services.sharia_governance import (
     ShariaAdminTelegramService,
 )
@@ -717,7 +717,9 @@ class ShariaMethodologyImportPackService:
         case = ReviewCase(
             case_reference=_case_reference(source_row_id),
             case_type=(
-                "source_identity_conflict" if unresolved else "initial_asset_review"
+                ReviewCaseType.SOURCE_IDENTITY_CONFLICT
+                if unresolved
+                else ReviewCaseType.INITIAL_ASSET_REVIEW
             ),
             state="needs_evidence",
             publication_state="unpublished",

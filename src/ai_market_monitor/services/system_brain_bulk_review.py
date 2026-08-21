@@ -30,6 +30,7 @@ its criterion should be recorded as something it is not.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -40,11 +41,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import ReviewActionBatch, ReviewCase, ReviewDecision
+from ai_market_monitor.db.models.enums import ReviewCaseType
 from ai_market_monitor.services.sharia_governance import (
     ShariaGovernanceError,
     ShariaGovernanceService,
 )
 from ai_market_monitor.services.sharia_review_blockers import explain_error
+
+logger = logging.getLogger(__name__)
 
 #: The outcome a reviewer means by "this condition is met", and the scope decision that
 #: means "this use is covered". Named once so the button, the request and the recorded
@@ -52,8 +56,26 @@ from ai_market_monitor.services.sharia_review_blockers import explain_error
 PASS_OUTCOME = "pass"
 COVERED_DECISION = "covered"
 
-#: The two quick decisions the page offers.
-BULK_ACTIONS = ("approve", "reject")
+#: The quick actions the page offers on a selection.
+#:
+#: ``start_research`` is not a decision — it is the way out of the refusal every other
+#: bulk action gives on a case that has no evidence yet. An imported case arrives with an
+#: asset identity and a provider row but **no research folder**, and the approval needs
+#: all three, so a reviewer selecting a hundred imported cases got a hundred copies of
+#: "This case is missing part of its evidence… Open it and run research." Opening a
+#: hundred cases one at a time to press the same button is not review work.
+BULK_ACTIONS = ("approve", "reject", "start_research")
+
+#: The actions that record a governed decision on the case. ``start_research`` asks for
+#: evidence to be gathered and decides nothing, so it is deliberately not one of them:
+#: it writes no ``ReviewDecision``, and it is not undoable, because there is no decision
+#: to take back.
+BULK_DECISION_ACTIONS = ("approve", "reject")
+
+#: Case types that carry no verdict at all. They are jobs for a person — go and find
+#: something — so approving, rejecting or researching one is meaningless rather than
+#: merely blocked, and the reviewer is told so in words that name the actual job.
+UNDECIDABLE_CASE_TYPES = frozenset({ReviewCaseType.OFFICIAL_SOURCE_GAP})
 
 #: The shortest reason the page will accept. The same floor the single-case decision
 #: uses, because a bulk decision is not a smaller decision.
@@ -95,6 +117,10 @@ class BatchOutcome:
     batch_id: UUID | None
     action: str
     results: list[CaseOutcome] = field(default_factory=list)
+    #: Whether the research sweep was actually handed to the worker. False means the
+    #: cases are marked and waiting, and the sweep will pick them up on its next run —
+    #: said plainly rather than reported as a success nobody can see.
+    research_queued: bool = True
 
     @property
     def applied(self) -> int:
@@ -115,6 +141,19 @@ class BatchOutcome:
             return (
                 f"{self.applied} case(s) put back. The earlier decision stays in the "
                 "history."
+            )
+        if self.action == "start_research":
+            when = (
+                "Research is running now."
+                if self.research_queued
+                else "The cases are marked; research starts on the next sweep."
+            )
+            done = f"{self.applied} case(s) sent for research. {when}"
+            if not self.failed:
+                return f"{done} Come back when it finishes, then decide them."
+            return (
+                f"{done} {self.failed} could not be sent and are listed below — "
+                "open them one by one."
             )
         if self.action == "reject":
             done = f"{self.applied} case(s) rejected and stored"
@@ -183,7 +222,14 @@ class BulkReviewService:
             )
 
         applied = [item for item in outcome.results if item.applied]
-        if applied:
+        if action == "start_research":
+            # Deliberately does **not** queue the worker here. This runs inside the
+            # caller's transaction, and the sweep reads the cases from the database — a
+            # task sent now can start before the commit and find the old states. The
+            # caller queues it with `queue_research_sweep` once the commit has landed.
+            outcome.research_queued = False
+            return outcome
+        if applied and action in BULK_DECISION_ACTIONS:
             batch = ReviewActionBatch(
                 actor_user_id=admin_user_id,
                 action=action,
@@ -212,6 +258,29 @@ class BulkReviewService:
             outcome.batch_id = batch.id
         return outcome
 
+    def queue_research_sweep(self) -> bool:
+        """Ask the worker to run its research sweep now instead of on its own timer.
+
+        Call this **after** the selection has been committed. One send for the whole
+        selection, not one per case: the task walks its own queue, so a hundred sends
+        would be a hundred copies of the same sweep competing for the same provider
+        hosts and the same model budget.
+
+        Reported rather than raised. The cases have already been marked and committed by
+        the time this runs, so a worker that cannot be reached means "it starts later",
+        not "nothing happened" — and telling the reviewer it failed would send them
+        looking for a problem that is not theirs.
+        """
+
+        try:
+            from ai_market_monitor.worker import app as worker_app
+
+            worker_app.send_task("ai_market_monitor.process_sharia_authority_imports")
+        except Exception:  # noqa: BLE001 - reported to the reviewer, never raised
+            logger.warning("Research sweep could not be queued; it runs on its next turn.")
+            return False
+        return True
+
     async def _apply_one(
         self,
         case_id: UUID,
@@ -224,11 +293,40 @@ class BulkReviewService:
         if case is None:
             return CaseOutcome(case_id, str(case_id), False, "This case no longer exists.")
         reference = case.case_reference
+        if case.case_type in UNDECIDABLE_CASE_TYPES:
+            # A job for a person, not a case with a verdict. Without this guard the
+            # decision path refuses it much later and much worse: the reviewer is told
+            # the case "is missing part of its evidence: the asset identity, the
+            # official source record, or the research folder", which is true of every
+            # blocked case and tells them nothing about what this one actually wants.
+            return CaseOutcome(
+                case_id,
+                reference,
+                False,
+                "This is a job to find a missing link, not a case to decide. "
+                "Open it and add the address.",
+            )
         previous_state = case.state
         previous_publication_state = case.publication_state
         publication_id: UUID | None = None
         message = "Recorded."
         try:
+            if action == "start_research":
+                # Asks for the evidence; decides nothing. Returns early because there is
+                # no ReviewDecision to record and nothing for Undo to take back.
+                await self.governance.start_research(
+                    case_id,
+                    admin_user_id=admin_user_id,
+                    reason=reason,
+                )
+                return CaseOutcome(
+                    case_id,
+                    reference,
+                    True,
+                    "Queued for research.",
+                    previous_state=previous_state,
+                    previous_publication_state=previous_publication_state,
+                )
             if action == "reject":
                 decision = await self.governance.reject_and_store(
                     case_id,

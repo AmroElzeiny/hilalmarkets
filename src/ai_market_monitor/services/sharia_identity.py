@@ -3,7 +3,6 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +14,16 @@ from ai_market_monitor.db.models import (
     ExternalAssessment,
     OfficialSource,
     ReviewCase,
+)
+from ai_market_monitor.db.models.enums import ReviewCaseType
+from ai_market_monitor.services.sharia_source_catalog import (
+    CATEGORY_PRIORITY,
+    DOCUMENTATION,
+    LAYER_CONFIDENCE,
+    WEBSITE,
+    DiscoveryLayer,
+    is_official_url,
+    normalized_url,
 )
 
 
@@ -271,7 +280,7 @@ class CanonicalAssetMappingService:
                 key.casefold(): value.casefold()
                 for key, value in sorted(candidate.contract_addresses.items())
             },
-            "official_website": _normalized_url(candidate.official_website),
+            "official_website": normalized_url(candidate.official_website),
         }
         identity_hash = _hash_json(identity_payload)
         asset = await self.session.scalar(
@@ -286,8 +295,8 @@ class CanonicalAssetMappingService:
                 asset_type=candidate.asset_type,
                 native_chain=candidate.native_chain,
                 contract_addresses=candidate.contract_addresses,
-                official_website=_normalized_url(candidate.official_website),
-                official_documentation=_normalized_url(candidate.official_documentation),
+                official_website=normalized_url(candidate.official_website),
+                official_documentation=normalized_url(candidate.official_documentation),
                 provider_ids=candidate.provider_ids,
                 identity_hash=identity_hash,
                 mapping_state="verified",
@@ -315,8 +324,8 @@ class CanonicalAssetMappingService:
                 **dict(asset.provider_ids or {}),
                 **candidate.provider_ids,
             }
-            asset.official_website = _normalized_url(candidate.official_website)
-            asset.official_documentation = _normalized_url(candidate.official_documentation)
+            asset.official_website = normalized_url(candidate.official_website)
+            asset.official_documentation = normalized_url(candidate.official_documentation)
             asset.identity_hash = identity_hash
             asset.mapping_state = "verified"
             asset.mapping_evidence = {
@@ -412,17 +421,15 @@ class CanonicalAssetMappingService:
                 )
         await self._register_source(
             asset.id,
-            "official_website",
+            WEBSITE,
             f"{candidate.name} official website",
             candidate.official_website,
-            10,
         )
         await self._register_source(
             asset.id,
-            "official_documentation",
+            DOCUMENTATION,
             f"{candidate.name} official documentation",
             candidate.official_documentation,
-            20,
         )
         self.session.add(
             AuditEvent(
@@ -456,7 +463,7 @@ class CanonicalAssetMappingService:
             ).all()
         )
         candidate_provider_id = str(candidate.provider_ids.get("coingecko") or "").strip()
-        candidate_website = _normalized_url(candidate.official_website)
+        candidate_website = normalized_url(candidate.official_website)
         matches = []
         for row in rows:
             if row.asset_type != candidate.asset_type:
@@ -473,7 +480,7 @@ class CanonicalAssetMappingService:
             if _identity_text(row.name) != _identity_text(candidate.name):
                 continue
             website_match = bool(
-                row.official_website and _normalized_url(row.official_website) == candidate_website
+                row.official_website and normalized_url(row.official_website) == candidate_website
             )
             if website_match:
                 matches.append(row)
@@ -553,9 +560,9 @@ class CanonicalAssetMappingService:
             problems.append("Native chain is missing.")
         if candidate.asset_type == "token" and not candidate.contract_addresses:
             problems.append("Token contract addresses are missing.")
-        if not _valid_official_url(candidate.official_website):
+        if not is_official_url(candidate.official_website):
             problems.append("A valid HTTPS official website is required.")
-        if not _valid_official_url(candidate.official_documentation):
+        if not is_official_url(candidate.official_documentation):
             problems.append("A valid HTTPS official documentation URL is required.")
         if verified_exchange_symbols is not None:
             for market in candidate.exchange_markets:
@@ -576,7 +583,7 @@ class CanonicalAssetMappingService:
             self.session.add(
                 ReviewCase(
                     case_reference=f"ID-{str(external.id)[:8].upper()}",
-                    case_type="source_identity_conflict",
+                    case_type=ReviewCaseType.SOURCE_IDENTITY_CONFLICT,
                     state="needs_evidence",
                     publication_state="unpublished",
                     canonical_asset_id=external.canonical_asset_id,
@@ -596,9 +603,17 @@ class CanonicalAssetMappingService:
         category: str,
         title: str,
         url: str,
-        priority: int,
     ) -> None:
-        normalized = _normalized_url(url)
+        """Record an address that came with an identity a reviewer approved.
+
+        ``verification_state`` stays ``verified``: a person did approve this address as
+        the project's own. ``last_checked_at`` is deliberately left empty, because
+        nobody has fetched it. Those were the same fact until now, which is how a dead
+        link could keep presenting itself as evidence. The layered resolver reads the
+        empty check date and proves the link for real.
+        """
+
+        normalized = normalized_url(url)
         existing = await self.session.scalar(
             select(OfficialSource).where(
                 OfficialSource.canonical_asset_id == asset_id,
@@ -613,27 +628,18 @@ class CanonicalAssetMappingService:
                     title=title,
                     source_url=url,
                     normalized_url=normalized,
-                    priority=priority,
+                    priority=CATEGORY_PRIORITY.get(category, 100),
                     verification_state="verified",
                     verified_at=datetime.now(UTC),
                     is_active=True,
+                    confidence=LAYER_CONFIDENCE[DiscoveryLayer.IDENTITY],
+                    discovery_layer=str(DiscoveryLayer.IDENTITY),
                 )
             )
 
 
 def _identity_text(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.casefold())
-
-
-def _normalized_url(value: str) -> str:
-    parsed = urlsplit(value.strip())
-    path = parsed.path or "/"
-    return urlunsplit((parsed.scheme.casefold(), parsed.netloc.casefold(), path, "", ""))
-
-
-def _valid_official_url(value: str) -> bool:
-    parsed = urlsplit(value.strip())
-    return parsed.scheme == "https" and bool(parsed.netloc) and "@" not in parsed.netloc
 
 
 def _hash_json(value: object) -> str:

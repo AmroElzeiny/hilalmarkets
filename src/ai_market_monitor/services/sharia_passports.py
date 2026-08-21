@@ -31,7 +31,7 @@ from ai_market_monitor.db.models import (
     SourceSnapshot,
     User,
 )
-from ai_market_monitor.db.models.enums import ShariaAssetStatus
+from ai_market_monitor.db.models.enums import ReviewCaseType, ShariaAssetStatus
 from ai_market_monitor.schemas.sharia import (
     AssetPassportResponse,
     PassportCriterionOutcome,
@@ -333,7 +333,7 @@ class ShariaPassportReadService:
         now = datetime.now(UTC)
         case = ReviewCase(
             case_reference=f"USR-{asset.symbol[:8]}-{str(row.id)[:8].upper()}",
-            case_type="user_factual_report",
+            case_type=ReviewCaseType.USER_FACTUAL_REPORT,
             state="ready_for_review",
             publication_state="published_unchanged",
             canonical_asset_id=asset.id,

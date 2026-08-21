@@ -23,7 +23,7 @@ import hashlib
 import hmac
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -675,6 +675,100 @@ class SiteAnalyticsService:
             }
             for row in rows
         ]
+
+    async def visits_last_day(self, *, limit: int = 500) -> dict[str, Any]:
+        """Every visit of the last 24 hours, one row each, newest first.
+
+        The tiles above this answer "how many" and "how long on average". They cannot
+        answer "what happened at half past eight" — an average hides the one visitor who
+        read for six minutes and the twenty who bounced. This is the same rows the tiles
+        are counted from, listed rather than summarised.
+
+        Times are read on :data:`REPORT_TIMEZONE`, not UTC. ``limit`` is a ceiling on the
+        page, not on the truth: when a day has more visits than that, the count says so,
+        so a busy day never quietly looks like a capped one.
+        """
+
+        since = datetime.now(UTC) - timedelta(hours=24)
+        total = int(
+            await self.session.scalar(
+                select(func.count()).select_from(SiteVisit).where(SiteVisit.started_at >= since)
+            )
+            or 0
+        )
+        rows = list(
+            (
+                await self.session.scalars(
+                    select(SiteVisit)
+                    .where(SiteVisit.started_at >= since)
+                    .order_by(SiteVisit.started_at.desc())
+                    .limit(limit)
+                )
+            ).all()
+        )
+        visits: list[dict[str, Any]] = []
+        for row in rows:
+            local = _as_local(row.started_at)
+            seconds = round(row.active_ms / 1000)
+            # "Left" is the absence of a next action, never a stored value — see the note
+            # on `SiteVisit.next_action`. A visit still open has not left yet either.
+            still_open = row.ended_at is None
+            visits.append(
+                {
+                    "started_at": row.started_at.isoformat(),
+                    "local_time": local.strftime("%H:%M"),
+                    "local_day": local.strftime("%a %d %b"),
+                    "path": row.path,
+                    "seconds": seconds,
+                    "duration": _duration(seconds),
+                    "next_action": (
+                        row.next_action
+                        if row.next_action
+                        else ("still reading" if still_open else "left")
+                    ),
+                    "next_action_detail": row.next_action_detail or "",
+                    "next_action_time": (
+                        _as_local(row.next_action_at).strftime("%H:%M")
+                        if row.next_action_at
+                        else ""
+                    ),
+                    "source": row.source,
+                    "device": row.device,
+                    "referrer_host": row.referrer_host or "",
+                    "still_open": still_open,
+                }
+            )
+        return {
+            "timezone_label": REPORT_TIMEZONE_LABEL,
+            "total": total,
+            "shown": len(visits),
+            "truncated": total > len(visits),
+            "visits": visits,
+        }
+
+
+#: The clock the Stats page reads visit times on.
+#:
+#: The database stores every moment in UTC, which is the only sane way to store one. It
+#: is not, however, the clock the person reading this page lives on, and "was that visit
+#: at nine in the morning?" is a question about *their* day. Converted once here, on the
+#: way out, so the stored value stays UTC and only the reading changes.
+REPORT_TIMEZONE = timezone(timedelta(hours=3))
+REPORT_TIMEZONE_LABEL = "UTC+3"
+
+
+def _as_local(moment: datetime) -> datetime:
+    """One stored moment, read on the report's clock.
+
+    The ``tzinfo`` is put back before converting rather than trusted from the driver.
+    PostgreSQL hands back an aware value and SQLite hands back a naive one, and
+    ``astimezone`` on a naive value silently assumes **the server's own** timezone — so
+    the same row would read one hour on the production database and a different hour on
+    any other, with nothing to show that a conversion had been skipped.
+    """
+
+    aware = moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+    return aware.astimezone(REPORT_TIMEZONE)
 
 
 def _change(current: float, earlier: float) -> dict[str, Any]:

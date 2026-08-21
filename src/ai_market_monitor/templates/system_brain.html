@@ -4,18 +4,18 @@
   {#- First script on the page, deliberately, and without `defer`: it puts a time limit
       on every request this product sends to its own server, and it can only do that for
       a request sent after it has run. See `static/hm-request.js`. -#}
-  <script src="/static/hm-request.js?v=20260820-cards"></script>
+  <script src="/static/hm-request.js?v=20260822-links"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
   <title>System Brain | Hilal Markets</title>
   <link rel="icon" type="image/png" href="/static/favicon-dark.png">
-  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260820-cards">
-  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260820-cards">
-  <link rel="stylesheet" href="/static/system-brain.css?v=20260820-cards">
+  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260822-links">
+  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260822-links">
+  <link rel="stylesheet" href="/static/system-brain.css?v=20260822-links">
   <script src="/static/hilalmarkets-icons.js" defer></script>
-  <script src="/static/chat-message-renderer.js?v=20260820-cards" defer></script>
-  <script src="/static/system-brain.js?v=20260820-cards" defer></script>
+  <script src="/static/chat-message-renderer.js?v=20260822-links" defer></script>
+  <script src="/static/system-brain.js?v=20260822-links" defer></script>
 </head>
 <body data-system-brain-csrf="{{ csrf_token }}" data-brain-section="{{ section }}">
   <a class="brain-skip" href="#admin-content">Skip to admin content</a>
@@ -302,6 +302,56 @@
         </article>
       </div>
 
+      {#- Every visit of the last day, one row each. The tiles above answer "how many"
+          and "how long on average"; an average hides the one person who read for six
+          minutes and the twenty who bounced. Times are on the reader's clock, not UTC. -#}
+      <article class="brain-panel brain-day-visits">
+        <div class="brain-section-head">
+          <div>
+            <h2>Every visit in the last 24 hours</h2>
+            <p>
+              Times shown on {{ day_visits.timezone_label }}.
+              {{ day_visits.total }} visit(s) in the last day.
+              {% if day_visits.truncated %}
+              The newest {{ day_visits.shown }} are listed.
+              {% endif %}
+            </p>
+          </div>
+        </div>
+        <div class="brain-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Time ({{ day_visits.timezone_label }})</th>
+                <th scope="col">Page</th>
+                <th scope="col">Stayed</th>
+                <th scope="col">What they did next</th>
+                <th scope="col">Came from</th>
+                <th scope="col">Device</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for visit in day_visits.visits %}
+              <tr>
+                <td><strong>{{ visit.local_time }}</strong> <small>{{ visit.local_day }}</small></td>
+                <td>{{ visit.path }}</td>
+                <td>{{ visit.duration }}</td>
+                <td>
+                  <span class="brain-status {{ 'success' if visit.still_open else 'neutral' }}">{{ visit.next_action }}</span>
+                  {% if visit.next_action_detail %}<small>{{ visit.next_action_detail }}</small>{% endif %}
+                  {% if visit.next_action_time %}<small>at {{ visit.next_action_time }}</small>{% endif %}
+                </td>
+                <td>{{ visit.referrer_host or visit.source }}</td>
+                <td>{{ visit.device }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="6" class="brain-empty">No visit in the last 24 hours.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
       <p class="brain-measure-note">
         Counted by Hilal Markets itself, not by another company. Nothing is written to the
         visitor's device and no address is kept: one person is recognised for one day
@@ -542,6 +592,17 @@
             value="reject"
             data-confirm="Reject the selected cases and keep their evidence?"
           ><i data-icon="close"></i>Reject</button>
+          {#- The way out of "this case is missing part of its evidence". An imported
+              case has no research folder until research runs, and every decision needs
+              one, so without this button the only route was opening each case and
+              pressing the same thing. Decides nothing; asks for the evidence. -#}
+          <button
+            class="brain-secondary-button"
+            type="submit"
+            name="action"
+            value="start_research"
+            data-confirm="Send the selected cases for research? Nothing is decided — the assistant gathers the evidence and you decide afterwards."
+          ><i data-icon="search"></i>Run research</button>
           <button class="brain-secondary-button" type="button" data-bulk-clear>Clear</button>
         </div>
       </form>

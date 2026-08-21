@@ -25,13 +25,14 @@ from ai_market_monitor.db.models import (
     AgentRun,
     AgentToolCall,
     AuditEvent,
+    CanonicalAsset,
     ReviewCase,
     SystemBrainActionProposal,
     SystemBrainArtifact,
     SystemBrainMessage,
     UserIdentity,
 )
-from ai_market_monitor.db.models.enums import IdentityProvider, UserRole
+from ai_market_monitor.db.models.enums import IdentityProvider, ReviewCaseType, UserRole
 from ai_market_monitor.schemas.system_brain import (
     ActionConfirmationRequest,
     ActionProposalRead,
@@ -57,6 +58,11 @@ from ai_market_monitor.services.sharia_governance import (
 )
 from ai_market_monitor.services.sharia_review_blockers import explain_error
 from ai_market_monitor.services.sharia_screening import ShariaScreeningError
+from ai_market_monitor.services.sharia_source_catalog import (
+    SOURCE_CATEGORIES,
+    is_official_url,
+)
+from ai_market_monitor.services.sharia_source_resolution import SourceResolutionService
 from ai_market_monitor.services.site_analytics import SiteAnalyticsService
 from ai_market_monitor.services.system_brain_actions import (
     SystemBrainActionError,
@@ -312,14 +318,9 @@ async def system_brain_reviews(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ):
-    allowed_kinds = {
-        "initial_asset_review",
-        "material_source_change",
-        "evidence_refresh",
-        "source_identity_conflict",
-        "methodology_change",
-        "user_factual_report",
-    }
+    # One owner for the kinds of case that exist. The private list that used to sit
+    # here offered two filters nothing ever created, and hid any kind added later.
+    allowed_kinds = {item.value for item in ReviewCaseType}
     if kind is not None and kind not in allowed_kinds:
         raise HTTPException(status_code=404, detail="Review queue not found.")
     section = (
@@ -408,6 +409,10 @@ async def system_brain_stats(
     )
     context["stats_scope"] = scope
     context["recent_visits"] = await service.recent_visits()
+    # Every visit of the last day, one row each, on the reader's own clock. The tiles
+    # above answer "how many" and "how long on average"; an average cannot answer "what
+    # happened at half past eight".
+    context["day_visits"] = await service.visits_last_day()
     context["measurement_enabled"] = settings.site_visit_measurement_enabled
     return _protect(
         templates.TemplateResponse(
@@ -435,8 +440,9 @@ async def system_brain_bulk_case_decision(
     """Record one decision on the selected cases, each through the normal review path."""
 
     _verify_csrf(settings, principal.user_id, csrf_token)
+    service = BulkReviewService(session, settings)
     try:
-        outcome = await BulkReviewService(session, settings).apply(
+        outcome = await service.apply(
             case_id,
             action=action,
             reason=reason,
@@ -446,6 +452,10 @@ async def system_brain_bulk_case_decision(
     except BulkReviewError as exc:
         await session.rollback()
         return _cases_redirect(request, error=str(exc))
+    if action == "start_research" and outcome.applied:
+        # Only once the marked cases are really in the database. The sweep reads them
+        # from there, so a task sent before the commit can look and find nothing.
+        outcome.research_queued = service.queue_research_sweep()
     refused = _refused_summary(outcome.results)
     if not outcome.applied:
         return _cases_redirect(
@@ -1798,6 +1808,78 @@ async def system_brain_retry_notification(
         )
     return RedirectResponse(
         "/dashboard/system-brain/operations?success=Delivery+retry+was+queued+and+audited.",
+        status_code=303,
+    )
+
+
+@router.post(
+    "/system-brain/cases/{case_id}/official-sources",
+    include_in_schema=False,
+)
+@router.post(
+    "/dashboard/system-brain/cases/{case_id}/official-sources",
+    include_in_schema=False,
+)
+async def system_brain_add_official_source(
+    case_id: UUID,
+    category: str = Form(...),
+    source_url: str = Form(...),
+    csrf_token: str = Form(...),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Record an address a person found, then prove it the same way the machine would.
+
+    This is the other half of the link-gap task. Raising a task that says "add the
+    address" without giving anybody a place to add it would be a queue that can only
+    ever grow.
+
+    The address a person types is **not** trusted more than one the machine guessed. It
+    goes in as a candidate and is fetched immediately; if it is dead, or the site
+    refuses robots, or it is a news page that stopped publishing years ago, it is
+    refused here and the task stays open. A person can be wrong about a URL, and the
+    review that reads it later cannot tell who typed it.
+    """
+
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    back = f"/dashboard/system-brain/cases/{case_id}"
+    case = await session.get(ReviewCase, case_id)
+    if case is None or case.canonical_asset_id is None:
+        raise HTTPException(status_code=404, detail="Case not found.")
+    if category not in SOURCE_CATEGORIES:
+        return RedirectResponse(
+            f"{back}?{urlencode({'error': 'Choose one of the listed kinds of page.'})}",
+            status_code=303,
+        )
+    address = source_url.strip()
+    if not is_official_url(address):
+        refused = "The address must start with https:// and name a real site."
+        return RedirectResponse(
+            f"{back}?{urlencode({'error': refused})}",
+            status_code=303,
+        )
+    asset = await session.get(CanonicalAsset, case.canonical_asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found.")
+    service = SourceResolutionService(session, settings)
+    added = await service.add_reviewed_source(
+        asset,
+        category=category,
+        url=address,
+        reviewer_id=principal.user_id,
+    )
+    outcome = await service.resolve_asset(asset)
+    await session.commit()
+    if added.verification_state != "verified":
+        told = added.check_detail.get("error") or "It could not be read."
+        return RedirectResponse(
+            f"{back}?{urlencode({'error': f'That address did not work. {told}'})}",
+            status_code=303,
+        )
+    settled = "The job is done." if not outcome.missing else "Still missing another page."
+    return RedirectResponse(
+        f"{back}?{urlencode({'success': f'Address checked and saved. {settled}'})}",
         status_code=303,
     )
 

@@ -20,6 +20,7 @@ from ai_market_monitor.db.models import (
     SourceSnapshot,
 )
 from ai_market_monitor.services.provider_runtime import provider_request
+from ai_market_monitor.services.sharia_source_catalog import normalized_url
 
 SC_AUTHORITY = "Shariah Advisory Council of the Securities Commission Malaysia"
 SC_SCOPE = "Securities Commission Malaysia regulated digital-assets framework"
@@ -511,10 +512,10 @@ def _clean_text(value: object) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _normalized_source_url(value: str) -> str:
-    parsed = urlparse(value)
-    path = parsed.path.rstrip("/") or "/"
-    return f"{parsed.scheme.casefold()}://{parsed.netloc.casefold()}{path}"
+#: One owner for "are these two addresses the same page". See
+#: ``sharia_source_catalog.normalized_url`` for why four private copies of this was a
+#: defect rather than a convenience.
+_normalized_source_url = normalized_url
 
 
 def _sha256(value: str) -> str:

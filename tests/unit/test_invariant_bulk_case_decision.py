@@ -37,6 +37,7 @@ from ai_market_monitor.services.sharia_governance import (
 )
 from ai_market_monitor.services.system_brain_bulk_review import (
     BULK_ACTIONS,
+    BULK_DECISION_ACTIONS,
     COVERED_DECISION,
     MAX_BATCH_SIZE,
     MIN_REASON_LENGTH,
@@ -300,18 +301,98 @@ async def test_the_same_case_selected_twice_is_decided_once(test_context):
 
 
 # --------------------------------------------------------------------------------
+# Asking for evidence in bulk.
+# --------------------------------------------------------------------------------
+
+
+async def test_research_can_be_asked_for_on_a_whole_selection(test_context):
+    """The way out of "this case is missing part of its evidence".
+
+    An imported case arrives with an asset identity and a provider row and **no research
+    folder**. Every decision needs all three, so a reviewer who selected the imported
+    cases got one refusal per case and one instruction: open it and run research. With
+    192 of them that instruction is not review work, it is data entry.
+    """
+
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        reviewer = await _reviewer(session)
+        outcome = await BulkReviewService(session, test_context["settings"]).apply(
+            [case.id],
+            action="start_research",
+            reason=REASON,
+            admin_user_id=reviewer.id,
+        )
+        await session.commit()
+        refreshed = await session.get(ReviewCase, case.id)
+
+    assert outcome.applied == 1
+    assert refreshed is not None
+    assert refreshed.state == "researching"
+    assert "research" in outcome.message().casefold()
+
+
+async def test_asking_for_research_records_no_decision_and_cannot_be_undone(test_context):
+    """It gathers evidence; it decides nothing.
+
+    Writing a ``ReviewDecision`` for it would put a decision nobody made into the
+    history, and offering Undo would offer to take back a decision that is not there.
+    """
+
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        reviewer = await _reviewer(session)
+        outcome = await BulkReviewService(session, test_context["settings"]).apply(
+            [case.id],
+            action="start_research",
+            reason=REASON,
+            admin_user_id=reviewer.id,
+        )
+        await session.commit()
+        decisions = (
+            await session.scalars(
+                select(ReviewDecision).where(ReviewDecision.review_case_id == case.id)
+            )
+        ).all()
+
+    assert outcome.batch_id is None, "an undoable batch was recorded for a non-decision"
+    assert not decisions, "asking for research wrote a decision nobody made"
+    assert all(item.decision_id is None for item in outcome.results)
+
+
+async def test_asking_for_research_uses_the_same_reason_floor(test_context):
+    """Recorded on every case it touches, so it is held to the same floor."""
+
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        reviewer = await _reviewer(session)
+        with pytest.raises(BulkReviewError):
+            await BulkReviewService(session, test_context["settings"]).apply(
+                [case.id],
+                action="start_research",
+                reason="x" * (MIN_REASON_LENGTH - 1),
+                admin_user_id=reviewer.id,
+            )
+
+
+# --------------------------------------------------------------------------------
 # Undo.
 # --------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("action", BULK_ACTIONS)
+@pytest.mark.parametrize("action", BULK_DECISION_ACTIONS)
 async def test_undo_puts_every_case_back_and_keeps_the_decision_in_the_history(
     test_context, action
 ):
     """The way back from a mistake, not an eraser.
 
-    Asserted for both quick decisions: an undo that worked for one and silently did
-    nothing for the other would be the same defect wearing a different name.
+    Asserted for every quick **decision**: an undo that worked for one and silently did
+    nothing for another would be the same defect wearing a different name.
+
+    Parametrised over the decisions rather than over every bulk action, because not
+    every bulk action decides something. ``start_research`` asks for evidence to be
+    gathered and records no decision, so there is nothing for Undo to put back — a
+    property the case below pins down rather than leaves as an unexplained exemption.
     """
 
     async with test_context["session_factory"]() as session:

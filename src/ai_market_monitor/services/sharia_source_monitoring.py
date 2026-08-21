@@ -21,7 +21,7 @@ from ai_market_monitor.db.models import (
     SourceChangeEvent,
     SourceSnapshot,
 )
-from ai_market_monitor.db.models.enums import ComplianceChangeSeverity
+from ai_market_monitor.db.models.enums import ComplianceChangeSeverity, ReviewCaseType
 from ai_market_monitor.schemas.sharia import ComplianceChangeIngestRequest
 from ai_market_monitor.services import sharia_dossier_state as dossier_state
 from ai_market_monitor.services.compliance_watch import ComplianceWatchService
@@ -452,7 +452,7 @@ class ShariaSourceMonitoringService:
         )
         case = ReviewCase(
             case_reference=f"CHG-{asset.symbol}-{str(dossier.id)[:8].upper()}",
-            case_type="material_source_change",
+            case_type=ReviewCaseType.MATERIAL_SOURCE_CHANGE,
             state="ready_for_review",
             publication_state=(
                 "change_under_review"

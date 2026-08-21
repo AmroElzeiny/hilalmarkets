@@ -378,6 +378,155 @@ def divider() -> str:
     )
 
 
+# ── The signature a person pastes into their own mail client ─────────────────
+#
+# An email somebody writes by hand is still a Hilal Markets email, so it is held to the
+# same rules as the ones the product sends: one palette, two typefaces, and **one
+# picture** — because Outlook blocks pictures by default and everything a reader needs
+# has to survive that.
+#
+# What was here before broke the picture rule twice. The image in the logo's place was
+# not the logo: it was a near-black rounded square with the symbol knocked out of it and
+# a green tile added in the corner. That drawing exists nowhere else in the brand, and
+# `brand guide.md` section 5 does not list it as a permitted form — it lists the
+# horizontal logo, the symbol on its own, and the two monochrome versions. Beside it sat
+# three more pictures: pale tinted circles standing in for "website", "email" and
+# "guide". With pictures switched off the whole signature was four empty boxes and no
+# brand at all.
+#
+# There is now one picture and it is the real logo, built from the site's own
+# `hilal-markets-logo.svg` by `scripts/build_email_logo.py` — the same source, at the
+# same size, as the logo in the header of every email the product sends. Nothing is
+# redrawn, so the two can never become different logos. Everything else is text: it
+# survives blocked pictures, it can be selected and copied, and a screen reader reads it.
+
+#: Where the built picture is served from, and the default `src` for a served signature.
+#: The pasteable page passes a `data:` URI instead, so that file needs nothing online.
+SIGNATURE_LOGO_PATH = "/static/email/hilal-markets-logo-dark.png"
+
+#: How wide the block is allowed to get. Narrow enough to sit under a short reply
+#: without dominating it, wide enough that the disclaimer takes two lines rather than four.
+SIGNATURE_WIDTH = 460
+
+#: The label column. "Website" is the longest word in it.
+SIGNATURE_LABEL_WIDTH = 72
+
+
+@dataclass(frozen=True, slots=True)
+class SignatureContact:
+    """One way to reach Hilal Markets: what it is, what it says, and where it goes."""
+
+    label: str
+    text: str
+    url: str
+
+
+#: The same three destinations for everybody, so two people's signatures cannot disagree
+#: about the office address. Only the name and the role change from person to person.
+SIGNATURE_CONTACTS: tuple[SignatureContact, ...] = (
+    SignatureContact(
+        "Email", "office@hilalmarkets.com", "mailto:office@hilalmarkets.com"
+    ),
+    SignatureContact("Website", "hilalmarkets.com", "https://hilalmarkets.com"),
+    SignatureContact("Help", "How Hilal Markets works", "https://hilalmarkets.com/help"),
+)
+
+#: What the product is, and the boundary it does not cross. The same sentence the footer
+#: of every sent email carries, shortened to two lines.
+SIGNATURE_DISCLAIMER: tuple[str, ...] = (
+    "Screening, evidence and monitoring in line with Islamic principles.",
+    "Not a broker. Hilal Markets does not execute trades, hold funds, or give "
+    "investment advice.",
+)
+
+
+def _signature_rule() -> str:
+    """A hairline that is a filled cell rather than a border.
+
+    The Outlook desktop clients render with Word, which drops a `border-top` on an empty
+    `div` often enough that the rule is simply missing. A one-pixel cell with a
+    background is the shape every client agrees on.
+    """
+
+    return (
+        f'<div style="height:1px;background:{HAIRLINE};font-size:0;line-height:0">'
+        "&nbsp;</div>"
+    )
+
+
+def signature_logo(src: str) -> str:
+    """The one picture, and what a reader sees when the picture is blocked.
+
+    The `alt` text is styled rather than left bare, for the same reason the header's is:
+    a blocked picture must still say Hilal Markets, in the brand's own display face,
+    inside the box the picture would have filled.
+
+    The image paints its own white background. A signature is pasted into somebody
+    else's message, so it has no control over the page around it; in a client that turns
+    that page dark, a near-black logo on nothing at all would disappear.
+    """
+
+    return (
+        f'<img src="{_attr(src)}" alt="Hilal Markets" '
+        f'width="{EMAIL_LOGO_WIDTH}" height="{EMAIL_LOGO_HEIGHT}" '
+        f'style="display:block;width:{EMAIL_LOGO_WIDTH}px;height:{EMAIL_LOGO_HEIGHT}px;'
+        f'border:0;outline:none;text-decoration:none;background:{SURFACE};color:{INK};'
+        f'font-family:{DISPLAY_FONT};font-size:19px;font-weight:700;'
+        f'letter-spacing:-.02em;line-height:{EMAIL_LOGO_HEIGHT}px">'
+    )
+
+
+def signature_block(*, name: str, role: str, logo_src: str | None = None) -> str:
+    """One person's signature: the logo, who they are, where to reach us, the boundary.
+
+    Read top to bottom it goes brand, person, contact, limits — which is the order
+    somebody scans a signature in, and the order that puts the smallest type last.
+
+    Every cell paints its own background and its own colour. That is the same rule the
+    sent emails follow, and it matters more here: a signature lives inside a thread
+    whose colours belong to whoever the reply is going to.
+    """
+
+    rows = "".join(
+        "<tr>"
+        f'<td width="{SIGNATURE_LABEL_WIDTH}" valign="top" '
+        f'style="padding:5px 14px 5px 0;background:{SURFACE};color:{COPY};'
+        f'font-family:{BODY_FONT};font-size:13px;line-height:1.5">'
+        f"{_e(contact.label)}</td>"
+        f'<td valign="top" style="padding:5px 0;background:{SURFACE};'
+        f'font-family:{BODY_FONT};font-size:14px;line-height:1.5">'
+        f'<a href="{_attr(contact.url)}" style="color:{APPLE_DEEP};font-weight:700;'
+        f'text-decoration:none">{_e(contact.text)}</a></td>'
+        "</tr>"
+        for contact in SIGNATURE_CONTACTS
+    )
+    disclaimer = "<br>".join(_e(line) for line in SIGNATURE_DISCLAIMER)
+    return (
+        f'<table role="presentation" cellspacing="0" cellpadding="0" border="0" '
+        f'width="{SIGNATURE_WIDTH}" style="border-collapse:collapse;width:100%;'
+        f'max-width:{SIGNATURE_WIDTH}px;background:{SURFACE}">'
+        f'<tr><td style="padding:0 0 20px;background:{SURFACE};line-height:0">'
+        f"{signature_logo(logo_src or SIGNATURE_LOGO_PATH)}</td></tr>"
+        f'<tr><td style="padding:0;background:{SURFACE}">'
+        f'<div style="margin:0;color:{INK_STRONG};font-family:{DISPLAY_FONT};'
+        f'font-size:24px;font-weight:500;letter-spacing:-.02em;line-height:1.25">'
+        f"{_e(name)}</div>"
+        f'<div style="margin:5px 0 0;color:{COPY};font-family:{BODY_FONT};'
+        f'font-size:14px;font-weight:700;line-height:1.45">{_e(role)}</div>'
+        "</td></tr>"
+        f'<tr><td style="padding:16px 0 0;background:{SURFACE}">'
+        f"{_signature_rule()}</td></tr>"
+        f'<tr><td style="padding:12px 0 0;background:{SURFACE}">'
+        f'<table role="presentation" cellspacing="0" cellpadding="0" border="0" '
+        f'style="border-collapse:collapse">{rows}</table></td></tr>'
+        f'<tr><td style="padding:16px 0 0;background:{SURFACE}">'
+        f"{_signature_rule()}</td></tr>"
+        f'<tr><td style="padding:12px 0 0;background:{SURFACE};color:{COPY};'
+        f'font-family:{BODY_FONT};font-size:12px;line-height:1.7">{disclaimer}</td></tr>'
+        "</table>"
+    )
+
+
 class HilalMarketsEmailRenderer:
     """Render one Hilal Markets frame, and the templates built inside it."""
 
