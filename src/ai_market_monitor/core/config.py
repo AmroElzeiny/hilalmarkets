@@ -439,6 +439,34 @@ class Settings(BaseSettings):
     # unbounded pool opens as many sockets as there are concurrent calls, and an
     # unbounded wait makes a saturated pool hang every caller instead of failing in a
     # way the turn can report.
+    # ── The database connection pool ──────────────────────────────────────────────────
+    #
+    # These were never chosen. `create_async_engine` was called with no pool arguments at
+    # all, so SQLAlchemy's defaults applied: 5 kept open plus 10 overflow, and a **thirty
+    # second** wait for a free one. Every process gets its own pool — two API workers, the
+    # Celery parent and its child, and the scheduler — so the deployment could reach 75
+    # connections against PostgreSQL's default ceiling of 100, with nothing anywhere
+    # saying so. Adding one more API worker would have crossed it.
+    #
+    # The thirty-second wait is the worse half. A saturated pool did not fail, it *froze*:
+    # every page hung for half a minute and then broke, which reads as "the whole site is
+    # down" and names nothing. Five seconds, matching `provider_pool_timeout_seconds`
+    # above, turns that into a fast and legible failure.
+    #
+    # `tests/unit/test_invariant_database_pool.py` multiplies these by the number of
+    # processes this deployment starts and fails if the total approaches the server's
+    # limit, so the arithmetic cannot be forgotten when a worker is added.
+    database_pool_size: int = Field(default=5, ge=1, le=100)
+    #: Extra connections allowed above `database_pool_size` during a burst. They are
+    #: closed again when the burst passes, so this is headroom, not a running cost.
+    database_pool_overflow: int = Field(default=5, ge=0, le=100)
+    #: How long a request waits for a free connection before failing. Short on purpose.
+    database_pool_timeout_seconds: float = Field(default=5.0, gt=0.0, le=60.0)
+    #: Drop and reopen a connection older than this. Idle TCP connections are silently
+    #: dropped by routers and by PostgreSQL itself; `pool_pre_ping` then pays a failed
+    #: round trip to discover it. Recycling first avoids the discovery.
+    database_pool_recycle_seconds: int = Field(default=1800, ge=60, le=86400)
+
     provider_pool_max_connections: int = Field(default=40, ge=1, le=500)
     provider_pool_max_keepalive: int = Field(default=20, ge=0, le=500)
     provider_pool_keepalive_seconds: float = Field(default=30.0, ge=0.0, le=600.0)

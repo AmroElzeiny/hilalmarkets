@@ -32,6 +32,10 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `BILLING_WEBHOOK_SECRET` | Billing provider webhook signing secret. Keep secret. |
 | `TRIAL_DAYS` | Trial monitoring-cycle length. Default is `14`. |
 | `DELIVERY_SETTLEMENT_GRACE_MINUTES` | Time to wait after a trial cycle ends before renewal evaluation. |
+| `DATABASE_POOL_SIZE` | Connections each process keeps open to PostgreSQL. Default `5`. **A pool is per process, not per deployment**: two API workers, the Celery parent, its child and the scheduler each get their own, so multiply by five before comparing with PostgreSQL's limit of 100. |
+| `DATABASE_POOL_OVERFLOW` | Extra connections allowed during a burst, closed again afterwards. Default `5`. Was SQLAlchemy's undeclared `10`, which put the deployment at 75 of 100 possible connections with nothing saying so. |
+| `DATABASE_POOL_TIMEOUT_SECONDS` | How long a request waits for a free connection before failing. Default `5.0`. SQLAlchemy's undeclared default was **30**, so a busy moment froze every page for half a minute and then broke — indistinguishable from the site being down, and it held the worker for the whole wait. |
+| `DATABASE_POOL_RECYCLE_SECONDS` | Replace a connection older than this. Default `1800`. Idle connections are dropped by the network; `pool_pre_ping` finds that out by paying a failed round trip, recycling avoids it. |
 | `API_WORKER_PROCESSES` | How many API worker processes serve at once. Default `2`. **One is a single point of failure** — when it is killed or replaced, the website is down until it returns. Measured: with one worker, 94 of 240 requests failed during a recycle; with two, none did. |
 | `API_WORKER_MAX_REQUESTS` | A worker retires after this many requests and a fresh one takes over. Default `20000`. This bounds a slow leak that nobody has found yet: the process never lives long enough to reach the container's memory ceiling. It was `800`, and that was too eager — Caddy holds pooled connections to each worker, so every retirement produced a handful of 502s. Retiring is now rare, and `deploy/Caddyfile` retries a dropped upstream instead of showing an error. |
 | `API_WORKER_MAX_REQUESTS_JITTER` | Random extra requests added per worker before it retires. Default `5000`. **Never set this to 0.** Workers start together, so without jitter they all retire at the same moment — which is the outage again, just on a schedule. |
@@ -785,6 +789,26 @@ together, and neither is enough alone:
 
 The first version used 800, which made a worker retire every few minutes on a busy page
 and turned a safety net into the most common cause of errors.
+
+### How many people the server can hold
+
+Memory is mostly a **fixed cost per process**, not a cost per person. Each API worker
+loads Python, the application, and the exchange's market list — measured at 139 MB — and
+that is paid once, on the first request that needs it. The second person to arrive adds
+almost nothing to it. What each concurrent request adds is its own working set, which
+after the list fix above is a few megabytes.
+
+So the ceiling that fails first is not memory. In order:
+
+| What runs out first | When | What it looks like |
+|---|---|---|
+| Database connections | Adding API workers | The database refuses connections; the change that caused it was made hours earlier |
+| CPU | Many people with the Market tab open at once | Everything queues behind everything else |
+| Memory | Last | A container is killed and restarts |
+
+The Market tab is the only thing that scales with people *and never stops*: every open tab
+is one request every `SHARIA_LIVE_QUOTE_CACHE_SECONDS`, for as long as it is open. That is
+the number to reason about for capacity, not page views.
 
 ### One page must not read the whole database
 

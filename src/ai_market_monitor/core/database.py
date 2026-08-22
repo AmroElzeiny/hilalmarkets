@@ -7,12 +7,32 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from ai_market_monitor.core.config import get_settings
+from ai_market_monitor.core.config import Settings, get_settings
 
 settings = get_settings()
 
 
-def build_engine(database_url: str) -> AsyncEngine:
+def pool_options(database_url: str, options: Settings) -> dict[str, object]:
+    """Connection-pool arguments for this URL, or none where a pool cannot exist.
+
+    SQLite — the local default and every test — is served by SQLAlchemy's ``StaticPool``
+    or ``NullPool``, which accept none of these names and raise ``TypeError`` on any of
+    them. There is no queue of connections to size, because there is one file.
+
+    For PostgreSQL every one of these had been left to SQLAlchemy's defaults. See the
+    block in ``core/config.py`` for what that cost.
+    """
+    if database_url.startswith("sqlite"):
+        return {}
+    return {
+        "pool_size": options.database_pool_size,
+        "max_overflow": options.database_pool_overflow,
+        "pool_timeout": options.database_pool_timeout_seconds,
+        "pool_recycle": options.database_pool_recycle_seconds,
+    }
+
+
+def build_engine(database_url: str, options: Settings | None = None) -> AsyncEngine:
     """Create the engine, and explain a missing driver in terms of ``DATABASE_URL``.
 
     SQLAlchemy imports the driver named in the URL scheme, so a URL the environment
@@ -26,7 +46,12 @@ def build_engine(database_url: str) -> AsyncEngine:
     scheme and the missing module name go into the message.
     """
     try:
-        return create_async_engine(database_url, pool_pre_ping=True, echo=False)
+        return create_async_engine(
+            database_url,
+            pool_pre_ping=True,
+            echo=False,
+            **pool_options(database_url, options or settings),
+        )
     except ModuleNotFoundError as missing_driver:
         scheme = database_url.split("://", 1)[0] or "(empty)"
         raise RuntimeError(
