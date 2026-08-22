@@ -1,0 +1,14 @@
+# Files the Ubuntu server executes must keep Unix line endings.
+#
+# `core.autocrlf` is `true` on the Windows machines this repository is developed on, and
+# until this file existed nothing pinned the shell scripts. A fresh clone on Windows
+# therefore checked them out with Windows line endings, and a shell script with a carriage
+# return at the end of every line does not run on Ubuntu at all: bash stops on the second
+# line with `$'\r': command not found`.
+#
+# That would break `deploy/free-disk.sh` — the script for recovering a server whose disk is
+# full — at exactly the moment somebody needs it, and the error message says nothing about
+# line endings. `tests/unit/test_invariant_deploy_disk_safety.py` fails if a carriage
+# return reaches one of these files anyway.
+*.sh        text eol=lf
+Caddyfile   text eol=lf

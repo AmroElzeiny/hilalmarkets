@@ -1,4 +1,4 @@
-﻿x-tracedge-env: &tracedge_env
+x-tracedge-env: &tracedge_env
   - ${TRACEDGE_ENV_FILE:-.env.production}
 
 # Docker's json-file driver never rotates on its own: a container's log grows until the
@@ -11,6 +11,33 @@ x-logging: &default_logging
   options:
     max-size: "50m"
     max-file: "5"
+
+# Every service has a memory ceiling, and the ceilings add up to less than the server has.
+#
+# Without them, one container can take the whole machine down, and on 22 August 2026 one
+# did. The kernel log:
+#
+#   Out of memory: Killed process 564376 (celery) anon-rss:1428256kB   15:48:53
+#   Out of memory: Killed process 597555 (celery) anon-rss:1428884kB   16:50:20
+#   systemd invoked oom-killer                                        16:50:19
+#   Total swap = 0kB, 1023866 pages RAM (about 3.9 GB)
+#
+# A Celery worker grew to 1.4 GB. With no limit, the kernel had to choose a victim across
+# the whole machine, and it eventually chose systemd — process 1. The site went down, SSH
+# stopped accepting connections, and the server could only be reached through Hetzner's
+# rescue system.
+#
+# With a limit, the kernel kills only the container that broke its own promise. Docker
+# restarts it, and PostgreSQL, Redis, Caddy and the API never notice.
+#
+# The budget below is for the Hetzner CX22 this runs on: 2 CPUs, 3.9 GB RAM, 40 GB disk.
+#
+#   worker 1024m + api 768m + db 768m + scheduler 384m + redis 256m + caddy 128m
+#     = 3328m, leaving about 500 MB for the operating system and the page cache.
+#
+# Changing the server size means changing these together. They are deliberately written
+# out per service rather than shared through one anchor: they are not the same number and
+# an anchor would invite making them so.
 
 # Public analytics identifiers are pinned here so a stale secret file cannot
 # re-enable the retired direct-GA integration in a production container.
@@ -25,6 +52,7 @@ x-public-analytics-env: &public_analytics_env
 services:
   caddy:
     logging: *default_logging
+    mem_limit: 128m
     image: caddy:2.8-alpine
     restart: unless-stopped
     depends_on:
@@ -45,6 +73,7 @@ services:
 
   api:
     logging: *default_logging
+    mem_limit: 768m
     build: .
     restart: unless-stopped
     env_file: *tracedge_env
@@ -78,6 +107,10 @@ services:
 
   worker:
     logging: *default_logging
+    # The container that broke the server on 22 August 2026. Its own Celery limits
+    # (core/config.py) recycle a child that grows between tasks; this is the hard stop for
+    # a single task that allocates too much in one go. Docker kills only this container.
+    mem_limit: 1024m
     build: .
     restart: unless-stopped
     env_file: *tracedge_env
@@ -95,6 +128,7 @@ services:
 
   scheduler:
     logging: *default_logging
+    mem_limit: 384m
     build: .
     restart: unless-stopped
     env_file: *tracedge_env
@@ -122,6 +156,7 @@ services:
 
   db:
     logging: *default_logging
+    mem_limit: 768m
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -138,8 +173,13 @@ services:
 
   redis:
     logging: *default_logging
+    mem_limit: 256m
     image: redis:7-alpine
     restart: unless-stopped
+    # `--maxmemory` is deliberately NOT set. Redis is the Celery broker here, so evicting
+    # keys under pressure would silently drop queued background jobs. The container limit
+    # above is the ceiling; if Redis ever reaches it, the answer is a bigger limit or less
+    # queued work, never eviction.
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data

@@ -28,6 +28,16 @@ app.conf.update(
     enable_utc=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    # The three settings that stop a worker eating the server. See the long note beside
+    # `celery_worker_concurrency` in core/config.py for what happened on 22 August 2026:
+    # a child grew to 1.4 GB, nothing replaced it, and the kernel killed systemd.
+    #
+    # They live here rather than on the command line so that every way of starting a
+    # worker is bounded — the compose file, a hand-typed `celery` command, and a local
+    # run all read the same numbers.
+    worker_concurrency=settings.celery_worker_concurrency,
+    worker_max_tasks_per_child=settings.celery_worker_max_tasks_per_child,
+    worker_max_memory_per_child=settings.celery_worker_max_memory_per_child_kb,
     # structlog writes to stdout, and Celery captures stdout into its own logger. That
     # capture defaults to WARNING, so every *successful* provider call was arriving in the
     # log stamped as a warning while its own payload said `"level": "info"`. Two costs: a

@@ -4,8 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# shellcheck source=deploy/resource_guard.sh
+source "$ROOT_DIR/deploy/resource_guard.sh"
+
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 ENV_FILE="${TRACEDGE_ENV_FILE:-.env.production}"
+MIN_FREE_GB="${MIN_FREE_GB:-5}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing $ENV_FILE. Copy .env.production.example to $ENV_FILE and fill the placeholders first." >&2
@@ -39,6 +43,30 @@ if ! docker volume inspect "$POSTGRES_VOLUME" >/dev/null 2>&1; then
     exit 1
   fi
 fi
+
+# Building images needs room, and a build that runs out of disk part way leaves its
+# half-written layers behind - so the next attempt starts with even less. The same check
+# and the same reading of the disk as deploy/redeploy-clean.sh, from deploy/disk_guard.sh.
+echo "Checking the server has room to build..."
+DOCKER_ROOT="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || true)"
+if ! disk_require_free "$MIN_FREE_GB" "$ROOT_DIR" ${DOCKER_ROOT:+"$DOCKER_ROOT"}; then
+  cat <<HINT >&2
+
+Less than ${MIN_FREE_GB} GB free. Nothing was changed.
+
+Free the room first. That script only removes things the server can make again, and it
+cannot reach a Docker volume, so the database, Redis, the exports and the certificates
+are all safe:
+
+  bash deploy/free-disk.sh
+
+Never free room with \`docker system prune -a --volumes\` or \`docker volume prune\`.
+With the stack stopped, both of them delete the database.
+HINT
+  exit 1
+fi
+# Reported, not enforced - see the note on memory_report_swap in deploy/resource_guard.sh.
+memory_report_swap || true
 
 echo "Pulling latest source..."
 git pull --ff-only

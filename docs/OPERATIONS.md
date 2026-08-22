@@ -32,6 +32,9 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `BILLING_WEBHOOK_SECRET` | Billing provider webhook signing secret. Keep secret. |
 | `TRIAL_DAYS` | Trial monitoring-cycle length. Default is `14`. |
 | `DELIVERY_SETTLEMENT_GRACE_MINUTES` | Time to wait after a trial cycle ends before renewal evaluation. |
+| `CELERY_WORKER_CONCURRENCY` | How many worker children run at once. Default `2`, matching the two-CPU server. Left unset, Celery uses one per CPU and the worker's peak memory depends on which machine it lands on. |
+| `CELERY_WORKER_MAX_TASKS_PER_CHILD` | Replace a worker child after this many tasks. Default `100`. Bounds a slow leak that no single task causes. |
+| `CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB` | Kilobytes. A child above this is replaced once its current task finishes. Default `450000` (450 MB). Two children at 450 MB fit inside the worker container's 1024 MB ceiling. |
 | `SCAN_JOB_CLAIM_TIMEOUT_SECONDS` | Running scan heartbeat age after which a job can be recovered. |
 | `SCAN_JOB_MAX_ATTEMPTS` | Maximum retry attempts for retryable provider-wide scan failures. |
 | `DISCLAIMER_VERSION` | Current disclaimer version stored with acknowledgements. |
@@ -631,6 +634,165 @@ minutes ago.
 screening, widening the screened universe, or relaxing the market-data staleness
 check. Those are fail-closed gates. If one of them is blocking, it is doing its job,
 and forcing it open converts a visible outage into a wrong answer shown to a customer.
+
+### The server runs out of memory
+*No alert watches this. Nothing in the product measures the server's memory, so the first
+sign is that the whole site stops working and SSH stops answering.*
+
+**This is what actually happened on 22 August 2026.** It looked like a full disk. It was
+not. Always check memory before you start deleting files.
+
+- **Detection.** The site does not answer. SSH is refused or hangs. The Hetzner console
+  shows the machine up but unusable. The disk looks fine.
+- **Proof.** From the rescue system, read the machine's own log:
+
+  ```bash
+  strings /mnt/var/log/journal/*/system.journal \
+    | grep -iE "out of memory|oom-kill|no space left" | tail -40
+  ```
+
+  On the day, that printed:
+
+  ```
+  Out of memory: Killed process 564376 (celery) anon-rss:1428256kB   15:48:53
+  Out of memory: Killed process 597555 (celery) anon-rss:1428884kB   16:50:20
+  systemd invoked oom-killer                                        16:50:19
+  Total swap = 0kB, 1023866 pages RAM (about 3.9 GB)
+  ```
+
+- **What it means in plain words.** A background worker grew to 1.4 GB. The server has
+  3.9 GB and **no swap**, so the kernel had to kill something. It killed `systemd`, which
+  is the program that runs everything else. That is why SSH died too.
+- **Mitigation.** Reboot. Then make sure all three protections below are in place.
+
+**The three things that stop it happening again.** Any one of them alone keeps the site
+up. All three are now in place except the first, which is a server setting and cannot
+live in this repository:
+
+| # | Protection | Where it lives |
+|---|---|---|
+| 1 | **Swap.** Gives the kernel slack instead of killing at once | The server — see below. **Check this first after any rebuild** |
+| 2 | **Celery recycles a worker child that grows** | `celery_worker_*` in `core/config.py`, applied in `worker.py` |
+| 3 | **Each container has a memory ceiling** | `mem_limit` per service in `docker-compose.prod.yml` |
+
+**Adding swap** (do this once, on the server, as root):
+
+```bash
+fallocate -l 4G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+sysctl -w vm.swappiness=10
+echo 'vm.swappiness=10' > /etc/sysctl.d/99-swappiness.conf
+free -h        # confirm Swap shows 4.0Gi
+```
+
+Swap is slower than memory. That is the point: a slow server is a server you can still
+log in to and fix. A server with no swap goes from working to unreachable with no warning.
+
+**The memory budget** for the Hetzner CX22 (2 CPUs, 3.9 GB, 40 GB disk):
+
+| Service | Ceiling |
+|---|---|
+| worker | 1024 MB |
+| api | 768 MB |
+| db | 768 MB |
+| scheduler | 384 MB |
+| redis | 256 MB |
+| caddy | 128 MB |
+| **Total** | **3328 MB**, leaving about 500 MB for the operating system |
+
+`tests/unit/test_invariant_container_memory_limits.py` fails if a service has no ceiling,
+if the ceilings add up to more than the server has, or if the worker container is too
+small to hold its own Celery children — in that last case Docker would kill the container
+before Celery could recycle a grown child, and protection 2 would never run. **If you move
+to a bigger server, change `SERVER_RAM_MB` in that test.**
+
+- **Never.** Do not remove a `mem_limit` to make an out-of-memory error go away. Without
+  it the kernel kills something else instead, and last time it chose the program that runs
+  the whole machine.
+
+### The server disk is full
+*No alert watches this. Nothing in the product measures the server's disk, so the first
+sign is that the whole site stops working.*
+
+> **Check memory first.** On 22 August 2026 this looked exactly like a full disk and was
+> not — see the section above. Run `df -h /` and `df -i /` before deleting anything. If
+> they show free space, the fault is somewhere else and deleting files wastes the outage.
+
+- **Detection.** The site does not answer. Logging in over SSH is slow, or fails, or drops
+  you straight back out. `df -h /` says `100%`. PostgreSQL cannot write, so everything
+  stops at once — the site, the scans and the alerts.
+- **Order.** Get in **first**. You cannot delete anything without a shell, and a full disk
+  can stop you getting one. Do not start a deploy to fix it: a deploy needs *more* room
+  than it frees.
+
+**Step 1 — get a shell, in this order. Stop at the first one that works.**
+
+| Try | When it works | What it is |
+|---|---|---|
+| `ssh root@<server>` | Usually still works on a full disk | The normal way in |
+| The hosting panel's web console (VNC / serial) | SSH refuses or disconnects at once | A screen attached to the server. It does not use the network the way SSH does, so a broken `sshd` cannot block it |
+| The provider's rescue system | Even the console cannot log in | Boots a small separate system, mounts the server's disk as a folder, and lets you delete files. Reboot back to normal afterwards |
+
+If SSH connects and then closes immediately, that is the full disk, not a wrong password.
+Login needs to write a few small files and cannot.
+
+**Step 2 — free room. One command:**
+
+```bash
+cd <the repository folder on the server>
+bash deploy/free-disk.sh
+```
+
+It deletes only things the server can make again: old pre-deploy database dumps, the
+container log files, the systemd journal, the apt cache, the Docker build cache, and
+Docker images nothing is using. It cannot reach a Docker volume, so the database, Redis,
+the exported files and the TLS certificates are all safe. If it does not free enough, run
+`KEEP=1 AGGRESSIVE=1 bash deploy/free-disk.sh`.
+
+> **Never** run `docker system prune -a --volumes` or `docker volume prune`. With the
+> stack stopped, Docker counts the PostgreSQL volume as unused and both commands delete
+> it. That is the entire database. It happened on this project on 19 August 2026 and
+> recovery needed a full dump plus repair by hand.
+
+**Step 3 — start the stack again.** Not a deploy — just start what is already built:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+docker compose --env-file .env.production -f docker-compose.prod.yml ps
+docker compose --env-file .env.production -f docker-compose.prod.yml logs --tail=50 db
+```
+
+- **Verification.** `curl -sS -o /dev/null -w '%{http_code}\n' https://hilalmarkets.com/`
+  answers `200`, and every service in `ps` says `running`.
+- **If PostgreSQL will not start.** A disk that filled while it was writing can leave it
+  refusing to open. Free the room first, then restart it once. Only if it still refuses,
+  restore the newest dump from `../hilalmarkets-backups/` following
+  [`BACKUP_RESTORE.md`](BACKUP_RESTORE.md).
+- **Never.** Do not delete a Docker volume, `.env.production`, or the newest database
+  dump, to make room.
+
+**Two ways it could fill up.** Both were found and fixed on 22 August 2026 while looking
+into the memory outage above. **Neither of them caused that outage** — the disk was only
+25% full — but both are real, and left alone either one would have filled the disk in
+time:
+
+| Cause | Fix |
+|---|---|
+| Every deploy wrote a full database dump into `../hilalmarkets-backups/` and nothing ever deleted them | `deploy/resource_guard.sh` keeps the newest `BACKUP_KEEP` dumps (5 by default) and deletes the rest, before and after each dump is written |
+| Nothing checked for free space, so a deploy that ran out mid-build left half-written image layers behind and never reached the step that clears them — each failed try left *less* room | Both deploy scripts refuse to start below `MIN_FREE_GB` (5 by default) and tell you to run `deploy/free-disk.sh` |
+
+Free space is read in one place only, `deploy/resource_guard.sh`, so no two scripts can
+disagree about whether there is room. `tests/unit/test_invariant_deploy_disk_safety.py`
+fails if a deploy script writes dumps without deleting old ones, builds without checking
+for room, or contains a command that can delete a Docker volume.
+
+**Still unsolved:** nothing takes a scheduled backup off this server. The only dumps are
+the pre-deploy ones, and they sit on the same disk as the database — if the server is
+lost, they are lost with it. Choosing where off-server backups go is a decision for the
+owner, so it is not done.
 
 ### API availability
 *Alert: `api_unavailable` — pages.*

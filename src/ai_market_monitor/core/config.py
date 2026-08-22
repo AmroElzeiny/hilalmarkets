@@ -826,6 +826,40 @@ class Settings(BaseSettings):
     dashboard_export_directory: str = "./exports"
     chart_library_cdn_url: str | None = "/static/vendor/lightweight-charts.standalone.production.js"
 
+    # --- What stops one background task taking the whole server down ------------------
+    #
+    # On 22 August 2026 the live server died twice. The kernel log says why:
+    #
+    #   Out of memory: Killed process 564376 (celery) anon-rss:1428256kB   15:48:53
+    #   Out of memory: Killed process 597555 (celery) anon-rss:1428884kB   16:50:20
+    #   systemd invoked oom-killer                                        16:50:19
+    #   Total swap = 0kB, 1023866 pages RAM (about 3.9 GB)
+    #
+    # A Celery worker child had grown to 1.4 GB and nothing ever replaced it. Celery's
+    # default worker count is one per CPU, so on the two-CPU server that was 2.8 GB of
+    # workers on a machine with less than 3.8 GB usable and no swap at all. The kernel
+    # then started killing whatever it could, including systemd itself, and the machine
+    # stopped answering — SSH included.
+    #
+    # Celery has both limits built in and neither was set. They are set here, not on the
+    # command line, so every way of starting a worker gets them: the compose file, a
+    # `celery` command typed by hand, and a local run.
+    #
+    # These bound *growth between tasks*. A single task that allocates a gigabyte in one
+    # go is not stopped by them — that is what the per-container memory limit in
+    # docker-compose.prod.yml is for. Three layers, each catching what the one before
+    # cannot: recycle a grown child, cap the container, and give the kernel swap.
+    celery_worker_concurrency: int = Field(default=2, ge=1, le=32)
+    #: A child is replaced once it has run this many tasks. Bounds slow leaks that no
+    #: single task is responsible for.
+    celery_worker_max_tasks_per_child: int = Field(default=100, ge=1, le=100000)
+    #: Kilobytes. A child above this is replaced after it finishes its current task.
+    #: 450 MB per child times two children leaves room for PostgreSQL, Redis, the API,
+    #: Caddy and the operating system on a 4 GB server.
+    celery_worker_max_memory_per_child_kb: int = Field(
+        default=450_000, ge=50_000, le=8_000_000
+    )
+
     trial_days: int = Field(default=7, ge=0, le=90)
     trial_alerts_per_cycle: int = Field(default=350, ge=0, le=100000)
     delivery_settlement_grace_minutes: int = Field(default=60, ge=0, le=1440)

@@ -18,10 +18,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# shellcheck source=deploy/resource_guard.sh
+source "$ROOT_DIR/deploy/resource_guard.sh"
+
 BRANCH="${BRANCH:-main}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 ENV_FILE="${TRACEDGE_ENV_FILE:-.env.production}"
 FLUSH_REDIS="${FLUSH_REDIS:-0}"
+MIN_FREE_GB="${MIN_FREE_GB:-5}"
+BACKUP_DIR="${BACKUP_DIR:-$ROOT_DIR/../hilalmarkets-backups}"
+BACKUP_KEEP="${BACKUP_KEEP:-5}"
 PUBLIC_URL="${PUBLIC_URL:-https://hilalmarkets.com}"
 APP_URL="${APP_URL:-https://app.hilalmarkets.com}"
 
@@ -70,8 +76,16 @@ step "0/9  Checking no other container owns the web ports"
 OUR_CONTAINERS="$(
   "${COMPOSE[@]}" ps -aq 2>/dev/null | xargs -r docker inspect -f '{{.Id}}' 2>/dev/null || true
 )"
-OUR_PROJECT="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' \
-  $(echo "$OUR_CONTAINERS" | head -1) 2>/dev/null || true)"
+# The first id is put in its own variable rather than expanded unquoted inside the
+# command. Unquoted, an empty list silently became `docker inspect` with no argument at
+# all, and a value with a space in it would have been split into several arguments.
+FIRST_CONTAINER="$(printf '%s\n' "$OUR_CONTAINERS" | head -1)"
+OUR_PROJECT=""
+if [[ -n "$FIRST_CONTAINER" ]]; then
+  OUR_PROJECT="$(docker inspect \
+    -f '{{index .Config.Labels "com.docker.compose.project"}}' \
+    "$FIRST_CONTAINER" 2>/dev/null || true)"
+fi
 for port in 80 443; do
   while read -r intruder_id; do
     [[ -z "$intruder_id" ]] && continue
@@ -143,6 +157,49 @@ HINT
 done < <(docker_ids)
 echo "this deployment owns its database folder alone"
 
+step "0c/9  Checking the server has room to work"
+# A deploy needs far more disk than it leaves behind. Step 2 writes a fresh database dump,
+# step 5 throws the whole build cache away, and step 6 downloads every base image again and
+# rebuilds every layer from zero. Starting that on a nearly full disk does not fail
+# cleanly: the build stops part way and leaves half-written layers behind, and the
+# `docker image prune` at step 8 is never reached to clear them. So every failed attempt
+# leaves the server with LESS room than it had before.
+#
+# That is how a slow leak becomes an outage. On 22 August 2026 this server's disk filled
+# completely: the site stopped answering and even logging in over SSH failed. The space is
+# therefore checked before anything at all is written, thrown away or torn down.
+#
+# The Docker data folder is checked as well as the repository, because on some servers they
+# are separate filesystems and only one of them is the one that runs out.
+DOCKER_ROOT="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || true)"
+if ! disk_require_free "$MIN_FREE_GB" "$ROOT_DIR" ${DOCKER_ROOT:+"$DOCKER_ROOT"}; then
+  cat <<HINT >&2
+
+Nothing was changed. A clean rebuild needs about ${MIN_FREE_GB} GB free.
+
+Free the room first. That script only removes things the server can make again, and it
+cannot reach a Docker volume, so the database, Redis, the exports and the TLS
+certificates are all safe:
+
+  bash deploy/free-disk.sh
+
+Then run this script again. If there is still no room:
+
+  KEEP=1 AGGRESSIVE=1 bash deploy/free-disk.sh
+
+and if that is still not enough, the server's disk has to grow. Do NOT run
+\`docker system prune -a --volumes\` or \`docker volume prune\` to make room - with the
+stack stopped, both of them delete the database.
+HINT
+  fail "less than ${MIN_FREE_GB} GB free"
+fi
+echo "enough room to build"
+
+# Reported, not enforced. No swap does not break the deploy that is running - it breaks
+# the server later, under load - so refusing here would block an emergency deploy for a
+# fault the deploy did not cause. A deploy is simply the moment somebody is looking.
+memory_report_swap || true
+
 step "1/9  Checking the server has nothing that only exists here"
 # An earlier version of this script ran `git reset --hard` and `git clean -fd`. Both
 # destroy work that lives only on the server, so neither runs any more. If the working
@@ -163,13 +220,30 @@ fi
 step "2/9  Backing up the database before anything is torn down"
 # The backup is written OUTSIDE the repository so that no git or docker command in this
 # script can reach it.
-BACKUP_DIR="${BACKUP_DIR:-$ROOT_DIR/../hilalmarkets-backups}"
 mkdir -p "$BACKUP_DIR"
+
+# Nothing used to delete these. One full dump was written on every single deploy and every
+# one of them stayed for ever, on the same disk as the database, the Docker images and the
+# build cache. This project deploys many times a day, so the folder grew with no limit at
+# all until the disk was full - and a full disk stops PostgreSQL writing, which takes the
+# whole product down. Keeping a fixed number of dumps makes the folder's size bounded.
+#
+# One dump is too few to be safe and every dump is unaffordable, so the number is a
+# setting, BACKUP_KEEP. Deleting old dumps is done by deploy/disk_guard.sh, which is also
+# what the emergency cleanup uses, so both agree on which dump is the newest.
+#
+# It runs once before the dump, so an old dump is never the reason there is no room for
+# the new one, and once after it, so the new one counts towards the limit. Pruning before
+# never drops below BACKUP_KEEP, so a dump that then fails still leaves a full set behind.
+disk_prune_backups "$BACKUP_DIR" "$BACKUP_KEEP" \
+  || fail "BACKUP_KEEP must be a whole number of 1 or more (it is '$BACKUP_KEEP')"
+
 BACKUP_FILE="$BACKUP_DIR/predeploy-$(date -u +%Y%m%d-%H%M%S).sql.gz"
 # shellcheck disable=SC2016
 if "${COMPOSE[@]}" exec -T db sh -c \
      'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null | gzip > "$BACKUP_FILE"; then
   echo "database backup: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"
+  disk_prune_backups "$BACKUP_DIR" "$BACKUP_KEEP"
 else
   rm -f "$BACKUP_FILE"
   echo "no running database to back up - continuing (first deploy, or stack already down)"
