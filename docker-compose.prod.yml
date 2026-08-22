@@ -132,9 +132,14 @@ services:
   worker:
     logging: *default_logging
     # Its own Celery limits (core/config.py) recycle a child that grows between tasks;
-    # this is the hard stop for a single task that allocates too much in one go. One
-    # child at 350 MB plus a 200 MB parent is 550 MB, so 768m leaves real headroom.
-    mem_limit: 768m
+    # this is the hard stop for a single task that allocates too much in one go.
+    #
+    # 768m was too tight and the worker was killed at about 700 MB on 22 August 2026,
+    # mid-task. Celery's per-child memory limit cannot prevent that: it is checked
+    # *between* tasks, so one scan that allocates a lot in a single run walks straight
+    # past it. A scan holds the exchange's whole market list — measured at 139 MB — for
+    # the length of the run, on top of the 350 MB recycle threshold and a 200 MB parent.
+    mem_limit: 1024m
     build: .
     restart: unless-stopped
     env_file: *tracedge_env

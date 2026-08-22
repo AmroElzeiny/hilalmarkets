@@ -160,7 +160,13 @@ class Settings(BaseSettings):
     scanning_enabled: bool = False
     sharia_screening_enforced: bool = False
     sharia_allow_legacy_unscreened_local: bool = True
-    sharia_live_quote_cache_seconds: float = Field(default=0.75, ge=0.5, le=10)
+    #: How long one provider price snapshot is reused, and — through
+    #: `LiveMarketQuoteService.refresh_after_ms` — how often the Market page asks for a new
+    #: one. At 0.75 the cache never served anybody: the page's own floor made it ask every
+    #: two seconds, so every ask was a full round trip to the exchange for all symbols.
+    #: This is a monitoring product, not a trading terminal; five seconds is honest, and
+    #: the page always shows the time its prices were taken.
+    sharia_live_quote_cache_seconds: float = Field(default=5.0, ge=0.5, le=10)
     sharia_default_methodology_code: str | None = None
     sharia_universe_cache_ttl_seconds: int = Field(default=300, ge=30, le=86400)
     sharia_abnormal_exclusion_rate_threshold: float = Field(default=0.8, ge=0, le=1)
@@ -843,14 +849,20 @@ class Settings(BaseSettings):
     #: A worker retires after this many requests and the parent starts a fresh one. This
     #: is the cure for a slow leak: the process never lives long enough to grow into the
     #: ceiling, whatever is leaking and whether or not anybody has found it yet.
-    api_worker_max_requests: int = Field(default=800, ge=50, le=1_000_000)
+    #:
+    #: 800 was too eager. Retiring is not free: the proxy holds keep-alive connections to
+    #: the worker, and every one of them breaks when it goes. On 22 August 2026 the 502
+    #: timestamps matched worker start times to the second. Two things changed together —
+    #: the proxy now retries a dropped upstream (`deploy/Caddyfile`), and a worker lives
+    #: long enough that retiring is rare rather than routine.
+    api_worker_max_requests: int = Field(default=20_000, ge=50, le=1_000_000)
     #: Random extra requests added per worker before it retires.
     #:
     #: **This is what makes it seamless, and zero would undo the whole thing.** Workers
     #: start together, so without jitter they reach the same count at the same moment and
     #: all retire at once — which is an outage, just a tidier one. With jitter they retire
     #: at different times and the others keep serving.
-    api_worker_max_requests_jitter: int = Field(default=200, ge=0, le=1_000_000)
+    api_worker_max_requests_jitter: int = Field(default=5_000, ge=0, le=1_000_000)
 
     # --- What stops one background task taking the whole server down ------------------
     #

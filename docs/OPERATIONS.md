@@ -33,11 +33,12 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `TRIAL_DAYS` | Trial monitoring-cycle length. Default is `14`. |
 | `DELIVERY_SETTLEMENT_GRACE_MINUTES` | Time to wait after a trial cycle ends before renewal evaluation. |
 | `API_WORKER_PROCESSES` | How many API worker processes serve at once. Default `2`. **One is a single point of failure** — when it is killed or replaced, the website is down until it returns. Measured: with one worker, 94 of 240 requests failed during a recycle; with two, none did. |
-| `API_WORKER_MAX_REQUESTS` | A worker retires after this many requests and a fresh one takes over. Default `800`. This is the cure for a slow leak that nobody has found yet: the process never lives long enough to reach the container's memory ceiling. |
-| `API_WORKER_MAX_REQUESTS_JITTER` | Random extra requests added per worker before it retires. Default `200`. **Never set this to 0.** Workers start together, so without jitter they all retire at the same moment — which is the outage again, just on a schedule. |
+| `API_WORKER_MAX_REQUESTS` | A worker retires after this many requests and a fresh one takes over. Default `20000`. This bounds a slow leak that nobody has found yet: the process never lives long enough to reach the container's memory ceiling. It was `800`, and that was too eager — Caddy holds pooled connections to each worker, so every retirement produced a handful of 502s. Retiring is now rare, and `deploy/Caddyfile` retries a dropped upstream instead of showing an error. |
+| `API_WORKER_MAX_REQUESTS_JITTER` | Random extra requests added per worker before it retires. Default `5000`. **Never set this to 0.** Workers start together, so without jitter they all retire at the same moment — which is the outage again, just on a schedule. |
 | `CELERY_WORKER_CONCURRENCY` | How many worker children run at once. Default `1`. Two was tried and the server killed a child at 890 MB — two CPUs do not mean two children are affordable, memory decides that. Left unset entirely, Celery uses one per CPU and peak memory depends on which machine it lands on. |
 | `CELERY_WORKER_MAX_TASKS_PER_CHILD` | Replace a worker child after this many tasks. Default `50`. Bounds a slow leak that no single task causes. Recycling costs a few seconds of process start; memory on this server costs more. |
-| `CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB` | Kilobytes. A child above this is replaced once its current task finishes. Default `350000` (350 MB). The sum must fit the worker container's 768 MB ceiling **including the parent process**: 200 MB parent + 1 × 350 MB = 550 MB. If it does not fit, Docker kills the container before Celery can recycle, and this setting does nothing at all. |
+| `CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB` | Kilobytes. A child above this is replaced once its current task finishes. Default `350000` (350 MB). The sum must fit the worker container's 1024 MB ceiling **including the parent process**: 200 MB parent + 1 × 350 MB = 550 MB. If it does not fit, Docker kills the container before Celery can recycle, and this setting does nothing at all. Note the words *once its current task finishes*: this cannot stop a single task that grows, which is why the container ceiling is sized from the measured peak of a scan instead. |
+| `SHARIA_LIVE_QUOTE_CACHE_SECONDS` | How long one provider price snapshot is reused — and, through the same number, how often the Market page asks for a new one. Default `5.0`. It was `0.75`, which is below the browser's own 2-second floor, so the cache never served anybody and one open Market tab meant thirty full round trips to the exchange every minute. Do not lower it below `2.0`. |
 | `SCAN_JOB_CLAIM_TIMEOUT_SECONDS` | Running scan heartbeat age after which a job can be recovered. |
 | `SCAN_JOB_MAX_ATTEMPTS` | Maximum retry attempts for retryable provider-wide scan failures. |
 | `DISCLAIMER_VERSION` | Current disclaimer version stored with acknowledgements. |
@@ -699,12 +700,20 @@ log in to and fix. A server with no swap goes from working to unreachable with n
 | Service | Measured use | Ceiling |
 |---|---|---|
 | api | 273 MB per worker | 1280 MB |
-| worker | 465 MB | 768 MB |
+| worker | 465 MB idle, **700 MB peak during a scan** | 1024 MB |
 | db | 113 MB | 512 MB |
 | scheduler | 57 MB | 192 MB |
 | redis | 27 MB | 160 MB |
 | caddy | 43 MB | 128 MB |
-| **Total** | | **3040 MB**, leaving about 750 MB for the operating system |
+| **Total** | | **3296 MB**, leaving about 600 MB for the operating system |
+
+The worker's ceiling was 768 MB and that was too tight: it was killed at about 700 MB on
+22 August 2026, part way through a scan. **Celery's own per-child memory limit cannot
+prevent that** — it is checked *between* tasks, so one scan that allocates a lot in a
+single run walks straight past it and Docker kills the container instead. The killed scan
+is then retried and grows the same way. A worker ceiling is therefore sized from the
+largest amount one task has been *measured* using, not from the recycle threshold;
+`test_the_worker_container_holds_what_one_task_has_been_seen_to_use` enforces that.
 
 The api's share is the largest because it runs **two** worker processes plus a small
 parent — about 630 MB before any growth.
@@ -762,6 +771,53 @@ and replaced during it — and no request was dropped while that happened.
 `tests/unit/test_invariant_api_serving.py` checks that every setting actually reaches
 uvicorn and that each name is one uvicorn accepts — a misspelled option is ignored in
 silence, and the protection would look present while doing nothing.
+
+**Retiring a worker is not free, and the proxy has to know.** Caddy keeps pooled
+connections open to the API. When a worker retires, every pooled connection to *that*
+worker dies, and a request in flight on one of them is answered 502. This happened in
+production: the 502 timestamps matched worker start times to the second. Two things fix it
+together, and neither is enough alone:
+
+| Where | What |
+|---|---|
+| `deploy/Caddyfile` | `lb_try_duration 5s` — retry against the replacement instead of answering 502 |
+| `API_WORKER_MAX_REQUESTS` | 20000, not 800 — retiring is rare rather than routine |
+
+The first version used 800, which made a worker retire every few minutes on a busy page
+and turned a safety net into the most common cause of errors.
+
+### One page must not read the whole database
+
+The defect that made the dashboard unusable on 22 August 2026 was not memory management.
+It was one line: every list of screened coins asked for **all** assessments under a
+methodology, then kept a page of them.
+
+`AssetShariaAssessment` carries three JSON columns — `evidence_snapshot` holds a whole
+factual profile per asset — so reading the table is not a long list, it is hundreds of
+megabytes. Measured: the Home page took about **1.6 GB and thirty-six seconds** to draw a
+strip of **twelve** coins.
+
+It was never only one page. Five places went through the same call: Home, the Market tab,
+the Halal Assets list, the coin search inside the monitor builder, and the setup chat. The
+Market tab repeated it every two seconds and the coin search on every keystroke, so a
+single open Market tab kept a worker permanently busy — which is why pages that touch no
+Shariah code at all, such as Subscriptions, were also slow. They were queued behind it.
+
+The shape of the fix, and the rule to keep:
+
+- `ShariaScreeningService._winning_assessments` is the **single owner** of "which
+  assessment governs this asset". It reads six small columns and never a JSON blob.
+- Whole rows are loaded only for the rows that reach the answer.
+- A caller that only needs a count uses `eligible_assets`; a caller that needs a page uses
+  `list_screened_assets`; a caller that needs named assets passes `assets=`.
+- **`effective_assessments` without an `assets=` scope reads everything.**
+  `test_no_caller_reads_every_assessment` fails the build if any module does that.
+
+Because this decides which coins are shown as Halal and with which status, the change is
+guarded by a differential test: the old algorithm is kept in full inside
+`tests/services/test_invariant_screened_list_reads_only_its_page.py` and every request
+shape the product makes is compared against it. A faster list that gives a different
+answer must fail.
 
 ### The server disk is full
 *No alert watches this. Nothing in the product measures the server's disk, so the first

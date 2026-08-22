@@ -1,5 +1,6 @@
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -62,6 +63,27 @@ AGGREGATE_METHODOLOGY_CODE = "ALL_APPROVED_METHODOLOGIES"
 
 def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+@dataclass(frozen=True, slots=True)
+class _AssessmentIndexRow:
+    """The only fields needed to *choose*, filter, count and order assessments.
+
+    Deliberately not the ORM object. ``AssetShariaAssessment`` carries three JSON columns
+    — ``evidence_snapshot`` above all, which holds a whole factual profile per asset — so
+    reading a table of them costs hundreds of megabytes. Every list view used to do
+    exactly that and then keep twelve rows: the Home page read about 1.6 GB and took
+    around thirty-six seconds to show a strip of twelve coins, and the Market tab repeated
+    it every four seconds. The decision is made on these six small fields, and only the
+    rows that survive to the answer are loaded in full.
+    """
+
+    id: UUID
+    canonical_asset: str
+    asset_name: str | None
+    methodology_id: UUID
+    status: ShariaAssetStatus
+    reviewed_at: datetime
 
 
 class ShariaScreeningError(ValueError):
@@ -247,18 +269,27 @@ class ShariaScreeningService:
         self._assert_effective(methodology, as_of or datetime.now(UTC))
         return methodology
 
-    async def effective_assessments(
+    async def _winning_assessments(
         self,
-        methodology_id: UUID,
+        methodology: ShariaMethodology,
         *,
         assets: set[str] | None = None,
         as_of: datetime | None = None,
-    ) -> dict[str, AssetShariaAssessment]:
+    ) -> dict[str, _AssessmentIndexRow]:
+        """Which assessment governs each asset — the single owner of that rule.
+
+        This is the *only* place the "one winner per asset" decision is made. Both the
+        full-object reader (`effective_assessments`) and every list view go through it, so
+        a list and a passport can never disagree about which review is current.
+
+        It reads six columns, never whole rows. Choosing a winner needs the asset, the
+        status, the methodology, the review time and the id; the evidence blob is needed
+        only for the handful of rows that reach the answer, and is loaded there.
+        """
         as_of = as_of or datetime.now(UTC)
-        methodology = await self.methodology(methodology_id, require_active=True, as_of=as_of)
         aggregate = methodology.code == AGGREGATE_METHODOLOGY_CODE
         source_methodologies: list[ShariaMethodology] = []
-        methodology_ids = [methodology_id]
+        methodology_ids = [methodology.id]
         if aggregate:
             source_methodologies = [
                 row
@@ -269,7 +300,21 @@ class ShariaScreeningService:
             methodology_ids = [row.id for row in source_methodologies]
             if not methodology_ids:
                 return {}
-        query = select(AssetShariaAssessment).where(
+        normalized_assets = {canonical_asset(asset) for asset in assets or set()}
+        # An empty-but-present scope means "these assets", and there are none. It used to
+        # skip the filter and read the whole table instead — the opposite of what the
+        # caller asked, and it fails *open*. `safety_hold_assets` already refuses the same
+        # input; the two now agree.
+        if assets is not None and not normalized_assets:
+            return {}
+        query = select(
+            AssetShariaAssessment.id,
+            AssetShariaAssessment.canonical_asset,
+            AssetShariaAssessment.asset_name,
+            AssetShariaAssessment.methodology_id,
+            AssetShariaAssessment.status,
+            AssetShariaAssessment.reviewed_at,
+        ).where(
             AssetShariaAssessment.methodology_id.in_(methodology_ids),
             AssetShariaAssessment.valid_from <= as_of,
             or_(
@@ -277,20 +322,29 @@ class ShariaScreeningService:
                 AssetShariaAssessment.valid_until > as_of,
             ),
         )
-        normalized_assets = {canonical_asset(asset) for asset in assets or set()}
         if normalized_assets:
             query = query.where(AssetShariaAssessment.canonical_asset.in_(normalized_assets))
-        rows = (
-            await self.session.scalars(
-                query.order_by(
-                    AssetShariaAssessment.canonical_asset.asc(),
-                    AssetShariaAssessment.valid_from.desc(),
-                    AssetShariaAssessment.reviewed_at.desc(),
-                    AssetShariaAssessment.created_at.desc(),
-                )
+        rows = [
+            _AssessmentIndexRow(
+                id=record.id,
+                canonical_asset=record.canonical_asset,
+                asset_name=record.asset_name,
+                methodology_id=record.methodology_id,
+                status=record.status,
+                reviewed_at=record.reviewed_at,
             )
-        ).all()
-        current: dict[str, AssetShariaAssessment] = {}
+            for record in (
+                await self.session.execute(
+                    query.order_by(
+                        AssetShariaAssessment.canonical_asset.asc(),
+                        AssetShariaAssessment.valid_from.desc(),
+                        AssetShariaAssessment.reviewed_at.desc(),
+                        AssetShariaAssessment.created_at.desc(),
+                    )
+                )
+            ).all()
+        ]
+        current: dict[str, _AssessmentIndexRow] = {}
         priority_codes = list(
             methodology.rules_json.get(
                 "source_priority_codes",
@@ -319,6 +373,79 @@ class ShariaScreeningService:
         for row in rows:
             current.setdefault(row.canonical_asset, row)
         return current
+
+    async def _assessments_by_id(
+        self,
+        ids: list[UUID],
+    ) -> dict[UUID, AssetShariaAssessment]:
+        """Load whole assessment rows, for ids already chosen by `_winning_assessments`."""
+        if not ids:
+            return {}
+        rows = (
+            await self.session.scalars(
+                select(AssetShariaAssessment).where(AssetShariaAssessment.id.in_(ids))
+            )
+        ).all()
+        return {row.id: row for row in rows}
+
+    async def _published_assessment_ids(self) -> set[UUID]:
+        """Assessment ids with a live published Passport.
+
+        Asked for as a whole set rather than as `IN (…every candidate id…)`: the caller
+        only ever tests membership, and the list form sent a thousand-element parameter
+        list to the database on every page view.
+        """
+        return set(
+            (
+                await self.session.scalars(
+                    select(PublishedAssetAssessment.asset_assessment_id).where(
+                        PublishedAssetAssessment.is_active.is_(True),
+                        PublishedAssetAssessment.publication_state == "published",
+                    )
+                )
+            ).all()
+        )
+
+    async def effective_assessments(
+        self,
+        methodology_id: UUID,
+        *,
+        assets: set[str] | None = None,
+        as_of: datetime | None = None,
+    ) -> dict[str, AssetShariaAssessment]:
+        """The governing assessment for each asset, as whole rows.
+
+        Callers that only need statuses or names should use `eligible_assets` or a list
+        view instead: this loads every JSON column of every row it returns.
+        """
+        as_of = as_of or datetime.now(UTC)
+        methodology = await self.methodology(methodology_id, require_active=True, as_of=as_of)
+        index = await self._winning_assessments(methodology, assets=assets, as_of=as_of)
+        rows = await self._assessments_by_id([row.id for row in index.values()])
+        return {
+            asset: rows[row.id] for asset, row in index.items() if row.id in rows
+        }
+
+    async def eligible_assets(
+        self,
+        methodology_id: UUID,
+        *,
+        as_of: datetime | None = None,
+    ) -> set[str]:
+        """Canonical assets a monitor may watch, under one methodology.
+
+        The answer is a set of short strings, so asking "how many assets are eligible?"
+        no longer reads every stored review to count them.
+        """
+        as_of = as_of or datetime.now(UTC)
+        methodology = await self.methodology(methodology_id, require_active=True, as_of=as_of)
+        index = await self._winning_assessments(methodology, as_of=as_of)
+        holds = await self.safety_hold_assets(assets=set(index))
+        return {
+            asset
+            for asset, row in index.items()
+            if row.status in DEFAULT_ALLOWED_STATUSES and asset not in holds
+        }
 
     async def effective_assessment(
         self,
@@ -388,33 +515,14 @@ class ShariaScreeningService:
                     "not a religious ruling and is never shown as eligible market data."
                 ),
             )
-        assessments = await self.effective_assessments(methodology.id)
+        index = await self._winning_assessments(methodology)
         readiness_warning = None
-        safety_holds = await self.safety_hold_assets(assets=set(assessments))
-        values = list(assessments.values())
-        source_methodologies = {
-            row.id: row
-            for row in await self.methodologies(include_non_active=True)
-            if row.id in {assessment.methodology_id for assessment in values}
-        }
+        safety_holds = await self.safety_hold_assets(assets=set(index))
+        values = list(index.values())
         if methodology.code == AGGREGATE_METHODOLOGY_CODE or (
             self.settings and self.settings.is_deployed
         ):
-            assessment_ids = [row.id for row in values]
-            if assessment_ids:
-                published_ids = set(
-                    (
-                        await self.session.scalars(
-                            select(PublishedAssetAssessment.asset_assessment_id).where(
-                                PublishedAssetAssessment.asset_assessment_id.in_(assessment_ids),
-                                PublishedAssetAssessment.is_active.is_(True),
-                                PublishedAssetAssessment.publication_state == "published",
-                            )
-                        )
-                    ).all()
-                )
-            else:
-                published_ids = set()
+            published_ids = await self._published_assessment_ids() if values else set()
             values = [row for row in values if row.id in published_ids]
         if not values:
             readiness_warning = (
@@ -457,25 +565,36 @@ class ShariaScreeningService:
             counts[effective_status.value] = counts.get(effective_status.value, 0) + 1
         total = len(values)
         offset = (page - 1) * limit
+        # Only now, on the rows that actually reach the answer, are whole assessments read.
+        page_rows = values[offset : offset + limit]
+        assessments = await self._assessments_by_id([row.id for row in page_rows])
+        page_methodology_ids = {row.methodology_id for row in page_rows}
+        source_methodologies = {
+            row.id: row
+            for row in await self.methodologies(include_non_active=True)
+            if row.id in page_methodology_ids
+        }
         return ScreenedAssetListResponse(
             items=[
                 self.assessment_summary(
-                    row,
-                    source_methodologies.get(row.methodology_id, methodology),
+                    assessment,
+                    source_methodologies.get(assessment.methodology_id, methodology),
                     status_override=(
                         ShariaAssetStatus.UNDER_REVIEW
-                        if row.canonical_asset in safety_holds
+                        if assessment.canonical_asset in safety_holds
                         else None
                     ),
                     summary_override=(
                         "A configured safety policy has temporarily placed this asset under "
                         "review. The previous approved assessment remains in history until a "
                         "qualified reviewer records a decision."
-                        if row.canonical_asset in safety_holds
+                        if assessment.canonical_asset in safety_holds
                         else None
                     ),
                 )
-                for row in values[offset : offset + limit]
+                for assessment in (
+                    assessments[row.id] for row in page_rows if row.id in assessments
+                )
             ],
             page=page,
             limit=limit,

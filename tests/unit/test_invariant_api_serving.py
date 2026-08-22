@@ -13,12 +13,16 @@ count stops any of them growing into the container's memory ceiling.
 from __future__ import annotations
 
 import inspect
+import re
+from pathlib import Path
 
 import pytest
 import uvicorn
 
 from ai_market_monitor import serve
 from ai_market_monitor.core.config import Settings, get_settings
+
+CADDYFILE = Path(__file__).resolve().parents[2] / "deploy" / "Caddyfile"
 
 
 def options(**overrides: object) -> dict[str, object]:
@@ -74,12 +78,58 @@ def test_the_app_is_passed_as_an_import_string() -> None:
     )
 
 
+#: Every `reverse_proxy` block in the Caddyfile — the public site and the app subdomain.
+PROXY_BLOCKS = [
+    block
+    for block in re.findall(
+        r"reverse_proxy[^\n]*\{(.*?)\n\t\}", CADDYFILE.read_text(encoding="utf-8"), re.S
+    )
+]
+
+
+def test_there_is_a_proxy_block_to_check() -> None:
+    """If the file is reshaped and this stops matching, the rules below silently pass."""
+    assert len(PROXY_BLOCKS) >= 2, (
+        "the Caddyfile no longer has a reverse_proxy block per site, or the shape this "
+        "test reads has changed. The retry rules below would pass without checking."
+    )
+
+
+@pytest.mark.parametrize("index", range(len(PROXY_BLOCKS)))
+def test_a_retiring_worker_is_retried_rather_than_shown_as_an_error(index: int) -> None:
+    """A replaced worker must never reach a customer as 502.
+
+    The API runs several worker processes and retires each after a bounded number of
+    requests. Caddy keeps pooled connections to them, and a pooled connection to the
+    worker being replaced dies mid-request. Without a retry that is an error page: on
+    22 August 2026 the 502 timestamps matched worker start times to the second.
+
+    Asserted for every site in the file, not for the one that was reported. The report
+    named app.hilalmarkets.com; the public site had exactly the same gap.
+    """
+    block = PROXY_BLOCKS[index]
+    assert "lb_try_duration" in block, (
+        "a reverse_proxy block has no lb_try_duration, so a request that arrives while a "
+        "worker is being replaced is answered 502 instead of being retried against the "
+        "worker that is already listening."
+    )
+
+
+def test_the_retry_window_outlasts_a_worker_restart() -> None:
+    """A retry window shorter than the gap it covers is decoration."""
+    for block in PROXY_BLOCKS:
+        match = re.search(r"lb_try_duration\s+(\d+)(ms|s)", block)
+        assert match, "lb_try_duration must be written with a unit, such as 5s"
+        seconds = int(match.group(1)) / (1000 if match.group(2) == "ms" else 1)
+        assert seconds >= 2, (
+            f"lb_try_duration is {seconds}s. A uvicorn worker takes longer than that to "
+            "be replaced, so the retry would give up before the new one is listening."
+        )
+
+
 def test_the_port_matches_what_the_container_exposes() -> None:
     """serve.py, the compose `expose`, and the healthcheck URL are one number in three
     places, and the other two are not in Python."""
-    import re
-    from pathlib import Path
-
     compose = (Path(__file__).resolve().parents[2] / "docker-compose.prod.yml").read_text(
         encoding="utf-8"
     )

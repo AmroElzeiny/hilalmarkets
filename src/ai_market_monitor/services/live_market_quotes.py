@@ -40,6 +40,15 @@ class LiveMarketQuoteService:
         cls._cache.clear()
         cls._locks.clear()
 
+    def refresh_after_ms(self) -> int:
+        """How long a page should wait before asking for prices again.
+
+        Derived from the snapshot cache, never written down a second time: asking faster
+        than the cache is refilled can only return the same answer, at the cost of a full
+        round trip through the API for every asking page.
+        """
+        return max(1000, int(self.settings.sharia_live_quote_cache_seconds * 1000))
+
     async def snapshot(
         self,
         *,
@@ -192,7 +201,14 @@ class LiveMarketQuoteService:
                 )
             )
         items.sort(key=lambda item: (-(item.quote_volume_24h or 0), item.symbol))
+        # How soon the page should come back, decided by how soon there can be anything
+        # new: this snapshot is reused until the cache above expires, so a page asking
+        # sooner is answered with bytes it already has. The two numbers used to be
+        # unrelated — the page was told "one second" while the data was rebuilt every
+        # 0.75, and the browser's own floor made it ask every two seconds for ever. One
+        # open Market tab was therefore thirty provider round-trips a minute.
         return LiveSpotMarketResponse(
+            refresh_after_ms=self.refresh_after_ms(),
             methodology=LiveMarketMethodologySummary(
                 id=methodology_id,
                 code="PROVIDER_QUOTE_SNAPSHOT",

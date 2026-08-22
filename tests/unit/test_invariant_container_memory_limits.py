@@ -61,6 +61,13 @@ API_PARENT_PROCESS_MB = 80
 #: was 67 MB. 200 MB is the deliberately generous figure between the two.
 CELERY_PARENT_PROCESS_MB = 200
 
+#: The highest the worker container has actually been measured using, in megabytes. It was
+#: killed at about this figure on 22 August 2026, part way through a scan. This is a
+#: *measurement*, not an estimate: a scan holds the exchange's whole market list — measured
+#: separately at 139 MB — for the length of the run, on top of the recycle threshold and
+#: the parent process.
+WORKER_MEASURED_PEAK_MB = 700
+
 COMPOSE: dict[str, Any] = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
 SERVICES: dict[str, Any] = COMPOSE["services"]
 SERVICE_NAMES = sorted(SERVICES)
@@ -117,6 +124,28 @@ def test_the_limits_fit_on_the_server() -> None:
         f"operating system).\n  {breakdown}\n"
         "Either lower a limit or move to a bigger server — and if the server did grow, "
         "SERVER_RAM_MB in this test is the place that records it."
+    )
+
+
+def test_the_worker_container_holds_what_one_task_has_been_seen_to_use() -> None:
+    """Celery's per-child limit cannot save a single task, so the ceiling must.
+
+    `worker_max_memory_per_child` is checked **between** tasks. One scan that allocates a
+    lot in a single run walks straight past it and is killed by Docker instead — which is
+    what happened on 22 August 2026, at about 700 MB against a 768 MB ceiling. The killed
+    scan is then retried, grows the same way, and is killed again.
+
+    So the ceiling is not sized from the recycle threshold, which is a between-tasks
+    number. It is sized from the largest amount the worker has actually been measured
+    using, with room left over: a ceiling reached by a normal scan is not a safety net,
+    it is a scheduled outage.
+    """
+    ceiling = memory_limit_mb(SERVICES["worker"]) or 0
+    assert ceiling * 0.75 >= WORKER_MEASURED_PEAK_MB, (
+        f"the worker container is capped at {ceiling} MB, but one scan has been measured "
+        f"at {WORKER_MEASURED_PEAK_MB} MB. Celery cannot recycle a child in the middle of "
+        "the task that is growing it, so Docker kills the container first and the scan is "
+        "retried into the same wall. Raise the ceiling or lower what one scan holds."
     )
 
 

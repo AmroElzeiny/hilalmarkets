@@ -10,6 +10,15 @@ hilalmarkets.com {
 		header_up X-Forwarded-Host {host}
 		header_up X-Forwarded-Proto {scheme}
 		header_up X-Forwarded-For {remote_host}
+
+		# Try again instead of answering 502. The API runs several worker processes and
+		# retires each one after a bounded number of requests; a pooled connection to the
+		# worker being replaced dies mid-request. Without these two lines that showed the
+		# customer an error page — on 22 August 2026 the 502 timestamps matched worker
+		# start times to the second. Retrying costs a quarter of a second and the
+		# replacement worker is already listening on the same socket.
+		lb_try_duration 5s
+		lb_try_interval 250ms
 	}
 }
 
@@ -29,5 +38,14 @@ app.hilalmarkets.com {
 		header_up X-Forwarded-Host {host}
 		header_up X-Forwarded-Proto {scheme}
 		header_up X-Forwarded-For {remote_host}
+
+		# Try again instead of answering 502. The API runs several worker processes and
+		# retires each one after a bounded number of requests; a pooled connection to the
+		# worker being replaced dies mid-request. Without these two lines that showed the
+		# customer an error page — on 22 August 2026 the 502 timestamps matched worker
+		# start times to the second. Retrying costs a quarter of a second and the
+		# replacement worker is already listening on the same socket.
+		lb_try_duration 5s
+		lb_try_interval 250ms
 	}
 }

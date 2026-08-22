@@ -2794,13 +2794,10 @@ class AISetupChatService:
         methodology_id = UUID(str(context["sharia_methodology_id"]))
         mode = ShariaUniverseMode(context["screened_universe_mode"])
         screening = ShariaScreeningService(session, self.settings)
-        assessments = await screening.effective_assessments(methodology_id)
-        safety_holds = await screening.safety_hold_assets(assets=set(assessments))
-        eligible_assets = {
-            asset
-            for asset, assessment in assessments.items()
-            if assessment.status in DEFAULT_ALLOWED_STATUSES and asset not in safety_holds
-        }
+        # Only the names are needed here, to count them and to intersect them with what
+        # somebody asked for. Reading whole assessments to do that pulled every stored
+        # evidence blob into memory for a number that is shown as one digit.
+        eligible_assets = await screening.eligible_assets(methodology_id)
         scope_label = "all eligible spot assets"
         if mode == ShariaUniverseMode.EXPLICIT_ASSETS:
             requested_symbols = list(context.get("screened_explicit_symbols") or [])
