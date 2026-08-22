@@ -240,10 +240,26 @@ def market_snapshot_from_candles(
 class CcxtMarketDataProvider:
     """Shared, rate-limited CCXT clients for public spot-market data."""
 
+    #: How many previous order-book snapshots to keep.
+    #:
+    #: The snapshot of one symbol exists only to compare against the *next* reading of the
+    #: same symbol, so nothing needs the whole history. In the API this object is a
+    #: process-wide singleton (`@lru_cache` on `api/dependencies.get_market_data_provider`),
+    #: so before this cap the dictionary was never cleared for the life of the process: one
+    #: entry per symbol ever seen, kept for ever. The worker did not suffer from it because
+    #: every task closes its own provider.
+    #:
+    #: 4000 is comfortably above the number of spot symbols on any one exchange, so in
+    #: normal running nothing is ever evicted and the comparison always finds its previous
+    #: reading. The cap exists to make the growth *bounded*, not to make it small.
+    _MAX_ORDER_BOOK_SNAPSHOTS = 4000
+
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings
         self._clients: dict[str, Any] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        # Insertion-ordered, and re-inserted on every write, so the first key is always the
+        # least recently written one. A plain dict is enough for that in Python 3.7+.
         self._order_book_snapshots: dict[tuple[str, str], dict[str, Any]] = {}
 
     async def list_symbols(self, exchange: str, quote_currencies: list[str]) -> list[str]:
@@ -629,8 +645,22 @@ class CcxtMarketDataProvider:
             "recent_trade_volume": recent_trade_volume,
             "captured_at": datetime.now(UTC).isoformat(),
         }
-        self._order_book_snapshots[key] = result
+        self._remember_order_book_snapshot(key, result)
         return result
+
+    def _remember_order_book_snapshot(
+        self, key: tuple[str, str], snapshot: dict[str, Any]
+    ) -> None:
+        """Store one symbol's snapshot, keeping the store bounded.
+
+        Re-inserting moves the key to the end, so the oldest write is always first and
+        eviction takes it. See ``_MAX_ORDER_BOOK_SNAPSHOTS``.
+        """
+        self._order_book_snapshots.pop(key, None)
+        self._order_book_snapshots[key] = snapshot
+        while len(self._order_book_snapshots) > self._MAX_ORDER_BOOK_SNAPSHOTS:
+            oldest = next(iter(self._order_book_snapshots))
+            del self._order_book_snapshots[oldest]
 
     async def fetch_derivatives_context(
         self,

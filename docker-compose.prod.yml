@@ -32,8 +32,19 @@ x-logging: &default_logging
 #
 # The budget below is for the Hetzner CX22 this runs on: 2 CPUs, 3.9 GB RAM, 40 GB disk.
 #
-#   worker 1024m + api 768m + db 768m + scheduler 384m + redis 256m + caddy 128m
-#     = 3328m, leaving about 500 MB for the operating system and the page cache.
+#   api 1024m + worker 768m + db 640m + scheduler 256m + redis 192m + caddy 128m
+#     = 3008m, leaving about 780 MB for the operating system and the page cache.
+#
+# The shares are set from what each service actually uses, measured on the live server on
+# 22 August 2026, not from guessing:
+#
+#   api 273m   db 113m   worker 465m   scheduler 57m   caddy 43m   redis 27m
+#
+# The first version of this budget gave the api 768m and the worker 1024m. That was
+# backwards. The api is the customer-facing process — when it dies the website is down —
+# and it was the one being killed (`uvicorn` at 694 MB, 17:57). Meanwhile db sat at 113 MB
+# of its 768, and the scheduler at 57 MB of its 384. The room existed; it was in the wrong
+# place. The api now has the largest share, and the total came *down*.
 #
 # Changing the server size means changing these together. They are deliberately written
 # out per service rather than shared through one anchor: they are not the same number and
@@ -73,7 +84,9 @@ services:
 
   api:
     logging: *default_logging
-    mem_limit: 768m
+    # The largest share, because this is the one a customer notices. It was killed at
+    # 694 MB against a 768 MB ceiling on 22 August 2026.
+    mem_limit: 1024m
     build: .
     restart: unless-stopped
     env_file: *tracedge_env
@@ -107,10 +120,10 @@ services:
 
   worker:
     logging: *default_logging
-    # The container that broke the server on 22 August 2026. Its own Celery limits
-    # (core/config.py) recycle a child that grows between tasks; this is the hard stop for
-    # a single task that allocates too much in one go. Docker kills only this container.
-    mem_limit: 1024m
+    # Its own Celery limits (core/config.py) recycle a child that grows between tasks;
+    # this is the hard stop for a single task that allocates too much in one go. One
+    # child at 350 MB plus a 200 MB parent is 550 MB, so 768m leaves real headroom.
+    mem_limit: 768m
     build: .
     restart: unless-stopped
     env_file: *tracedge_env
@@ -128,7 +141,9 @@ services:
 
   scheduler:
     logging: *default_logging
-    mem_limit: 384m
+    # Beat only enqueues work; measured at 57 MB. Its small, stable size is also the proof
+    # that the growth elsewhere comes from doing work, not from loading the application.
+    mem_limit: 256m
     build: .
     restart: unless-stopped
     env_file: *tracedge_env
@@ -156,7 +171,9 @@ services:
 
   db:
     logging: *default_logging
-    mem_limit: 768m
+    # Measured at 113 MB. PostgreSQL's default shared_buffers is 128 MB, so 640m is still
+    # several times what it asks for.
+    mem_limit: 640m
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -173,7 +190,8 @@ services:
 
   redis:
     logging: *default_logging
-    mem_limit: 256m
+    # Measured at 27 MB holding a 69 MB dataset on disk.
+    mem_limit: 192m
     image: redis:7-alpine
     restart: unless-stopped
     # `--maxmemory` is deliberately NOT set. Redis is the Celery broker here, so evicting

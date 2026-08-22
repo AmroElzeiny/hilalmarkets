@@ -32,9 +32,9 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `BILLING_WEBHOOK_SECRET` | Billing provider webhook signing secret. Keep secret. |
 | `TRIAL_DAYS` | Trial monitoring-cycle length. Default is `14`. |
 | `DELIVERY_SETTLEMENT_GRACE_MINUTES` | Time to wait after a trial cycle ends before renewal evaluation. |
-| `CELERY_WORKER_CONCURRENCY` | How many worker children run at once. Default `2`, matching the two-CPU server. Left unset, Celery uses one per CPU and the worker's peak memory depends on which machine it lands on. |
-| `CELERY_WORKER_MAX_TASKS_PER_CHILD` | Replace a worker child after this many tasks. Default `100`. Bounds a slow leak that no single task causes. |
-| `CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB` | Kilobytes. A child above this is replaced once its current task finishes. Default `350000` (350 MB). The sum must fit the worker container's 1024 MB ceiling **including the parent process**: 200 MB parent + 2 × 350 MB = 900 MB. If it does not fit, Docker kills the container before Celery can recycle, and this setting does nothing at all. |
+| `CELERY_WORKER_CONCURRENCY` | How many worker children run at once. Default `1`. Two was tried and the server killed a child at 890 MB — two CPUs do not mean two children are affordable, memory decides that. Left unset entirely, Celery uses one per CPU and peak memory depends on which machine it lands on. |
+| `CELERY_WORKER_MAX_TASKS_PER_CHILD` | Replace a worker child after this many tasks. Default `50`. Bounds a slow leak that no single task causes. Recycling costs a few seconds of process start; memory on this server costs more. |
+| `CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB` | Kilobytes. A child above this is replaced once its current task finishes. Default `350000` (350 MB). The sum must fit the worker container's 768 MB ceiling **including the parent process**: 200 MB parent + 1 × 350 MB = 550 MB. If it does not fit, Docker kills the container before Celery can recycle, and this setting does nothing at all. |
 | `SCAN_JOB_CLAIM_TIMEOUT_SECONDS` | Running scan heartbeat age after which a job can be recovered. |
 | `SCAN_JOB_MAX_ATTEMPTS` | Maximum retry attempts for retryable provider-wide scan failures. |
 | `DISCLAIMER_VERSION` | Current disclaimer version stored with acknowledgements. |
@@ -693,15 +693,21 @@ log in to and fix. A server with no swap goes from working to unreachable with n
 
 **The memory budget** for the Hetzner CX22 (2 CPUs, 3.9 GB, 40 GB disk):
 
-| Service | Ceiling |
-|---|---|
-| worker | 1024 MB |
-| api | 768 MB |
-| db | 768 MB |
-| scheduler | 384 MB |
-| redis | 256 MB |
-| caddy | 128 MB |
-| **Total** | **3328 MB**, leaving about 500 MB for the operating system |
+| Service | Measured use | Ceiling |
+|---|---|---|
+| api | 273 MB | 1024 MB |
+| worker | 465 MB | 768 MB |
+| db | 113 MB | 640 MB |
+| scheduler | 57 MB | 256 MB |
+| redis | 27 MB | 192 MB |
+| caddy | 43 MB | 128 MB |
+| **Total** | | **3008 MB**, leaving about 780 MB for the operating system |
+
+The shares come from what each service actually uses, not from guessing. The first version
+of this budget had it backwards — the api had 768 MB and the worker 1024 MB, and it was the
+**api** that kept being killed. The api is the customer-facing process: when it dies, the
+website is down. It now has the largest share, and the total came down at the same time,
+because `db` and `scheduler` were holding room they never touch.
 
 `tests/unit/test_invariant_container_memory_limits.py` fails if a service has no ceiling,
 if the ceilings add up to more than the server has, or if the worker container is too

@@ -849,10 +849,19 @@ class Settings(BaseSettings):
     # go is not stopped by them — that is what the per-container memory limit in
     # docker-compose.prod.yml is for. Three layers, each catching what the one before
     # cannot: recycle a grown child, cap the container, and give the kernel swap.
-    celery_worker_concurrency: int = Field(default=2, ge=1, le=32)
+    #: One child, not one per CPU.
+    #:
+    #: Two children was the first attempt and the server killed one of them at 890 MB
+    #: (`Memory cgroup out of memory`, 17:20 on 22 August 2026). Two CPUs do not mean two
+    #: children are affordable — what decides it is memory, and this machine has 3.9 GB
+    #: shared with PostgreSQL, Redis, Caddy and the API. Background scans run one at a
+    #: time now. That is slower and it stays up, which is the right trade for a monitoring
+    #: product: a late alert is a problem, a dead server is a worse one.
+    celery_worker_concurrency: int = Field(default=1, ge=1, le=32)
     #: A child is replaced once it has run this many tasks. Bounds slow leaks that no
-    #: single task is responsible for.
-    celery_worker_max_tasks_per_child: int = Field(default=100, ge=1, le=100000)
+    #: single task is responsible for. Lowered from 100 after the second outage: recycling
+    #: is cheap — a few seconds of process start — and memory here is not.
+    celery_worker_max_tasks_per_child: int = Field(default=50, ge=1, le=100000)
     #: Kilobytes. A child above this is replaced after it finishes its current task.
     #:
     #: The number has to fit *inside* the worker container's own ceiling, and the sum is
