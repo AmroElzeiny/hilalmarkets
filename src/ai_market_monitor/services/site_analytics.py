@@ -498,10 +498,17 @@ class SiteAnalyticsService:
         # Accounts the product really has, whether or not a visit was measured first.
         # The two numbers differ when somebody signs up from a link that never touched
         # the public site, and the page says which is which rather than hiding the gap.
+        #
+        # This was the fourth copy of the window comparison and the one the extraction
+        # missed. It hand-wrote `>= since, < until`, so it ignored `include_until` and the
+        # live window silently stopped short of the present moment: an account created in
+        # the same instant the page was opened was never counted, and it would have read
+        # as "nobody signed up" rather than as a boundary being off by one tick. Every
+        # count in this window now goes through the one rule.
         accounts = int(
             await self.session.scalar(
                 select(func.count(User.id)).where(
-                    User.created_at >= since, User.created_at < until
+                    recorded_within(User.created_at, since, until, include_until)
                 )
             )
             or 0

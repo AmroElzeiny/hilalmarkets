@@ -16,6 +16,7 @@ to the Stats page cannot quietly grow a fourth copy with a different edge.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -100,6 +101,60 @@ async def test_a_signup_recorded_this_instant_is_counted(test_context) -> None:
 
     signups = next(item for item in report["tiles"] if item["key"] == "signups")
     assert signups["value"] == 1
+
+
+def test_every_count_in_the_window_uses_the_one_boundary_rule() -> None:
+    """No count inside ``_window`` may write its own ``>=`` / ``<`` on a timestamp.
+
+    ``recorded_within`` exists because that comparison "was written thrice" — its own
+    docstring says so. The extraction then missed a fourth copy: the ``accounts`` count
+    hand-wrote ``User.created_at >= since, User.created_at < until``, which ignores
+    ``include_until``. So the live window stopped just short of the present moment, and a
+    person who signed up in the same instant the Stats page was opened was not counted.
+
+    It read as "nobody signed up", never as a boundary being off by one tick, and it is
+    why ``test_a_signup_recorded_this_instant_is_counted`` failed only sometimes — the two
+    timestamps have to land on the same tick for it to show.
+
+    A source rule, not a behaviour rule, on purpose: the next count added to this window
+    is the one at risk, and no amount of testing today's counts catches tomorrow's copy.
+    """
+    import inspect
+
+    from ai_market_monitor.services.site_analytics import SiteAnalyticsService
+
+    source = inspect.getsource(SiteAnalyticsService._window)
+    offenders = re.findall(
+        r"\b\w+\.(?:created_at|started_at|recorded_at)\s*(?:>=|<=|<|>)\s*\w+",
+        source,
+    )
+    assert not offenders, (
+        "these comparisons in _window bypass recorded_within: "
+        f"{offenders}. Every window boundary goes through the one rule, or the counts on "
+        "one page disagree with each other."
+    )
+
+
+async def test_an_account_created_this_instant_is_counted(test_context) -> None:
+    """The counter the Sign-ups tile actually shows, at the boundary.
+
+    The tile keyed ``signups`` displays ``accounts`` — every account the product has,
+    whether or not a visit was measured first — and uses the attributed sign-up count only
+    in its hint. So this is the number a reader sees, and it is the one that was wrong.
+    """
+    from ai_market_monitor.db.models import User
+
+    async with test_context["session_factory"]() as session:
+        session.add(User(display_name="This very instant"))
+        await session.commit()
+        service = SiteAnalyticsService(session, test_context["settings"])
+        report = await service.report(days=30, landing_only=False)
+
+    tile = next(item for item in report["tiles"] if item["key"] == "signups")
+    assert tile["value"] == 1, (
+        "an account created a moment before the report was asked for was not counted. "
+        "The live window must include the present moment."
+    )
 
 
 async def test_the_two_windows_never_both_claim_the_same_row(test_context) -> None:

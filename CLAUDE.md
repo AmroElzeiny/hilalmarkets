@@ -72,6 +72,37 @@ one **nearest to its left**, inside the clause that owns it. Scanning a characte
 window let `(close < open) AND (bearish % change >= 1.0%)` read the `<` and compile a
 minimum move as a maximum.
 
+## A setting lives in four files, and they are edited together
+
+Adding, renaming or changing the default of a setting means editing **all four**, in the
+same piece of work:
+
+| File | What it is | In git? |
+|---|---|---|
+| `.env.example` | development example | yes |
+| `.env.production.example` | production example | yes |
+| `.env` | the real local file | no |
+| `.env.production` | the real deployed file | no |
+
+`tests/unit/test_invariant_phase6_launch_audit.py` only compares the two **examples** with
+each other. It cannot see the two real files — they are not in git — so nothing will ever
+tell you they are stale. A setting added to the examples alone is a setting the running
+system does not have, and the default silently applies instead. That is exactly how the
+Celery memory limits were written on 22 August 2026 and then not applied to the server.
+
+**Rules for touching the two real files**, because they hold live secrets:
+
+- **Copy only the keys that changed.** Never regenerate a real file from an example, and
+  never reorder or reformat it — everything already there stays exactly as it is.
+- **Back it up first** (`.bak-<reason>`), then prove afterwards that the key count rose by
+  exactly the number added and that **no existing value changed**.
+- **Do the edit in Python**, never with a PowerShell file write: `Set-Content` adds a
+  byte-order mark and `Get-Content -Raw` decodes with the wrong codepage. Either one
+  silently corrupts a secret.
+- **Never print a value** from `.env` or `.env.production`. Key names and counts only.
+- Changing the deployed file on the server is a separate step from changing it here; say
+  so plainly, and give the command.
+
 ## Tests assert the rule, not the case
 
 Parametrise across the whole family — every operator phrase × every indicator, every
