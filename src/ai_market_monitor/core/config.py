@@ -826,6 +826,32 @@ class Settings(BaseSettings):
     dashboard_export_directory: str = "./exports"
     chart_library_cdn_url: str | None = "/static/vendor/lightweight-charts.standalone.production.js"
 
+    # --- What keeps the website up while a process is replaced ------------------------
+    #
+    # On 22 August 2026 the API process was killed by the kernel twice (`uvicorn`, 694 MB).
+    # It ran as a single process, so each kill took the whole website down until Docker
+    # restarted the container.
+    #
+    # More than one worker is what makes that survivable, and recycling is what stops a
+    # worker ever reaching the ceiling. Both are built into the uvicorn already pinned
+    # here — `--workers`, `--limit-max-requests`, and a parent that restarts a worker that
+    # dies. Nothing extra is installed for this.
+    #
+    # `ai_market_monitor/serve.py` is the only reader of these three. The Docker command
+    # calls it rather than spelling the numbers out, so there is one place they live.
+    api_worker_processes: int = Field(default=2, ge=1, le=16)
+    #: A worker retires after this many requests and the parent starts a fresh one. This
+    #: is the cure for a slow leak: the process never lives long enough to grow into the
+    #: ceiling, whatever is leaking and whether or not anybody has found it yet.
+    api_worker_max_requests: int = Field(default=800, ge=50, le=1_000_000)
+    #: Random extra requests added per worker before it retires.
+    #:
+    #: **This is what makes it seamless, and zero would undo the whole thing.** Workers
+    #: start together, so without jitter they reach the same count at the same moment and
+    #: all retire at once — which is an outage, just a tidier one. With jitter they retire
+    #: at different times and the others keep serving.
+    api_worker_max_requests_jitter: int = Field(default=200, ge=0, le=1_000_000)
+
     # --- What stops one background task taking the whole server down ------------------
     #
     # On 22 August 2026 the live server died twice. The kernel log says why:

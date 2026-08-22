@@ -46,6 +46,15 @@ SERVER_RAM_MB = 3900
 #: container. Below this the server has no slack, which is the state it died in.
 OPERATING_SYSTEM_RESERVE_MB = 400
 
+#: One uvicorn worker with the application loaded, measured on the live server at 273 MB.
+#: Rounded up, because a ceiling sized to the exact measurement has no room for a normal
+#: busy minute.
+API_WORKER_BASELINE_MB = 300
+
+#: The uvicorn parent. It supervises the workers and does not serve requests, so it never
+#: loads the heavy parts. Generous on purpose.
+API_PARENT_PROCESS_MB = 80
+
 #: The Celery parent process, which holds the whole application without running tasks.
 #: Measured on the live server: the idle worker container was 670 MB for a parent plus two
 #: children, and the scheduler — a bare beat process with the same application loaded —
@@ -124,6 +133,99 @@ def test_redis_does_not_evict_queued_jobs() -> None:
         "redis has a maxmemory setting. It is the Celery broker here — evicting keys "
         "throws away queued background jobs with no error anywhere."
     )
+
+
+def test_the_api_runs_more_than_one_worker() -> None:
+    """One process means one kill takes the whole website down.
+
+    That is what happened on 22 August 2026: the API ran as a single `uvicorn` process,
+    the kernel killed it at 694 MB, and the site was down until Docker restarted the
+    container. With a second worker, the other one keeps serving.
+    """
+    from ai_market_monitor.core.config import get_settings
+
+    assert get_settings().api_worker_processes >= 2, (
+        "the API is configured to run a single worker. One process is one point of "
+        "failure: when it is killed or restarted, the website is down for as long as it "
+        "takes to come back."
+    )
+
+
+def test_the_api_workers_retire_before_they_can_grow_into_the_ceiling() -> None:
+    """Recycling is the cure for a leak nobody has found yet.
+
+    A worker that retires on a request count never lives long enough to reach the
+    container's memory ceiling, whatever is leaking. This is deliberately a defence that
+    does not depend on knowing the cause — as of writing, the cause is not known.
+    """
+    from ai_market_monitor.core.config import get_settings
+
+    settings = get_settings()
+    assert settings.api_worker_max_requests > 0, (
+        "API workers are never retired, so any leak eventually reaches the ceiling."
+    )
+
+
+def test_the_api_workers_do_not_all_retire_at_the_same_moment() -> None:
+    """Jitter is the whole difference between a rolling restart and an outage.
+
+    Workers start together and serve roughly equal shares of traffic, so without jitter
+    they reach the retirement count at nearly the same moment and go together — which is
+    the outage this was meant to prevent, arriving on a schedule instead of by surprise.
+    """
+    from ai_market_monitor.core.config import get_settings
+
+    settings = get_settings()
+    if settings.api_worker_processes < 2:
+        pytest.skip("only one worker, so there is nothing to stagger")
+    assert settings.api_worker_max_requests_jitter > 0, (
+        "API_WORKER_MAX_REQUESTS_JITTER is zero, so every worker retires at the same "
+        "moment and the site goes down each time it happens."
+    )
+
+
+def test_the_api_container_can_hold_the_workers_it_is_told_to_run() -> None:
+    """The worker count and the container ceiling have to agree.
+
+    Same trap as the Celery one: two limits that each look sensible alone, and a container
+    that dies before the mechanism inside it can work.
+    """
+    from ai_market_monitor.core.config import get_settings
+
+    workers = get_settings().api_worker_processes
+    needed = API_PARENT_PROCESS_MB + workers * API_WORKER_BASELINE_MB
+    ceiling = memory_limit_mb(SERVICES["api"]) or 0
+    assert needed <= ceiling, (
+        f"{workers} API workers at {API_WORKER_BASELINE_MB} MB each plus a "
+        f"{API_PARENT_PROCESS_MB} MB parent need {needed} MB, but the api container is "
+        f"capped at {ceiling} MB. It would be killed while merely idling."
+    )
+    # And there must be real room left over, or the ceiling is reached by normal traffic
+    # rather than by something going wrong.
+    assert needed <= ceiling * 0.75, (
+        f"{workers} idle API workers already use {needed} MB of the {ceiling} MB ceiling. "
+        "A ceiling should be reached by a fault, not by a busy afternoon."
+    )
+
+
+def test_the_docker_command_does_not_repeat_the_worker_numbers() -> None:
+    """One owner for the numbers: `serve.py` reads Settings, Compose names nothing.
+
+    Writing `--workers 2` into the Compose command as well would create a second copy that
+    silently wins over the setting, and the setting would then be a knob connected to
+    nothing.
+    """
+    command = SERVICES["api"].get("command", "")
+    text = " ".join(command) if isinstance(command, list) else str(command)
+    assert "ai_market_monitor.serve" in text, (
+        "the api command no longer starts through serve.py, which is the only reader of "
+        "the worker settings."
+    )
+    for flag in ("--workers", "--limit-max-requests"):
+        assert flag not in text, (
+            f"the api command spells out {flag}. That is a second copy of a number that "
+            "already lives in core/config.py, and the copy in the command wins."
+        )
 
 
 def test_the_celery_worker_recycles_a_child_that_grows() -> None:

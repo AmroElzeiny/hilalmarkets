@@ -32,8 +32,13 @@ x-logging: &default_logging
 #
 # The budget below is for the Hetzner CX22 this runs on: 2 CPUs, 3.9 GB RAM, 40 GB disk.
 #
-#   api 1024m + worker 768m + db 640m + scheduler 256m + redis 192m + caddy 128m
-#     = 3008m, leaving about 780 MB for the operating system and the page cache.
+#   api 1280m + worker 768m + db 512m + scheduler 192m + redis 160m + caddy 128m
+#     = 3040m, leaving about 750 MB for the operating system and the page cache.
+#
+# The api's share grew again when it went from one worker process to two. Two workers at
+# the measured 273 MB each, plus the small parent that supervises them, is about 630 MB
+# before any growth at all — and the whole point of the ceiling is to be reached only by
+# something abnormal, never by normal running.
 #
 # The shares are set from what each service actually uses, measured on the live server on
 # 22 August 2026, not from guessing:
@@ -85,8 +90,10 @@ services:
   api:
     logging: *default_logging
     # The largest share, because this is the one a customer notices. It was killed at
-    # 694 MB against a 768 MB ceiling on 22 August 2026.
-    mem_limit: 1024m
+    # 694 MB against a 768 MB ceiling on 22 August 2026, when it ran as a single process.
+    # It now runs two workers plus a parent, and each worker retires on a request count
+    # long before it could reach this number.
+    mem_limit: 1280m
     build: .
     restart: unless-stopped
     env_file: *tracedge_env
@@ -98,13 +105,17 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # `serve` runs several workers and retires each one after a bounded number of
+    # requests, so the website stays up while a process is replaced and no process lives
+    # long enough to grow into the ceiling above. The numbers are settings, read by
+    # `ai_market_monitor/serve.py` — deliberately not repeated here, because a second copy
+    # of a number is a number that drifts.
+    #
+    # The migration runs once, in this shell, before any worker starts. Running it inside
+    # the workers would run it as many times as there are workers.
     command: >
       sh -c "alembic upgrade head &&
-      uvicorn ai_market_monitor.main:app
-      --host 0.0.0.0
-      --port 8000
-      --proxy-headers
-      --forwarded-allow-ips='*'"
+      python -m ai_market_monitor.serve"
     healthcheck:
       test:
         [
@@ -143,7 +154,7 @@ services:
     logging: *default_logging
     # Beat only enqueues work; measured at 57 MB. Its small, stable size is also the proof
     # that the growth elsewhere comes from doing work, not from loading the application.
-    mem_limit: 256m
+    mem_limit: 192m
     build: .
     restart: unless-stopped
     env_file: *tracedge_env
@@ -171,9 +182,9 @@ services:
 
   db:
     logging: *default_logging
-    # Measured at 113 MB. PostgreSQL's default shared_buffers is 128 MB, so 640m is still
-    # several times what it asks for.
-    mem_limit: 640m
+    # Measured at 113 MB. PostgreSQL's default shared_buffers is 128 MB, so 512m is still
+    # four times what it asks for, and the room it gives up goes to the api.
+    mem_limit: 512m
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -191,7 +202,7 @@ services:
   redis:
     logging: *default_logging
     # Measured at 27 MB holding a 69 MB dataset on disk.
-    mem_limit: 192m
+    mem_limit: 160m
     image: redis:7-alpine
     restart: unless-stopped
     # `--maxmemory` is deliberately NOT set. Redis is the Celery broker here, so evicting

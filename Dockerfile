@@ -66,4 +66,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 FROM base AS runtime
 
-CMD ["uvicorn", "ai_market_monitor.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# The same way docker-compose.prod.yml starts it: several workers, each retired after a
+# bounded number of requests. This is the image's own default, so running it without a
+# compose file cannot quietly give a single process — which is the shape that went down
+# twice on 22 August 2026. The numbers live in core/config.py; see serve.py.
+#
+# No migration here on purpose. Compose runs `alembic upgrade head` once before this, and
+# a migration in the image default would run again for every container started from it.
+CMD ["python", "-m", "ai_market_monitor.serve"]

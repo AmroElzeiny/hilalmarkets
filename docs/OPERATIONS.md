@@ -32,6 +32,9 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `BILLING_WEBHOOK_SECRET` | Billing provider webhook signing secret. Keep secret. |
 | `TRIAL_DAYS` | Trial monitoring-cycle length. Default is `14`. |
 | `DELIVERY_SETTLEMENT_GRACE_MINUTES` | Time to wait after a trial cycle ends before renewal evaluation. |
+| `API_WORKER_PROCESSES` | How many API worker processes serve at once. Default `2`. **One is a single point of failure** — when it is killed or replaced, the website is down until it returns. Measured: with one worker, 94 of 240 requests failed during a recycle; with two, none did. |
+| `API_WORKER_MAX_REQUESTS` | A worker retires after this many requests and a fresh one takes over. Default `800`. This is the cure for a slow leak that nobody has found yet: the process never lives long enough to reach the container's memory ceiling. |
+| `API_WORKER_MAX_REQUESTS_JITTER` | Random extra requests added per worker before it retires. Default `200`. **Never set this to 0.** Workers start together, so without jitter they all retire at the same moment — which is the outage again, just on a schedule. |
 | `CELERY_WORKER_CONCURRENCY` | How many worker children run at once. Default `1`. Two was tried and the server killed a child at 890 MB — two CPUs do not mean two children are affordable, memory decides that. Left unset entirely, Celery uses one per CPU and peak memory depends on which machine it lands on. |
 | `CELERY_WORKER_MAX_TASKS_PER_CHILD` | Replace a worker child after this many tasks. Default `50`. Bounds a slow leak that no single task causes. Recycling costs a few seconds of process start; memory on this server costs more. |
 | `CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB` | Kilobytes. A child above this is replaced once its current task finishes. Default `350000` (350 MB). The sum must fit the worker container's 768 MB ceiling **including the parent process**: 200 MB parent + 1 × 350 MB = 550 MB. If it does not fit, Docker kills the container before Celery can recycle, and this setting does nothing at all. |
@@ -695,13 +698,16 @@ log in to and fix. A server with no swap goes from working to unreachable with n
 
 | Service | Measured use | Ceiling |
 |---|---|---|
-| api | 273 MB | 1024 MB |
+| api | 273 MB per worker | 1280 MB |
 | worker | 465 MB | 768 MB |
-| db | 113 MB | 640 MB |
-| scheduler | 57 MB | 256 MB |
-| redis | 27 MB | 192 MB |
+| db | 113 MB | 512 MB |
+| scheduler | 57 MB | 192 MB |
+| redis | 27 MB | 160 MB |
 | caddy | 43 MB | 128 MB |
-| **Total** | | **3008 MB**, leaving about 780 MB for the operating system |
+| **Total** | | **3040 MB**, leaving about 750 MB for the operating system |
+
+The api's share is the largest because it runs **two** worker processes plus a small
+parent — about 630 MB before any growth.
 
 The shares come from what each service actually uses, not from guessing. The first version
 of this budget had it backwards — the api had 768 MB and the worker 1024 MB, and it was the
@@ -718,6 +724,44 @@ to a bigger server, change `SERVER_RAM_MB` in that test.**
 - **Never.** Do not remove a `mem_limit` to make an out-of-memory error go away. Without
   it the kernel kills something else instead, and last time it chose the program that runs
   the whole machine.
+
+### How the API is served, and why the site survives a leak
+
+The API starts with `python -m ai_market_monitor.serve`, not a long `uvicorn` command. That
+file is the only reader of the three `API_WORKER_*` settings, so the numbers live in one
+place instead of being repeated in `docker-compose.prod.yml`.
+
+Two things happen there, and together they mean **a leak can no longer take the site down,
+even one nobody has found**:
+
+| | What it does |
+|---|---|
+| Several workers | One is replaced while the others keep serving |
+| Retire on a request count | No process lives long enough to reach the memory ceiling |
+| Jitter on that count | They never retire at the same moment |
+
+Nothing extra is installed for this. Gunicorn was the obvious answer and turned out to be
+unnecessary: the pinned `uvicorn 0.49.0` already provides `--workers`,
+`--limit-max-requests`, `--limit-max-requests-jitter`, and a parent process that starts a
+replacement whenever a worker goes away. Using gunicorn would have meant adding **two**
+dependencies — gunicorn itself and `uvicorn-worker`, because `uvicorn.workers` was removed
+in 0.49 — to obtain behaviour already present.
+
+**Measured, on Linux, with the pinned uvicorn**, sending 240 requests at a server told to
+retire a worker every 5–7 requests:
+
+| Workers | Requests | Failed | Distinct processes that answered |
+|---|---|---|---|
+| **2** | 240 | **0** | 4 |
+| **1** | 240 | **94** | 1 |
+
+The second row is the setup that was running until 22 August 2026. Four different
+processes answering in the two-worker run is the proof that workers really were retired
+and replaced during it — and no request was dropped while that happened.
+
+`tests/unit/test_invariant_api_serving.py` checks that every setting actually reaches
+uvicorn and that each name is one uvicorn accepts — a misspelled option is ignored in
+silence, and the protection would look present while doing nothing.
 
 ### The server disk is full
 *No alert watches this. Nothing in the product measures the server's disk, so the first
