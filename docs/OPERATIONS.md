@@ -34,7 +34,7 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `DELIVERY_SETTLEMENT_GRACE_MINUTES` | Time to wait after a trial cycle ends before renewal evaluation. |
 | `CELERY_WORKER_CONCURRENCY` | How many worker children run at once. Default `2`, matching the two-CPU server. Left unset, Celery uses one per CPU and the worker's peak memory depends on which machine it lands on. |
 | `CELERY_WORKER_MAX_TASKS_PER_CHILD` | Replace a worker child after this many tasks. Default `100`. Bounds a slow leak that no single task causes. |
-| `CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB` | Kilobytes. A child above this is replaced once its current task finishes. Default `450000` (450 MB). Two children at 450 MB fit inside the worker container's 1024 MB ceiling. |
+| `CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB` | Kilobytes. A child above this is replaced once its current task finishes. Default `350000` (350 MB). The sum must fit the worker container's 1024 MB ceiling **including the parent process**: 200 MB parent + 2 × 350 MB = 900 MB. If it does not fit, Docker kills the container before Celery can recycle, and this setting does nothing at all. |
 | `SCAN_JOB_CLAIM_TIMEOUT_SECONDS` | Running scan heartbeat age after which a job can be recovered. |
 | `SCAN_JOB_MAX_ATTEMPTS` | Maximum retry attempts for retryable provider-wide scan failures. |
 | `DISCLAIMER_VERSION` | Current disclaimer version stored with acknowledgements. |

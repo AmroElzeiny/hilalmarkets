@@ -46,6 +46,12 @@ SERVER_RAM_MB = 3900
 #: container. Below this the server has no slack, which is the state it died in.
 OPERATING_SYSTEM_RESERVE_MB = 400
 
+#: The Celery parent process, which holds the whole application without running tasks.
+#: Measured on the live server: the idle worker container was 670 MB for a parent plus two
+#: children, and the scheduler — a bare beat process with the same application loaded —
+#: was 67 MB. 200 MB is the deliberately generous figure between the two.
+CELERY_PARENT_PROCESS_MB = 200
+
 COMPOSE: dict[str, Any] = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
 SERVICES: dict[str, Any] = COMPOSE["services"]
 SERVICE_NAMES = sorted(SERVICES)
@@ -147,20 +153,30 @@ def test_the_worker_container_can_hold_its_own_children() -> None:
     """The two limits have to agree, or one of them does nothing.
 
     Celery replaces a child only *after* the task that grew it has finished. So the
-    container has to be able to hold every child at its ceiling at once, plus the parent
-    process. If it cannot, Docker kills the container before Celery ever gets to recycle,
-    and the setting that was supposed to prevent the outage never runs.
+    container has to hold every child at its ceiling **at the same time**, and the parent
+    process as well — Celery's prefork pool is one parent plus `worker_concurrency`
+    children, and the parent has the whole application loaded too.
+
+    If the total can exceed the container, Docker kills the container first and Celery
+    never reaches the point where it would have recycled the grown child. The setting
+    reads as present and does nothing, which is worse than not having it: it looks like
+    the outage is prevented.
+
+    The first version of this test left the parent out of the sum. Measurements from the
+    live server on 22 August 2026 — the worker container at 670 MB while idle — showed
+    that the parent is far too big to ignore.
     """
     from ai_market_monitor.worker import app
 
     children = int(app.conf.worker_concurrency)
     per_child_mb = int(app.conf.worker_max_memory_per_child) / 1024
     container_mb = memory_limit_mb(SERVICES["worker"]) or 0
-    needed = children * per_child_mb
-    assert needed < container_mb, (
-        f"{children} children at {per_child_mb:.0f} MB each need {needed:.0f} MB, but the "
-        f"worker container is capped at {container_mb} MB. Docker would kill the "
-        "container before Celery could recycle a grown child, so the Celery limit would "
-        "never take effect. Lower the concurrency or the per-child limit, or raise the "
-        "container limit."
+    needed = CELERY_PARENT_PROCESS_MB + children * per_child_mb
+    assert needed <= container_mb, (
+        f"the worker needs {needed:.0f} MB — {CELERY_PARENT_PROCESS_MB} MB for the parent "
+        f"process plus {children} children at {per_child_mb:.0f} MB each — but the "
+        f"container is capped at {container_mb} MB. Docker would kill the container "
+        "before Celery could recycle a grown child, so the Celery limit would never take "
+        "effect. Lower the concurrency or the per-child limit, or raise the container "
+        "limit."
     )

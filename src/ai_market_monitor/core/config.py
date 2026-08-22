@@ -854,10 +854,21 @@ class Settings(BaseSettings):
     #: single task is responsible for.
     celery_worker_max_tasks_per_child: int = Field(default=100, ge=1, le=100000)
     #: Kilobytes. A child above this is replaced after it finishes its current task.
-    #: 450 MB per child times two children leaves room for PostgreSQL, Redis, the API,
-    #: Caddy and the operating system on a 4 GB server.
+    #:
+    #: The number has to fit *inside* the worker container's own ceiling, and the sum is
+    #: not just the children: Celery's prefork pool is one parent process plus
+    #: `celery_worker_concurrency` children, and the parent has the whole application
+    #: loaded too. Measured on the live server, the parent is around 150-200 MB.
+    #:
+    #:   200 MB parent + 2 children x 350 MB = 900 MB, inside the 1024 MB container
+    #:
+    #: Getting this wrong in the other direction is silent and total: if the parent plus
+    #: the children can exceed the container, Docker kills the container first and Celery
+    #: never reaches the point where it would have recycled the grown child. The setting
+    #: would look present and do nothing. `test_invariant_container_memory_limits.py`
+    #: checks the arithmetic, parent included.
     celery_worker_max_memory_per_child_kb: int = Field(
-        default=450_000, ge=50_000, le=8_000_000
+        default=350_000, ge=50_000, le=8_000_000
     )
 
     trial_days: int = Field(default=7, ge=0, le=90)
