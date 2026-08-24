@@ -55,10 +55,13 @@ printed, so replacing a secret shows that it changed and never what it was.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import sys
 import tempfile
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -114,6 +117,30 @@ def serialise(value: object) -> str:
 
 def settings_from(path: Path) -> dict:
     return Settings(_env_file=str(path)).model_dump()
+
+
+@contextmanager
+def without_ambient(keys: Iterable[str]) -> Iterator[None]:
+    """Hide these names from the process environment while a file is read back.
+
+    The supported way to run this on the server is inside the application's own container,
+    and Docker injects every key of the very file being edited as a real environment
+    variable. ``pydantic-settings`` reads the environment *before* the file, so a check
+    that loads the file gets the value the container started with, not the value just
+    written.
+
+    On 24 August 2026 that turned the safety check into the failure: a correct write of
+    ``SCAN_HISTORY_RETENTION_DAYS=3`` was read back as ``30`` — the container's copy — and
+    rolled itself back. Hiding only the keys being set keeps the check meaningful (a value
+    the application cannot parse still fails) without letting the container's memory of
+    the old file overrule the new one.
+    """
+
+    saved = {key: os.environ.pop(key) for key in list(keys) if key in os.environ}
+    try:
+        yield
+    finally:
+        os.environ.update(saved)
 
 
 def merged_lines(base: list[str], additions: list[tuple[str, str]], stamp: str) -> list[str]:
@@ -281,18 +308,31 @@ def set_one(root: Path, name: str, overrides: dict[str, str], stamp: str, apply:
         ]
     path.write_text("\n".join(written) + "\n", encoding="utf-8")
 
-    try:
-        loaded = settings_from(path)
-    except Exception as error:  # noqa: BLE001 - any parse failure means put it back
+    # The file is the thing being written, so the file is what is checked first. This part
+    # cannot be fooled by anything in the environment.
+    on_disk = {key: value_of(read_lines(path), key) for key in changing}
+    missed = sorted(key for key, value in changing.items() if on_disk[key] != value)
+    if missed:
         shutil.copy2(backup, path)
-        print(f"  STOP. The result would not load, backup restored: {error}\n")
+        print(f"  STOP. Not written as asked, backup restored: {missed}\n")
         return 1
 
-    wrong = [
-        key
-        for key, value in changing.items()
-        if key.lower() in loaded and serialise(loaded[key.lower()]) != value
-    ]
+    # Then that the application can still read it. See `without_ambient`: run inside the
+    # container, the old value of this very key is sitting in the environment and would
+    # otherwise win.
+    with without_ambient(changing):
+        try:
+            loaded = settings_from(path)
+        except Exception as error:  # noqa: BLE001 - any parse failure means put it back
+            shutil.copy2(backup, path)
+            print(f"  STOP. The result would not load, backup restored: {error}\n")
+            return 1
+
+        wrong = [
+            key
+            for key, value in changing.items()
+            if key.lower() in loaded and serialise(loaded[key.lower()]) != value
+        ]
     if wrong:
         shutil.copy2(backup, path)
         print(f"  STOP. Read back differently, backup restored: {sorted(wrong)}\n")
