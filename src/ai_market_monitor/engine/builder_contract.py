@@ -39,6 +39,11 @@ from ai_market_monitor.engine.capabilities import (
     parameter_semantic_unit,
     parameter_value_range,
 )
+from ai_market_monitor.engine.provider_families import (
+    PROVIDER_FAMILIES,
+    plain_feed_name,
+    runtime_availability,
+)
 from ai_market_monitor.schemas.strategy import UNARY_COMPARATORS, Comparator
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     FORMULA_CONTRACTS,
@@ -577,36 +582,26 @@ _PLATFORM_OWNED_PARAMETERS = frozenset(
 
 #: What each missing feed is, in words a beginner reads.
 #:
-#: 143 of the 512 cards are withdrawn because something they need is not connected, and
-#: every one of them showed the reader the platform's own internal name for it —
-#: "(risk_context)", "(universe_ranking)", "(token_categories)". Two of them were not
-#: market data at all: `alert_behavior` is the account's own past alerts and
-#: `setup_lifecycle` is how long a setup has been running, so the sentence was also
-#: untrue. The product is built for beginners; an internal field name is never an answer.
+#: Cards withdrawn because something they need is not connected used to show the reader
+#: the platform's own internal name for it — "(risk_context)", "(universe_ranking)",
+#: "(token_categories)". Two of them were not market data at all: `alert_behavior` is the
+#: account's own past alerts and `setup_lifecycle` is how long a setup has been running,
+#: so the sentence was also untrue. The product is built for beginners; an internal field
+#: name is never an answer.
+#:
+#: The names now come from `engine/provider_families.py`, beside the record of how each
+#: feed is satisfied. Kept here as a name because callers import it, but it is a view of
+#: that owner rather than a second list: a feed added there could otherwise be explained
+#: to a beginner in one file and not in the other.
 FEED_IN_PLAIN_WORDS: dict[str, str] = {
-    "alert_behavior": "your own past alerts",
-    "cross_market": "the prices of other coins",
-    "crypto_index": "a whole-market index",
-    "derivatives": "futures market numbers",
-    "event_feed": "news and events",
-    "macro_market": "the wider financial markets",
-    "market_breadth": "how many coins are rising or falling",
-    "market_cap_provider": "how big a coin is by market value",
-    "order_book": "the live buy and sell orders",
-    "risk_context": "your trade size and stop settings",
-    "setup_lifecycle": "how long a setup has been running",
-    "token_categories": "which group a coin belongs to",
-    "universe_ranking": "how coins rank against each other",
+    family.key: family.plain_words for family in PROVIDER_FAMILIES
 }
 
 
 def _plain_feed_names(missing: Iterable[str]) -> str:
     """The missing feeds as a readable list. Falls back to the name spelled out."""
 
-    names = [
-        FEED_IN_PLAIN_WORDS.get(str(feed), str(feed).replace("_", " "))
-        for feed in sorted(set(missing))
-    ]
+    names = [plain_feed_name(str(feed)) for feed in sorted(set(missing))]
     if len(names) == 1:
         return names[0]
     return ", ".join(names[:-1]) + f" and {names[-1]}"
@@ -860,7 +855,7 @@ def disabled_capabilities_from(raw: str) -> frozenset[str]:
 
 @lru_cache(maxsize=32)
 def capability_mechanics(
-    configured_providers: frozenset[str] = frozenset(),
+    configured_providers: frozenset[str],
     disabled_capabilities: frozenset[str] = frozenset(),
 ) -> tuple[BuilderMechanic, ...]:
     """Every launch-supported capability, as a Builder form.
@@ -889,22 +884,52 @@ def capability_mechanics(
 
 
 @lru_cache(maxsize=32)
+def configured_providers_or_runtime(
+    configured_providers: frozenset[str] | None,
+) -> frozenset[str]:
+    """What feeds to judge a mechanic against when the caller did not say.
+
+    ``frozenset()`` used to be the default, and it is not a neutral one: it says *this
+    deployment can read nothing*, so every capability that names a feed was reported as
+    needing something Hilal Markets could not read. The scanner meanwhile reads the order
+    book, the cross-market prices, the universe snapshot and the risk numbers on every
+    candle. The honest default is what this process can actually reach.
+    """
+
+    if configured_providers is not None:
+        return configured_providers
+    return runtime_availability().contract_names()
+
+
 def builder_mechanics(
-    configured_providers: frozenset[str] = frozenset(),
+    configured_providers: frozenset[str] | None = None,
     disabled_capabilities: frozenset[str] = frozenset(),
 ) -> tuple[BuilderMechanic, ...]:
     """Everything the Builder may offer, core grammar first."""
 
     return (
         *core_mechanics(),
-        *capability_mechanics(configured_providers, disabled_capabilities),
+        *capability_mechanics(
+            configured_providers_or_runtime(configured_providers),
+            disabled_capabilities,
+        ),
+    )
+
+
+def mechanics_by_key(
+    configured_providers: frozenset[str] | None = None,
+    disabled_capabilities: frozenset[str] = frozenset(),
+) -> dict[str, BuilderMechanic]:
+    return _mechanics_by_key(
+        configured_providers_or_runtime(configured_providers),
+        disabled_capabilities,
     )
 
 
 @lru_cache(maxsize=32)
-def mechanics_by_key(
-    configured_providers: frozenset[str] = frozenset(),
-    disabled_capabilities: frozenset[str] = frozenset(),
+def _mechanics_by_key(
+    configured_providers: frozenset[str],
+    disabled_capabilities: frozenset[str],
 ) -> dict[str, BuilderMechanic]:
     return {
         item.key: item
@@ -915,7 +940,7 @@ def mechanics_by_key(
 def find_mechanic(
     key: str,
     *,
-    configured_providers: frozenset[str] = frozenset(),
+    configured_providers: frozenset[str] | None = None,
     disabled_capabilities: frozenset[str] = frozenset(),
 ) -> BuilderMechanic | None:
     return mechanics_by_key(configured_providers, disabled_capabilities).get(key)

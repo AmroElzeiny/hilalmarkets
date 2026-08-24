@@ -518,6 +518,27 @@ def context_metric(
     raise ContextDataUnavailable(f"{name}{suffix} is unavailable")
 
 
+def _no_setup_yet(context: dict[str, Any]) -> bool:
+    """Did the caller *measure* that this symbol has no open setup?
+
+    ``setup_state`` is ``None`` for two completely different reasons, and reading it
+    alone cannot tell them apart: nobody looked, or somebody looked and there is no setup
+    row yet. The scanner always knows which — it loaded the setup, or found none — so it
+    states it, and three cards stop being permanently unreadable.
+
+    Without this the three of them could never be true on a live monitor, and not because
+    of a threshold: a setup row is only written *after* a scan produces one, and a scan
+    cannot produce one while a mandatory condition in the tree reports "unavailable". A
+    monitor asking for "the setup has not expired" therefore blocked the very first setup
+    it would have created, on every candle, for ever.
+
+    Absence of the key still means unknown, and unknown still refuses. Only a caller that
+    says so out loud gets the definite answer.
+    """
+
+    return "setup_exists" in context and not context.get("setup_exists")
+
+
 def runtime_context_metric(
     name: str,
     parameters: dict[str, Any],
@@ -572,6 +593,10 @@ def runtime_context_metric(
         expected = str(parameters.get("state", parameters.get("expected_state", "forming")))
         actual = context.get("setup_state")
         if actual is None:
+            if _no_setup_yet(context):
+                # There is no setup, and the scanner *measured* that. No setup is not the
+                # state being asked about, so the honest answer is no — not "unavailable".
+                return False
             raise ContextDataUnavailable("setup_state unavailable")
         return str(actual) == expected
     if name in {"setup_age_minutes", "setup_first_detected_within"}:
@@ -591,12 +616,18 @@ def runtime_context_metric(
         return bool(context.get("setup_entry_zone_active", False))
     if name == "setup_not_invalidated":
         if context.get("setup_state") is None:
+            if _no_setup_yet(context):
+                # Nothing has been invalidated, because nothing has been detected yet.
+                return True
             raise ContextDataUnavailable("setup_state unavailable")
         return str(context.get("setup_state")) != "invalidated"
     if name == "setup_not_expired":
         expires_at = context.get("setup_expires_at")
         if expires_at is None:
             if context.get("setup_state") is None:
+                if _no_setup_yet(context):
+                    # Nothing has expired, because nothing has been detected yet.
+                    return True
                 raise ContextDataUnavailable("setup_state unavailable")
             return str(context.get("setup_state")) != "expired"
         expires_at = (

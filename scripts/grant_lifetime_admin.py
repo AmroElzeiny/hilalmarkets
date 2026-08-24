@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.core.database import SessionFactory, engine
 from ai_market_monitor.db.models import (
     AdminOverride,
@@ -24,6 +25,7 @@ from ai_market_monitor.db.models.enums import (
     UserStatus,
 )
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
+from ai_market_monitor.services.governance_bootstrap import ensure_configured_owner_grants
 
 DEFAULT_EMAILS = ("amroelzene@gmail.com", "uxui.fa@gmail.com")
 
@@ -184,6 +186,18 @@ async def _grant_lifetime_admin(
     )
     await session.flush()
 
+    # Making somebody an ADMIN opens System Brain but grants no authority to act inside
+    # it. This script used to stop here, so an owner promoted by it met
+    # "You have no review permission in this environment." on every governance action.
+    # The same one reconciler the sign-in path uses decides that, and it only ever
+    # reaches an address SYSTEM_BRAIN_ADMIN_EMAILS already names.
+    governance = await ensure_configured_owner_grants(
+        session,
+        settings=get_settings(),
+        email=email,
+        reason=reason,
+    )
+
     await EntitlementService(session).snapshot(target.id)
     snapshot = await session.scalar(
         select(EntitlementSnapshot)
@@ -196,6 +210,7 @@ async def _grant_lifetime_admin(
         "role": target.role.value,
         "subscription": subscription_action,
         "plan": snapshot.plan_code if snapshot else "lifetime",
+        "governance": ",".join(sorted(grant.role for grant in governance)) or "none",
     }
 
 
@@ -232,7 +247,8 @@ async def grant(emails: Sequence[str], *, create_missing: bool, actor_email: str
     for item in results:
         print(
             f"OK {item['email']} user_id={item['user_id']} "
-            f"role={item['role']} plan={item['plan']} subscription={item['subscription']}"
+            f"role={item['role']} plan={item['plan']} subscription={item['subscription']} "
+            f"governance={item['governance']}"
         )
 
 

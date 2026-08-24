@@ -56,6 +56,13 @@ FAILED_DELIVERY = {
     DeliveryStatus.FAILED_RETRYABLE,
     DeliveryStatus.FAILED_PERMANENT,
 }
+#: How many of a setup's notification attempts the explanation lists, newest first.
+#:
+#: This bounds only what is *shown*. Whether a notification succeeded, which channel failed
+#: and why an alert was held back are each asked of the whole history in their own query,
+#: so no judgement on the page depends on this number.
+SETUP_DELIVERY_HISTORY_LIMIT = 50
+
 TERMINAL_RADAR_STATES = {"confirmed", "invalidated", "expired", "provider_data_error"}
 STAGE_RANK = {
     "not_started": 0,
@@ -455,9 +462,14 @@ class SetupObservabilityService:
                 )
             )
         ).all()
+        # The scan is joined for exactly one thing — whether it was a near miss — so one
+        # column is what is asked for. Taking the whole row also took its `proof_summary`
+        # evidence blob for every check in the window, and this window is thirty days by
+        # default. See `cockpit_service.ScanEvidenceTally` for what that cost on the web
+        # side; here it is the hourly worker that has to hold it.
         result_rows = (
             await self.session.execute(
-                select(SetupConditionResult, ScanResult, SetupInstance.state)
+                select(SetupConditionResult, ScanResult.outcome, SetupInstance.state)
                 .join(ScanResult, ScanResult.id == SetupConditionResult.scan_result_id)
                 .join(SetupInstance, SetupInstance.id == SetupConditionResult.setup_instance_id)
                 .where(
@@ -475,12 +487,12 @@ class SetupObservabilityService:
                 ConditionObservabilityAggregate.strategy_version_id == version.id
             )
         )
-        grouped: dict[str, list[tuple[SetupConditionResult, ScanResult, SetupLifecycleState]]] = (
+        grouped: dict[str, list[tuple[SetupConditionResult, ScanOutcome, SetupLifecycleState]]] = (
             defaultdict(list)
         )
         by_scan: dict[UUID, list[SetupConditionResult]] = defaultdict(list)
-        for result, scan, setup_state in result_rows:
-            grouped[result.condition_key].append((result, scan, setup_state))
+        for result, scan_outcome, setup_state in result_rows:
+            grouped[result.condition_key].append((result, scan_outcome, setup_state))
             by_scan[result.scan_result_id].append(result)
         final_blockers: Counter[str] = Counter()
         co_occurrence: dict[str, Counter[str]] = defaultdict(Counter)
@@ -562,8 +574,8 @@ class SetupObservabilityService:
                 final_blocker_count=final_blockers[key],
                 near_miss_blocker_count=sum(
                     1
-                    for item, scan, _ in values
-                    if scan.outcome == ScanOutcome.NEAR_MISS
+                    for item, scan_outcome, _ in values
+                    if scan_outcome == ScanOutcome.NEAR_MISS
                     and item.outcome != ConditionOutcome.PASSED
                 ),
                 invalidation_count=sum(
@@ -1018,29 +1030,70 @@ class SetupObservabilityService:
         latest: dict[str, tuple[SetupConditionResult, StrategyCondition]] = {}
         for result, condition in condition_rows:
             latest.setdefault(result.condition_key, (result, condition))
-        alerts = list(
-            (
-                await self.session.scalars(
-                    select(Alert)
-                    .where(Alert.setup_instance_id == setup.id)
-                    .order_by(Alert.created_at.desc())
-                )
-            ).all()
-        )
-        alert_ids = [item.id for item in alerts]
-        deliveries = (
-            list(
-                (
-                    await self.session.scalars(
-                        select(AlertDelivery)
-                        .where(AlertDelivery.alert_id.in_(alert_ids))
-                        .order_by(AlertDelivery.created_at.desc())
-                    )
-                ).all()
+        # Three questions about this setup's alerts, asked as three questions.
+        #
+        # They used to be answered by loading every alert the setup ever produced and every
+        # delivery of every one of them, then looking through the lists in Python. The
+        # answers below are the same answers — the newest suppressed alert, whether any
+        # delivery succeeded, and the newest failed delivery's channel — but each is one
+        # row, so a setup that has been alerting for a year costs the same as a new one.
+        has_alert = (
+            await self.session.scalar(
+                select(Alert.id).where(Alert.setup_instance_id == setup.id).limit(1)
             )
-            if alert_ids
-            else []
+        ) is not None
+        withheld_reason = await self.session.scalar(
+            select(Alert.suppressed_reason)
+            .where(
+                Alert.setup_instance_id == setup.id,
+                Alert.suppressed_reason.is_not(None),
+            )
+            .order_by(Alert.created_at.desc())
+            .limit(1)
         )
+        successful = (
+            await self.session.scalar(
+                select(AlertDelivery.id)
+                .join(Alert, Alert.id == AlertDelivery.alert_id)
+                .where(
+                    Alert.setup_instance_id == setup.id,
+                    AlertDelivery.status.in_(SUCCESSFUL_DELIVERY),
+                )
+                .limit(1)
+            )
+        ) is not None
+        failed_delivery = (
+            await self.session.execute(
+                select(AlertDelivery.id, AlertDelivery.channel)
+                .join(Alert, Alert.id == AlertDelivery.alert_id)
+                .where(
+                    Alert.setup_instance_id == setup.id,
+                    AlertDelivery.status.in_(FAILED_DELIVERY),
+                )
+                .order_by(AlertDelivery.created_at.desc())
+                .limit(1)
+            )
+        ).first()
+        # The list a person reads, newest first and bounded. The three answers above are
+        # asked of *every* delivery, so what the page decides never depends on how much of
+        # the history it happens to be showing.
+        deliveries = (
+            await self.session.execute(
+                select(
+                    AlertDelivery.id,
+                    AlertDelivery.channel,
+                    AlertDelivery.status,
+                    AlertDelivery.attempt_count,
+                    AlertDelivery.last_error_code,
+                    AlertDelivery.last_error_detail,
+                    AlertDelivery.delivered_at,
+                )
+                .join(Alert, Alert.id == AlertDelivery.alert_id)
+                .where(Alert.setup_instance_id == setup.id)
+                .order_by(AlertDelivery.created_at.desc())
+                .limit(SETUP_DELIVERY_HISTORY_LIMIT)
+            )
+        ).all()
         latest_scan = (
             await self.session.get(ScanResult, setup.latest_scan_result_id)
             if setup.latest_scan_result_id
@@ -1053,10 +1106,6 @@ class SetupObservabilityService:
                     MonitorEvaluationCycle.scan_job_id == latest_scan.scan_job_id
                 )
             )
-        successful = any(item.status in SUCCESSFUL_DELIVERY for item in deliveries)
-        failed_delivery = next(
-            (item for item in deliveries if item.status in FAILED_DELIVERY), None
-        )
         failed_required = [
             (result, condition)
             for result, condition in latest.values()
@@ -1071,25 +1120,26 @@ class SetupObservabilityService:
             (item for item in reversed(events) if item.to_state == SetupLifecycleState.SUPPRESSED),
             None,
         )
-        # Why the alert itself was held back, written down by whichever gate refused it.
-        # Without this the branch below fell through to "no notification destination was
-        # attempted", which told people to switch a channel on when the real cause was a
-        # limit they had set — a wrong instruction, not merely a vague one.
-        withheld = next((item for item in alerts if item.suppressed_reason), None)
-        if failed_delivery and not successful:
+        # Why the alert itself was held back is read above, written down by whichever gate
+        # refused it. Without it the branch below fell through to "no notification
+        # destination was attempted", which told people to switch a channel on when the
+        # real cause was a limit they had set — a wrong instruction, not a vague one.
+        if failed_delivery is not None and not successful:
             category = "notification_delivery_failure"
-            reason = f"The setup confirmed, but {failed_delivery.channel.value} delivery failed."
+            reason = (
+                f"The setup confirmed, but {failed_delivery.channel.value} delivery failed."
+            )
         elif suppressed:
             category = "cooldown_or_exclusion"
             reason = (
                 "The setup confirmed, but notification rules suppressed it: "
                 f"{suppressed.reason_code.replace('_', ' ')}."
             )
-        elif withheld and not successful:
+        elif withheld_reason and not successful:
             category = "cooldown_or_exclusion"
             reason = (
                 "The setup produced an alert, but it was held back: "
-                f"{str(withheld.suppressed_reason).replace('_', ' ')}."
+                f"{str(withheld_reason).replace('_', ' ')}."
             )
         elif unavailable:
             category = "data_provider_issue"
@@ -1103,7 +1153,7 @@ class SetupObservabilityService:
                 f"No alert was sent because {len(failed_required)} required condition"
                 f"{'s' if len(failed_required) != 1 else ''} did not pass."
             )
-        elif not alerts:
+        elif not has_alert:
             category = "completed_without_alert"
             reason = (
                 "No notification record exists for this lifecycle. The retained evidence "
@@ -1161,8 +1211,8 @@ class SetupObservabilityService:
             "withheld_code": (
                 suppressed.reason_code
                 if suppressed
-                else str(withheld.suppressed_reason)
-                if withheld and not successful
+                else str(withheld_reason)
+                if withheld_reason and not successful
                 else None
             ),
             "notification_successful": successful,

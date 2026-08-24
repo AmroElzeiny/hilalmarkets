@@ -10,7 +10,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_market_monitor.core.asset_logos import asset_logo
+from ai_market_monitor.api.template_env import register as register_template_helpers
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.dashboard_paths import HOME_PATH
 from ai_market_monitor.core.database import get_db_session
@@ -65,17 +65,10 @@ PACKAGE_DIR = Path(__file__).resolve().parents[2]
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
 router = APIRouter(tags=["public"])
 
-
-def _plan_limit(value: object) -> str:
-    if isinstance(value, int) and value >= 100_000:
-        return "Unlimited"
-    return str(value)
-
-
-templates.env.filters["plan_limit"] = _plan_limit
-# The same owner the dashboard templates use. Registered on both environments because
-# a shared macro must not behave differently depending on which router rendered it.
-templates.env.globals["asset_logo"] = asset_logo
+# The same helpers the dashboard templates use. Installed from one place, because a
+# shared macro must not behave differently — or fail to load at all — depending on which
+# router rendered it. See ``api/template_env.py``.
+register_template_helpers(templates)
 
 
 def _absolute_url(settings: Settings, path: str) -> str:

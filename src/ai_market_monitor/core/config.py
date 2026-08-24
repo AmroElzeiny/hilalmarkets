@@ -1,6 +1,7 @@
 import re
 from functools import lru_cache
-from typing import Any, Literal
+from types import UnionType
+from typing import Any, Literal, Union, get_args, get_origin
 
 from pydantic import (
     AnyHttpUrl,
@@ -20,6 +21,22 @@ from ai_market_monitor.core.launch_stage import (
     resolve_launch_stage,
 )
 from ai_market_monitor.observability.metrics import MetricRetentionPolicy
+
+
+def _is_optional_secret(field: Any) -> bool:
+    """Whether a settings field is a credential that is allowed to be absent.
+
+    Read off the annotation rather than a hand-written list of names, because a
+    hand-written list is one more thing that goes stale the next time somebody adds a
+    key and does not know the list exists.
+    """
+
+    annotation = getattr(field, "annotation", None)
+    if get_origin(annotation) not in {Union, UnionType}:
+        return False
+    arguments = get_args(annotation)
+    return SecretStr in arguments and type(None) in arguments
+
 
 #: Every rate-limited scope in the product, named once.
 #:
@@ -223,6 +240,23 @@ class Settings(BaseSettings):
     #: How long a proved link is trusted before it is fetched again. A source that
     #: went dead between sweeps is caught here rather than at review time.
     sharia_source_recheck_days: int = Field(default=30, ge=1, le=365)
+    #: Whether the resolver may search the open web for a coin's own news channels.
+    #: True by default, but it does nothing at all until a search key is set, so
+    #: turning it on is the same act as configuring it.
+    sharia_source_search_enabled: bool = True
+    sharia_source_search_provider: Literal["google", "brave", "none"] = "google"
+    #: How many answers one question asks for. Five questions are asked per coin, so
+    #: this is not the number of links registered — almost every answer is thrown away
+    #: for not being the project's own page.
+    sharia_source_search_results: int = Field(default=10, ge=1, le=20)
+    #: How many proved links each of news and community should end up with. One is a
+    #: single point of failure: the day it moves, the coin has no way to hear about the
+    #: project. The layers keep looking until a coin reaches this many.
+    sharia_source_links_per_category: int = Field(default=3, ge=1, le=10)
+    #: How low a source's activity score may fall before it stops counting as coverage
+    #: and the layers go looking for a replacement alongside it. Activity says how alive
+    #: and how relevant a page is; it is never a Shariah status and is never shown as one.
+    sharia_source_activity_floor: float = Field(default=0.45, ge=0.0, le=1.0)
     sharia_external_rights_enforcement: bool = True
     sharia_ai_enrichment_enabled: bool = True
     sharia_ai_enrichment_official_sources_only: bool = True
@@ -328,6 +362,14 @@ class Settings(BaseSettings):
     fred_api_base: AnyHttpUrl = AnyHttpUrl("https://api.stlouisfed.org/fred")
     fred_api_key: SecretStr | None = None
     fred_enabled: bool = False
+    #: Credentials for looking a coin's own news channels up on the open web. Both are
+    #: needed together: the key authorises the call, the engine id says which
+    #: Programmable Search Engine answers it. With either missing the search layer
+    #: offers nothing and every other layer carries on unchanged.
+    google_search_api_key: SecretStr | None = None
+    google_search_engine_id: str | None = None
+    #: The alternative engine. One key, no engine id.
+    brave_search_api_key: SecretStr | None = None
     ai_interpreter_provider: Literal["rules", "openai"] = "openai"
     openai_api_key: SecretStr | None = None
     openai_base_url: AnyHttpUrl = AnyHttpUrl("https://api.openai.com/v1")
@@ -1162,6 +1204,35 @@ class Settings(BaseSettings):
     @classmethod
     def blank_optional_url(cls, value):
         return None if value in {"", None} else value
+
+    @model_validator(mode="before")
+    @classmethod
+    def blank_secret_means_unset(cls, values: object) -> object:
+        """``KEY=`` in an env file means "not configured", not "configured as nothing".
+
+        Every optional credential in this file is read by a caller that asks
+        ``is None`` and takes the "no provider" path when it is. An empty line in
+        ``.env`` produced ``SecretStr('')`` instead, which is not None — so the caller
+        took the configured path and sent an empty key. The provider then answered 401
+        or 403, and the failure looked like a bad credential rather than a missing one.
+        The two examples in git ship exactly that empty line for several keys, so
+        anybody copying one inherited the problem.
+
+        The rule is applied to the whole family rather than to the key that happened to
+        be reported: any optional secret, blank, is unset.
+        """
+
+        if not isinstance(values, dict):
+            return values
+        cleaned = dict(values)
+        for name, field in cls.model_fields.items():
+            for key in (name, field.alias, field.validation_alias):
+                if not isinstance(key, str) or key not in cleaned:
+                    continue
+                value = cleaned[key]
+                if isinstance(value, str) and not value.strip() and _is_optional_secret(field):
+                    cleaned[key] = None
+        return cleaned
 
     @field_validator("api_rate_limits")
     @classmethod

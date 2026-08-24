@@ -73,8 +73,15 @@ def _write_registry(payload: dict[str, Any]) -> None:
         "",
         f"- Schema version: `{payload['schema_version']}`",
         f"- Total capabilities: `{payload['counts']['total']}`",
-        f"- Executable now: `{payload['counts']['executable']}`",
-        f"- Deferred or provider-bound: `{payload['counts']['recognized_not_executable']}`",
+        # What a reader of this file wants to know is how many cards they can actually
+        # use, and how many are waiting on a feed. These two lines used to report
+        # `counts.executable` and `counts.recognized_not_executable`, which are about the
+        # `executable` flag on the spec, not about availability — so the file said
+        # "Deferred or provider-bound: 0" while 59 cards were withheld from every surface
+        # of the product.
+        f"- Usable now: `{payload['counts']['compatibility_available']}`",
+        f"- Waiting on a feed: `{payload['hidden_provider_required']['count']}`",
+        f"- Recognised but not runnable: `{payload['hidden_unavailable']['count']}`",
         f"- Logic operators: `{payload['counts']['logic_operators']}`",
         "",
         "| Category | Key | Status | Example sentence | Required data | Comparators | Notes |",

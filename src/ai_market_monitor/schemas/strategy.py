@@ -317,6 +317,22 @@ class TargetPolicy(BaseModel):
     size_percent: float | None = Field(default=None, gt=0, le=100)
 
 
+#: What an enabled risk policy uses for the three limits a trader did not state.
+#:
+#: An enabled policy must carry all three — the validator below refuses one that does
+#: not — so any code turning risk on has to supply them, and two places now do. These are
+#: the values the legacy rules path has always used (see ``from_rules`` further down);
+#: naming them keeps the v2 compiler from growing a second, quietly different set.
+#:
+#: None of them is an invented trading constraint. ``100`` percent is *no practical stop
+#: limit*, ``1`` is *the reward must merely match the risk*, and a first target at twice
+#: the risk is the same first target the rules path has always written. A trader who
+#: states their own limits overwrites all three.
+UNSTATED_MAXIMUM_STOP_PERCENT = 100.0
+UNSTATED_MINIMUM_REWARD_TO_RISK = 1.0
+UNSTATED_FIRST_TARGET_RISK_MULTIPLE = 2.0
+
+
 class RiskPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -460,7 +476,17 @@ class StrategyDefinition(BaseModel):
                 "size_percent": target.get("size_percent"),
             }
             for index, target in enumerate(targets)
-        ] or ([{"label": "T1", "method": "risk_multiple", "value": 2.0}] if risk_enabled else [])
+        ] or (
+            [
+                {
+                    "label": "T1",
+                    "method": "risk_multiple",
+                    "value": UNSTATED_FIRST_TARGET_RISK_MULTIPLE,
+                }
+            ]
+            if risk_enabled
+            else []
+        )
         stop_method = stop.get("method") or risk_rules.get("stop_method") or "structure"
         target_value = (
             normalized_targets[0]["value"]
@@ -511,12 +537,16 @@ class StrategyDefinition(BaseModel):
                 "stop_method": stop_method,
                 "stop_value": stop.get("value"),
                 "maximum_stop_percent": (
-                    risk_rules.get("maximum_stop_percent", 100) if risk_enabled else None
+                    risk_rules.get("maximum_stop_percent", UNSTATED_MAXIMUM_STOP_PERCENT)
+                    if risk_enabled
+                    else None
                 ),
                 "target_method": risk_rules.get("target_method", "risk_multiple"),
                 "target_value": risk_rules.get("target_value", target_value),
                 "minimum_reward_to_risk": (
-                    risk_rules.get("minimum_reward_to_risk", 1) if risk_enabled else None
+                    risk_rules.get("minimum_reward_to_risk", UNSTATED_MINIMUM_REWARD_TO_RISK)
+                    if risk_enabled
+                    else None
                 ),
                 "account_risk_percent": risk_rules.get("account_risk_percent"),
                 "estimated_fee_bps": risk_rules.get("estimated_fee_bps", 0),

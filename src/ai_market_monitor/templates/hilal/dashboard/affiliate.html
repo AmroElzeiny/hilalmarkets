@@ -1,0 +1,399 @@
+{#- The affiliate programme: one address, four states.
+
+    Which one a person sees is decided on the server and handed here as `application`.
+    A template that worked it out itself would be a second place deciding whether
+    somebody is an affiliate, and the two would eventually disagree.
+
+    Every class here already exists in `hilalmarkets.css` and
+    `hilalmarkets-dashboard-v2.css`. Nothing invents a colour, a radius or a spacing:
+    the brand sheet remaps the older tokens onto the apple-green palette, so a page
+    built from the shared parts is a brand page by construction. The few classes that
+    are new live in `hm-affiliate.css` and are laid out only — they set no colour that
+    is not already a token. -#}
+{% extends "hilal/base_dashboard.html" %}
+
+{% block page_styles_late %}
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-affiliate.css') }}?v=20260824-affiliate-share">
+{% endblock %}
+
+{% block content %}
+{%- set state = application.status if application else 'none' -%}
+
+<div class="page-header">
+  <div>
+    <span class="kicker">Affiliate programme</span>
+    <h1>Earn by sharing Hilal Markets</h1>
+    <p>Share a discount code with your audience. When somebody joins with it and pays,
+      you keep a share of what they pay.</p>
+  </div>
+</div>
+
+{#- Every confirmation and every error this page redirects with is drawn by
+    `base_dashboard.html`, from the shared `dashboard_messages` and
+    `dashboard_error_messages` maps, exactly like every other page's.
+
+    They were written out here as well to begin with, and that is worse than
+    duplication: the base draws its own notice from the same query parameter, so a
+    refused form showed **two** notices — the shared one saying "Invalid Link", an
+    internal name a beginner cannot act on, and this page's sentence underneath it.
+    `tests/unit/test_invariant_monitor_destinations.py` holds the rule for
+    confirmations. -#}
+
+{# ══ Waiting for an answer ═══════════════════════════════════════════════════ #}
+{% if state == 'pending' %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <span class="kicker">With us now</span>
+      <h2>Your application is being read</h2>
+      <p>A person reads every application. You will hear back within {{ decision_hours }} hours,
+        by email and here on this page.</p>
+    </div>
+    <span class="badge badge-review"><span data-icon="clock" data-icon-class="icon-sm"></span>Waiting</span>
+  </div>
+  <div class="hm-aff-summary">
+    <div><small>Name</small><strong>{{ application.display_name }}</strong></div>
+    <div><small>Code you asked for</small><strong>{{ application.requested_discount_code }}</strong></div>
+    <div><small>Your share</small><strong>{{ '%.0f'|format(application.requested_commission_percent) }}%</strong></div>
+    <div><small>Sent</small><strong>{{ application.submitted_at.strftime('%d %b %Y, %H:%M UTC') }}</strong></div>
+  </div>
+  <div class="hm-aff-links">
+    <small class="muted">Where you will share</small>
+    <ul>
+      {% for link in application.social_links %}
+      <li><span data-icon="link" data-icon-class="icon-sm"></span><a href="{{ link }}" rel="noopener nofollow" target="_blank">{{ link }}</a></li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
+{% endif %}
+
+{# ══ Not approved — say why, and open the form again ═════════════════════════ #}
+{% if state == 'rejected' %}
+<div class="notice notice-warning" role="status">
+  <span data-icon="warning" data-icon-class="icon"></span>
+  <div>
+    <strong>Not approved this time</strong>
+    <p>{{ application.decision_note or 'We could not approve this one. You are welcome to apply again with more about where you will share Hilal Markets.' }}</p>
+  </div>
+</div>
+{% endif %}
+
+{# ══ Approved — the numbers, the link, and the money ═════════════════════════ #}
+{% if state == 'approved' %}
+<section class="stat-grid">
+  <article class="stat-card">
+    <div class="stat-head">
+      <div class="icon-box"><span data-icon="user" data-icon-class="icon"></span></div>
+    </div>
+    <div class="value">{{ stats.uses }}</div>
+    <div class="caption">People who used your code</div>
+  </article>
+  <article class="stat-card">
+    <div class="stat-head">
+      <div class="icon-box is-gold"><span data-icon="check" data-icon-class="icon"></span></div>
+    </div>
+    <div class="value">{{ stats.paid_conversions }}</div>
+    <div class="caption">Of those, paid a plan</div>
+  </article>
+  <article class="stat-card">
+    <div class="stat-head">
+      <div class="icon-box is-dark"><span data-icon="coins" data-icon-class="icon"></span></div>
+    </div>
+    <div class="value">${{ '%.2f'|format(stats.total_commission_usd) }}</div>
+    <div class="caption">Earned in total</div>
+  </article>
+  <article class="stat-card hm-aff-balance">
+    <div class="stat-head">
+      <div class="icon-box"><span data-icon="wallet" data-icon-class="icon"></span></div>
+      {% if stats.can_request_payout %}<span class="badge badge-eligible">Ready</span>{% endif %}
+    </div>
+    <div class="value">${{ '%.2f'|format(stats.available_usd) }}</div>
+    <div class="caption">Yours to take out now</div>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <span class="kicker">Your code</span>
+      <h2>Share this and you get paid</h2>
+      <p>Anyone who joins with your code saves
+        {{ '%.0f'|format(application.discount_percent) }}%. You keep
+        {{ '%.0f'|format(application.commission_percent) }}% of what they pay.</p>
+    </div>
+    <span class="badge badge-eligible"><span data-icon="shield_check" data-icon-class="icon-sm"></span>Approved</span>
+  </div>
+
+  <div class="hm-aff-code-row">
+    <div class="hm-aff-code">
+      <small>Your code</small>
+      <strong>{{ application.discount_code }}</strong>
+    </div>
+    <button class="btn btn-secondary btn-sm" type="button" data-copy-value="{{ application.discount_code }}">
+      <span data-icon="copy" data-icon-class="icon-sm"></span>Copy code
+    </button>
+  </div>
+
+  <div class="field hm-aff-link-field">
+    <label for="affiliate-link">Your link</label>
+    <div class="row hm-aff-copy-row">
+      <input class="input" id="affiliate-link" value="{{ referral_url }}" readonly>
+      <button class="btn btn-secondary" type="button" data-copy-value="{{ referral_url }}">
+        <span data-icon="copy" data-icon-class="icon-sm"></span>Copy link
+      </button>
+    </div>
+    <p class="field-help">The link fills the code in for them, so nobody has to type it.</p>
+  </div>
+</section>
+
+{# ── Who joined ─────────────────────────────────────────────────────────────── #}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <span class="kicker">Your people</span>
+      <h2>Who joined with your code</h2>
+      <p>Names and dates only. We never show you anybody's email address.</p>
+    </div>
+  </div>
+  {% if stats.earnings %}
+  <div class="table-wrap">
+    <table class="data-table hm-aff-table">
+      <caption class="sr-only">People who joined with your code, and what each one earned you</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Joined</th>
+          <th scope="col">Paid a plan</th>
+          <th scope="col">You earned</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for earning in stats.earnings %}
+        <tr>
+          <td>{{ earning.customer_name }}</td>
+          <td>{{ earning.joined_at.strftime('%d %b %Y') }}</td>
+          <td>
+            {% if earning.is_paid_conversion %}
+            <span class="badge badge-eligible"><span data-icon="check" data-icon-class="icon-sm"></span>Yes</span>
+            {% else %}
+            <span class="badge badge-neutral">Not yet</span>
+            {% endif %}
+          </td>
+          <td class="hm-aff-amount">${{ '%.2f'|format(earning.commission_usd) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon-box"><span data-icon="user" data-icon-class="icon"></span></div>
+    <h3>Nobody has used your code yet</h3>
+    <p>Share your link where your audience already is. The names of people who join
+      will appear here.</p>
+  </div>
+  {% endif %}
+</section>
+
+{# ── Taking the money out ───────────────────────────────────────────────────── #}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <span class="kicker">Getting paid</span>
+      <h2>Ask for a payout</h2>
+      <p>We pay in crypto. Pick the coin and the network your wallet uses, and paste
+        the address from your wallet.</p>
+    </div>
+  </div>
+
+  {% if stats.can_request_payout %}
+  {#- The catalogue, once, from the server. The script reads it from here rather than
+      carrying its own copy: a second list in JavaScript is a list that drifts, and the
+      drift shows up as a network offered on screen that the server then refuses. -#}
+  <script type="application/json" id="hm-payout-options">{{ payout_currencies|tojson }}</script>
+  <form method="post" action="/dashboard/affiliate/payout" class="stack" data-hm-affiliate-payout>
+    <div class="grid grid-2">
+      <div class="field">
+        <label for="payout-currency">Coin</label>
+        <select class="select" id="payout-currency" name="currency" required data-hm-payout-currency>
+          {% for currency in payout_currencies %}
+          <option value="{{ currency.key }}">{{ currency.label }} — {{ currency.plain_words }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="payout-network">Network</label>
+        <select class="select" id="payout-network" name="network" required data-hm-payout-network></select>
+        <p class="field-help" data-hm-payout-hint>Pick a coin first.</p>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="payout-address">Your wallet address</label>
+      <input class="input" id="payout-address" name="destination_address" required
+             autocomplete="off" spellcheck="false"
+             placeholder="Paste the address from your wallet">
+      <p class="field-help">Copy it from your wallet rather than typing it. An address
+        with one wrong character loses the money.</p>
+    </div>
+
+    <div class="row-between wrap">
+      <p class="muted hm-aff-asking">
+        You are asking for <strong>${{ '%.2f'|format(stats.available_usd) }}</strong>.
+        The smallest payout is ${{ '%.2f'|format(minimum_payout) }}.
+      </p>
+      <button class="btn btn-primary" type="submit">
+        <span data-icon="send" data-icon-class="icon-sm"></span>Ask for ${{ '%.2f'|format(stats.available_usd) }}
+      </button>
+    </div>
+  </form>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon-box is-amber"><span data-icon="wallet" data-icon-class="icon"></span></div>
+    <h3>${{ '%.2f'|format(stats.available_usd) }} so far</h3>
+    <p>You can ask for a payout once you have ${{ '%.2f'|format(minimum_payout) }}.
+      Keep sharing your code.</p>
+  </div>
+  {% endif %}
+
+  <div class="notice hm-aff-other-method">
+    <span data-icon="info" data-icon-class="icon"></span>
+    <div>
+      <strong>Want paying another way?</strong>
+      <p>Write to <a href="mailto:{{ alternative_method_email }}">{{ alternative_method_email }}</a>
+        and tell us what suits you. A person will answer.</p>
+    </div>
+  </div>
+</section>
+
+{# ── The payout ledger ──────────────────────────────────────────────────────── #}
+{% if payouts %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <span class="kicker">Your payouts</span>
+      <h2>Every payout you have asked for</h2>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table hm-aff-table">
+      <caption class="sr-only">Payouts you have asked for, and where each one stands</caption>
+      <thead>
+        <tr>
+          <th scope="col">Asked</th>
+          <th scope="col">Amount</th>
+          <th scope="col">Sent as</th>
+          <th scope="col">Where it stands</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for payout in payouts %}
+        <tr>
+          <td>{{ payout.requested_at.strftime('%d %b %Y') }}</td>
+          <td class="hm-aff-amount">${{ '%.2f'|format(payout.amount_usd) }}</td>
+          <td>
+            {{ payout.currency }}
+            <small class="muted hm-aff-sub">{{ payout.metadata_json.get('network_label', payout.network) }}</small>
+          </td>
+          <td>
+            {% if payout.status == 'paid' %}
+            <span class="badge badge-eligible"><span data-icon="check" data-icon-class="icon-sm"></span>Paid</span>
+            {% elif payout.status == 'rejected' %}
+            <span class="badge badge-excluded"><span data-icon="close" data-icon-class="icon-sm"></span>Refused</span>
+            {% else %}
+            <span class="badge badge-review"><span data-icon="clock" data-icon-class="icon-sm"></span>Waiting</span>
+            {% endif %}
+            {% if payout.decision_note %}<small class="muted hm-aff-sub">{{ payout.decision_note }}</small>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endif %}
+
+{# ══ The form — shown when there is no application, or the last one was refused ══ #}
+{% if state in ['none', 'rejected'] %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <span class="kicker">{{ 'Apply again' if state == 'rejected' else 'Apply' }}</span>
+      <h2>Ask to become an affiliate</h2>
+      <p>Three questions. A person reads every application and answers within
+        {{ decision_hours }} hours.</p>
+    </div>
+  </div>
+
+  <form method="post" action="/dashboard/affiliate/apply" class="stack">
+    <div class="field">
+      <label for="affiliate-name">Your name</label>
+      <input class="input" id="affiliate-name" name="display_name" required
+             maxlength="120" autocomplete="name"
+             value="{{ application.display_name if application else (user.display_name or '') }}">
+      <p class="field-help">The name we pay this out to.</p>
+    </div>
+
+    <div class="field">
+      <label for="affiliate-links">Where will you share Hilal Markets?</label>
+      <textarea class="textarea" id="affiliate-links" name="social_links" required
+                placeholder="https://instagram.com/yourname&#10;https://x.com/yourname">{{ application.social_links|join('\n') if application else '' }}</textarea>
+      <p class="field-help">One link per line, up to {{ maximum_links }}. Your channel,
+        page or profile — wherever your audience already follows you.</p>
+    </div>
+
+    <div class="field">
+      <label for="affiliate-code">The code you would like</label>
+      <input class="input" id="affiliate-code" name="requested_discount_code" required
+             maxlength="40" autocomplete="off" spellcheck="false"
+             placeholder="YOURNAME"
+             value="{{ application.requested_discount_code if application else '' }}">
+      <p class="field-help">Letters, numbers and dashes. Short is easier to say out loud.</p>
+    </div>
+
+    {# The share is a fact, not a question. There is no box for it — a box nobody can use
+       still sends its number with the form, and it invites a person to try. #}
+    <div class="hm-aff-share">
+      <div class="hm-aff-share-value">
+        <small>Your share</small>
+        <strong>{{ default_commission }}%</strong>
+      </div>
+      <p>Everybody starts here. You keep {{ default_commission }}% of what the people you
+        bring pay. We set this one, so there is nothing to fill in.
+        <strong>Want a bigger share than {{ default_commission }}%?</strong> Write to
+        <a href="mailto:{{ alternative_method_email }}">{{ alternative_method_email }}</a>
+        and tell us about your audience. A person will read it and answer.</p>
+    </div>
+
+    <div class="field">
+      <label for="affiliate-note">Anything else? <span class="muted">(you can leave this empty)</span></label>
+      <textarea class="textarea" id="affiliate-note" name="applicant_note" maxlength="1000"
+                placeholder="How big is your audience? What do you usually post about?">{{ application.applicant_note if application else '' }}</textarea>
+    </div>
+
+    <div class="notice">
+      <span data-icon="info" data-icon-class="icon"></span>
+      <div>
+        <strong>What happens next</strong>
+        <p>We set the real code and the discount it gives when we answer. The code you ask
+          for here is a request, not a setting.</p>
+      </div>
+    </div>
+
+    <div class="row-between wrap">
+      <small class="muted">Hilal Markets never pays for buying or selling. This is for
+        sharing the product.</small>
+      <button class="btn btn-primary" type="submit">
+        <span data-icon="send" data-icon-class="icon-sm"></span>Send my application
+      </button>
+    </div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block page_scripts %}
+<script src="{{ url_for('static', path='/hm-affiliate.js') }}?v=20260824-affiliate-share" defer></script>
+{% endblock %}

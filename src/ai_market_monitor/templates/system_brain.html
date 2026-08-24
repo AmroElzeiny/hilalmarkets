@@ -4,18 +4,18 @@
   {#- First script on the page, deliberately, and without `defer`: it puts a time limit
       on every request this product sends to its own server, and it can only do that for
       a request sent after it has run. See `static/hm-request.js`. -#}
-  <script src="/static/hm-request.js?v=20260822-links"></script>
+  <script src="/static/hm-request.js?v=20260824-affiliate-share"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
   <title>System Brain | Hilal Markets</title>
   <link rel="icon" type="image/png" href="/static/favicon-dark.png">
-  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260822-links">
-  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260822-links">
-  <link rel="stylesheet" href="/static/system-brain.css?v=20260822-links">
+  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260824-affiliate-share">
+  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260824-affiliate-share">
+  <link rel="stylesheet" href="/static/system-brain.css?v=20260824-affiliate-share">
   <script src="/static/hilalmarkets-icons.js" defer></script>
-  <script src="/static/chat-message-renderer.js?v=20260822-links" defer></script>
-  <script src="/static/system-brain.js?v=20260822-links" defer></script>
+  <script src="/static/chat-message-renderer.js?v=20260824-affiliate-share" defer></script>
+  <script src="/static/system-brain.js?v=20260824-affiliate-share" defer></script>
 </head>
 <body data-system-brain-csrf="{{ csrf_token }}" data-brain-section="{{ section }}">
   <a class="brain-skip" href="#admin-content">Skip to admin content</a>
@@ -55,6 +55,7 @@
       <a class="{{ 'active' if section == 'operations' else '' }}" href="/dashboard/system-brain/operations"><i data-icon="activity"></i><span>Operations</span></a>
       <a class="{{ 'active' if section == 'governance' else '' }}" href="/dashboard/system-brain/governance"><i data-icon="methodology"></i><span>Governance</span></a>
       <a class="{{ 'active' if section == 'users' else '' }}" href="/dashboard/system-brain/users"><i data-icon="user"></i><span>Users</span></a>
+      <a class="{{ 'active' if section == 'affiliate' else '' }}" href="/dashboard/system-brain/affiliate"><i data-icon="gift"></i><span>Affiliate</span></a>
       <a class="{{ 'active' if section == 'audit-settings' else '' }}" href="/dashboard/system-brain/audit-settings"><i data-icon="shield"></i><span>Audit &amp; Settings</span></a>
     </nav>
     <div class="brain-sidebar-foot">
@@ -70,6 +71,7 @@
         <h1>
           {% if section == 'overview' %}System Brain
           {% elif section == 'review-detail' %}Review case
+          {% elif section == 'affiliate' %}Affiliate
           {% elif section == 'users' %}Users
           {% elif section == 'stats' %}Stats
           {% elif section in ['initial-reviews','change-reviews','user-reports'] %}Cases
@@ -359,6 +361,222 @@
       </p>
     </section>
 
+    {#- The affiliate programme. Applications and payouts on one screen, because they are
+        two decisions about the same person taken minutes apart.
+
+        Every money field on this screen is yours to fill. What the applicant typed is
+        shown beside each box as what they *asked for*, never as the value in the box:
+        an administrator must look at a number and choose it, and a pre-filled request
+        is a number chosen by the applicant that only looks like it was chosen here. The
+        one exception is the commission, which falls back to the platform's own default
+        when it is left empty — stated on the label, so leaving it alone is a decision
+        rather than an oversight.
+
+        **The share is only editable here.** The applicant's form has no box for it and
+        the apply route reads no such field, so this screen is the only place in the
+        product where that number can be moved. Somebody who wants more than the standard
+        share is told on their own page to write to the office address instead. -#}
+    {% elif section == 'affiliate' %}
+    <section class="brain-section brain-reveal">
+      <div class="brain-section-head">
+        <div>
+          <h2>Affiliate applications</h2>
+          <p>Set the code, the discount and the share, then approve. The applicant is
+            emailed either way.</p>
+        </div>
+        <span class="brain-status {{ 'warning' if pending_applications else 'neutral' }}">
+          {{ pending_applications|length }} waiting
+        </span>
+      </div>
+
+      {% if pending_applications %}
+      <div class="brain-affiliate-list">
+        {% for row in pending_applications %}{% set application = row.application %}{% set applicant_email = row.email %}
+        <article class="brain-panel brain-affiliate-card" data-testid="affiliate-application">
+          <header class="brain-affiliate-head">
+            <div>
+              <h3>{{ application.display_name }}</h3>
+              {#- The address is here on purpose: an administrator deciding who represents
+                  the product has to be able to recognise the account. It is never shown
+                  to another affiliate. -#}
+              <p class="brain-affiliate-email">{{ applicant_email }}</p>
+              <small>Applied {{ application.submitted_at.strftime('%d %b %Y, %H:%M UTC') }}</small>
+            </div>
+            <span class="brain-status warning">Waiting</span>
+          </header>
+
+          <dl class="brain-affiliate-asked">
+            <div><dt>Code asked for</dt><dd>{{ application.requested_discount_code }}</dd></div>
+            {#- Not "asked for": the applicant has no box for this. It is the standard
+                share the application was made under, kept on the row so an old
+                application still reads correctly if the standard one is ever changed. -#}
+            <div><dt>Applied on</dt><dd>{{ '%.0f'|format(application.requested_commission_percent) }}%</dd></div>
+          </dl>
+
+          <div class="brain-affiliate-links">
+            <span>Will share on</span>
+            <ul>
+              {% for link in application.social_links %}
+              <li><a href="{{ link }}" rel="noopener nofollow noreferrer" target="_blank">{{ link }}</a></li>
+              {% endfor %}
+            </ul>
+          </div>
+
+          {% if application.applicant_note %}
+          <p class="brain-affiliate-note">“{{ application.applicant_note }}”</p>
+          {% endif %}
+
+          <form method="post" action="/dashboard/system-brain/affiliate/{{ application.id }}/approve" class="brain-affiliate-decide">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="brain-affiliate-fields">
+              <label>
+                <span>Code the customer types</span>
+                <input name="discount_code" maxlength="40" autocomplete="off" spellcheck="false"
+                       placeholder="{{ application.requested_discount_code }}">
+                <small>Empty uses {{ application.requested_discount_code }}.</small>
+              </label>
+              <label>
+                <span>Discount it gives</span>
+                <input name="discount_percent" type="number" min="1" max="100" step="1" required
+                       inputmode="numeric" placeholder="10">
+                <small>Required. What the customer saves.</small>
+              </label>
+              <label>
+                <span>Their share</span>
+                <input name="commission_percent" type="number" min="1" max="100" step="1"
+                       inputmode="numeric" placeholder="{{ '%.0f'|format(default_commission) }}">
+                <small>Empty uses {{ '%.0f'|format(default_commission) }}%.</small>
+              </label>
+            </div>
+            <button class="brain-action-button" type="submit"><i data-icon="check"></i>Approve</button>
+          </form>
+
+          <form method="post" action="/dashboard/system-brain/affiliate/{{ application.id }}/reject" class="brain-affiliate-refuse">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label>
+              <span>Why not, in words they can act on</span>
+              <input name="decision_note" maxlength="2000"
+                     placeholder="For example: tell us more about where you will share this.">
+            </label>
+            <button class="brain-action-button secondary" type="submit"><i data-icon="close"></i>Not approved</button>
+          </form>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="brain-empty">No applications are waiting.</p>
+      {% endif %}
+    </section>
+
+    <section class="brain-section brain-reveal">
+      <div class="brain-section-head">
+        <div>
+          <h2>Payouts</h2>
+          <p>Send the money, then mark it paid. The amount was frozen when they asked
+            for it and is never recalculated.</p>
+        </div>
+        <span class="brain-status {{ 'warning' if pending_payouts else 'neutral' }}">
+          {{ pending_payouts|length }} waiting
+        </span>
+      </div>
+
+      {% if pending_payouts %}
+      <div class="brain-affiliate-list">
+        {% for row in pending_payouts %}{% set payout = row.payout %}{% set affiliate_email = row.email %}{% set affiliate_name = row.display_name %}
+        <article class="brain-panel brain-affiliate-card" data-testid="affiliate-payout">
+          <header class="brain-affiliate-head">
+            <div>
+              <h3>${{ '%.2f'|format(payout.amount_usd) }} to {{ affiliate_name }}</h3>
+              <p class="brain-affiliate-email">{{ affiliate_email }}</p>
+              <small>Asked {{ payout.requested_at.strftime('%d %b %Y, %H:%M UTC') }}</small>
+            </div>
+            <span class="brain-status warning">Waiting</span>
+          </header>
+
+          <dl class="brain-affiliate-asked">
+            <div><dt>Coin</dt><dd>{{ payout.currency }}</dd></div>
+            <div><dt>Network</dt><dd>{{ payout.metadata_json.get('network_label', payout.network) }}</dd></div>
+          </dl>
+          <p class="brain-affiliate-address"><span>Send to</span><code>{{ payout.destination_address }}</code></p>
+
+          <form method="post" action="/dashboard/system-brain/affiliate/payouts/{{ payout.id }}/settle" class="brain-affiliate-decide">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="status" value="paid">
+            <div class="brain-affiliate-fields">
+              <label>
+                <span>Transaction reference</span>
+                <input name="transaction_reference" maxlength="160" autocomplete="off" spellcheck="false"
+                       placeholder="The hash from your wallet">
+                <small>Kept as the receipt.</small>
+              </label>
+            </div>
+            <button class="brain-action-button" type="submit"><i data-icon="check"></i>Mark paid</button>
+          </form>
+
+          <form method="post" action="/dashboard/system-brain/affiliate/payouts/{{ payout.id }}/settle" class="brain-affiliate-refuse">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="status" value="rejected">
+            <label>
+              <span>Why not</span>
+              <input name="decision_note" maxlength="2000" placeholder="For example: the address is not on that network.">
+            </label>
+            <button class="brain-action-button secondary" type="submit"><i data-icon="close"></i>Refuse</button>
+          </form>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="brain-empty">No payouts are waiting.</p>
+      {% endif %}
+
+      {% if decided_payouts %}
+      <div class="brain-table-wrap" style="margin-top:20px">
+        <table>
+          <caption class="sr-only">Payouts already settled</caption>
+          <thead><tr><th scope="col">Affiliate</th><th scope="col">Amount</th><th scope="col">Sent as</th><th scope="col">Result</th><th scope="col">When</th></tr></thead>
+          <tbody>
+            {% for row in decided_payouts %}{% set payout = row.payout %}{% set affiliate_email = row.email %}{% set affiliate_name = row.display_name %}
+            <tr>
+              <td>{{ affiliate_name }}</td>
+              <td>${{ '%.2f'|format(payout.amount_usd) }}</td>
+              <td>{{ payout.currency }} · {{ payout.metadata_json.get('network_label', payout.network) }}</td>
+              <td><span class="brain-status {{ 'success' if payout.status == 'paid' else 'failed' }}">{{ 'Paid' if payout.status == 'paid' else 'Refused' }}</span></td>
+              <td>{{ payout.decided_at.strftime('%d %b %Y') if payout.decided_at else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </section>
+
+    {% if decided_applications %}
+    <section class="brain-section brain-reveal">
+      <div class="brain-section-head">
+        <div><h2>Already decided</h2></div>
+      </div>
+      <div class="brain-table-wrap">
+        <table>
+          <caption class="sr-only">Affiliate applications already decided</caption>
+          <thead><tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Result</th><th scope="col">Code</th><th scope="col">Discount</th><th scope="col">Share</th><th scope="col">When</th></tr></thead>
+          <tbody>
+            {% for row in decided_applications %}{% set application = row.application %}{% set applicant_email = row.email %}
+            <tr>
+              <td>{{ application.display_name }}</td>
+              <td>{{ applicant_email }}</td>
+              <td><span class="brain-status {{ 'success' if application.status == 'approved' else 'failed' }}">{{ application.status.title() }}</span></td>
+              <td>{{ application.discount_code or '—' }}</td>
+              <td>{{ ('%.0f'|format(application.discount_percent)) ~ '%' if application.discount_percent else '—' }}</td>
+              <td>{{ ('%.0f'|format(application.commission_percent)) ~ '%' if application.commission_percent else '—' }}</td>
+              <td>{{ application.decided_at.strftime('%d %b %Y') if application.decided_at else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
     {% elif section == 'users' %}
     <section class="brain-section brain-reveal brain-users">
       <div class="brain-section-head">
@@ -639,7 +857,7 @@
           </tbody></table></div>
         </details>
         <details class="brain-panel"><summary><span><i data-icon="passport"></i> Official sources</span><small>{{ sources|length }}</small></summary>
-          <div class="brain-table-wrap"><table><thead><tr><th>Asset</th><th>Category</th><th>Source</th><th>Checked</th></tr></thead><tbody>{% for item in sources %}<tr><td>{{ item.asset.symbol }}</td><td>{{ item.source.category.replace('_',' ').title() }}</td><td><a href="{{ item.source.source_url }}" target="_blank" rel="noopener">{{ item.source.title }}</a></td><td><span class="brain-status {{ item.source.verification_state }}">{{ item.source.verification_state }}</span></td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No source registered.</td></tr>{% endfor %}</tbody></table></div>
+          <div class="brain-table-wrap"><table><thead><tr><th>Asset</th><th>Category</th><th>Source</th><th>Checked</th></tr></thead><tbody>{% for item in sources %}<tr><td>{{ item.asset.symbol }}</td><td>{{ item.source.category | source_category | title }}</td><td><a href="{{ item.source.source_url }}" target="_blank" rel="noopener">{{ item.source.title }}</a></td><td><span class="brain-status {{ item.source.verification_state }}">{{ item.source.verification_state | source_state }}</span></td></tr>{% else %}<tr><td colspan="4" class="brain-empty">No source registered.</td></tr>{% endfor %}</tbody></table></div>
         </details>
         <details class="brain-panel"><summary><span><i data-icon="activity"></i> Past runs</span><small>{{ runs|length }}</small></summary>
           <div class="brain-table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Last activity</th><th>Items</th></tr></thead><tbody>{% for item in runs %}<tr><td>{{ item.run_kind.replace('_',' ').title() }}</td><td><span class="brain-status {{ item.status }}">{{ item.status }}</span></td><td>{{ (item.completed_at or item.started_at or item.created_at).strftime('%d %b %H:%M UTC') }}</td><td>{{ item.items_succeeded }}/{{ item.items_attempted }}</td></tr>{% endfor %}</tbody></table></div>

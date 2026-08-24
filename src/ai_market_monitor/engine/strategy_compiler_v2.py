@@ -8,10 +8,14 @@ from ai_market_monitor.db.models.enums import (
     MarketType,
     TriggerMode,
 )
+from ai_market_monitor.engine.capabilities import all_capabilities
 from ai_market_monitor.engine.capability_contract import DIRECTION_WORDS
 from ai_market_monitor.engine.capability_index import get_capability_index
 from ai_market_monitor.engine.strategy_draft_v2 import validate_draft_semantics
 from ai_market_monitor.schemas.strategy import (
+    UNSTATED_FIRST_TARGET_RISK_MULTIPLE,
+    UNSTATED_MAXIMUM_STOP_PERCENT,
+    UNSTATED_MINIMUM_REWARD_TO_RISK,
     AlertPolicy,
     Comparator,
     ConditionGroup,
@@ -140,7 +144,14 @@ def compile_strategy_draft_v2(draft: StrategyDraftV2) -> StrategyDefinition:
                 children=[conditions],
             )
         ),
-        risk=RiskPolicy(enabled=False),
+        # A monitor asks for risk numbers only when one of its own rules reads one, and
+        # then it must actually have them. This was a flat ``enabled=False``, so the
+        # eighteen trade-quality cards — stop distance, reward to risk after fees, the
+        # clean path to the target — compiled into a monitor whose engine never ran the
+        # risk model, and every one of them reported "unavailable" on every candle. The
+        # card was offered, it built, it compiled, and it could not be read: exactly the
+        # shape of defect `tests/unit/test_invariant_every_card_evaluates.py` exists for.
+        risk=_risk_policy_for(draft.condition_ast),
         alerts=AlertPolicy(
             channels=["web"] if draft.mode == DraftMode.SCANNER else ["telegram", "web"]
         ),
@@ -386,6 +397,50 @@ def _condition_type(node: ConditionNodeV2) -> ConditionType:
     if any(item.kind == "indicator" for item in node.operands):
         return ConditionType.INDICATOR
     return ConditionType.PRICE_ACTION
+
+
+def _risk_policy_for(root: ConditionNodeV2 | None) -> RiskPolicy:
+    """Risk on exactly when a rule in this draft reads a number the risk model produces.
+
+    The canvas has no risk form — a person draws conditions there, not a stop and a
+    target — so the limits come from the same "not stated" values the rules path has
+    always used. They are limits that constrain nothing, which is the truthful reading of
+    a trader who was never asked: the card's own threshold is what decides the rule.
+    """
+
+    if not _reads_trade_risk(root):
+        return RiskPolicy(enabled=False)
+    return RiskPolicy(
+        enabled=True,
+        maximum_stop_percent=UNSTATED_MAXIMUM_STOP_PERCENT,
+        minimum_reward_to_risk=UNSTATED_MINIMUM_REWARD_TO_RISK,
+        target_value=UNSTATED_FIRST_TARGET_RISK_MULTIPLE,
+    )
+
+
+def _reads_trade_risk(root: ConditionNodeV2 | None) -> bool:
+    """Does any rule in this draft read a number the risk model produces?
+
+    Asked of the capability register rather than of a name list here, so a trade-quality
+    card added later is covered without anybody remembering to come back to this file.
+    ``engine/capabilities.py`` is the one owner of which cards those are.
+    """
+
+    if root is None:
+        return False
+    risk_keys = {
+        capability.key
+        for capability in all_capabilities()
+        if capability.provider_required == "risk_context"
+    }
+    for item in root.walk():
+        if item.node_type != ConditionNodeType.CONDITION:
+            continue
+        if item.capability_key and str(item.capability_key) in risk_keys:
+            return True
+        if any(str(operand.name or "") in risk_keys for operand in item.operands):
+            return True
+    return False
 
 
 def _overall_bias(root: ConditionNodeV2) -> StrategyBias:

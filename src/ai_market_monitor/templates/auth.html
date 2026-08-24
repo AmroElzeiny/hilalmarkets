@@ -4,7 +4,7 @@
   {#- First script on the page, deliberately. It puts a time limit on every request this
       product sends to its own server, and it can only do that for a request sent after
       it has run. See `static/hm-request.js`. -#}
-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260822-links"></script>
+  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260824-affiliate-share"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
@@ -33,16 +33,16 @@
   <meta name="description" content="Secure access to Hilal Markets Halal Assets intelligence and guided monitoring.">
   <title>{{ auth.title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260822-links">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260822-links">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260822-links">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260824-affiliate-share">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260824-affiliate-share">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260824-affiliate-share">
   {# The cookie banner and its window are drawn by a shared partial and were styled in
      the public stylesheet and the dashboard stylesheet — neither of which this page
      loads. Both of them rendered here as raw unstyled blocks under the form, including
      a dialog marked `aria-hidden` that was nonetheless on screen and reachable by Tab.
      One stylesheet owns them now, and every page that includes the partial loads it. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260822-links">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-auth.css') }}?v=20260822-links">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260824-affiliate-share">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-auth.css') }}?v=20260824-affiliate-share">
 </head>
 {% from "hilal/macros/auth_fields.html" import field, password_field, code_field, submit, sent_to, resend with context %}
 {% set suffix = auth_link_suffix %}
@@ -236,9 +236,9 @@
       "email": auth_email
     } | tojson }};
   </script>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260822-links"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260822-links"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260822-links"></script>
-  <script type="module" src="{{ url_for('static', path='/hilalmarkets-auth.js') }}?v=20260822-links"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260824-affiliate-share"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260824-affiliate-share"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260824-affiliate-share"></script>
+  <script type="module" src="{{ url_for('static', path='/hilalmarkets-auth.js') }}?v=20260824-affiliate-share"></script>
 </body>
 </html>

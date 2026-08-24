@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -45,7 +46,7 @@ from ai_market_monitor.db.models.enums import (
     StrategyStatus,
     StrategyVersionStatus,
 )
-from ai_market_monitor.engine.data_freshness import measure_freshness
+from ai_market_monitor.engine.data_freshness import RATIO_WHEN_UNKNOWN, measure_freshness
 from ai_market_monitor.engine.market_filters import is_leveraged_token, is_stablecoin_base
 from ai_market_monitor.market_context import MarketRegimeAnalyzer
 from ai_market_monitor.schemas.strategy import StrategyDefinition
@@ -84,6 +85,142 @@ TERMINAL_STATES = {
     SetupLifecycleState.COMPLETED,
     SetupLifecycleState.CLOSED,
 }
+#: Of the terminal states, the ones that mean the setup actually got somewhere. Written
+#: here beside `TERMINAL_STATES` rather than inline at the one place that used it, because
+#: the counting now happens in SQL and the two readers must mean the same thing.
+PROGRESSED_STATES = {
+    SetupLifecycleState.TARGET_REACHED,
+    SetupLifecycleState.COMPLETED,
+    SetupLifecycleState.CLOSED,
+    SetupLifecycleState.MANUALLY_CLOSED,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ScanEvidenceTally:
+    """What a monitor's checks scored, counted in the database instead of read as rows.
+
+    **A page must never load a scan row to count it.** Every ``scan_results`` row carries
+    a ``proof_summary`` JSON blob — the evidence for that one check — so reading a month
+    of checks reads a month of blobs into the web process. On 23 August 2026 one signed-in
+    person opening Home did exactly that: a single api worker reached 1.02 GB, the
+    container's 1280 MB ceiling had the kernel kill it mid-request, Caddy saw the
+    connection close, and the answer was 502. It repeated for every signed-in visit.
+    ``dmesg`` recorded it as ``Killed process 679577 (python) anon-rss:1045268kB``.
+
+    The health score never wanted the rows. Every number it produces is a count or a mean
+    of counts, and counting is what a database is for. Holding the counts here keeps the
+    page's memory flat whether a monitor has run for a day or for a year.
+    """
+
+    #: How many checks the window holds.
+    total: int
+    #: Checks that produced usable data — anything that is not an error.
+    usable: int
+    confirmed: int
+    #: Checks that were forming or a near miss, which the card reports as one number.
+    forming: int
+    #: Checks whose lateness could actually be measured. Not knowing is not being late.
+    freshness_known: int
+    #: Of those, the ones that read the newest closed candle.
+    freshness_current: int
+    #: The sum of each measured check's freshness ratio, kept as a total so the mean can
+    #: be taken without the individual rows.
+    freshness_ratio_total: float
+
+    @property
+    def coverage_ratio(self) -> float:
+        return self.usable / self.total if self.total else 0.0
+
+    @property
+    def freshness_ratio(self) -> float:
+        if not self.freshness_known:
+            return RATIO_WHEN_UNKNOWN
+        return self.freshness_ratio_total / self.freshness_known
+
+
+def tally_scan_evidence(
+    groups: Sequence[tuple[ScanOutcome, str | None, int | None, int]],
+) -> ScanEvidenceTally:
+    """Fold ``(outcome, timeframe, lateness, how many)`` groups into one tally.
+
+    ``measure_freshness`` stays the only thing that decides what "behind" means. It is
+    asked once for each distinct timeframe-and-lateness pair and weighted by how many
+    checks shared it, which gives exactly the number that asking it once per row gave —
+    without holding the rows.
+    """
+
+    total = usable = confirmed = forming = 0
+    known = current = 0
+    ratio_total = 0.0
+    for outcome, timeframe, lateness_ms, checks in groups:
+        total += checks
+        if outcome != ScanOutcome.ERROR:
+            usable += checks
+        if outcome == ScanOutcome.CONFIRMED:
+            confirmed += checks
+        elif outcome in {ScanOutcome.FORMING, ScanOutcome.NEAR_MISS}:
+            forming += checks
+        freshness = measure_freshness(lateness_ms=lateness_ms, timeframe=timeframe)
+        if freshness.is_known:
+            known += checks
+            ratio_total += freshness.ratio * checks
+            if freshness.is_current:
+                current += checks
+    return ScanEvidenceTally(
+        total=total,
+        usable=usable,
+        confirmed=confirmed,
+        forming=forming,
+        freshness_known=known,
+        freshness_current=current,
+        freshness_ratio_total=ratio_total,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class AlertEvidenceTally:
+    """How many alerts a monitor sent, how many can be reconstructed, and the newest.
+
+    An alert row carries a ``proof_receipt`` blob — the same shape of problem the scan
+    rows had, one size down. Alerts are capped per hour by the product's own rules so
+    they cannot grow without limit the way checks do, but nothing here needs the rows
+    either, so only the two columns that answer the question are read.
+    """
+
+    total: int
+    with_reconstructable_proof: int
+    latest_at: datetime | None
+
+    @property
+    def proof_ratio(self) -> float:
+        return self.with_reconstructable_proof / self.total if self.total else 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class SetupOutcomeTally:
+    """How many setups finished, and how many of those reached a recorded closure."""
+
+    total: int
+    terminal: int
+    progressed: int
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackTally:
+    """What people said about a monitor's alerts, as three counts."""
+
+    total: int
+    positive: int
+    negative: int
+
+    @property
+    def ratio(self) -> float:
+        """Neutral when nobody has said anything, rather than zero — silence is not
+        a complaint."""
+
+        judged = self.positive + self.negative
+        return self.positive / judged if judged else 0.65
 
 
 class StrategyCockpitService:
@@ -242,40 +379,96 @@ class StrategyCockpitService:
             return await self._health_payload(strategy, version, components, 0, persist)
         now = datetime.now(UTC)
         since = now - timedelta(days=30)
-        scans = (
-            await self.session.scalars(
-                select(ScanResult).where(
+        # Counted, never read. See `ScanEvidenceTally` for what reading these rows did to
+        # the website. The grouping keys are exactly the three things the score asks each
+        # check about, so the counts that come back are the same counts the rows gave.
+        scan_groups = (
+            await self.session.execute(
+                select(
+                    ScanResult.outcome,
+                    ScanResult.timeframe,
+                    ScanResult.data_freshness_ms,
+                    func.count().label("checks"),
+                )
+                .where(
                     ScanResult.strategy_version_id.in_(version_ids),
                     ScanResult.evaluated_at >= since,
                 )
+                .group_by(
+                    ScanResult.outcome,
+                    ScanResult.timeframe,
+                    ScanResult.data_freshness_ms,
+                )
             )
         ).all()
-        alerts = (
-            await self.session.scalars(
-                select(Alert).where(
+        scans = tally_scan_evidence(
+            [
+                (row.outcome, row.timeframe, row.data_freshness_ms, row.checks)
+                for row in scan_groups
+            ]
+        )
+        # Two columns, not the row. Whether a receipt can be reconstructed is a rule about
+        # what is inside it, and that rule has one owner in Python, so the receipt is read
+        # and the rule stays where it is — but nothing else about the alert is carried.
+        alert_rows = (
+            await self.session.execute(
+                select(Alert.created_at, Alert.proof_receipt).where(
                     Alert.strategy_version_id.in_(version_ids),
                     Alert.created_at >= since,
                 )
             )
         ).all()
-        setups = (
-            await self.session.scalars(
-                select(SetupInstance).where(
+        alerts = AlertEvidenceTally(
+            total=len(alert_rows),
+            with_reconstructable_proof=sum(
+                1 for row in alert_rows if _proof_is_reconstructable(row.proof_receipt)
+            ),
+            latest_at=max((row.created_at for row in alert_rows), default=None),
+        )
+        setup_totals = (
+            await self.session.execute(
+                select(
+                    func.count().label("total"),
+                    func.sum(
+                        case((SetupInstance.state.in_(TERMINAL_STATES), 1), else_=0)
+                    ).label("terminal"),
+                    func.sum(
+                        case((SetupInstance.state.in_(PROGRESSED_STATES), 1), else_=0)
+                    ).label("progressed"),
+                ).where(
                     SetupInstance.strategy_version_id.in_(version_ids),
                     SetupInstance.last_evaluated_at >= since,
                 )
             )
-        ).all()
-        feedback = (
-            await self.session.scalars(
-                select(UserFeedback)
+        ).one()
+        setups = SetupOutcomeTally(
+            total=int(setup_totals.total or 0),
+            terminal=int(setup_totals.terminal or 0),
+            progressed=int(setup_totals.progressed or 0),
+        )
+        feedback_totals = (
+            await self.session.execute(
+                select(
+                    func.count().label("total"),
+                    func.sum(
+                        case((UserFeedback.feedback_type.in_(POSITIVE_FEEDBACK), 1), else_=0)
+                    ).label("positive"),
+                    func.sum(
+                        case((UserFeedback.feedback_type.in_(NEGATIVE_FEEDBACK), 1), else_=0)
+                    ).label("negative"),
+                )
                 .join(Alert, Alert.id == UserFeedback.alert_id)
                 .where(
                     Alert.strategy_version_id.in_(version_ids),
                     UserFeedback.created_at >= since,
                 )
             )
-        ).all()
+        ).one()
+        feedback = FeedbackTally(
+            total=int(feedback_totals.total or 0),
+            positive=int(feedback_totals.positive or 0),
+            negative=int(feedback_totals.negative or 0),
+        )
         bottlenecks = await self.condition_bottlenecks(strategy, persist=persist)
         regime = await self._market_regime_context(
             strategy,
@@ -291,7 +484,7 @@ class StrategyCockpitService:
             regime,
             now,
         )
-        sample_size = len(scans)
+        sample_size = scans.total
         return await self._health_payload(strategy, version, components, sample_size, persist)
 
     async def alert_frequency_forecast(self, strategy: Strategy) -> dict[str, Any]:
@@ -1362,17 +1555,17 @@ class StrategyCockpitService:
 
     def _health_components(
         self,
-        scans: Sequence[ScanResult],
-        alerts: Sequence[Alert],
-        setups: Sequence[SetupInstance],
-        feedback: Sequence[UserFeedback],
+        scans: ScanEvidenceTally,
+        alerts: AlertEvidenceTally,
+        setups: SetupOutcomeTally,
+        feedback: FeedbackTally,
         bottlenecks: dict[str, Any],
         regime: dict[str, Any],
         now: datetime,
     ) -> list[dict[str, Any]]:
-        scan_count = len(scans)
-        successful_scans = sum(1 for scan in scans if scan.outcome != ScanOutcome.ERROR)
-        coverage_ratio = successful_scans / scan_count if scan_count else 0
+        scan_count = scans.total
+        successful_scans = scans.usable
+        coverage_ratio = scans.coverage_ratio
         coverage = _component(
             "Data coverage",
             coverage_ratio * 12,
@@ -1391,31 +1584,23 @@ class StrategyCockpitService:
         # the newest candle the moment it closed still scored 0.3 out of 1, so every
         # monitor slower than a minute carried a permanent, untrue "the prices it read
         # were not the newest ones" on its card.
-        measured = [
-            measure_freshness(lateness_ms=scan.data_freshness_ms, timeframe=scan.timeframe)
-            for scan in scans
-        ]
-        known = [item for item in measured if item.is_known]
-        current_scans = sum(1 for item in known if item.is_current)
-        freshness_ratio = (
-            sum(item.ratio for item in known) / len(known) if known else _FRESHNESS_UNKNOWN_RATIO
-        )
+        known_count = scans.freshness_known
+        current_scans = scans.freshness_current
+        freshness_ratio = scans.freshness_ratio
         freshness = _component(
             "Data freshness",
             freshness_ratio * 8,
             8,
             _ratio_status(freshness_ratio),
             (
-                f"{current_scans} of {len(known)} recent evaluations read the newest "
+                f"{current_scans} of {known_count} recent evaluations read the newest "
                 "closed candle."
-                if known
+                if known_count
                 else "Data lateness evidence is unavailable."
             ),
         )
-        confirmed = sum(1 for scan in scans if scan.outcome == ScanOutcome.CONFIRMED)
-        forming = sum(
-            1 for scan in scans if scan.outcome in {ScanOutcome.FORMING, ScanOutcome.NEAR_MISS}
-        )
+        confirmed = scans.confirmed
+        forming = scans.forming
         frequency_ratio = _frequency_health_ratio(confirmed, scan_count)
         frequency = _component(
             "Frequency health",
@@ -1449,60 +1634,46 @@ class StrategyCockpitService:
         # was printing the first for monitors that had months of history and a rule that
         # could never be true.
         conditions["details"] = {"blocker_known": top is not None}
-        terminal = [setup for setup in setups if setup.state in TERMINAL_STATES]
-        progressed = [
-            setup
-            for setup in terminal
-            if setup.state
-            in {
-                SetupLifecycleState.TARGET_REACHED,
-                SetupLifecycleState.COMPLETED,
-                SetupLifecycleState.CLOSED,
-                SetupLifecycleState.MANUALLY_CLOSED,
-            }
-        ]
-        lifecycle_ratio = len(progressed) / len(terminal) if terminal else (0.6 if setups else 0)
+        lifecycle_ratio = (
+            setups.progressed / setups.terminal
+            if setups.terminal
+            else (0.6 if setups.total else 0)
+        )
         lifecycle = _component(
             "Lifecycle completion",
             lifecycle_ratio * 10,
             10,
             _ratio_status(lifecycle_ratio),
             (
-                f"{len(progressed)} of {len(terminal)} terminal setups reached a recorded closure."
-                if terminal
+                f"{setups.progressed} of {setups.terminal} terminal setups reached a "
+                "recorded closure."
+                if setups.terminal
                 else "Not enough terminal setup history exists."
             ),
         )
-        positive = sum(1 for item in feedback if item.feedback_type in POSITIVE_FEEDBACK)
-        negative = sum(1 for item in feedback if item.feedback_type in NEGATIVE_FEEDBACK)
-        feedback_ratio = positive / (positive + negative) if positive + negative else 0.65
+        feedback_ratio = feedback.ratio
         feedback_component = _component(
             "Alert quality feedback",
             feedback_ratio * 12,
             12,
             _ratio_status(feedback_ratio),
             (
-                f"{positive} positive and {negative} corrective feedback item(s)."
-                if feedback
+                f"{feedback.positive} positive and {feedback.negative} corrective "
+                "feedback item(s)."
+                if feedback.total
                 else "No alert-quality feedback exists; a neutral score is used."
             ),
         )
-        proof_complete = sum(
-            1
-            for alert in alerts
-            if alert.proof_receipt
-            and alert.proof_receipt.get("conditions") is not None
-            and alert.proof_receipt.get("strategy_version") is not None
-        )
-        proof_ratio = proof_complete / len(alerts) if alerts else 0
+        proof_ratio = alerts.proof_ratio
         proof = _component(
             "Proof completeness",
             proof_ratio * 10,
             10,
             _ratio_status(proof_ratio),
             (
-                f"{proof_complete} of {len(alerts)} alerts have reconstructable proof."
-                if alerts
+                f"{alerts.with_reconstructable_proof} of {alerts.total} alerts have "
+                "reconstructable proof."
+                if alerts.total
                 else "No alert proof receipts exist yet."
             ),
         )
@@ -1515,7 +1686,7 @@ class StrategyCockpitService:
             str(regime.get("explanation") or "Cross-market regime evidence is not available yet."),
         )
         regime_component["details"] = regime
-        latest_alert_at = max((alert.created_at for alert in alerts), default=None)
+        latest_alert_at = alerts.latest_at
         # `None` when no alert exists, and the score treats that as the longest silence.
         # The *sentence* may not: "Last alert evidence is 30.0 day(s) old." was printed
         # for a monitor switched on an hour ago, describing evidence that has never
@@ -1543,7 +1714,7 @@ class StrategyCockpitService:
                 else "No alert has been sent yet, so there is no alert evidence to age."
             ),
         )
-        alerts_per_day = len(alerts) / 30
+        alerts_per_day = alerts.total / 30
         spam_ratio = 1 if alerts_per_day <= 10 else 0.6 if alerts_per_day <= 30 else 0.2
         spam = _component(
             "Alert spam risk",
@@ -1676,28 +1847,93 @@ class StrategyCockpitService:
         *,
         experiment_id: UUID | None = None,
     ) -> dict[str, Any]:
-        scans = (
-            await self.session.scalars(
-                select(ScanResult).where(ScanResult.strategy_version_id == version_id)
+        if experiment_id is None:
+            # This reader carries no time window at all, so on a version that has been
+            # running for months it was reading every check ever made, with every
+            # `proof_summary` blob attached. Counted in the database instead.
+            totals = (
+                await self.session.execute(
+                    select(
+                        func.count().label("evaluations"),
+                        func.sum(
+                            case((ScanResult.outcome == ScanOutcome.CONFIRMED, 1), else_=0)
+                        ).label("confirmed"),
+                        func.sum(
+                            case(
+                                (
+                                    ScanResult.outcome.in_(
+                                        [ScanOutcome.FORMING, ScanOutcome.NEAR_MISS]
+                                    ),
+                                    1,
+                                ),
+                                else_=0,
+                            )
+                        ).label("forming"),
+                        func.min(ScanResult.evaluated_at).label("first_at"),
+                        func.max(ScanResult.evaluated_at).label("last_at"),
+                    ).where(ScanResult.strategy_version_id == version_id)
+                )
+            ).one()
+            evaluations = int(totals.evaluations or 0)
+            confirmed = int(totals.confirmed or 0)
+            forming = int(totals.forming or 0)
+            average_lead_minutes = _mean_interval_minutes(
+                totals.first_at, totals.last_at, evaluations
             )
-        ).all()
-        if experiment_id is not None:
-            scans = [
-                scan
-                for scan in scans
-                if str((scan.proof_summary or {}).get("scan_context", {}).get("experiment_id"))
+        else:
+            # Which experiment a check belonged to is recorded inside `proof_summary`, so
+            # these rows have to be looked at. Only the three columns that answer the
+            # question are read, never the whole row.
+            rows = [
+                row
+                for row in (
+                    await self.session.execute(
+                        select(
+                            ScanResult.outcome,
+                            ScanResult.evaluated_at,
+                            ScanResult.proof_summary,
+                        ).where(ScanResult.strategy_version_id == version_id)
+                    )
+                ).all()
+                if str((row.proof_summary or {}).get("scan_context", {}).get("experiment_id"))
                 == str(experiment_id)
             ]
-        alerts = (
-            await self.session.scalars(select(Alert).where(Alert.strategy_version_id == version_id))
-        ).all()
-        if experiment_id is not None:
-            alerts = [
-                alert
-                for alert in alerts
-                if str((alert.proof_receipt or {}).get("scan_context", {}).get("experiment_id"))
+            evaluations = len(rows)
+            confirmed = sum(1 for row in rows if row.outcome == ScanOutcome.CONFIRMED)
+            forming = sum(
+                1 for row in rows if row.outcome in {ScanOutcome.FORMING, ScanOutcome.NEAR_MISS}
+            )
+            times = sorted(row.evaluated_at for row in rows)
+            average_lead_minutes = _mean_interval_minutes(
+                times[0] if times else None,
+                times[-1] if times else None,
+                evaluations,
+            )
+        experiment_alert_ids: set[UUID] | None = None
+        if experiment_id is None:
+            alert_count = int(
+                await self.session.scalar(
+                    select(func.count()).where(Alert.strategy_version_id == version_id)
+                )
+                or 0
+            )
+        else:
+            # Which experiment an alert belonged to lives inside its receipt, so the
+            # receipts have to be read — but nothing else about the alert does.
+            alert_rows = (
+                await self.session.execute(
+                    select(Alert.id, Alert.proof_receipt).where(
+                        Alert.strategy_version_id == version_id
+                    )
+                )
+            ).all()
+            experiment_alert_ids = {
+                row.id
+                for row in alert_rows
+                if str((row.proof_receipt or {}).get("scan_context", {}).get("experiment_id"))
                 == str(experiment_id)
-            ]
+            }
+            alert_count = len(experiment_alert_ids)
         feedback = (
             await self.session.scalars(
                 select(UserFeedback)
@@ -1705,32 +1941,19 @@ class StrategyCockpitService:
                 .where(Alert.strategy_version_id == version_id)
             )
         ).all()
-        if experiment_id is not None:
-            experiment_alert_ids = {alert.id for alert in alerts}
+        if experiment_alert_ids is not None:
             feedback = [item for item in feedback if item.alert_id in experiment_alert_ids]
-        confirmed = sum(1 for scan in scans if scan.outcome == ScanOutcome.CONFIRMED)
-        forming = sum(
-            1 for scan in scans if scan.outcome in {ScanOutcome.FORMING, ScanOutcome.NEAR_MISS}
-        )
         false_feedback = sum(
             1
             for item in feedback
             if item.feedback_type in {"false_alert", "incorrect_match", "not_relevant"}
         )
-        evaluated_times = sorted(scan.evaluated_at for scan in scans)
-        average_lead_minutes = None
-        if len(evaluated_times) >= 2:
-            intervals = [
-                (current - previous).total_seconds() / 60
-                for previous, current in zip(evaluated_times, evaluated_times[1:], strict=False)
-            ]
-            average_lead_minutes = sum(intervals) / len(intervals)
         return {
             "version_id": str(version_id),
-            "evaluations": len(scans),
+            "evaluations": evaluations,
             "confirmed_matches": confirmed,
             "forming_setups": forming,
-            "alerts": len(alerts),
+            "alerts": alert_count,
             "false_alert_feedback": false_feedback,
             "feedback_count": len(feedback),
             "average_evaluation_interval_minutes": (
@@ -1738,9 +1961,9 @@ class StrategyCockpitService:
             ),
             "strictness": (
                 "high"
-                if scans and confirmed / len(scans) < 0.01
+                if evaluations and confirmed / evaluations < 0.01
                 else "low"
-                if scans and confirmed / len(scans) > 0.2
+                if evaluations and confirmed / evaluations > 0.2
                 else "moderate"
             ),
         }
@@ -1751,43 +1974,59 @@ class StrategyCockpitService:
         start: datetime,
         end: datetime,
     ) -> dict[str, Any]:
-        scans = (
-            await self.session.scalars(
-                select(ScanResult).where(
+        # Four counts, asked for as four counts. This period can be a whole quarter, and
+        # reading the rows to count them is what `ScanEvidenceTally` describes.
+        scan_totals = (
+            await self.session.execute(
+                select(
+                    func.count().label("scan_count"),
+                    func.sum(
+                        case((ScanResult.outcome == ScanOutcome.CONFIRMED, 1), else_=0)
+                    ).label("confirmed_count"),
+                    func.sum(case((ScanResult.outcome == ScanOutcome.ERROR, 1), else_=0)).label(
+                        "error_count"
+                    ),
+                    func.count(func.distinct(ScanResult.symbol)).label("universe_size"),
+                ).where(
                     ScanResult.strategy_version_id.in_(version_ids),
                     ScanResult.evaluated_at >= start,
                     ScanResult.evaluated_at < end,
                 )
             )
-        ).all()
-        alerts = (
-            await self.session.scalars(
-                select(Alert).where(
+        ).one()
+        alert_totals = (
+            await self.session.execute(
+                select(
+                    func.count().label("alert_count"),
+                    func.max(Alert.created_at).label("last_alert_at"),
+                ).where(
                     Alert.strategy_version_id.in_(version_ids),
                     Alert.created_at >= start,
                     Alert.created_at < end,
                 )
             )
-        ).all()
-        setups = (
-            await self.session.scalars(
-                select(SetupInstance).where(
+        ).one()
+        invalidations = int(
+            await self.session.scalar(
+                select(func.count()).where(
                     SetupInstance.strategy_version_id.in_(version_ids),
                     SetupInstance.last_evaluated_at >= start,
                     SetupInstance.last_evaluated_at < end,
+                    SetupInstance.state == SetupLifecycleState.INVALIDATED,
                 )
             )
-        ).all()
-        last_alert_at = max((_aware(alert.created_at) for alert in alerts), default=None)
+            or 0
+        )
+        last_alert_at = (
+            _aware(alert_totals.last_alert_at) if alert_totals.last_alert_at else None
+        )
         return {
-            "scan_count": len(scans),
-            "confirmed_count": sum(1 for scan in scans if scan.outcome == ScanOutcome.CONFIRMED),
-            "error_count": sum(1 for scan in scans if scan.outcome == ScanOutcome.ERROR),
-            "alert_count": len(alerts),
-            "invalidation_count": sum(
-                1 for setup in setups if setup.state == SetupLifecycleState.INVALIDATED
-            ),
-            "universe_size": len({scan.symbol for scan in scans}),
+            "scan_count": int(scan_totals.scan_count or 0),
+            "confirmed_count": int(scan_totals.confirmed_count or 0),
+            "error_count": int(scan_totals.error_count or 0),
+            "alert_count": int(alert_totals.alert_count or 0),
+            "invalidation_count": invalidations,
+            "universe_size": int(scan_totals.universe_size or 0),
             "last_alert_at": last_alert_at.isoformat() if last_alert_at is not None else None,
         }
 
@@ -2020,11 +2259,6 @@ def _component(
     }
 
 
-#: Scored when no scan carried a period we can size. Not zero: never having measured
-#: lateness is not the same as having measured it and found the data late.
-_FRESHNESS_UNKNOWN_RATIO = 0.6
-
-
 def _ratio_status(ratio: float) -> str:
     if ratio >= 0.8:
         return "healthy"
@@ -2221,5 +2455,38 @@ def _decay_findings(
     return events
 
 
+def _proof_is_reconstructable(receipt: dict[str, Any] | None) -> bool:
+    """Whether an alert's receipt can rebuild the decision that produced it.
+
+    One owner for the rule, so the count and any future reader agree on what a complete
+    receipt is. It needs both halves: the conditions that were true, and which version of
+    the monitor judged them. Either one alone cannot rebuild anything.
+    """
+
+    if not receipt:
+        return False
+    return (
+        receipt.get("conditions") is not None and receipt.get("strategy_version") is not None
+    )
+
+
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _mean_interval_minutes(
+    first: datetime | None,
+    last: datetime | None,
+    count: int,
+) -> float | None:
+    """The mean gap between consecutive checks, from the two ends and the count alone.
+
+    Summing the gaps between sorted times adds every time in the middle once and takes it
+    away once, so the total is always ``last - first``. The mean of ``count - 1`` gaps
+    therefore needs the first time, the last time and how many there were — not the
+    timestamps themselves, which is what the caller used to hold every row for.
+    """
+
+    if count < 2 or first is None or last is None:
+        return None
+    return (_aware(last) - _aware(first)).total_seconds() / 60 / (count - 1)

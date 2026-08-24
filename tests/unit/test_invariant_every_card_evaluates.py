@@ -118,10 +118,22 @@ def _scan_context(node: ConditionNodeV2) -> dict:
         "derivatives": dict(named),
         "event_context": dict(named),
         "risk_context": dict(named),
+        # The universe families. They were missing while every card that reads one was
+        # hidden behind a provider label, so 23 cards joined the catalogue with nothing
+        # here to answer them. `ProviderContextService.build` fills both on a real scan.
+        "market_breadth": dict(named),
+        "universe_ranking": dict(named),
         "last_triggered_at": NOW - timedelta(hours=3),
         "last_symbol_triggered_at": NOW - timedelta(hours=3),
         "last_strategy_triggered_at": NOW - timedelta(hours=3),
         "setup_first_detected_at": NOW - timedelta(hours=2),
+        # A monitor mid-flight: a setup exists and is forming. The scanner states both,
+        # and `setup_exists` is what separates "no setup" from "nobody looked".
+        "setup_exists": True,
+        "setup_state": "forming",
+        "setup_expires_at": NOW + timedelta(hours=6),
+        "setup_entry_zone_active": True,
+        "setup_state_changed": True,
         "condition_first_true_at_by_key": {node.node_id: NOW - timedelta(hours=1)},
         "alerts_last_hour": 0,
         "alerts_last_day": 0,

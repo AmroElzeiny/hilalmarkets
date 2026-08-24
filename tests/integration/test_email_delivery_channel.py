@@ -349,12 +349,21 @@ async def test_finishing_signup_queues_the_welcome_email(test_context):
         result = await AccountEmailOutboxService(session, settings).process_due()
         assert result["sent"] == 1
 
+    # A welcome is an account notice, not an access change. Every row in this outbox used
+    # to be handed the same flat ``account_access_changed`` purpose whatever it was, so a
+    # sign-up welcome arrived labelled as somebody's plan being changed — and the chip in
+    # the email's own header, which is the one thing telling a reader what kind of message
+    # they have opened, said "Your account" for the wrong reason. The purpose now follows
+    # the template, from `PURPOSE_BY_TEMPLATE_KIND`.
     sent = [
+        item for item in settings.email_test_outbox if item.get("purpose") == "account_notice"
+    ]
+    assert sent, "the welcome email was queued but never sent"
+    assert not [
         item
         for item in settings.email_test_outbox
         if item.get("purpose") == "account_access_changed"
-    ]
-    assert sent, "the welcome email was queued but never sent"
+    ], "the welcome is still being sent as an access change"
     assert sent[-1]["subject"] == "Your Hilal Markets account is ready"
     assert "Here is what to do first" in sent[-1]["html_body"]
     assert sent[-1]["body"].strip(), "the welcome email has no plain-text part"

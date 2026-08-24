@@ -1457,29 +1457,63 @@ async def test_dashboard_support_ticket_api_creates_thread_message(test_context)
 
 
 async def test_referral_page_shows_paid_conversion_reward_balance(test_context):
+    """A referrer sees the money a paid conversion earned them.
+
+    The same intent as before, against the programme that now exists. Two things about
+    it changed and both were defects:
+
+    * the page read ``reward_amount_usd`` from the relationship, and **nothing in the
+      product ever wrote that key** — so the balance was ``$0.00`` for everybody, always.
+      A commission is now a share of ``paid_amount_usd``, which the referral service
+      writes at the moment the conversion is recorded;
+    * `/dashboard/referrals` is the affiliate programme's older address and forwards to
+      it, because the link is in sent email and in bookmarks.
+    """
+
+    from ai_market_monitor.db.models import AffiliateApplication, User
+    from ai_market_monitor.services.affiliate import AffiliateService
+
     await _signup(test_context, "referrer@example.com")
     async with test_context["session_factory"]() as session:
-        from ai_market_monitor.db.models import User
-
         referrer = await session.scalar(select(User))
         referred = User(display_name="Referred trader")
-        session.add(referred)
+        admin = User(display_name="Owner")
+        session.add_all([referred, admin])
         await session.flush()
+        service = AffiliateService(session)
+        await service.apply(
+            user_id=referrer.id,
+            display_name="Referrer",
+            social_links=["https://x.com/referrer"],
+            requested_discount_code="referrer",
+        )
+        await service.approve(
+            application_id=(await session.scalar(select(AffiliateApplication))).id,
+            admin_user_id=admin.id,
+            discount_percent="10",
+            commission_percent="25",
+        )
         session.add(
             ReferralRelationship(
                 referrer_user_id=referrer.id,
                 referred_user_id=referred.id,
                 status="paid_converted",
                 reward_status="eligible_after_first_paid_month",
-                metadata_json={"reward_amount_usd": "12.50"},
+                metadata_json={"paid_amount_usd": "50.00"},
             )
         )
         await session.commit()
 
-    response = await test_context["client"].get("/dashboard/referrals")
+    forwarded = await test_context["client"].get(
+        "/dashboard/referrals", follow_redirects=False
+    )
+    assert forwarded.status_code in {302, 303, 307, 308}
+
+    response = await test_context["client"].get("/dashboard/affiliate")
     assert response.status_code == 200
-    assert "Rewards require paid conversion" in response.text
+    # A quarter of the fifty they paid.
     assert "$12.50" in response.text
+    assert "Referred trader" in response.text
 
 
 async def test_advanced_dashboard_pages_render(test_context):

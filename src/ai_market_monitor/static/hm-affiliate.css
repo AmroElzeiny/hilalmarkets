@@ -1,0 +1,204 @@
+/* The affiliate page.
+ *
+ * Layout only. Every colour, radius, shadow and font here is an existing token — the
+ * brand sheet remaps them onto the apple-green palette, so a rule that reaches for a
+ * token is a brand rule by construction and a rule with a hex value in it is not. There
+ * are no hex values in this file for that reason.
+ *
+ * The classes are the shared ones wherever a shared one exists (`panel`, `stat-card`,
+ * `field`, `data-table`, `badge`). What is here is the handful of shapes the affiliate
+ * page needs and no other page has: the summary of a submitted application, the code
+ * plaque, and the two money columns.
+ */
+
+/* The read-back of what somebody submitted, while they wait for an answer.
+ * A grid rather than a table: it is four facts, not rows of data, and a table would
+ * announce itself to a screen reader as something to navigate. */
+.hm-aff-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--hm-surface-soft);
+}
+.hm-aff-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.hm-aff-summary small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.hm-aff-summary strong {
+  font-size: 1rem;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.hm-aff-links {
+  margin-top: 16px;
+}
+.hm-aff-links ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.hm-aff-links li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.hm-aff-links li a {
+  overflow-wrap: anywhere;
+}
+.hm-aff-links .icon-sm {
+  color: var(--emerald-700);
+  flex: none;
+}
+
+/* The code, given the weight it deserves: it is the single thing on this page a person
+ * came to copy. Depth comes from the shared elevation token rather than from a drawn
+ * illustration — the brand asks for clean space and controlled colour, and a fabricated
+ * three-dimensional ornament is neither. */
+.hm-aff-code-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--gold-2);
+  box-shadow: var(--shadow-sm);
+}
+.hm-aff-code {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.hm-aff-code small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.hm-aff-code strong {
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* The share, stated rather than asked for.
+ *
+ * It reads like the other *facts* on this page — the same soft surface and line the
+ * submitted-application summary uses — and deliberately not like a field. A disabled or
+ * read-only input would look like something to fill in, would still send its number with
+ * the form, and would read to a screen reader as a control that cannot be operated. This
+ * is text, so there is nothing to operate and nothing to send.
+ *
+ * The number carries no colour of its own. Apple green measures 1.21:1 on white and
+ * cannot be read as text, so the value takes `--ink` like every other figure here and the
+ * surface does the separating. */
+.hm-aff-share {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--hm-surface-soft);
+}
+.hm-aff-share-value {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: none;
+}
+.hm-aff-share-value small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.hm-aff-share-value strong {
+  font-size: clamp(1.7rem, 5vw, 2.2rem);
+  line-height: 1;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.hm-aff-share p {
+  flex: 1 1 260px;
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+.hm-aff-share p strong {
+  color: var(--ink);
+}
+
+/* The spacing and shapes the page needs beyond the shared parts. Named rather than
+ * written inline, so a person changing the page's rhythm changes it in the sheet that
+ * owns the page rather than hunting through the markup. */
+.hm-aff-link-field {
+  margin-top: 16px;
+}
+.hm-aff-copy-row {
+  align-items: stretch;
+}
+.hm-aff-other-method {
+  margin-top: 18px;
+}
+.hm-aff-asking {
+  margin: 0;
+}
+.hm-aff-sub {
+  display: block;
+}
+.hm-aff-note {
+  min-height: 90px;
+}
+
+/* Money lines up under money. Tabular figures so a column of amounts can be compared by
+ * eye without reading each one. */
+.hm-aff-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.hm-aff-table {
+  min-width: 560px;
+}
+
+/* The balance card carries the number the payout button spends, so it is the one card
+ * given an outline. Colour alone never says this — the "Ready" badge beside it does. */
+.hm-aff-balance {
+  border-color: var(--emerald-700);
+}
+
+@media (max-width: 720px) {
+  .hm-aff-code-row {
+    align-items: stretch;
+  }
+  .hm-aff-code-row .btn {
+    justify-content: center;
+  }
+}

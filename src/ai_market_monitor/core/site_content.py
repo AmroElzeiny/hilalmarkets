@@ -431,6 +431,10 @@ DASHBOARD_NAVIGATION = (
                 "billing",
                 "billing",
             ),
+            #: The affiliate programme. It answers at `/dashboard/affiliate`, and it was
+            #: reachable from nowhere at all: the page existed as "Referrals" and had no
+            #: menu entry, so the only way to it was typing the address.
+            NavigationItem("Affiliate", "affiliate_page", "affiliate", "gift"),
             NavigationItem("Settings", "settings_page", "settings", "settings"),
             NavigationItem("Support", "support_page", "support", "support"),
         ),

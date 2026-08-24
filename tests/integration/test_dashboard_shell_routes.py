@@ -19,6 +19,7 @@ from pydantic import AnyHttpUrl
 
 from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.core.dashboard_paths import (
+    AFFILIATE_PATH,
     CONNECTIONS_PATH,
     HOME_PATH,
     MARKET_PATH,
@@ -148,7 +149,10 @@ async def test_the_side_menu_shows_the_entries_it_is_supposed_to(test_context):
 
     # Every name is on the link itself, so it is still there when the menu is minimized
     # and the label is moved off screen.
-    assert menu.count('class="hm-nav-text"') == 9
+    # Ten entries now: the affiliate programme joined the Account group. It used to be
+    # a page called Referrals that nothing linked to, so the only way to it was typing
+    # the address.
+    assert menu.count('class="hm-nav-text"') == 10
 
 
 async def test_the_menu_never_points_at_an_older_copy_of_a_page(test_context):
@@ -179,6 +183,9 @@ async def test_the_menu_never_points_at_an_older_copy_of_a_page(test_context):
         OPPORTUNITIES_PATH,
         CONNECTIONS_PATH,
         SUBSCRIPTION_PATH,
+        # Affiliate sits beside Plan and billing: both are about money, and Settings
+        # and Support are where a menu's utilities belong, at the end.
+        AFFILIATE_PATH,
         SETTINGS_PATH,
         SUPPORT_PATH,
     ], opened

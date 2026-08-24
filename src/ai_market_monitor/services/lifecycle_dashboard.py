@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.asset_logos import asset_logo
@@ -31,6 +32,22 @@ from ai_market_monitor.services.product_language import (
     lifecycle_presentation,
     readiness_copy,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class LatestAlert:
+    """The newest alert of one setup, as the three things a card actually shows.
+
+    Held as its own small object rather than as an ``Alert`` row, because an alert row
+    carries a ``proof_receipt`` blob and a card shows a title and a link. The card cannot
+    accidentally start depending on the rest of the row, and the page's memory no longer
+    grows with how long a setup has been alerting.
+    """
+
+    id: UUID
+    setup_instance_id: UUID | None
+    title: str
+
 
 LIFECYCLE_STAGES = (
     ("detected", "Detected"),
@@ -118,13 +135,36 @@ async def lifecycle_cards(
             .order_by(SetupConditionResult.evaluated_at.desc())
         )
     ).all()
-    alert_rows = (
-        await session.scalars(
-            select(Alert)
-            .where(Alert.setup_instance_id.in_(setup_ids))
-            .order_by(Alert.created_at.desc())
+    # Only the newest alert of each setup is ever kept below, so only the newest alert of
+    # each setup is asked for. Reading them all and throwing away every one but the first
+    # meant a setup that has alerted for months brought every alert — with its
+    # `proof_receipt` blob — into the page. Two names and an id is all a card shows.
+    recency = func.row_number().over(
+        partition_by=Alert.setup_instance_id,
+        order_by=Alert.created_at.desc(),
+    )
+    ranked_alerts = (
+        select(
+            Alert.id.label("id"),
+            Alert.setup_instance_id.label("setup_instance_id"),
+            Alert.title.label("title"),
+            recency.label("recency"),
         )
-    ).all()
+        .where(Alert.setup_instance_id.in_(setup_ids))
+        .subquery()
+    )
+    alert_rows = [
+        LatestAlert(id=row.id, setup_instance_id=row.setup_instance_id, title=row.title)
+        for row in (
+            await session.execute(
+                select(
+                    ranked_alerts.c.id,
+                    ranked_alerts.c.setup_instance_id,
+                    ranked_alerts.c.title,
+                ).where(ranked_alerts.c.recency == 1)
+            )
+        ).all()
+    ]
     alert_ids = [alert.id for alert in alert_rows]
     delivery_rows = (
         await session.scalars(
@@ -155,7 +195,7 @@ async def lifecycle_cards(
             (result, definition),
         )
 
-    latest_alert_by_setup: dict[UUID, Alert] = {}
+    latest_alert_by_setup: dict[UUID, LatestAlert] = {}
     for alert in alert_rows:
         if alert.setup_instance_id is not None:
             latest_alert_by_setup.setdefault(alert.setup_instance_id, alert)
@@ -250,7 +290,7 @@ def _lifecycle_card(
     strategy_version_number: int,
     events: list[SetupLifecycleEvent],
     conditions: dict[str, tuple[SetupConditionResult, StrategyCondition]],
-    latest_alert: Alert | None = None,
+    latest_alert: LatestAlert | None = None,
     deliveries: list[AlertDelivery] | None = None,
     latest_inbox_item: AlertInboxItem | None = None,
     current_sharia_status: str | None = None,

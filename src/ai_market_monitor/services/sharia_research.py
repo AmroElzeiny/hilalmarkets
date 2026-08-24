@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -35,6 +35,10 @@ from ai_market_monitor.db.models.enums import ReviewCaseType, ShariaMethodologyS
 from ai_market_monitor.services import sharia_dossier_state as dossier_state
 from ai_market_monitor.services.provider_reliability import ProviderCallError
 from ai_market_monitor.services.provider_runtime import provider_call, provider_request
+
+# The one word that decides what becomes evidence. It is imported rather than typed,
+# because a second spelling of it anywhere silently selects nothing.
+from ai_market_monitor.services.sharia_source_catalog import VERIFIED
 from ai_market_monitor.services.system_brain import estimate_usage_cost
 
 SCRAPER_VERSION = "scrapling-evidence-v1"
@@ -148,6 +152,19 @@ class ResearchResult:
     idempotent_replay: bool
 
 
+@dataclass(frozen=True, slots=True)
+class FetchTarget:
+    """Any address the evidence fetcher may read.
+
+    The fetcher only ever needed the address, but it was typed to the database row, so
+    reading a page that is not yet a registered source meant either inventing a throwaway
+    row or writing a second fetcher — and a second fetcher would have its own idea about
+    robots, timeouts and PDFs. This is the address on its own.
+    """
+
+    source_url: str
+
+
 class OfficialEvidenceFetcher:
     def __init__(
         self,
@@ -165,7 +182,7 @@ class OfficialEvidenceFetcher:
 
     async def fetch(
         self,
-        source: OfficialSource,
+        source: OfficialSource | FetchTarget,
     ) -> tuple[str | bytes, dict[str, str], int]:
         cache_key = source.source_url.strip()
         cached = self._response_cache.get(cache_key)
@@ -442,7 +459,7 @@ class ShariaResearchPipeline:
                     select(OfficialSource)
                     .where(
                         OfficialSource.canonical_asset_id == asset.id,
-                        OfficialSource.verification_state == "verified",
+                        OfficialSource.verification_state == VERIFIED,
                         OfficialSource.is_active.is_(True),
                     )
                     .order_by(OfficialSource.priority.asc(), OfficialSource.source_url.asc())
@@ -946,6 +963,86 @@ def _extract_document(
             "The official page did not expose enough accessible text for evidence review.",
         )
     return title[:500] or url, headings, text[:300_000]
+
+
+def extract_links(body: str | bytes, url: str) -> tuple[str, ...]:
+    """Every address a fetched page points at, made absolute and de-duplicated.
+
+    This lives beside ``_extract_document`` because both answer "what is in this body",
+    and keeping them together is what stops a second HTML parser appearing with its own
+    idea of what a page contains. ``_extract_document`` reads the words; this reads the
+    addresses, which is what finds a project's Telegram channel and its X account
+    without anybody guessing at either.
+
+    A body that cannot be parsed returns nothing. Failing to find links is an ordinary
+    answer, not an error: the caller simply moves on to the next layer.
+    """
+
+    if isinstance(body, bytes):
+        return ()  # a PDF has no navigation to read
+    try:
+        document = Selector(body.replace("\x00", " "), url=url, adaptive=True)
+        hrefs = document.css("a::attr(href)").getall()
+    except Exception:  # noqa: BLE001 - an unparsable page simply has no links
+        return ()
+    found: list[str] = []
+    seen: set[str] = set()
+    for raw in hrefs:
+        text = str(raw or "").strip()
+        if not text or text.startswith(("#", "javascript:", "mailto:", "tel:")):
+            continue
+        absolute = urljoin(url, text)
+        if not absolute.startswith(("http://", "https://")):
+            continue
+        if absolute in seen:
+            continue
+        seen.add(absolute)
+        found.append(absolute)
+        if len(found) >= 1000:
+            break
+    return tuple(found)
+
+
+#: Where a page states a date for a machine rather than for a reader.
+_DATE_META_NAMES = (
+    "article:published_time",
+    "article:modified_time",
+    "og:updated_time",
+    "date",
+    "dc.date",
+    "dcterms.modified",
+    "last-modified",
+    "pubdate",
+)
+
+
+def extract_dates(body: str | bytes, url: str) -> tuple[str, ...]:
+    """Every date a page states in markup rather than in words.
+
+    ``_extract_document`` strips the tags, which throws these away — and on a growing
+    number of real pages they are the *only* dates there are. A Telegram channel's
+    public web view prints "August 20" with no year and carries the real timestamp in a
+    ``<time datetime="…">`` attribute; the same is true of most modern blogs. Reading
+    only the visible words scored those pages as having published nothing, ever, so a
+    live announcement channel could never clear the freshness proof.
+
+    The strings are returned raw. They are appended to the page text and read by the one
+    date parser in ``sharia_source_activity``, so a second date format cannot appear
+    here and be understood differently there.
+    """
+
+    if isinstance(body, bytes):
+        return ()
+    try:
+        document = Selector(body.replace("\x00", " "), url=url, adaptive=True)
+        found = list(document.css("time::attr(datetime)").getall())
+        found.extend(document.css("*::attr(data-timestamp)").getall())
+        for name in _DATE_META_NAMES:
+            found.extend(document.css(f'meta[property="{name}"]::attr(content)').getall())
+            found.extend(document.css(f'meta[name="{name}"]::attr(content)').getall())
+    except Exception:  # noqa: BLE001 - a page with no readable markup simply has no dates
+        return ()
+    return tuple(str(value).strip() for value in found if str(value).strip())[:400]
 
 
 def _database_safe_text(value: str) -> str:

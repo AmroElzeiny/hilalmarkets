@@ -48,11 +48,14 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     MarketScopeV2,
     ShariaPolicyV2,
     ShariaUniverseMode,
+    StrategyBias,
     StrategyDraftV2,
     StrategyUniverseV2,
 )
 from ai_market_monitor.services.interfaces import Candle
 from ai_market_monitor.services.market_preview import market_snapshot_from_candles
+from tests.support.card_setups import trade_sides_for, with_bias
+from tests.support.market_feeds import ScanMarketDataAdapter
 
 SYMBOL = "SOL/USDT"
 
@@ -106,31 +109,13 @@ HISTORY = _candles()
 NOW = HISTORY[-1].timestamp + timedelta(minutes=15)
 
 
-class _Provider:
-    """Real-shaped candles for whatever symbol a producer asks for. Nothing else."""
-
-    async def list_symbols(self, exchange: str, quote_currencies: list[str]) -> list[str]:
-        return [SYMBOL, "BTC/USDT", "ETH/USDT"]
-
-    async def fetch_ohlcv(
-        self, exchange: str, symbol: str, timeframe: str, limit: int
-    ) -> list[Candle]:
-        return _candles(max(limit, 400), seed={"BTC/USDT": 11, "ETH/USDT": 13}.get(symbol, 7))[
-            -limit:
-        ]
-
-    async def fetch_universe_metadata(
-        self, exchange: str, symbols: list[str], *, include_listing_dates: bool = False
-    ) -> dict[str, dict[str, Any]]:
-        return {symbol: dict(METADATA) for symbol in symbols}
-
-    async def fetch_order_book_context(
-        self, exchange: str, symbol: str, *, depth: int = 50
-    ) -> dict[str, Any]:
-        return {}
-
-    async def fetch_derivatives_context(self, exchange: str, symbol: str) -> dict[str, Any]:
-        return {}
+#: The adapter a scan reads through. It answers the market-data contract and nothing
+#: else — candles, universe metadata, and a raw order book that the product's own reader
+#: turns into card values. It used to be written here, and its
+#: ``fetch_order_book_context`` returned ``{}``: a stub that made this file's own
+#: question unanswerable for sixteen cards, in the same way the browser stub once made
+#: every agent test exercise the outage path.
+_Provider = ScanMarketDataAdapter
 
 
 def _scan_context(node: ConditionNodeV2) -> dict[str, Any]:
@@ -138,6 +123,10 @@ def _scan_context(node: ConditionNodeV2) -> dict[str, Any]:
 
     Deliberately **not** a value per operand name. Injecting one is what let six cards
     with no producer at all pass the neighbouring invariant.
+
+    The setup keys are the scanner's own, including ``setup_exists``: a scan always knows
+    whether this symbol has an open setup, and three lifecycle cards cannot be read
+    without being told which. See `engine/context_conditions._no_setup_yet`.
     """
 
     return {
@@ -145,6 +134,11 @@ def _scan_context(node: ConditionNodeV2) -> dict[str, Any]:
         "last_symbol_triggered_at": NOW - timedelta(hours=3),
         "last_strategy_triggered_at": NOW - timedelta(hours=3),
         "setup_first_detected_at": NOW - timedelta(hours=2),
+        "setup_exists": True,
+        "setup_state": "forming",
+        "setup_expires_at": NOW + timedelta(hours=6),
+        "setup_entry_zone_active": True,
+        "setup_state_changed": True,
         "condition_first_true_at_by_key": {node.node_id: NOW - timedelta(hours=1)},
         "alerts_last_hour": 0,
         "alerts_last_day": 0,
@@ -176,6 +170,23 @@ async def _evaluate(key: str) -> Any:
 
 
 async def _evaluate_once(key: str) -> Any:
+    """The best reading of this card across the setups it could belong to.
+
+    A trade-quality card is meaningless without a side, so it is tried as a buy setup and
+    as a sell one, and the first reading that works is the answer. Everything else is
+    tried once, with no side, exactly as a beginner's monitor is built.
+    """
+
+    last: Any = None
+    for bias in trade_sides_for(key.removeprefix("capability:")):
+        leaf = await _evaluate_side(key, bias)
+        if leaf.state not in {EvaluationState.ERROR, EvaluationState.UNAVAILABLE}:
+            return leaf
+        last = leaf
+    return last
+
+
+async def _evaluate_side(key: str, bias: StrategyBias) -> Any:
     mechanic = BY_KEY[key]
     node, _ = _build(
         mechanic,
@@ -184,6 +195,7 @@ async def _evaluate_once(key: str) -> Any:
         node_id="card_1",
         required=True,
     )
+    node = with_bias(node, bias)
     draft = StrategyDraftV2(
         mode=DraftMode.MONITOR,
         name="Producer audit",
@@ -201,9 +213,11 @@ async def _evaluate_once(key: str) -> Any:
     )
     strategy = compile_strategy_draft_v2(draft)
     strategy.universe.min_historical_candles = 1
-    # Risk off is the ordinary monitor a beginner builds. A card that only answers with
-    # the risk model switched on must say so in the registry, not be offered anyway.
-    strategy.risk.enabled = False
+    # Whatever the compiler decided, left alone. This used to force risk off, on the
+    # reasoning that risk off is the ordinary monitor a beginner builds — and that was
+    # right while the compiler switched risk off for every draft. It now switches risk on
+    # exactly when a rule reads a risk number, so overriding it here would test a monitor
+    # the product never produces.
     candle_sets = {
         timeframe: HISTORY
         for timeframe in {strategy.base_timeframe, *strategy.supporting_timeframes}

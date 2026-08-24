@@ -492,6 +492,31 @@ grant cannot perform governance mutations. With `REQUIRE_SECOND_REVIEWER=false`,
 the approval and publishes the Passport in the same action — two audited governed steps, one press.
 Set it to `true` to keep the two apart and require a different person for the publication.
 
+### "You have no review permission in this environment."
+
+That message is `governance_grant_required`: the person is an administrator and System Brain let
+them in, but they hold no governance grant, so every decision is refused. Signing in reconciles it
+by itself — `WebAuthService.create_session` gives any address named in `SYSTEM_BRAIN_ADMIN_EMAILS`
+the four owner grants the first time it finds them missing — so the ordinary cure is **sign out and
+sign in again**.
+
+Sign-in fills the empty case only. It never revives a grant somebody revoked, and it never reaches
+an address the setting does not name. To change either, run the bootstrap command above; on the
+server that is
+
+```bash
+cd <the repository folder on the server>
+docker compose --env-file .env.production -f docker-compose.prod.yml exec api \
+  python scripts/bootstrap_governance_owner.py \
+  --email "owner@example.com" \
+  --reason "Restoring the accountable governance owner"
+```
+
+Before 23 August 2026 the grants were written in one place only — while an account was being
+created. An owner whose account already existed, or who was made an administrator afterwards by
+`scripts/grant_lifetime_admin.py`, therefore had none and no way to gain any without a shell on the
+server. That script now provisions them too.
+
 Application ADMIN authentication and scoped CSRF validation are always authoritative. In
 production, also set `SYSTEM_BRAIN_CLOUDFLARE_ACCESS_REQUIRED=true` and place `/system-brain*`
 behind a Cloudflare Access application. The application header check is not a substitute for

@@ -1495,3 +1495,148 @@ tr.is-selected { background: var(--hm-apple-pale); }
   .brain-stat-tiles { grid-template-columns: 1fr; }
   .brain-mobilebar-brand strong { display: none; }
 }
+﻿
+/* ── The affiliate programme ────────────────────────────────────────────────────
+ *
+ * Applications and payouts, on the one screen where both are decided. The shapes reuse
+ * `brain-panel` and `brain-status`; what is added here is the arrangement of an
+ * application card, which carries more than a user card does: what was asked for, where
+ * they will share, and two decisions.
+ *
+ * Every value is an existing brand token. No hex, no invented radius, no invented
+ * spacing step — the surface already has a scale and a second one would be visible.
+ */
+.brain-affiliate-list { display: grid; gap: 14px; }
+
+.brain-affiliate-card { display: grid; gap: 15px; }
+
+.brain-affiliate-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.brain-affiliate-head h3 { margin: 0 0 3px; }
+.brain-affiliate-head small { color: var(--hm-muted); font-size: 12px; }
+
+/* The address is shown because an administrator deciding who represents the product has
+ * to know who they are deciding about. It never leaves this screen. */
+.brain-affiliate-email {
+  margin: 0 0 2px !important;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.brain-affiliate-asked {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 26px;
+  margin: 0;
+  padding: 13px 15px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface-soft);
+}
+.brain-affiliate-asked > div { display: grid; gap: 3px; min-width: 0; }
+.brain-affiliate-asked dt {
+  color: var(--hm-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.brain-affiliate-asked dd { margin: 0; color: var(--hm-ink); font-weight: 650; }
+
+.brain-affiliate-links > span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--hm-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.brain-affiliate-links ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.brain-affiliate-links a { overflow-wrap: anywhere; }
+
+.brain-affiliate-note {
+  margin: 0 !important;
+  padding-left: 13px;
+  border-left: 3px solid var(--hm-apple-deep);
+  font-style: italic;
+}
+
+.brain-affiliate-address {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 !important;
+}
+.brain-affiliate-address > span {
+  color: var(--hm-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.brain-affiliate-address code {
+  padding: 4px 9px;
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-surface-soft);
+  color: var(--hm-ink);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.brain-affiliate-decide,
+.brain-affiliate-refuse {
+  display: grid;
+  gap: 11px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hm-hairline);
+}
+.brain-affiliate-decide { align-items: end; }
+
+.brain-affiliate-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  gap: 11px;
+}
+.brain-affiliate-decide label,
+.brain-affiliate-refuse label { display: grid; gap: 5px; min-width: 0; }
+.brain-affiliate-decide label > span,
+.brain-affiliate-refuse label > span {
+  color: var(--hm-ink);
+  font-size: 12px;
+  font-weight: 650;
+}
+.brain-affiliate-decide input,
+.brain-affiliate-refuse input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--hm-control-line);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+  font: inherit;
+  font-size: 14px;
+}
+.brain-affiliate-decide input:focus-visible,
+.brain-affiliate-refuse input:focus-visible {
+  outline: 2px solid var(--hm-apple-deep);
+  outline-offset: 1px;
+}
+.brain-affiliate-decide label small,
+.brain-affiliate-refuse label small { color: var(--hm-muted); font-size: 11px; }
+.brain-affiliate-decide > button,
+.brain-affiliate-refuse > button { justify-self: start; }
+
+@media (max-width: 640px) {
+  .brain-affiliate-fields { grid-template-columns: 1fr; }
+  .brain-affiliate-decide > button,
+  .brain-affiliate-refuse > button { justify-self: stretch; }
+}

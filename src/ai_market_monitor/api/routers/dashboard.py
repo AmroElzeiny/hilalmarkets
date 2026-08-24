@@ -1,13 +1,12 @@
 import asyncio
 import hmac
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Final, Literal, cast
 from urllib.parse import urlencode
 from uuid import UUID, uuid4
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -16,8 +15,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.api.dependencies import get_market_previewer
+from ai_market_monitor.api.template_env import register as register_template_helpers
 from ai_market_monitor.cockpit_service import StrategyCockpitService
-from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.auth_pages import (
     CODE_RESEND_SECONDS,
     alert_for,
@@ -27,10 +26,12 @@ from ai_market_monitor.core.auth_pages import (
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.csrf import csrf_token, csrf_token_matches
 from ai_market_monitor.core.dashboard_paths import (
+    AFFILIATE_PATH,
     CONNECTIONS_PATH,
     HOME_PATH,
     INTEGRATIONS_PATH,
     LEGACY_ASSISTANT_PATH,
+    LEGACY_REFERRALS_PATH,
     LIFECYCLES_PATH,
     MONITOR_PATH,
     MONITORS_PATH,
@@ -58,6 +59,7 @@ from ai_market_monitor.core.site_content import (
     dashboard_page_identity,
 )
 from ai_market_monitor.db.models import (
+    AffiliatePayoutRequest,
     Alert,
     AlertDelivery,
     ApprovedWatchlist,
@@ -72,7 +74,6 @@ from ai_market_monitor.db.models import (
     PaymentEmailDelivery,
     Plan,
     PublishedAssetAssessment,
-    ReferralRelationship,
     SetupInstance,
     ShariaMethodology,
     Strategy,
@@ -106,6 +107,21 @@ from ai_market_monitor.services.account_settings import (
 )
 from ai_market_monitor.services.activity import ActivityReadService
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
+from ai_market_monitor.services.affiliate import (
+    DECISION_TARGET_HOURS,
+    DEFAULT_COMMISSION_PERCENT,
+    MAXIMUM_SOCIAL_LINKS,
+    AffiliateError,
+    AffiliateService,
+    enqueue_affiliate_email,
+    first_name_of,
+    try_sending_now,
+)
+from ai_market_monitor.services.affiliate_payout_options import (
+    ALTERNATIVE_METHOD_EMAIL,
+    MINIMUM_PAYOUT_USD,
+    payout_options_payload,
+)
 from ai_market_monitor.services.billing import (
     BillingError,
     BillingService,
@@ -172,43 +188,10 @@ async def _signup_lock_for(email: str) -> asyncio.Lock:
         return lock
 
 
-def _short_datetime(value: datetime | None, timezone_name: str = "UTC") -> str:
-    if value is None:
-        return "-"
-    try:
-        timezone = ZoneInfo(timezone_name)
-    except ZoneInfoNotFoundError:
-        timezone = ZoneInfo("UTC")
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.astimezone(timezone).strftime("%Y-%m-%d %H:%M:%S %Z")
-
-
-def _reward_amount(value: Decimal) -> str:
-    value = value.quantize(Decimal("0.01"))
-    if value == Decimal("0.00"):
-        return "$ 0.00"
-    return f"${value:.2f}"
-
-
-def _plan_limit(value: object) -> str:
-    if isinstance(value, int) and value >= 100_000:
-        return "Unlimited"
-    return str(value)
-
-
-templates.env.filters["short_dt"] = _short_datetime
-templates.env.filters["reward_amount"] = _reward_amount
-templates.env.filters["plan_limit"] = _plan_limit
-# The one owner of "which pictures exist for this coin", reachable from a template. Six
-# templates used to answer it themselves, each knowing a different subset; the catalogue
-# address was typed into two of them by hand.
-templates.env.globals["asset_logo"] = asset_logo
-# Where a monitor is made, and where one is changed. Reachable from every template so no
-# page writes the address itself. Seven templates used to type the older assistant page's
-# address by hand, and each one had to be found again when that page moved.
-templates.env.globals["monitor_path"] = MONITOR_PATH
-templates.env.globals["monitor_edit_path"] = monitor_edit_path
+# Every filter and global this environment offers is installed in one place, so a
+# template that uses one still loads through any other router's environment. See
+# ``api/template_env.py``.
+register_template_helpers(templates)
 
 
 def _timezone_options(at: datetime | None = None) -> list[dict[str, str]]:
@@ -3729,40 +3712,130 @@ async def dashboard_admin_page(
     return _redirect("/dashboard/system-brain")
 
 
-@router.get("/dashboard/referrals", response_class=HTMLResponse, include_in_schema=False)
-async def referrals_page(
+@router.get(LEGACY_REFERRALS_PATH, include_in_schema=False)
+async def referrals_page() -> RedirectResponse:
+    """The old address. Referrals became the affiliate programme.
+
+    Kept as a redirect rather than deleted: the link is in sent email and in people's
+    bookmarks, and neither can be corrected after the fact.
+    """
+
+    return _redirect(AFFILIATE_PATH)
+
+
+@router.get(AFFILIATE_PATH, response_class=HTMLResponse, include_in_schema=False)
+async def affiliate_page(
     request: Request,
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    relationships = (
-        await session.scalars(
-            select(ReferralRelationship).where(
-                ReferralRelationship.referrer_user_id == user.id,
-                ReferralRelationship.reward_status == "eligible_after_first_paid_month",
-            )
-        )
-    ).all()
-    reward_balance = Decimal("0")
-    for relationship in relationships:
-        raw_amount = (relationship.metadata_json or {}).get("reward_amount_usd", 0)
-        try:
-            reward_balance += Decimal(str(raw_amount))
-        except InvalidOperation:
-            continue
+    """One address, three states: apply, waiting, or an approved affiliate's numbers.
+
+    Three pages would mean three places that decide which state somebody is in, and a
+    person refreshing after approval would have to find the new address themselves.
+    """
+
+    service = AffiliateService(session)
+    application = await service.application_for(user.id)
+    stats = None
+    payouts: list[AffiliatePayoutRequest] = []
+    referral_url = None
+    if application is not None and application.status == "approved":
+        stats = await service.stats(application)
+        payouts = await service.payout_requests(user.id)
+        base = str(settings.public_base_url).rstrip("/")
+        referral_url = f"{base}/signup?ref={application.discount_code}"
     return templates.TemplateResponse(
         request,
-        "hilal/dashboard/referrals.html",
+        "hilal/dashboard/affiliate.html",
         await _context(
             request=request,
             session=session,
             settings=settings,
             user=user,
-            page="referrals",
-            title="Referrals",
-            referral_url=f"{settings.public_base_url}signup?ref={user.id}",
-            reward_balance=reward_balance,
-            referral_count=len(relationships),
+            page="affiliate",
+            title="Affiliate",
+            application=application,
+            stats=stats,
+            payouts=payouts,
+            referral_url=referral_url,
+            default_commission=DEFAULT_COMMISSION_PERCENT,
+            decision_hours=DECISION_TARGET_HOURS,
+            minimum_payout=MINIMUM_PAYOUT_USD,
+            maximum_links=MAXIMUM_SOCIAL_LINKS,
+            payout_currencies=payout_options_payload(),
+            alternative_method_email=ALTERNATIVE_METHOD_EMAIL,
         ),
     )
+
+
+@router.post(f"{AFFILIATE_PATH}/apply", include_in_schema=False)
+async def affiliate_apply(
+    display_name: str = Form(...),
+    social_links: str = Form(...),
+    requested_discount_code: str = Form(...),
+    applicant_note: str = Form(default=""),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    # There is deliberately no `requested_commission_percent` parameter. The share is the
+    # same for everybody and only an administrator changes it, so the form has no box for
+    # it and this route reads none: a hand-made POST carrying one is ignored because
+    # nothing here looks. Extra form fields are dropped by FastAPI, so this is silent
+    # rather than an error, which is the right answer for a field that is not ours.
+    service = AffiliateService(session)
+    try:
+        application = await service.apply(
+            user_id=user.id,
+            display_name=display_name,
+            # One box, one link per line. Asking for "your social media link" singular is
+            # how a form loses the account that actually has the audience.
+            social_links=[line for line in social_links.splitlines()],
+            requested_discount_code=requested_discount_code,
+            applicant_note=applicant_note,
+        )
+    except AffiliateError as exc:
+        return _redirect(f"{AFFILIATE_PATH}?error={exc.code}")
+    delivery = await enqueue_affiliate_email(
+        session,
+        user_id=user.id,
+        template_kind="affiliate_application_received",
+        # The submission time is in the key, so applying again after a refusal raises a
+        # second receipt rather than being swallowed as a duplicate of the first.
+        event_key=f"affiliate-received:{application.id}:{int(application.submitted_at.timestamp())}",
+        payload={
+            "first_name": first_name_of(user),
+            "requested_code": application.requested_discount_code,
+            "decision_hours": DECISION_TARGET_HOURS,
+        },
+    )
+    await session.commit()
+    await try_sending_now(session, settings, delivery)
+    return _redirect(f"{AFFILIATE_PATH}?message=affiliate_application_sent")
+
+
+@router.post(f"{AFFILIATE_PATH}/payout", include_in_schema=False)
+async def affiliate_request_payout(
+    currency: str = Form(...),
+    network: str = Form(...),
+    destination_address: str = Form(...),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> RedirectResponse:
+    service = AffiliateService(session)
+    application = await service.application_for(user.id)
+    if application is None:
+        return _redirect(f"{AFFILIATE_PATH}?error=not_an_affiliate")
+    try:
+        await service.request_payout(
+            application=application,
+            currency=currency,
+            network=network,
+            destination_address=destination_address,
+        )
+    except AffiliateError as exc:
+        return _redirect(f"{AFFILIATE_PATH}?error={exc.code}")
+    await session.commit()
+    return _redirect(f"{AFFILIATE_PATH}?message=affiliate_payout_requested")

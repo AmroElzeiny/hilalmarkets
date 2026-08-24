@@ -5,7 +5,7 @@
   {#- First script on the page, deliberately. It puts a time limit on every request this
       product sends to its own server, and it can only do that for a request sent after
       it has run. See `static/hm-request.js`. -#}
-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260822-links"></script>
+  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260824-affiliate-share"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
@@ -33,22 +33,22 @@
   <meta name="description" content="Hilal Markets - Shariah-screened crypto spot intelligence and guided monitoring.">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260822-links">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260824-affiliate-share">
   {# One owner for the cookie banner and its settings window, which this template includes below. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260822-links">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260822-links">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260824-affiliate-share">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260824-affiliate-share">
   {% block page_styles %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260822-links">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260822-links">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260824-affiliate-share">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260824-affiliate-share">
   {#- The shell — the side menu and the topbar — after the sheet it replaces, because it
       is the one owner of both and nothing above may still be describing them. -#}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260822-links">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260822-links">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260824-affiliate-share">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260824-affiliate-share">
   {#- A page whose styles must win over the shared dashboard sheets loads them here.
       `page_styles` above is deliberately kept before them for pages that only add. -#}
   {% block page_styles_late %}{% endblock %}
   {% if hilal_chat|default(false) and settings.hilal_chat_enabled %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260822-links">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260824-affiliate-share">
   {% endif %}
 </head>
 {#- The page guide's identity is decided on the server, not parsed from the URL. -#}
@@ -83,7 +83,21 @@
           'billing_customer_missing': 'There is no provider-managed subscription to open yet.',
           'billing_portal_unavailable': 'Your payment provider does not offer an online subscription portal.',
           'creem_api_key_missing': 'Secure card checkout is not configured yet. No payment was created.',
-          'creem_product_missing': 'That card plan and billing period are not configured yet. No payment was created.'
+          'creem_product_missing': 'That card plan and billing period are not configured yet. No payment was created.',
+          'name_missing': 'Tell us the name to pay this out to.',
+          'name_too_long': 'That name is too long for the form.',
+          'links_missing': 'Add at least one link to where you will share Hilal Markets.',
+          'invalid_link': 'One of those is not a web address. Paste the full link, starting with https.',
+          'too_many_links': 'That is more links than the form takes. Keep your best ones.',
+          'invalid_code': 'A code needs 3 to 40 letters or numbers. Dashes are fine; spaces are not.',
+          'percent_out_of_range': 'The share must be more than 0 and no more than 100.',
+          'invalid_number': 'That share is not a number.',
+          'already_pending': 'Your application is already with us. We will answer within 24 hours.',
+          'already_approved': 'You are already an affiliate. There is nothing to apply for.',
+          'not_an_affiliate': 'Payouts are for approved affiliates.',
+          'below_minimum': 'You do not have enough yet to ask for a payout.',
+          'unsupported_destination': 'Pick one of the coins and networks on the list.',
+          'invalid_address': 'That does not look like a wallet address. Copy it from your wallet.'
         } %}
         {#- What a person reads after something worked.
 
@@ -110,7 +124,9 @@
           'plan_selected': 'Your plan choice was saved.',
           'trial_started': 'Your Monitor trial has started.',
           'telegram_connected': 'Telegram is connected. We can reach you there now.',
-          'account_created': 'Your account is ready.'
+          'account_created': 'Your account is ready.',
+          'affiliate_application_sent': 'We have your application. A person reads every one, and you will hear back within 24 hours. We have emailed you a copy.',
+          'affiliate_payout_requested': 'Your payout is on the list as waiting. We will send it and mark it paid.'
         } %}
         {#- A message that would promise the market is being checked is replaced while
             that is not true. The replacement is written in `product_language.py`, not
@@ -135,19 +151,19 @@
   {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
   {% include "hilal/partials/cookie_banner.html" %}
   <div class="dash-toast" id="dash-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260822-links"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260822-links"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260824-affiliate-share"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260824-affiliate-share"></script>
   {#- The side menu and the topbar. One owner for their state: `hilalmarkets.js` and
       `dashboard.js` each used to run their own copy of the minimize logic against the
       same class, from two different stored values. -#}
-  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260822-links"></script>
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260822-links"></script>
-  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260822-links"></script>
-  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260822-links"></script>{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260822-links"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260822-links" defer></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260822-links" defer></script>
-  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260822-links"></script>{% endif %}
+  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260824-affiliate-share"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260824-affiliate-share"></script>
+  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260824-affiliate-share"></script>
+  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260824-affiliate-share"></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260824-affiliate-share"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260824-affiliate-share" defer></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260824-affiliate-share" defer></script>
+  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260824-affiliate-share"></script>{% endif %}
   <script>
     (() => {
       const pageStatus = document.querySelector("[data-page-status]");

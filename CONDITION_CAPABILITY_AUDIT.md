@@ -1,223 +1,75 @@
 # Condition Capability Audit
 
-## Verification Result
+## Summary
 
-- Registry capabilities: **473**
-- Beta-visible deterministic concepts: **330**
-- Hidden provider-required concepts: **142**
-- Hidden unsupported concepts: **1**
-- Schema-valid builder templates: verified through the compatibility/template alignment tests.
-- Full pytest suite: **199 tests passed**
-- Ruff: passed for source, tests, and migrations.
-- Fresh Alembic migration: passed through revision `3c4d5e6f7a8b`.
+- Registry capabilities: **502**
+- Deterministically executable: **502**
+- Deferred/provider/runtime dependent: **0**
+- No trade execution, exchange trading keys, or AI-only signal outcomes were added.
 
-Private-beta policy update on 2026-06-27:
+## Already Existing Capabilities Skipped
 
-- Normal builder payloads now expose only concepts with `availability == "available"`.
-- Provider-required concepts are hidden from normal UI and prompt executable paths until a real
-  adapter, rate-limit handling, proof support, and tests are configured.
-- Old saved strategies containing mandatory provider-required conditions still load safely but
-  block activation with unavailable proof.
-- See `PROVIDER_REQUIRED_CONCEPTS_AUDIT.md`, `PROVIDER_SOURCES_RESEARCH.md`, and
-  `PROVIDER_ENV_PLACEHOLDERS.md`.
+- SMA, EMA, ATR, ATR percent, volume ratio, RSI, MACD, Bollinger Bands, Bollinger width/delta, Stochastic, VWAP, ADX, NOT, and SEQUENCE.
+- higher/lower highs and lows, break of structure, change of character, liquidity sweeps, equal highs/lows, range breakout/breakdown, breakout retest, support/resistance retest, inside/outside bars, engulfing candles, hammer, shooting star, doji, pin bar, range expansion, volume spike/dry-up, time windows, spread/listing filters, and existing risk calculations.
+- Existing keys were retained rather than duplicated; registry import validates key uniqueness.
 
-## Provider Families Requiring Beta Gating
+## Newly Added Capabilities
 
-The sections below describe intended/provider-capable families from earlier implementation work.
-For private beta, these families remain hidden unless the current registry payload marks the
-specific concept `available`.
+The following keys are executable from OHLCV or timezone-safe runtime context:
 
-### Public Exchange Data
-
-The following families require explicit adapter/proof verification before normal UI exposure:
-
-- **cross_market:** BTC and ETH trend filters, relative performance, BTC correlation, beta,
-  relative volatility, and relative move.
-- **market_breadth:** EMA 50/200 breadth, positive 24-hour breadth, new-high breadth, volume
-  breadth, breadth thrust, improving breadth, and deteriorating breadth.
-- **order_book:** spread, bid/ask depth, depth imbalance, walls, wall changes, slippage,
-  trade-count changes, average-trade-size changes, buy/sell imbalance, and short-window volume.
-- **derivatives:** funding rate, open-interest direction, and price/open-interest combinations
-  where the selected exchange exposes public contract data.
-- **universe_ranking:** volume, relative volume, momentum, volatility, trend strength,
-  EMA distance, high/low proximity, expansion, compression, breakout, pullback, and
-  BTC-relative-strength ranking.
-
-Universe ranking now affects live scanner ordering and the condition itself filters symbols
-outside the requested percentile.
-
-### Configurable External Context
-
-The following families execute through a strict HTTP context-provider contract:
-
-- **crypto_index:** TOTAL, TOTAL2, TOTAL3, BTC/USDT/stablecoin dominance, alt-market-cap,
-  altseason, and crypto risk-on/risk-off context.
-- **macro_market:** DXY, SPX, NASDAQ, gold, US 10Y yield, and VIX trend filters.
-- **event_feed:** listings, delistings, token unlocks, launches, upgrades, governance, exploits,
-  depegs, institutional or regulatory news, CPI, FOMC, Fed, NFP, GDP, calendar events, and
-  forecast surprise conditions.
-- **token_categories:** AI, DeFi, meme, layer 1, gaming, exchange-token, and relative category
-  trend conditions.
-- **derivatives enrichment:** liquidation spikes or provider-specific derivatives values not
-  exposed by the exchange's standard public CCXT methods.
-
-The endpoint receives:
-
-```json
-{
-  "category": "event_feed",
-  "requested_keys": ["cpi_event_window"],
-  "exchange": "binance",
-  "symbol": "SOL/USDT",
-  "timeframe": "15m",
-  "quote_assets": ["USDT"],
-  "evaluated_at": "2026-06-25T12:00:00Z"
-}
-```
-
-It must return condition-ready deterministic values:
-
-```json
-{
-  "values": {
-    "cpi_event_window": true
-  },
-  "as_of": "2026-06-25T12:00:00Z"
-}
-```
-
-Only requested scalar values are accepted. Missing, invalid, late, or unreachable provider data
-becomes an `unavailable` condition proof.
-
-## Completed Internal Conditions
-
-The previously recognized-only internal conditions are implemented:
-
-- `btc_trend_filter`
-- `correlation_filter`
-- `eth_trend_filter`
-- `fibonacci_extension_targets`
-- `fibonacci_retracement_zone`
-- `golden_pocket_zone`
-- `market_cap_minimum`
-- `meme_coin_exclusion`
-- `previous_session_high_low`
-- `rsi_divergence`
-
-Deterministic definitions:
-
-- Fibonacci zones use configured closed-candle swing lookbacks.
-- Fibonacci target validation checks the configured first target against common extensions.
-- RSI divergence pairs confirmed price pivots with RSI values at those pivots.
-- Previous-session levels use configured session hours and timezone.
-- Market cap and token categories use configured provider metadata and never infer missing tags.
-
-## Completed Risk-Quality Conditions
-
-Risk geometry is now calculated before the main condition tree, allowing the following conditions
-to block the same evaluation:
-
-- stop distance in ATR units, too tight, or too wide
-- next support or resistance distance
-- R multiple and clean path before an obstacle
-- liquidity obstacle or target overlap
-- price distance from trigger and candle overextension
-- spread, volatility, setup age, and invalidation availability
-- reward-to-risk after fees or slippage
-- alert lateness and data latency
-- minimum candle liquidity
-
-The normal strategy risk validation still remains mandatory and is included separately in every
-proof receipt.
-
-## Completed Runtime Conditions
-
-The live scanner supplies persisted runtime context for:
-
-- same-symbol and same-strategy cooldowns
-- hourly and daily alert budgets
-- state-change-only alerts
-- maximum alert lateness
-- setup state, age, first-detected window, entry-zone activity, invalidation, and expiry
-- time since the last alert, setup detection, or a specific condition first became true
-
-`ConditionRuntimeState` now stores every condition's last state, first true timestamp, last true
-timestamp, consecutive true count, actual value, and last evaluation time. This works even when
-no setup instance or alert was created.
-
-Migration:
-
-- `alembic/versions/3c4d5e6f7a8b_add_condition_runtime_states.py`
-
-## Provider Placeholders
-
-Placeholders were added to both `.env` and `.env.example`:
-
-```text
-CRYPTO_INDEX_API_URL=
-CRYPTO_INDEX_API_KEY=
-MACRO_MARKET_API_URL=
-MACRO_MARKET_API_KEY=
-EVENT_FEED_API_URL=
-EVENT_FEED_API_KEY=
-TOKEN_CATEGORY_API_URL=
-TOKEN_CATEGORY_API_KEY=
-DERIVATIVES_CONTEXT_API_URL=
-DERIVATIVES_CONTEXT_API_KEY=
-CONTEXT_PROVIDER_TIMEOUT_SECONDS=15
-CONTEXT_FETCH_CONCURRENCY=8
-MARKET_BREADTH_MAX_SYMBOLS=100
-```
-
-Existing optional metadata placeholders remain responsible for market cap and token category
-enrichment:
-
-```text
-MARKET_METADATA_API_URL=
-MARKET_METADATA_API_KEY=
-```
+`abandoned_baby_bearish`, `abandoned_baby_bullish`, `above_range`, `accumulation_distribution`, `all_time_high_breakout`, `ascending_triangle_breakout`, `asia_session`, `auto_channel_breakdown`, `auto_channel_breakout`, `auto_channel_lower_touch`, `auto_channel_upper_touch`, `avoid_daily_reset`, `avoid_low_liquidity_hours`, `bearish_candle`, `bearish_fair_value_gap`, `bearish_harami`, `bearish_order_block_candidate`, `below_range`, `belt_hold_bearish`, `belt_hold_bullish`, `bollinger_reentry`, `break_and_retest_confirmed`, `breakdown_from_consolidation`, `breakout_from_consolidation`, `breakout_with_volume_confirmation`, `breakout_without_volume_confirmation`, `breaks_n_candle_high`, `breaks_n_candle_low`, `bullish_candle`, `bullish_fair_value_gap`, `bullish_harami`, `bullish_order_block_candidate`, `buy_sell_pressure_proxy`, `buy_side_liquidity_sweep`, `candle_anatomy`, `chaikin_money_flow`, `choppiness_index`, `close_above_previous_day_high`, `close_above_previous_week_high`, `close_below_previous_day_low`, `close_below_previous_week_low`, `closes_above_n_candle_high`, `closes_below_n_candle_low`, `compression_before_breakout`, `condition_after_timestamp`, `condition_before_timestamp`, `condition_valid_until`, `consecutive_inside_bars`, `correction_leg_detected`, `daily_high_swept`, `daily_low_swept`, `daily_open`, `dark_cloud_cover`, `day_of_week`, `deep_pullback`, `descending_triangle_breakdown`, `displacement_candle_bearish`, `displacement_candle_bullish`, `distance_to_reference`, `dollar_volume`, `double_bottom_neckline_break`, `double_top_neckline_break`, `downside_tasuki_gap`, `dragonfly_doji`, `dynamic_trendline`, `ease_of_movement`, `equal_highs_liquidity_pool`, `equal_lows_liquidity_pool`, `evening_doji_star`, `evening_star`, `external_structure_break`, `failed_breakdown`, `failed_breakout`, `falling_three_methods`, `first_n_minutes_of_session`, `force_index`, `fvg_fully_mitigated`, `fvg_mid_mitigated`, `fvg_midpoint_touched`, `fvg_still_open`, `fvg_still_open_bearish`, `fvg_still_open_bullish`, `fvg_structure_invalidated`, `fvg_touched`, `fvg_virgin`, `gravestone_doji`, `hanging_man`, `harami_cross_bearish`, `harami_cross_bullish`, `head_and_shoulders_formed`, `head_and_shoulders_neckline_break`, `higher_high`, `higher_low`, `historical_volatility`, `impulse_leg_detected`, `in_neck_bearish`, `inside_range`, `internal_structure_break`, `inverse_head_and_shoulders_formed`, `inverse_head_and_shoulders_neckline_break`, `inverted_hammer`, `kicking_bearish`, `kicking_bullish`, `large_body_relative_to_atr`, `last_down_before_bullish_displacement`, `last_n_minutes_of_session`, `last_up_before_bearish_displacement`, `level_distance_percent`, `level_strength_score`, `linear_regression_channel_breakout`, `linear_regression_channel_touch`, `liquidity_grab_close_inside`, `london_session`, `long_legged_doji`, `long_lower_shadow`, `long_upper_shadow`, `lower_high`, `lower_low`, `market_structure_shift_bearish`, `market_structure_shift_bullish`, `marubozu_bearish`, `marubozu_bullish`, `matching_low`, `monthly_open`, `morning_doji_star`, `morning_star`, `multiple_touches_of_level`, `n_day_high_breakout`, `n_day_low_breakdown`, `narrow_range_candle`, `new_day_breakout`, `new_week_breakout`, `new_york_session`, `normalized_atr`, `nr4_candle`, `nr7_candle`, `on_balance_volume`, `on_neck_bearish`, `order_block_invalidated`, `order_block_mitigated`, `order_block_rejection`, `piercing_pattern`, `pivot_points`, `po3_dealing_range_sweep_bearish`, `po3_dealing_range_sweep_bullish`, `po3_sweep_displacement_bearish`, `po3_sweep_displacement_bullish`, `po3_sweep_displacement_structure_bearish`, `po3_sweep_displacement_structure_bullish`, `previous_high_swept`, `previous_low_swept`, `previous_session_high_low`, `price_bounces_from_support`, `price_bounces_from_trendline`, `price_breaks_trendline`, `price_closes_above_level`, `price_closes_below_level`, `price_enters_fvg`, `price_fills_fvg`, `price_near_horizontal_level`, `price_rejects_fvg`, `price_rejects_level`, `price_rejects_resistance`, `price_retests_broken_trendline`, `price_returns_to_order_block`, `price_touches_level`, `price_touches_trendline`, `protected_high`, `protected_low`, `pullback_ending_reversal_candle`, `pullback_to_breakout_level`, `pullback_to_ema`, `pullback_to_fibonacci_zone`, `pullback_to_vwap`, `pullback_with_declining_volume`, `range_compression`, `range_contraction_candle`, `range_expansion`, `range_high_rejection`, `range_low_rejection`, `reference_period_sweep`, `relative_volume_by_session`, `resistance_becomes_support`, `retest_after_breakdown`, `retest_after_breakout`, `rising_three_methods`, `rsi_divergence`, `sell_side_liquidity_sweep`, `separating_lines_bearish`, `separating_lines_bullish`, `session_close_window`, `session_expired`, `session_high_swept`, `session_low_swept`, `session_open_window`, `shallow_pullback`, `sideways_market`, `specific_hour_range`, `specific_utc_session`, `spinning_top_bearish`, `spinning_top_bullish`, `stop_hunt_above_range`, `stop_hunt_below_range`, `strong_swing_high`, `strong_swing_low`, `support_becomes_resistance`, `sweep_and_displacement`, `sweep_and_reclaim`, `swing_high_formed`, `swing_low_formed`, `symmetrical_triangle_breakdown`, `symmetrical_triangle_breakout`, `three_black_crows`, `three_inside_down`, `three_inside_up`, `three_outside_down`, `three_outside_up`, `three_white_soldiers`, `thrusting_pattern`, `tight_consolidation`, `time_since_condition_true`, `time_since_last_alert`, `time_since_setup_detected`, `time_window`, `trend_continuation_after_pullback`, `tweezer_bottom`, `tweezer_top`, `ulcer_index`, `upside_tasuki_gap`, `volume_oscillator`, `volume_profile_proxy`, `weak_high`, `weak_low`, `weekday_only`, `weekend_filter`, `weekly_high_swept`, `weekly_low_swept`, `weekly_open`, `wick_breaks_high_returns_below`, `wick_breaks_low_returns_above`, `wide_range_candle`
 
 ## Deterministic Approximation Notes
 
-- `volume_profile_proxy` remains an OHLCV volume-bin approximation, not true exchange volume
-  profile.
-- `buy_sell_pressure_proxy` remains based on candle close location, not aggressor-side trades.
-- Order-book buy/sell metrics use public trade-side labels where available.
-- FVG, order-block, smart-money, swing-strength, trendline, Fibonacci, and structure conditions
-  use documented deterministic rules and do not claim institutional intent.
-- Breadth and ranking use at most `MARKET_BREADTH_MAX_SYMBOLS` symbols per cached evaluation
-  bucket to control provider load.
-- Custom sessions and calendar rules are timezone-aware; UTC remains the default.
+- `volume_profile_proxy` uses typical-price bins weighted by candle volume. It is not a true exchange volume profile.
+- `buy_sell_pressure_proxy` uses close location within candle range. It is not real aggressor-side order flow.
+- FVG, order-block, smart-money, swing-strength, trendline, and structure conditions use documented OHLCV definitions. They are deterministic labels, not claims about institutional intent.
+- Custom sessions and calendar rules are timezone-aware. UTC remains the default unless the strategy condition supplies a user timezone.
 
-## Partially Implemented
+## Deferred Due to Provider or Runtime Limitations
 
-**None.**
+## Partial Implementations
 
-External feeds may still require a URL, API key, subscription, or exchange support, but the
-execution, validation, proof, failure handling, and configuration paths are complete.
+- Cross-symbol, crypto-index, macro-index, breadth, sector, news/event, order-book, trade-tape, derivatives, and universe-ranking interfaces exist, but no production provider is configured.
+- Universe ranking is registered for a future two-pass scanner. It does not yet affect live scanner sorting.
+- Post-evaluation risk-quality keys are registered, but the current engine calculates risk after the entry tree, so those keys cannot block the same tree evaluation yet.
+- `time_since_condition_true` evaluates only when a persisted `condition_first_true_at` value is supplied. That timestamp is not yet stored for every condition.
+- Provider-required cards are visible only through category selection or search and cannot be added until available.
+- Generated capability families have registry metadata and shared evaluator-family tests. Positive, negative, and insufficient-data fixtures are representative rather than one handcrafted fixture for every generated alias/key.
+- Every generated condition template is schema-validated in bulk, but provider-bound conditions cannot receive positive live-data tests until their providers exist.
 
-## Deliberately Rejected
+## Unsupported or Unsafe Capabilities Rejected
 
-- Automated trade placement or exchange order execution.
+- Automated trade placement or order execution.
 - Wallet seed phrases, private keys, withdrawal permissions, or remote access.
 - News-derived buy/sell recommendations or unverified sentiment predictions.
 - Guaranteed-profit, future-price prediction, or AI-invented market values.
-- Treating missing provider data as a passing condition.
-- Futures-only values when neither exchange public data nor the configured derivatives provider
-  can supply them.
+- Futures-only conditions on spot-only plans without a derivatives provider and entitlement.
 
-## Main Files
+## Files Changed
 
-- `src/ai_market_monitor/provider_context.py`
-- `src/ai_market_monitor/engine/capabilities.py`
-- `src/ai_market_monitor/engine/context_conditions.py`
-- `src/ai_market_monitor/engine/evaluator.py`
+- `src/ai_market_monitor/engine/indicators.py`
+- `src/ai_market_monitor/engine/candle_patterns.py`
 - `src/ai_market_monitor/engine/price_action.py`
-- `src/ai_market_monitor/engine/risk.py`
-- `src/ai_market_monitor/services/market_preview.py`
-- `src/ai_market_monitor/services/scanner.py`
-- `src/ai_market_monitor/services/on_demand_scans.py`
-- `src/ai_market_monitor/services/dashboard_jobs.py`
+- `src/ai_market_monitor/engine/context_conditions.py`
+- `src/ai_market_monitor/engine/capabilities.py`
+- `src/ai_market_monitor/engine/condition_registry.py`
+- `src/ai_market_monitor/engine/builder_templates.py`
+- `src/ai_market_monitor/engine/evaluator.py`
 - `src/ai_market_monitor/services/interpreter.py`
-- `src/ai_market_monitor/db/models/monitoring.py`
-- `src/ai_market_monitor/core/config.py`
+- `src/ai_market_monitor/services/interfaces.py`
+- `src/ai_market_monitor/services/scanner.py`
+- `src/ai_market_monitor/templates/dashboard.html`
+- `src/ai_market_monitor/static/dashboard.js`
+- `src/ai_market_monitor/static/dashboard.css`
+
+## Tests Added
+
+- Indicator warm-up and extended calculation coverage.
+- Positive, negative, and insufficient-data candle-pattern cases.
+- Breakout and fair-value-gap price-action cases.
+- Timezone-safe weekend/weekday evaluation.
+- Prompt alias conversion into condition keys.
+- Provider-unavailable proof behavior.
+- Registry deduplication, categories, provider badges, and builder markup.
+

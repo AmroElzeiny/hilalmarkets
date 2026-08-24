@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.api.dependencies import UserPrincipal
 from ai_market_monitor.api.routers.dashboard_api import get_dashboard_principal
+from ai_market_monitor.api.template_env import register as register_template_helpers
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.models import (
@@ -30,6 +31,7 @@ from ai_market_monitor.db.models import (
     SystemBrainActionProposal,
     SystemBrainArtifact,
     SystemBrainMessage,
+    User,
     UserIdentity,
 )
 from ai_market_monitor.db.models.enums import IdentityProvider, ReviewCaseType, UserRole
@@ -49,6 +51,15 @@ from ai_market_monitor.services.account_admin import (
     SystemBrainUserAdminService,
 )
 from ai_market_monitor.services.account_emails import AccountEmailOutboxService
+from ai_market_monitor.services.affiliate import (
+    DEFAULT_COMMISSION_PERCENT,
+    AffiliateError,
+    AffiliateService,
+    enqueue_affiliate_email,
+    first_name_of,
+    try_sending_now,
+)
+from ai_market_monitor.services.affiliate_payout_options import MINIMUM_PAYOUT_USD
 from ai_market_monitor.services.sharia_admin_dashboard import (
     ShariaAdminDashboardService,
 )
@@ -60,7 +71,9 @@ from ai_market_monitor.services.sharia_review_blockers import explain_error
 from ai_market_monitor.services.sharia_screening import ShariaScreeningError
 from ai_market_monitor.services.sharia_source_catalog import (
     SOURCE_CATEGORIES,
+    VERIFIED,
     is_official_url,
+    state_label,
 )
 from ai_market_monitor.services.sharia_source_resolution import SourceResolutionService
 from ai_market_monitor.services.site_analytics import SiteAnalyticsService
@@ -89,6 +102,9 @@ from ai_market_monitor.services.system_brain_repository_index import (
 
 PACKAGE_DIR = Path(__file__).resolve().parents[2]
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
+# Installed from one place so that every environment can load every template. See
+# ``api/template_env.py``.
+register_template_helpers(templates)
 
 #: How many cases the Cases page lists at once.
 #:
@@ -680,6 +696,208 @@ async def system_brain_users(
             context=context,
         )
     )
+
+
+def _affiliate_redirect(*, success: str | None = None, error: str | None = None):
+    query = urlencode(
+        {key: value for key, value in (("success", success), ("error", error)) if value}
+    )
+    suffix = f"?{query}" if query else ""
+    return RedirectResponse(f"/dashboard/system-brain/affiliate{suffix}", status_code=303)
+
+
+@router.get(
+    "/system-brain/affiliate",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+@router.get(
+    "/dashboard/system-brain/affiliate",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def system_brain_affiliate(
+    request: Request,
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Applications and payouts on one screen.
+
+    They are two decisions about the same person, taken minutes apart. Two screens would
+    mean an administrator approving somebody and then hunting for where their payout
+    went.
+    """
+
+    context = await _base_context(
+        request,
+        session,
+        settings,
+        principal,
+        section="affiliate",
+    )
+    service = AffiliateService(session)
+    context.update(
+        {
+            "pending_applications": await service.pending_applications(),
+            "decided_applications": await service.decided_applications(limit=25),
+            "pending_payouts": await service.pending_payouts(),
+            "decided_payouts": await service.decided_payouts(limit=25),
+            "default_commission": DEFAULT_COMMISSION_PERCENT,
+        }
+    )
+    return _protect(
+        templates.TemplateResponse(
+            request=request,
+            name="system_brain.html",
+            context=context,
+        )
+    )
+
+
+@router.post(
+    "/dashboard/system-brain/affiliate/{application_id}/approve",
+    include_in_schema=False,
+)
+async def system_brain_approve_affiliate(
+    application_id: UUID,
+    csrf_token: str = Form(...),
+    discount_code: str = Form(default=""),
+    discount_percent: str = Form(...),
+    commission_percent: str = Form(default=""),
+    decision_note: str = Form(default=""),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Approve, then raise the email. In that order, and never the other way round.
+
+    A message sent before the row is written is a message that can describe an approval
+    that did not happen.
+    """
+
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    service = AffiliateService(session)
+    try:
+        application = await service.approve(
+            application_id=application_id,
+            admin_user_id=principal.user_id,
+            discount_code=discount_code or None,
+            discount_percent=discount_percent,
+            commission_percent=commission_percent or None,
+        )
+        delivery = None
+        applicant = await session.get(User, application.user_id)
+        if applicant is not None:
+            base = str(settings.public_base_url).rstrip("/")
+            delivery = await enqueue_affiliate_email(
+                session,
+                user_id=application.user_id,
+                template_kind="affiliate_application_approved",
+                event_key=f"affiliate-approved:{application.id}",
+                payload={
+                    "first_name": first_name_of(applicant),
+                    "discount_code": application.discount_code,
+                    "discount_percent": f"{application.discount_percent:.0f}",
+                    "commission_percent": f"{application.commission_percent:.0f}",
+                    "referral_url": f"{base}/signup?ref={application.discount_code}",
+                    "minimum_payout": f"${MINIMUM_PAYOUT_USD:.2f}",
+                },
+            )
+        await session.commit()
+    except AffiliateError as exc:
+        await session.rollback()
+        return _affiliate_redirect(error=str(exc))
+    await try_sending_now(session, settings, delivery)
+    if decision_note.strip():
+        # Recorded after the decision so a note that fails validation cannot lose the
+        # approval itself.
+        application.decision_note = decision_note.strip()[:2000]
+        await session.commit()
+    return _affiliate_redirect(
+        success=f"{application.discount_code} is live. The affiliate has been emailed."
+    )
+
+
+@router.post(
+    "/dashboard/system-brain/affiliate/{application_id}/reject",
+    include_in_schema=False,
+)
+async def system_brain_reject_affiliate(
+    application_id: UUID,
+    csrf_token: str = Form(...),
+    decision_note: str = Form(default=""),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    service = AffiliateService(session)
+    try:
+        application = await service.reject(
+            application_id=application_id,
+            admin_user_id=principal.user_id,
+            decision_note=decision_note,
+        )
+        delivery = None
+        applicant = await session.get(User, application.user_id)
+        if applicant is not None:
+            delivery = await enqueue_affiliate_email(
+                session,
+                user_id=application.user_id,
+                template_kind="affiliate_application_rejected",
+                # The decision time is in the key, so a person refused twice gets two
+                # answers rather than silence the second time. `reject` always stamps
+                # `decided_at`; the fallback keeps a message going out rather than
+                # raising while the platform is in the middle of telling somebody no.
+                event_key=(
+                    f"affiliate-rejected:{application.id}:"
+                    f"{int((application.decided_at or datetime.now(UTC)).timestamp())}"
+                ),
+                payload={
+                    "first_name": first_name_of(applicant),
+                    "reason": application.decision_note or "",
+                },
+            )
+        await session.commit()
+    except AffiliateError as exc:
+        await session.rollback()
+        return _affiliate_redirect(error=str(exc))
+    await try_sending_now(session, settings, delivery)
+    return _affiliate_redirect(
+        success="Not approved. They have been emailed and the form is open to them again."
+    )
+
+
+@router.post(
+    "/dashboard/system-brain/affiliate/payouts/{payout_id}/settle",
+    include_in_schema=False,
+)
+async def system_brain_settle_affiliate_payout(
+    payout_id: UUID,
+    csrf_token: str = Form(...),
+    status: str = Form(...),
+    transaction_reference: str = Form(default=""),
+    decision_note: str = Form(default=""),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    try:
+        payout = await AffiliateService(session).settle_payout(
+            payout_id=payout_id,
+            admin_user_id=principal.user_id,
+            status=status,
+            transaction_reference=transaction_reference,
+            decision_note=decision_note,
+        )
+        await session.commit()
+    except AffiliateError as exc:
+        await session.rollback()
+        return _affiliate_redirect(error=str(exc))
+    word = "marked paid" if payout.status == "paid" else "refused"
+    return _affiliate_redirect(success=f"${payout.amount_usd:.2f} {word}.")
 
 
 @router.post(
@@ -1871,10 +2089,11 @@ async def system_brain_add_official_source(
     )
     outcome = await service.resolve_asset(asset)
     await session.commit()
-    if added.verification_state != "verified":
+    if added.verification_state != VERIFIED:
         told = added.check_detail.get("error") or "It could not be read."
+        said = f"That address did not work ({state_label(added.verification_state)}). {told}"
         return RedirectResponse(
-            f"{back}?{urlencode({'error': f'That address did not work. {told}'})}",
+            f"{back}?{urlencode({'error': said})}",
             status_code=303,
         )
     settled = "The job is done." if not outcome.missing else "Still missing another page."

@@ -137,6 +137,15 @@ SETTINGS_PATH: Final[str] = "/dashboard/settings"
 #: Help, and the tickets somebody has opened.
 SUPPORT_PATH: Final[str] = "/dashboard/support"
 
+#: The affiliate programme: apply, then a code, the people it brought and the payouts.
+AFFILIATE_PATH: Final[str] = "/dashboard/affiliate"
+
+#: The address it answered at when it was called Referrals and was a link and two numbers.
+#: Kept as a redirect rather than deleted — the same rule ``LEGACY_HOME_PATH`` above
+#: follows, and for the same reason: it is in saved bookmarks and in sent messages, and
+#: neither can be corrected after the fact.
+LEGACY_REFERRALS_PATH: Final[str] = "/dashboard/referrals"
+
 #: Evidence and Activity: every lifecycle, every alert proof, every screening change and
 #: every missed-alert investigation, in one list with its own tabs.
 #:

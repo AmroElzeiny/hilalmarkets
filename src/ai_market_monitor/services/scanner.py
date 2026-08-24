@@ -1566,6 +1566,10 @@ class ScanOrchestrator:
             "last_triggered_at": last_symbol_triggered_at or last_strategy_triggered_at,
             "setup_first_detected_at": setup_first_detected_at,
             "setup_state": current_setup.state.value if current_setup else None,
+            # Said out loud, because ``setup_state: None`` on its own cannot distinguish
+            # "there is no setup" from "nobody looked", and three lifecycle cards have to
+            # tell those apart to ever be readable. See `context_conditions._no_setup_yet`.
+            "setup_exists": current_setup is not None,
             "setup_expires_at": current_setup.expires_at if current_setup else None,
             "setup_entry_zone_active": bool(
                 current_setup

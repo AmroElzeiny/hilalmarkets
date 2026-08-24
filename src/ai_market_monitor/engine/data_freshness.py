@@ -104,7 +104,11 @@ _RATIO_WHEN_FAR_BEHIND = 0.0
 #: Used when there is nothing to measure — no candle, or a period we cannot size. Neither
 #: full marks nor zero: not knowing is not the same as being late, and a monitor must not
 #: be marked broken for a measurement that was never taken.
-_RATIO_WHEN_UNKNOWN = 0.6
+#:
+#: Public because a caller that has *no* measurements at all still has to score them, and
+#: it must reach for this number rather than write its own. `cockpit_service.py` held a
+#: second copy of `0.6` under its own name, which is how the two would have drifted.
+RATIO_WHEN_UNKNOWN = 0.6
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +134,7 @@ class DataFreshness:
         """How much of a freshness score this deserves, between 0 and 1."""
 
         if self.candles_behind is None:
-            return _RATIO_WHEN_UNKNOWN
+            return RATIO_WHEN_UNKNOWN
         return _RATIO_BY_CANDLES_BEHIND.get(self.candles_behind, _RATIO_WHEN_FAR_BEHIND)
 
     @property

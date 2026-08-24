@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor import __version__
+from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     AuditEvent,
     ShariaGovernanceRoleGrant,
@@ -129,3 +130,69 @@ async def grant_owner_governance_roles(
 
     await session.flush()
     return grants
+
+
+async def ensure_configured_owner_grants(
+    session: AsyncSession,
+    *,
+    settings: Settings,
+    email: str,
+    reason: str,
+) -> tuple[ShariaGovernanceRoleGrant, ...]:
+    """Reconcile one configured System Brain owner's governance grants with the settings.
+
+    ``SYSTEM_BRAIN_ADMIN_EMAILS`` already decides who is an owner: an address listed there
+    is made an ``ADMIN`` on sign-up and let into System Brain. The grants that carry the
+    authority to *act* there were written in one place only — while an account was being
+    created — so three ordinary situations produced an owner with none:
+
+    * the account already existed when the address was added to the setting;
+    * the account was made an administrator afterwards, by
+      ``scripts/grant_lifetime_admin.py``, which never wrote a grant;
+    * the account predates the sign-up grant itself.
+
+    In staging and production such an owner is refused every governance action with
+    ``governance_grant_required``, and the only cure was a shell on the server. This is the
+    one function that says "a configured owner holds the owner grants", so every door that
+    admits one reconciles the same way.
+
+    It never elevates anybody: an address the settings do not list, an unverified identity,
+    a suspended account or a non-administrator all return empty. Granting stays in
+    :func:`grant_owner_governance_roles`, which audits each newly activated role.
+
+    It also never *restores* authority. It fills the empty case only — an owner holding no
+    owner-role record at all. Once any record exists, active or revoked, a person decided
+    it, and :mod:`scripts.bootstrap_governance_owner` is the audited way to change that
+    decision. Reviving a revoked grant on the next sign-in would make revoking one
+    meaningless.
+    """
+
+    normalized = email.strip().casefold()
+    if normalized not in settings.system_brain_authorized_emails:
+        return ()
+    identity = await session.scalar(
+        select(UserIdentity).where(
+            UserIdentity.provider == IdentityProvider.EMAIL,
+            UserIdentity.normalized_identifier == normalized,
+        )
+    )
+    if identity is None:
+        return ()
+    already_decided = await session.scalar(
+        select(ShariaGovernanceRoleGrant.id)
+        .where(
+            ShariaGovernanceRoleGrant.user_id == identity.user_id,
+            ShariaGovernanceRoleGrant.role.in_(OWNER_GOVERNANCE_ROLES),
+        )
+        .limit(1)
+    )
+    if already_decided is not None:
+        return ()
+    try:
+        grants = await grant_owner_governance_roles(session, email=normalized, reason=reason)
+    except GovernanceBootstrapError:
+        # The address is configured but the account is not yet a verified, active
+        # administrator. Nothing to reconcile, and this must never become the failure of
+        # whatever the caller was really doing — signing in, for one.
+        return ()
+    return tuple(grants)

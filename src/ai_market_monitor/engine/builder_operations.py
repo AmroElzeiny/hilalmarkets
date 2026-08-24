@@ -43,6 +43,7 @@ from ai_market_monitor.engine.builder_contract import (
     BuilderMechanic,
     BuilderParameter,
     builder_mechanics,
+    configured_providers_or_runtime,
     find_mechanic,
 )
 from ai_market_monitor.engine.reference_levels import (
@@ -145,9 +146,8 @@ ASSISTANT_ONLY_REASON = (
 )
 
 
-@lru_cache(maxsize=8)
 def mechanic_catalog(
-    configured_providers: frozenset[str] = frozenset(),
+    configured_providers: frozenset[str] | None = None,
     disabled_capabilities: frozenset[str] = frozenset(),
 ) -> tuple[BuilderMechanic, ...]:
     """Every mechanic, with ``available`` corrected by actually trying to build one.
@@ -159,8 +159,23 @@ def mechanic_catalog(
 
     The check runs the real validators — the registry contract and the draft's own
     semantic rules — so it cannot drift from what the mutation path enforces.
+
+    The feeds are resolved *before* the cache below. Caching a call that had not
+    resolved them would key the whole catalogue under ``None`` and freeze whichever
+    answer happened to be right the first time anybody asked.
     """
 
+    return _cached_mechanic_catalog(
+        configured_providers_or_runtime(configured_providers),
+        disabled_capabilities,
+    )
+
+
+@lru_cache(maxsize=8)
+def _cached_mechanic_catalog(
+    configured_providers: frozenset[str],
+    disabled_capabilities: frozenset[str],
+) -> tuple[BuilderMechanic, ...]:
     checked: list[BuilderMechanic] = []
     for mechanic in builder_mechanics(configured_providers, disabled_capabilities):
         if not mechanic.available:
@@ -175,10 +190,20 @@ def mechanic_catalog(
     return tuple(checked)
 
 
-@lru_cache(maxsize=8)
 def _catalog_by_key(
-    configured_providers: frozenset[str] = frozenset(),
+    configured_providers: frozenset[str] | None = None,
     disabled_capabilities: frozenset[str] = frozenset(),
+) -> dict[str, BuilderMechanic]:
+    return _cached_catalog_by_key(
+        configured_providers_or_runtime(configured_providers),
+        disabled_capabilities,
+    )
+
+
+@lru_cache(maxsize=8)
+def _cached_catalog_by_key(
+    configured_providers: frozenset[str],
+    disabled_capabilities: frozenset[str],
 ) -> dict[str, BuilderMechanic]:
     return {
         item.key: item
@@ -187,7 +212,7 @@ def _catalog_by_key(
 
 
 def offered_mechanics(
-    configured_providers: frozenset[str] = frozenset(),
+    configured_providers: frozenset[str] | None = None,
     disabled_capabilities: frozenset[str] = frozenset(),
 ) -> tuple[BuilderMechanic, ...]:
     """The mechanics a person can actually pick right now."""
@@ -280,7 +305,7 @@ def _self_check(mechanic: BuilderMechanic) -> bool:
 
 def _require_mechanic(
     mechanic_key: str,
-    configured_providers: frozenset[str] = frozenset(),
+    configured_providers: frozenset[str] | None = None,
     disabled_capabilities: frozenset[str] = frozenset(),
 ) -> BuilderMechanic:
     mechanic = _catalog_by_key(
@@ -456,7 +481,7 @@ def build_condition(
     source_turn_id: str,
     node_id: str | None = None,
     required: bool = True,
-    configured_providers: frozenset[str] = frozenset(),
+    configured_providers: frozenset[str] | None = None,
     disabled_capabilities: frozenset[str] = frozenset(),
 ) -> tuple[ConditionNodeV2, str]:
     """One validated rule, plus the sentence that describes it.
@@ -901,7 +926,7 @@ def add_condition_plan(
     source_turn_id: str,
     segment_id: str,
     required: bool = True,
-    configured_providers: frozenset[str] = frozenset(),
+    configured_providers: frozenset[str] | None = None,
     disabled_capabilities: frozenset[str] = frozenset(),
 ) -> BuilderPlan:
     node, sentence = build_condition(
@@ -933,7 +958,7 @@ def update_condition_plan(
     source_turn_id: str,
     segment_id: str,
     required: bool = True,
-    configured_providers: frozenset[str] = frozenset(),
+    configured_providers: frozenset[str] | None = None,
     disabled_capabilities: frozenset[str] = frozenset(),
 ) -> BuilderPlan:
     node, sentence = build_condition(

@@ -3,6 +3,10 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from ai_market_monitor.core.config import WHATSAPP_TEMPLATE_EVENTS, Settings
+from ai_market_monitor.engine.provider_families import (
+    availability_from_settings,
+    set_runtime_availability,
+)
 from ai_market_monitor.observability.alerts import AlertRuleError, validate_alert_rules
 from ai_market_monitor.observability.slos import undeclared_metric_names
 
@@ -183,6 +187,11 @@ def _launch_stage_errors(settings: Settings) -> list[str]:
 
 
 def validate_runtime_configuration(settings: Settings) -> None:
+    # Tell the capability register what this deployment can actually read, before
+    # anything asks it. Without this the register keeps its own default — the feeds the
+    # platform serves itself and nothing else — so a configured third-party feed would
+    # stay invisible in the Builder however carefully it was set up.
+    set_runtime_availability(availability_from_settings(settings))
     errors: list[str] = []
     errors.extend(_observability_errors())
     errors.extend(_metric_storage_errors(settings))

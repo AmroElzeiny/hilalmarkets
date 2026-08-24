@@ -115,6 +115,7 @@ EMAIL_LOGO_HEIGHT = 28
 MESSAGE_KIND_BY_PURPOSE: dict[str, str] = {
     "account_access_changed": "Your account",
     "account_notice": "Your account",
+    "affiliate_programme": "Affiliate",
     "alert": "Market alert",
     "connection_test": "Test message",
     "operational_alert": "Platform notice",
@@ -842,6 +843,190 @@ class HilalMarketsEmailRenderer:
             ),
         )
 
+    # ── The affiliate programme ──────────────────────────────────────────────
+
+    def affiliate_application_received(
+        self,
+        *,
+        first_name: str,
+        requested_code: str,
+        decision_hours: int,
+    ) -> BrandedEmail:
+        """The receipt. Its whole job is to say *we have it* and *when you will hear*.
+
+        A form that says "thank you" and then goes quiet is the reason people email
+        support two days later. The waiting time is passed in rather than written here,
+        so the page and the email can never promise different things.
+        """
+
+        greeting = _greeting_for(first_name)
+        base_url = str(self.settings.public_base_url).rstrip("/")
+        rows: list[tuple[str, str | EmailLink]] = [
+            ("Code you asked for", requested_code),
+            ("Answer within", f"{decision_hours} hours"),
+        ]
+        text_body = (
+            f"{greeting}\n\n"
+            "We have your affiliate application.\n\n"
+            + "".join(f"{label}: {value}\n" for label, value in rows)
+            + "\nWe read every application by hand. Nothing else is needed from you "
+            "right now.\n\n"
+            f"Your dashboard: {base_url}/dashboard/affiliate\n\n"
+            "Hilal Markets"
+        )
+        content = (
+            greeting_line(greeting)
+            + lead("We have your application. Nothing else is needed from you right now.")
+            + status_block(
+                tone="information",
+                label="With us now",
+                meaning=(
+                    f"A person reads every application. You will hear back within "
+                    f"{decision_hours} hours."
+                ),
+            )
+            + fact_table(rows)
+            + button("See your application", f"{base_url}/dashboard/affiliate")
+            + note(
+                "The code and the discount are set by our team when we answer. What you "
+                "asked for is a request, not a setting."
+            )
+        )
+        return BrandedEmail(
+            subject="We have your Hilal Markets affiliate application",
+            text_body=text_body,
+            html_body=self.shell(
+                title="Application received",
+                eyebrow="Affiliate",
+                preheader=f"We will answer within {decision_hours} hours.",
+                content_html=content,
+                footer_reason=(
+                    "You are receiving this because you applied to the Hilal Markets "
+                    "affiliate programme."
+                ),
+            ),
+        )
+
+    def affiliate_application_approved(
+        self,
+        *,
+        first_name: str,
+        discount_code: str,
+        discount_percent: str,
+        commission_percent: str,
+        referral_url: str,
+        minimum_payout: str,
+    ) -> BrandedEmail:
+        """Yes — and immediately, the three numbers that decide everything after it.
+
+        The code, what it saves the customer, and what the affiliate keeps. Those are the
+        only facts that change what somebody does next, so they are a table and not a
+        paragraph.
+        """
+
+        greeting = _greeting_for(first_name)
+        base_url = str(self.settings.public_base_url).rstrip("/")
+        rows: list[tuple[str, str | EmailLink]] = [
+            ("Your code", discount_code),
+            ("Your audience saves", f"{discount_percent}%"),
+            ("You keep", f"{commission_percent}% of what they pay"),
+            ("Your link", EmailLink("Open your affiliate link", referral_url)),
+        ]
+        text_body = (
+            f"{greeting}\n\n"
+            "You are a Hilal Markets affiliate.\n\n"
+            + "".join(
+                f"{label}: {value.url if isinstance(value, EmailLink) else value}\n"
+                for label, value in rows
+            )
+            + f"\nYou can ask for a payout once you have {minimum_payout}. "
+            "Payouts are sent in crypto.\n\n"
+            f"Your dashboard: {base_url}/dashboard/affiliate\n\n"
+            "Hilal Markets"
+        )
+        content = (
+            greeting_line(greeting)
+            + lead("You are an affiliate. Here is everything you need.")
+            + status_block(
+                tone="success",
+                label="Approved",
+                meaning="Your code works from now. Share it wherever you said you would.",
+            )
+            + fact_table(rows, title="Your programme")
+            + button("Open your affiliate page", f"{base_url}/dashboard/affiliate")
+            + note(
+                f"You can ask for a payout once you have {minimum_payout}. Payouts are "
+                "sent in crypto, and you choose the coin and the network."
+            )
+        )
+        return BrandedEmail(
+            subject="You are a Hilal Markets affiliate",
+            text_body=text_body,
+            html_body=self.shell(
+                title="You are an affiliate",
+                eyebrow="Affiliate",
+                preheader=f"Your code is {discount_code}.",
+                content_html=content,
+                footer_reason=(
+                    "You are receiving this because your Hilal Markets affiliate "
+                    "application was approved."
+                ),
+            ),
+        )
+
+    def affiliate_application_rejected(
+        self, *, first_name: str, reason: str | None
+    ) -> BrandedEmail:
+        """No — with the reason, and with the door left open.
+
+        A refusal with nothing after it is the one answer an applicant cannot act on, so
+        a reason is always shown: the reviewer's own words when there are any, and a
+        plain sentence when there are none.
+        """
+
+        greeting = _greeting_for(first_name)
+        base_url = str(self.settings.public_base_url).rstrip("/")
+        explanation = (reason or "").strip() or (
+            "We could not approve this one. You are welcome to apply again with more "
+            "about where you will share Hilal Markets."
+        )
+        text_body = (
+            f"{greeting}\n\n"
+            "We could not approve your affiliate application this time.\n\n"
+            f"{explanation}\n\n"
+            "You can apply again whenever you like — the form is open on your "
+            f"dashboard: {base_url}/dashboard/affiliate\n\n"
+            "Hilal Markets"
+        )
+        content = (
+            greeting_line(greeting)
+            + lead("We could not approve your application this time.")
+            + status_block(
+                tone="warning",
+                label="Not approved",
+                meaning=explanation,
+            )
+            + paragraph(
+                "The form is open again on your dashboard. Applying a second time is "
+                "welcome, and it is read by a person exactly like the first."
+            )
+            + button("Apply again", f"{base_url}/dashboard/affiliate")
+        )
+        return BrandedEmail(
+            subject="About your Hilal Markets affiliate application",
+            text_body=text_body,
+            html_body=self.shell(
+                title="Not approved this time",
+                eyebrow="Affiliate",
+                preheader="You can apply again whenever you like.",
+                content_html=content,
+                footer_reason=(
+                    "You are receiving this because you applied to the Hilal Markets "
+                    "affiliate programme."
+                ),
+            ),
+        )
+
     def connection_test(self) -> BrandedEmail:
         """The email somebody gets when they press "send me a test".
 
@@ -1000,6 +1185,17 @@ class HilalMarketsEmailRenderer:
                 ),
             ),
         )
+
+
+def _greeting_for(first_name: str) -> str:
+    """One greeting, so every message opens the same way.
+
+    Three templates were each building this line themselves, and two of them fell back to
+    "there" while the third dropped the name entirely.
+    """
+
+    name = (first_name or "").strip()
+    return f"Assalamu Alaikum {name}," if name else "Assalamu Alaikum,"
 
 
 def _masked_email(value: str) -> str:

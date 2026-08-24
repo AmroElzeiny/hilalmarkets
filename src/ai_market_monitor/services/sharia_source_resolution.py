@@ -1,9 +1,10 @@
 """Turn proposed links into proved ones, layer by layer, and ask a person when they run out.
 
-``sharia_source_catalog`` knows where a link can come from. This module is what decides
-whether a link is real. Nothing else is allowed to write ``verification_state``
-``verified`` onto an official source, because "verified" is the word the Sharia research
-pipeline reads to choose what counts as evidence — it selects *only* verified sources.
+``sharia_source_catalog`` knows where a link can come from. ``sharia_source_discovery``
+goes and looks. This module is what decides whether a link is real. Nothing else is
+allowed to write ``verification_state`` ``verified`` onto an official source, because
+"verified" is the word the Shariah research pipeline reads to choose what counts as
+evidence — it selects *only* verified sources.
 
 The order matters and is the whole idea:
 
@@ -12,24 +13,41 @@ The order matters and is the whole idea:
    robots policy, readable as text, and — for a news page — recently updated.
 3. Score it. Proof adds; failure removes. A candidate that cannot be proved scores zero
    however confident the layer that proposed it was.
-4. If a required category is still unanswered, drop to the next layer and repeat.
-5. When the layers are exhausted, raise a task for a person.
+4. If a required category still has fewer proved links than the product wants, drop to
+   the next layer and repeat.
+5. When the layers are exhausted and a category has no working link at all, raise a task
+   for a person.
 
 Because proof can only ever *lower* a guess, the cheap guessing layer is safe to have.
 A wrong ``https://example.com/blog`` fails step 2 and disappears; it can never talk its
 way into being evidence. This is the same fail-closed rule the compiler follows: a
 refused reading stays visible, an invented one silently measures the wrong thing.
 
+**Wanted and required are two different numbers.** One working news page is a single
+point of failure: the day it moves, the coin has no way to hear about the project at
+all. So the layers keep looking until a category holds
+:data:`~sharia_source_catalog.LINKS_WANTED_PER_CATEGORY` links, and a person is only
+asked when it holds fewer than :data:`~sharia_source_catalog.LINKS_REQUIRED_PER_CATEGORY`.
+Without that separation the review queue fills with "this coin has two news pages
+instead of three", which nobody would ever work through.
+
+**Working is not the same as useful.** A newsroom can answer HTTP 200 for years after
+the last post was written. ``sharia_source_activity`` scores how alive and how relevant
+a fetched page is, and a source below that floor stops counting as coverage — so the
+layers go looking for company for it — while staying registered and visible. Nothing is
+deleted for being quiet.
+
 Two things this module deliberately does **not** do. It never writes, infers or implies
-a Sharia status — a confidence number here ranks links and nothing else. And it never
-decides a case: when it gives up it opens a review case for a human, which is a request
-for attention, not an answer.
+a Shariah status — a confidence or activity number here ranks links and nothing else.
+And it never decides a case: when it gives up it opens a review case for a human, which
+is a request for attention, not an answer.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -49,24 +67,54 @@ from ai_market_monitor.services.sharia_research import (
     OfficialEvidenceFetcher,
     ShariaResearchError,
     _extract_document,
+    extract_dates,
+)
+from ai_market_monitor.services.sharia_source_activity import (
+    SourceActivity,
+    measure,
+    newest_published_at,
 )
 from ai_market_monitor.services.sharia_source_catalog import (
+    CANDIDATE,
     CATEGORY_PRIORITY,
     CONFIDENCE_FLOOR,
     CURATED_CONFIDENT,
+    LAYER_CONFIDENCE,
     LAYER_ORDER,
+    LINKS_REQUIRED_PER_CATEGORY,
     NEWS,
     NEWS_MAXIMUM_AGE_DAYS,
+    NOT_PERMITTED,
     PROOF_BONUS,
     REQUIRED_CATEGORIES,
+    UNREACHABLE,
+    VERIFIED,
+    WEBSITE,
     DiscoveryLayer,
+    SearchResult,
     SourceCandidate,
     candidates_for,
+    categories_below,
     category_label,
+    is_official_url,
     normalized_url,
 )
+from ai_market_monitor.services.sharia_source_discovery import WebSourceDiscovery
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "CANDIDATE",
+    "NOT_PERMITTED",
+    "UNREACHABLE",
+    "VERIFIED",
+    "AssetSourceOutcome",
+    "ResolutionSweep",
+    "SourceProof",
+    "SourceResolutionService",
+    "newest_published_at",
+    "score_candidate",
+]
 
 #: A page that renders less than this much text is not something a reviewer or a model
 #: can read. Usually it means the content only exists after JavaScript runs, which the
@@ -75,29 +123,20 @@ MINIMUM_READABLE_CHARACTERS = 200
 
 #: HTTP answers that mean "this address is gone", as opposed to "try again later". Only
 #: these are allowed to withdraw a source that was previously trusted.
-DEFINITIVE_FAILURE_STATUSES = frozenset({400, 401, 403, 404, 405, 410, 451})
+DEFINITIVE_FAILURE_STATUSES = frozenset({400, 401, 404, 405, 410, 451})
 
 #: Error codes the fetcher raises that are settled answers rather than bad luck.
 DEFINITIVE_FAILURE_CODES = frozenset({"robots_disallowed"})
 
-#: What a source row's ``verification_state`` may say.
-VERIFIED = "verified"
-CANDIDATE = "candidate"
-UNREACHABLE = "unreachable"
-
-_MONTHS = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
-}
-_ISO_DATE = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
-_DAY_MONTH_YEAR = re.compile(
-    r"\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,?\s+(20\d{2})\b",
-    re.IGNORECASE,
-)
-_MONTH_DAY_YEAR = re.compile(
-    r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2}),?\s+(20\d{2})\b",
-    re.IGNORECASE,
-)
+#: Answers that mean "this page is real, and you are not allowed to read it". A site's
+#: robots policy and a 403 are the two ways that is said. They are settled answers, so
+#: they withdraw a source like a dead link does — but they are recorded under their own
+#: name, because the two need different work from a person: a dead link needs
+#: replacing, while a forbidden one is the right address that the product may never
+#: quote. Calling both "unreachable" sent reviewers hunting for a replacement page that
+#: already existed.
+NOT_PERMITTED_STATUSES = frozenset({403})
+NOT_PERMITTED_CODES = frozenset({"robots_disallowed"})
 
 
 def _capped(value: object, limit: int = 300) -> str:
@@ -121,6 +160,9 @@ class SourceProof:
     published_at: datetime | None = None
     error_code: str | None = None
     detail: dict[str, Any] = field(default_factory=dict)
+    #: How alive and how relevant the page is, when it could be read at all. Never a
+    #: Shariah status; see ``sharia_source_activity``.
+    activity: SourceActivity | None = None
 
     @property
     def usable(self) -> bool:
@@ -137,7 +179,21 @@ class SourceProof:
 
         if self.error_code in DEFINITIVE_FAILURE_CODES:
             return True
+        if self.status in NOT_PERMITTED_STATUSES:
+            return True
         return self.status in DEFINITIVE_FAILURE_STATUSES
+
+    @property
+    def forbidden(self) -> bool:
+        """Whether the page exists and the product is not allowed to read it."""
+
+        if self.error_code in NOT_PERMITTED_CODES:
+            return True
+        return self.status in NOT_PERMITTED_STATUSES
+
+    @property
+    def activity_score(self) -> float:
+        return self.activity.score if self.activity is not None else 0.0
 
 
 def score_candidate(base_confidence: float, proof: SourceProof) -> float:
@@ -157,33 +213,6 @@ def score_candidate(base_confidence: float, proof: SourceProof) -> float:
     return round(min(1.0, base_confidence + PROOF_BONUS), 4)
 
 
-def newest_published_at(text: str, *, now: datetime) -> datetime | None:
-    """The most recent date the page itself claims, if it claims one.
-
-    Dates in the future are ignored. A newsroom listing next month's conference is not
-    evidence that the newsroom is still being written.
-    """
-
-    best: datetime | None = None
-    candidates: list[tuple[int, int, int]] = []
-    for year, month, day in _ISO_DATE.findall(text):
-        candidates.append((int(year), int(month), int(day)))
-    for day, month, year in _DAY_MONTH_YEAR.findall(text):
-        candidates.append((int(year), _MONTHS[month.lower()[:3]], int(day)))
-    for month, day, year in _MONTH_DAY_YEAR.findall(text):
-        candidates.append((int(year), _MONTHS[month.lower()[:3]], int(day)))
-    for year, month, day in candidates:
-        try:
-            moment = datetime(year, month, day, tzinfo=UTC)
-        except ValueError:
-            continue  # 31 February on a badly built page is not a date.
-        if moment > now:
-            continue
-        if best is None or moment > best:
-            best = moment
-    return best
-
-
 @dataclass(slots=True)
 class AssetSourceOutcome:
     """What the resolver managed to settle for one asset."""
@@ -193,13 +222,30 @@ class AssetSourceOutcome:
     proved: list[str] = field(default_factory=list)
     rejected: list[str] = field(default_factory=list)
     withdrawn: list[str] = field(default_factory=list)
+    #: Categories with no working link at all. These raise a task for a person.
     missing: tuple[str, ...] = ()
+    #: Categories with fewer working links than the product wants. Not a task — the
+    #: machine simply keeps looking on the next sweep.
+    short: tuple[str, ...] = ()
+    #: How many working links each required category ended up with.
+    coverage: dict[str, int] = field(default_factory=dict)
+    #: Links that answer but have stopped saying anything worth reading.
+    quiet: list[str] = field(default_factory=list)
     escalated: bool = False
     case_reference: str | None = None
 
     @property
     def complete(self) -> bool:
         return not self.missing and not self.withdrawn
+
+
+@dataclass(frozen=True, slots=True)
+class Coverage:
+    """How many working links one asset holds, and how many of them still say things."""
+
+    counts: Counter[str]
+    lively: Counter[str]
+    quiet: list[str]
 
 
 @dataclass(slots=True)
@@ -215,6 +261,10 @@ class ResolutionSweep:
     @property
     def proved(self) -> int:
         return sum(len(item.proved) for item in self.assets)
+
+    @property
+    def quiet(self) -> int:
+        return sum(len(item.quiet) for item in self.assets)
 
     def message(self) -> str:
         if not self.assets:
@@ -234,17 +284,34 @@ class SourceResolutionService:
         settings: Settings,
         *,
         fetcher: OfficialEvidenceFetcher | None = None,
+        discovery: WebSourceDiscovery | None = None,
         now: datetime | None = None,
+        force_recheck: bool = False,
     ) -> None:
         self.session = session
         self.settings = settings
         self.fetcher = fetcher or OfficialEvidenceFetcher(settings)
+        self.discovery = discovery or WebSourceDiscovery(settings, fetcher=self.fetcher)
         self._now = now
+        #: Ignore the recheck calendar and fetch everything. The scheduled sweep never
+        #: does this — it exists for the operator's full re-check, which is the only
+        #: caller that means "look at every link the product holds, right now".
+        self.force_recheck = force_recheck
 
     def _clock(self) -> datetime:
         return self._now or datetime.now(UTC)
 
-    async def resolve_pending(self, *, limit: int | None = None) -> ResolutionSweep:
+    @property
+    def wanted_per_category(self) -> int:
+        return self.settings.sharia_source_links_per_category
+
+    @property
+    def activity_floor(self) -> float:
+        return self.settings.sharia_source_activity_floor
+
+    async def resolve_pending(
+        self, *, limit: int | None = None, deep: bool = False
+    ) -> ResolutionSweep:
         """Work through assets whose official links have not been settled.
 
         Verified identities only. An asset whose identity a reviewer has not approved
@@ -266,7 +333,7 @@ class SourceResolutionService:
             ).all()
         )
         for asset in assets:
-            sweep.assets.append(await self.resolve_asset(asset))
+            sweep.assets.append(await self.resolve_asset(asset, deep=deep))
         return sweep
 
     async def add_reviewed_source(
@@ -324,38 +391,96 @@ class SourceResolutionService:
         )
         return row
 
-    async def resolve_asset(self, asset: CanonicalAsset) -> AssetSourceOutcome:
+    async def resolve_asset(
+        self, asset: CanonicalAsset, *, deep: bool = False
+    ) -> AssetSourceOutcome:
+        """Settle one asset's official links.
+
+        ``deep`` means "go and look properly": read the project's own site for its
+        channels and ask a search engine, even when the coin already has a working link
+        in every category. The scheduled sweep does not, because both cost somebody
+        else's server a request; the operator's re-check does.
+        """
+
         outcome = AssetSourceOutcome(asset_id=asset.id, symbol=asset.symbol)
         rows = await self._existing_rows(asset.id)
-        await self._recheck_trusted(asset, rows, outcome)
-        satisfied = {
-            row.category
-            for row in rows.values()
-            if row.verification_state == VERIFIED
-            and row.is_active
-            and row.confidence >= CONFIDENCE_FLOOR
-            and not self._due_for_recheck(row)
-        }
+        # Addresses this run has already fetched and written a verdict for. Without it
+        # a forced re-check proves the same row twice — once because the operator asked
+        # for every link, and again when a layer offers the same address.
+        settled: set[str] = set()
+        # Read before anything is proved: the homepage is re-read on the same calendar
+        # as every other link, and proving it below would otherwise make it look freshly
+        # checked and stop the channel layer from ever running.
+        look_due = self._harvest_due(asset, rows)
+        await self._ensure_website_row(asset, rows, settled)
+        await self._recheck_existing(asset, rows, outcome, settled)
+        coverage = self._coverage(rows)
         for layer in LAYER_ORDER:
             # The curated layer always runs. Its links were written down by a person and
             # the product wants more than one good link per coin, so it is not skipped
-            # just because a category is already answered. The guessing layers are
-            # skipped, because guessing costs somebody else's server a request.
-            if layer is not DiscoveryLayer.CURATED and not self._still_missing(satisfied):
+            # just because a category is already answered. The other layers stop once
+            # every category holds as many *lively* links as the product wants.
+            if layer is not DiscoveryLayer.CURATED and not categories_below(
+                coverage.lively, self.wanted_per_category
+            ):
                 break
+            if layer in {DiscoveryLayer.SOCIAL, DiscoveryLayer.SEARCH} and not self._may_look(
+                coverage.counts, deep=deep, look_due=look_due
+            ):
+                continue
             await self._run_layer(
-                layer, asset=asset, rows=rows, satisfied=satisfied, outcome=outcome
+                layer,
+                asset=asset,
+                rows=rows,
+                lively=coverage.lively,
+                outcome=outcome,
+                settled=settled,
             )
-        outcome.missing = self._still_missing(satisfied)
+            # Read the coverage again rather than adding to it as we go. See _coverage.
+            coverage = self._coverage(rows)
+        outcome.coverage = {
+            category: coverage.counts.get(category, 0) for category in REQUIRED_CATEGORIES
+        }
+        outcome.quiet = coverage.quiet
+        outcome.short = categories_below(coverage.lively, self.wanted_per_category)
+        outcome.missing = categories_below(coverage.counts, LINKS_REQUIRED_PER_CATEGORY)
         if outcome.missing or outcome.withdrawn:
             await self._escalate(asset, outcome)
         else:
             await self._close_gap_case(asset)
         return outcome
 
-    @staticmethod
-    def _still_missing(satisfied: set[str]) -> tuple[str, ...]:
-        return tuple(item for item in REQUIRED_CATEGORIES if item not in satisfied)
+    def _harvest_due(
+        self, asset: CanonicalAsset, rows: dict[str, OfficialSource]
+    ) -> bool:
+        """Whether the project's own homepage is due to be read again."""
+
+        site = (asset.official_website or "").strip()
+        if not site or not is_official_url(site):
+            return False
+        row = rows.get(normalized_url(site))
+        return row is None or self._due_for_recheck(row)
+
+    def _may_look(
+        self,
+        counts: Counter[str],
+        *,
+        deep: bool,
+        look_due: bool,
+    ) -> bool:
+        """Whether it is worth spending requests on somebody else's server today.
+
+        Reading the project's homepage for its channel links, and asking a search
+        engine, both cost a request that the cheap layers do not. Three things earn it:
+        the operator asked for a full look, the coin has a category with no working link
+        at all, or the homepage has not been read since the last recheck window.
+        """
+
+        if deep or self.force_recheck:
+            return True
+        if categories_below(counts, LINKS_REQUIRED_PER_CATEGORY):
+            return True
+        return look_due
 
     async def _existing_rows(self, asset_id: UUID) -> dict[str, OfficialSource]:
         rows = list(
@@ -369,7 +494,61 @@ class SourceResolutionService:
         )
         return {row.normalized_url: row for row in rows}
 
-    def _due_for_recheck(self, row: OfficialSource) -> bool:
+    async def _ensure_website_row(
+        self, asset: CanonicalAsset, rows: dict[str, OfficialSource], settled: set[str]
+    ) -> None:
+        """Make sure the approved official website is in the register, and prove it.
+
+        Identity approval records it, but assets approved before that code existed have
+        no website row at all — and the website is both a source in its own right and
+        the page the channel layer reads. Registering it as an ordinary candidate means
+        it is proved like everything else rather than trusted for having been typed.
+
+        It is proved here rather than left for a layer, because no layer proposes a
+        homepage: it is not one of the two categories the layers hunt for. A row nobody
+        proposes and nobody proves would sit at "never checked" for ever.
+        """
+
+        site = (asset.official_website or "").strip()
+        if not site or not is_official_url(site):
+            return
+        normalized = normalized_url(site)
+        if normalized in rows:
+            return
+        row = OfficialSource(
+            canonical_asset_id=asset.id,
+            category=WEBSITE,
+            title=f"{asset.name} {category_label(WEBSITE)}"[:300],
+            source_url=site,
+            normalized_url=normalized,
+            priority=CATEGORY_PRIORITY.get(WEBSITE, 100),
+            verification_state=CANDIDATE,
+            is_active=True,
+            confidence=0.0,
+            discovery_layer=str(DiscoveryLayer.IDENTITY),
+        )
+        self.session.add(row)
+        await self.session.flush()
+        rows[normalized] = row
+        settled.add(normalized)
+        proof = await self._prove(row, WEBSITE)
+        self._record(
+            row,
+            proof,
+            score_candidate(LAYER_CONFIDENCE[DiscoveryLayer.IDENTITY], proof),
+            layer=str(DiscoveryLayer.IDENTITY),
+        )
+
+    def _stale_by_calendar(self, row: OfficialSource) -> bool:
+        """Whether what the row says about itself is too old to rely on.
+
+        Kept apart from :meth:`_due_for_recheck` on purpose. "Fetch this again" and "do
+        not believe this any more" are two different questions, and a forced re-check
+        answers only the first. Folding them together made every row look untrustworthy
+        the moment the operator asked for a full re-check, so a run that was supposed to
+        confirm a coin's links reported that it had none.
+        """
+
         if row.last_checked_at is None:
             return True
         checked = row.last_checked_at
@@ -380,48 +559,162 @@ class SourceResolutionService:
         age = self._clock() - checked
         return age > timedelta(days=self.settings.sharia_source_recheck_days)
 
-    async def _recheck_trusted(
+    def _due_for_recheck(self, row: OfficialSource) -> bool:
+        return self.force_recheck or self._stale_by_calendar(row)
+
+    def _counts_towards_coverage(self, row: OfficialSource) -> bool:
+        """Whether a row is a working official source: verified, on, and proved lately."""
+
+        if row.verification_state != VERIFIED or not row.is_active:
+            return False
+        if row.confidence < CONFIDENCE_FLOOR:
+            return False
+        return not self._stale_by_calendar(row)
+
+    def _is_lively(self, row: OfficialSource) -> bool:
+        """Whether a working source is also still saying something worth reading.
+
+        Deliberately **not** part of :meth:`_counts_towards_coverage`. A quiet page is
+        still a real official source: it is not withdrawn, not un-verified, and it still
+        stops a human task being raised. All that changes is that the machine keeps
+        looking for company for it, which is exactly what "the confidence is low, go and
+        find more" has to mean. Letting activity un-verify a link instead would delete a
+        coin's evidence because its forum happens not to print dates.
+        """
+
+        return self._stored_activity(row) >= self.activity_floor
+
+    @staticmethod
+    def _stored_activity(row: OfficialSource) -> float:
+        """The activity score last written on a row, or full marks if it predates them.
+
+        A row checked before activity scoring existed has no number. Treating that as
+        zero would make every one of them stop counting at once and open a task for
+        every coin the product has, which is a report about this code rather than about
+        the links. They keep counting until their next check writes a real number.
+        """
+
+        detail = row.check_detail if isinstance(row.check_detail, dict) else {}
+        activity = detail.get("activity")
+        if not isinstance(activity, dict):
+            return 1.0
+        try:
+            return float(activity.get("score", 1.0))
+        except (TypeError, ValueError):
+            return 1.0
+
+    def _coverage(self, rows: dict[str, OfficialSource]) -> Coverage:
+        """How much coverage this asset actually has, read off its rows.
+
+        One owner for the question, and it is answered by *counting the rows* rather
+        than by adding one every time a layer proves something. Two places keeping the
+        same tally is how a link gets counted twice: the sweep counted a proved link
+        once when it read the rows and again when a later layer offered the same address
+        and found it already checked. A coin then looked better covered than it was, and
+        the layers stopped looking early.
+
+        ``counts`` decides whether a person is asked. ``lively`` decides whether the
+        machine keeps looking. Keeping those two apart is what lets the product hunt for
+        a third news page without telling a reviewer that anything is wrong.
+        """
+
+        counts: Counter[str] = Counter()
+        lively: Counter[str] = Counter()
+        quiet: list[str] = []
+        for row in rows.values():
+            if row.category not in REQUIRED_CATEGORIES:
+                continue
+            if not self._counts_towards_coverage(row):
+                continue
+            counts[row.category] += 1
+            if self._is_lively(row):
+                lively[row.category] += 1
+            else:
+                quiet.append(f"{category_label(row.category)}: {row.source_url}")
+        return Coverage(counts=counts, lively=lively, quiet=quiet)
+
+    async def _recheck_existing(
         self,
         asset: CanonicalAsset,
         rows: dict[str, OfficialSource],
         outcome: AssetSourceOutcome,
+        settled: set[str],
     ) -> None:
-        """Prove the links that were trusted without ever being fetched.
+        """Prove the links the register already holds.
 
-        Every source registered before this module existed was written straight to
-        ``verified``. Some of them are dead. A dead link that still says ``verified``
+        Every source registered before the layered resolver existed was written straight
+        to ``verified``. Some of them are dead. A dead link that still says ``verified``
         is worse than no link, because the research pipeline hands it to a reviewer as
         evidence. This is the only place that withdraws one, and it does so only on a
         settled answer — never on a timeout.
+
+        On an ordinary sweep only rows that are currently trusted are touched. A row
+        still sitting at ``candidate`` or ``unreachable`` was never evidence, so
+        re-proving it here would report it as *withdrawn* every sweep — and an asset
+        that looked like it had just lost a source would keep its human task open for
+        ever. Those rows are retried by the layer walk instead, which is where they
+        belong. A forced re-check proves them too, because the operator asked for every
+        link; it still only reports a **withdrawal** for a row that was trusted before,
+        which is what keeps that rule intact.
         """
 
         for row in rows.values():
-            # Only links that are currently trusted. A row still sitting at
-            # ``candidate`` or ``unreachable`` was never evidence, so re-proving it here
-            # would report it as *withdrawn* every sweep — and an asset that looked like
-            # it had just lost a source would keep its human task open for ever. Those
-            # rows are retried by the layer walk instead, which is where they belong.
-            if row.verification_state != VERIFIED:
+            trusted = row.verification_state == VERIFIED
+            if not self.force_recheck and not trusted:
                 continue
             if not row.is_active or not self._due_for_recheck(row):
                 continue
+            settled.add(row.normalized_url)
             proof = await self._prove(row, row.category)
             if proof.usable:
-                base = row.confidence or CONFIDENCE_FLOOR
+                base = row.confidence or LAYER_CONFIDENCE.get(
+                    _layer_of(row), CONFIDENCE_FLOOR
+                )
                 self._record(row, proof, score_candidate(base, proof), layer=row.discovery_layer)
                 continue
             if proof.definitively_dead:
                 self._record(row, proof, 0.0, layer=row.discovery_layer)
-                row.verification_state = UNREACHABLE
-                row.is_active = False
-                outcome.withdrawn.append(f"{category_label(row.category)}: {row.source_url}")
+                if trusted:
+                    row.is_active = False
+                    outcome.withdrawn.append(
+                        f"{category_label(row.category)}: {row.source_url}"
+                    )
                 continue
-            # Could not be checked. Say so, change nothing else.
-            row.last_checked_at = self._clock()
-            row.check_detail = {
-                "outcome": "not_checked",
-                "reason": _capped(proof.error_code or "unavailable"),
-            }
+            if trusted:
+                # Could not be checked. Say so, change nothing else.
+                row.last_checked_at = self._clock()
+                row.check_detail = {
+                    "outcome": "not_checked",
+                    "reason": _capped(proof.error_code or "unavailable"),
+                }
+            else:
+                self._record(row, proof, 0.0, layer=row.discovery_layer)
+
+    async def _candidates(
+        self,
+        layer: DiscoveryLayer,
+        *,
+        asset: CanonicalAsset,
+    ) -> tuple[SourceCandidate, ...]:
+        """One layer's proposals, including the two that have to go and look."""
+
+        channel_links: tuple[str, ...] = ()
+        search_results: tuple[SearchResult, ...] = ()
+        if layer is DiscoveryLayer.SOCIAL:
+            channel_links = await self.discovery.channel_links(asset.official_website)
+        elif layer is DiscoveryLayer.SEARCH:
+            search_results = await self.discovery.search(
+                asset_name=asset.name, symbol=asset.symbol
+            )
+        return candidates_for(
+            layer,
+            symbol=asset.symbol,
+            asset_name=asset.name,
+            official_website=asset.official_website,
+            official_documentation=asset.official_documentation,
+            channel_links=channel_links,
+            search_results=search_results,
+        )
 
     async def _run_layer(
         self,
@@ -429,39 +722,39 @@ class SourceResolutionService:
         *,
         asset: CanonicalAsset,
         rows: dict[str, OfficialSource],
-        satisfied: set[str],
+        lively: Counter[str],
         outcome: AssetSourceOutcome,
+        settled: set[str],
     ) -> None:
-        # A person writing links down is worth following to the end: the product wants
-        # more than one good link per coin. A rule guessing addresses is not, so a
-        # guessing layer stops as soon as it has answered a category.
-        stop_when_answered = layer is not DiscoveryLayer.CURATED
-        candidates = candidates_for(
-            layer,
-            symbol=asset.symbol,
-            asset_name=asset.name,
-            official_website=asset.official_website,
-            official_documentation=asset.official_documentation,
-        )
+        # A person writing links down is worth following to the end. Every other layer
+        # stops offering a category once it holds as many links as the product wants.
+        # ``found`` is what this layer has added so far, counted only so the layer knows
+        # when to stop; the asset's real coverage is re-read from its rows afterwards.
+        stop_when_full = layer is not DiscoveryLayer.CURATED
+        found: Counter[str] = Counter()
+        candidates = await self._candidates(layer, asset=asset)
         for candidate in candidates:
-            if stop_when_answered and candidate.category in satisfied:
+            held = lively.get(candidate.category, 0) + found.get(candidate.category, 0)
+            if stop_when_full and held >= self.wanted_per_category:
                 continue
+            if candidate.normalized_url in settled:
+                continue  # already fetched and judged earlier in this same run
             row = rows.get(candidate.normalized_url)
             if row is not None and not self._due_for_recheck(row):
-                if row.verification_state == VERIFIED and row.is_active:
-                    satisfied.add(row.category)
                 continue
             row = await self._register(asset, candidate, row)
             rows[candidate.normalized_url] = row
+            settled.add(candidate.normalized_url)
             proof = await self._prove(row, candidate.category)
             confidence = score_candidate(candidate.confidence, proof)
             self._record(row, proof, confidence, layer=str(layer))
             label = f"{category_label(candidate.category)}: {candidate.url}"
-            if row.verification_state == VERIFIED:
-                satisfied.add(candidate.category)
-                outcome.proved.append(label)
-            else:
+            if row.verification_state != VERIFIED:
                 outcome.rejected.append(label)
+                continue
+            outcome.proved.append(label)
+            if proof.activity_score >= self.activity_floor:
+                found[candidate.category] += 1
 
     async def _register(
         self,
@@ -470,6 +763,11 @@ class SourceResolutionService:
         existing: OfficialSource | None,
     ) -> OfficialSource:
         if existing is not None:
+            if not existing.is_active:
+                # A layer is offering this address again. Switch it back on so the proof
+                # below decides, rather than leaving a working page permanently off
+                # because it failed once.
+                existing.is_active = True
             return existing
         row = OfficialSource(
             canonical_asset_id=asset.id,
@@ -500,7 +798,7 @@ class SourceResolutionService:
         row.content_published_at = proof.published_at
         if layer:
             row.discovery_layer = layer
-        row.check_detail = {
+        detail: dict[str, Any] = {
             "reachable": proof.reachable,
             "robots_allowed": proof.allowed,
             "readable": proof.readable,
@@ -509,9 +807,15 @@ class SourceResolutionService:
             "error": _capped(proof.error_code) if proof.error_code else None,
             **{key: _capped(value) for key, value in proof.detail.items()},
         }
+        if proof.activity is not None:
+            detail["activity"] = proof.activity.as_detail()
+            detail["activity_note"] = _capped(proof.activity.sentence(), 400)
+        row.check_detail = detail
         if proof.usable and confidence >= CONFIDENCE_FLOOR:
             row.verification_state = VERIFIED
             row.verified_at = self._clock()
+        elif proof.forbidden:
+            row.verification_state = NOT_PERMITTED
         elif proof.definitively_dead:
             row.verification_state = UNREACHABLE
         else:
@@ -546,9 +850,13 @@ class SourceResolutionService:
             )
         readable = len(text.strip()) >= MINIMUM_READABLE_CHARACTERS
         now = self._clock()
-        published = newest_published_at(
-            "\n".join([*headings, text]), now=now
-        )
+        # The dates a page states in markup are added to the words it prints, and both
+        # are read by the one date parser. Without the markup half, a Telegram channel
+        # or any blog that renders "20 August" with the year only in a ``<time>`` tag
+        # scored as having published nothing since it began.
+        page = "\n".join([*headings, text, *extract_dates(body, row.source_url)])
+        activity = measure(page, category=category, now=now)
+        published = activity.newest_published_at
         if category == NEWS:
             fresh = published is not None and (
                 now - published <= timedelta(days=NEWS_MAXIMUM_AGE_DAYS)
@@ -565,6 +873,7 @@ class SourceResolutionService:
             status=status,
             published_at=published,
             detail={"characters": len(text.strip())},
+            activity=activity,
         )
 
     async def _escalate(self, asset: CanonicalAsset, outcome: AssetSourceOutcome) -> None:
@@ -644,6 +953,20 @@ class SourceResolutionService:
             return
         case.state = "resolved"
         case.done_at = self._clock()
+
+
+def _layer_of(row: OfficialSource) -> DiscoveryLayer:
+    """Which layer a stored row came from, defaulting to the weakest reading.
+
+    An unknown or missing layer name is read as the guessing layer on purpose: it is
+    the lowest starting confidence there is, so a row whose provenance was lost can
+    never be scored higher than one whose provenance is known.
+    """
+
+    try:
+        return DiscoveryLayer(str(row.discovery_layer or ""))
+    except ValueError:
+        return DiscoveryLayer.CONVENTION
 
 
 def _status_from_error(message: str) -> int | None:

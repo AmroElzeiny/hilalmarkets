@@ -11,9 +11,23 @@ from ai_market_monitor.db.models import AccountEmailDelivery
 from ai_market_monitor.services.email_branding import BrandedEmail, HilalMarketsEmailRenderer
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
 
+#: What kind of message each template is, for the header chip and the delivery record.
+#:
+#: The sender used to be handed a flat ``"account_access_changed"`` for every row in this
+#: outbox, so a sign-up welcome and an affiliate approval both arrived labelled as an
+#: access change — and the chip in the header, which is the one thing telling a reader
+#: what kind of message they have opened, said the wrong thing on both.
+PURPOSE_BY_TEMPLATE_KIND: dict[str, str] = {
+    "signup_welcome": "account_notice",
+    "access_changed": "account_access_changed",
+    "affiliate_application_received": "affiliate_programme",
+    "affiliate_application_approved": "affiliate_programme",
+    "affiliate_application_rejected": "affiliate_programme",
+}
+
 
 class AccountEmailOutboxService:
-    """Deliver idempotent account-access notices without delaying the admin action."""
+    """Deliver idempotent account notices without delaying the action that raised them."""
 
     def __init__(self, session: AsyncSession, settings: Settings):
         self.session = session
@@ -56,7 +70,9 @@ class AccountEmailOutboxService:
                     text_body=rendered.text_body,
                     html_body=rendered.html_body,
                     idempotency_key=row.event_key,
-                    purpose="account_access_changed",
+                    purpose=PURPOSE_BY_TEMPLATE_KIND.get(
+                        row.template_kind, "account_notice"
+                    ),
                 )
             except EmailDeliveryError as exc:
                 refreshed = await self.session.get(AccountEmailDelivery, row.id)
@@ -112,6 +128,30 @@ class AccountEmailOutboxService:
                 plan_name=str(payload.get("plan_name") or "Hilal Markets access"),
                 duration_label=str(payload.get("duration_label") or "Not specified"),
                 ends_at_label=_utc_label(ends_at) if ends_at else None,
+            )
+        # The three affiliate messages queue here rather than in an outbox of their own.
+        # One outbox means one retry rule, one idempotency key, and one place a stuck
+        # message is found — three of those, one per feature, is how a message quietly
+        # stops being retried in the corner nobody looks at.
+        if delivery.template_kind == "affiliate_application_received":
+            return renderer.affiliate_application_received(
+                first_name=str(payload.get("first_name") or ""),
+                requested_code=str(payload.get("requested_code") or ""),
+                decision_hours=int(payload.get("decision_hours") or 24),
+            )
+        if delivery.template_kind == "affiliate_application_approved":
+            return renderer.affiliate_application_approved(
+                first_name=str(payload.get("first_name") or ""),
+                discount_code=str(payload.get("discount_code") or ""),
+                discount_percent=str(payload.get("discount_percent") or "0"),
+                commission_percent=str(payload.get("commission_percent") or "0"),
+                referral_url=str(payload.get("referral_url") or ""),
+                minimum_payout=str(payload.get("minimum_payout") or "$5.00"),
+            )
+        if delivery.template_kind == "affiliate_application_rejected":
+            return renderer.affiliate_application_rejected(
+                first_name=str(payload.get("first_name") or ""),
+                reason=str(payload.get("reason") or "") or None,
             )
         raise ValueError("Unsupported account email template.")
 

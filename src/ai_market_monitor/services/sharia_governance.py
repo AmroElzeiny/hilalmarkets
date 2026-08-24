@@ -50,7 +50,7 @@ from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningService,
     methodology_is_development_only,
 )
-from ai_market_monitor.services.sharia_source_catalog import normalized_url
+from ai_market_monitor.services.sharia_source_catalog import VERIFIED, normalized_url
 from ai_market_monitor.telegram.adapter import TelegramDeliveryError, TelegramHttpAdapter
 from ai_market_monitor.telegram.types import TelegramButton, TelegramOutboundMessage
 
@@ -1443,7 +1443,7 @@ class ShariaGovernanceService:
                 source_url=context.external.source_url,
                 normalized_url=normalized,
                 priority=5,
-                verification_state="verified",
+                verification_state=VERIFIED,
                 verified_by_user_id=admin_user_id,
                 verified_at=datetime.now(UTC),
                 is_active=True,

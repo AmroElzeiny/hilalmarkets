@@ -230,6 +230,10 @@ def test_final_authenticated_styles_use_only_approved_brand_hex_colors():
         # `/main`. A new page is exactly where a new colour gets invented, so the sheet
         # that designs it is held to the same palette as the ones it sits on top of.
         Path("src/ai_market_monitor/static/hm-main.css"),
+        # The affiliate page. A new sheet is exactly where a colour gets invented, and
+        # this one draws money — a balance card in an unapproved green would look like a
+        # status the platform never assigned.
+        Path("src/ai_market_monitor/static/hm-affiliate.css"),
         # The side menu and the topbar. They are on every signed-in page, so a colour
         # invented here would be invented on all of them at once.
         Path("src/ai_market_monitor/static/hm-shell.css"),

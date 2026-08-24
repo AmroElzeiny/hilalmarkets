@@ -1321,6 +1321,10 @@ async def _resolve_official_sources() -> dict:
         "status": "completed",
         "assets_checked": len(sweep.assets),
         "links_proved": sweep.proved,
+        # Links that answer but have stopped saying anything worth reading. Not a
+        # failure and never a withdrawal: it is how many pages the product is now
+        # looking for company for.
+        "links_gone_quiet": sweep.quiet,
         "sent_to_a_person": sweep.escalated,
     }
 

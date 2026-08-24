@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.db.models import (
     AuditEvent,
+    Plan,
     ReferralCode,
     ReferralRelationship,
     Subscription,
@@ -76,19 +77,31 @@ class ReferralService:
         )
         if relationship is None or relationship.reward_status == "granted":
             return relationship
-        paid_subscription = await self.session.scalar(
-            select(Subscription.id).where(
-                Subscription.user_id == referred_user_id,
-                Subscription.status == SubscriptionStatus.ACTIVE,
+        paid = (
+            await self.session.execute(
+                select(Subscription.id, Plan.price_monthly, Plan.code)
+                .join(Plan, Plan.id == Subscription.plan_id)
+                .where(
+                    Subscription.user_id == referred_user_id,
+                    Subscription.status == SubscriptionStatus.ACTIVE,
+                )
             )
-        )
-        if paid_subscription is None:
+        ).first()
+        if paid is None:
             return relationship
+        subscription_id, price_monthly, plan_code = paid
         relationship.status = "paid_converted"
         relationship.reward_status = "eligible_after_first_paid_month"
         relationship.metadata_json = {
             **relationship.metadata_json,
-            "paid_subscription_id": str(paid_subscription),
+            "paid_subscription_id": str(subscription_id),
+            # What the customer actually paid, written down at the moment it became true.
+            # An affiliate's commission is a share of this, and nothing else: without it
+            # the share would have to be taken of an assumed plan price, which is how a
+            # balance comes to show money that was never received. The plan's price can
+            # change tomorrow; this row is what happened today.
+            "paid_amount_usd": str(price_monthly),
+            "paid_plan_code": plan_code,
         }
         self._audit(
             relationship.referrer_user_id,

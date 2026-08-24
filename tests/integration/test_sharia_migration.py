@@ -1,5 +1,4 @@
 import os
-import re
 import sqlite3
 import subprocess
 import sys
@@ -38,41 +37,31 @@ def _run_alembic_downgrade(
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_sharia_migration_identifiers_fit_postgresql_limit():
-    repo_root = Path(__file__).resolve().parents[2]
-    migration_paths = [
-        repo_root
-        / "alembic"
-        / "versions"
-        / "c5d6e7f8a9b0_add_sharia_first_product_layer.py",
-        repo_root
-        / "alembic"
-        / "versions"
-        / "e7f8a9b0c1d2_add_passport_governance_checkout_email.py",
-        repo_root
-        / "alembic"
-        / "versions"
-        / "6f02832495ab_add_fasset_and_aggregate_methodologies.py",
-        repo_root
-        / "alembic"
-        / "versions"
-        / "70a1395b26cf_add_system_brain_user_controls.py",
-        repo_root
-        / "alembic"
-        / "versions"
-        / "81b24a6c37de_add_methodology_import_pack_metadata.py",
-    ]
-    explicit_names = [
-        name
-        for migration_path in migration_paths
-        for name in re.findall(
-            r'"((?:fk|ix|uq|ck)_[A-Za-z0-9_]+)"',
-            migration_path.read_text(encoding="utf-8"),
-        )
-    ]
+def test_the_postgresql_identifier_limit_is_checked_for_every_migration():
+    """This check used to live here, naming five migration files out of sixty-five.
 
-    over_limit = sorted({name for name in explicit_names if len(name) > 63})
-    assert over_limit == []
+    It was wrong in both directions. It could not see the migration with the most
+    over-long names in the whole schema, so it passed while eight of them sat there; and
+    its rule — "no name over 63 characters" — is not the real rule, so had those files
+    been on its list it would have failed on names that are perfectly safe.
+
+    The real rule is that a name is either short enough for PostgreSQL *or* marked with
+    ``op.f()`` so SQLAlchemy shortens it. That is checked for every migration file and
+    every table in ``tests/unit/test_invariant_database_identifiers.py``. This test only
+    proves the check still covers this directory, so the rule cannot quietly lose its
+    scope again.
+    """
+
+    from tests.unit.test_invariant_database_identifiers import (
+        MIGRATION_FILES,
+        TABLES,
+    )
+
+    repo_root = Path(__file__).resolve().parents[2]
+    on_disk = sorted((repo_root / "alembic" / "versions").glob("*.py"))
+
+    assert on_disk == MIGRATION_FILES
+    assert len(TABLES) >= 150
 
 
 def test_sc_governance_migration_reaches_head_and_seeds_no_assets(tmp_path):

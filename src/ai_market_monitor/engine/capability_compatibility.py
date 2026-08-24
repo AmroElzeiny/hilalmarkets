@@ -12,6 +12,10 @@ from ai_market_monitor.engine.capabilities import CapabilitySpec, all_capabiliti
 from ai_market_monitor.engine.context_conditions import TIME_CONDITION_NAMES
 from ai_market_monitor.engine.indicators import IndicatorRegistry
 from ai_market_monitor.engine.price_action import PRICE_ACTION_NAMES
+from ai_market_monitor.engine.provider_families import (
+    ProviderAvailability,
+    runtime_availability,
+)
 from ai_market_monitor.schemas.strategy import ConditionRule
 
 Availability = Literal[
@@ -47,18 +51,39 @@ class CapabilityCompatibility:
         }
 
 
-def compatibility_report() -> list[CapabilityCompatibility]:
+def compatibility_report(
+    availability: ProviderAvailability | None = None,
+) -> list[CapabilityCompatibility]:
+    resolved = availability or runtime_availability()
     registry = IndicatorRegistry()
-    return [_check_capability(capability, registry) for capability in all_capabilities()]
+    return [_check_capability(capability, registry, resolved) for capability in all_capabilities()]
 
 
-@lru_cache(maxsize=1)
-def compatibility_by_key() -> dict[str, CapabilityCompatibility]:
-    return {row.key: row for row in compatibility_report()}
+def compatibility_by_key(
+    availability: ProviderAvailability | None = None,
+) -> dict[str, CapabilityCompatibility]:
+    """The compatibility row for every capability, keyed by capability key.
+
+    Resolving the deployment's availability *before* the cache is what keeps the cache
+    honest. Caching a no-argument call would freeze whichever answer happened to be
+    correct at import time, and a deployment that later configured a feed would keep
+    reading the old one for the life of the process.
+    """
+
+    return _compatibility_by_key(availability or runtime_availability())
 
 
-def prompt_executable_capabilities() -> tuple[CapabilitySpec, ...]:
-    compatibility = compatibility_by_key()
+@lru_cache(maxsize=8)
+def _compatibility_by_key(
+    availability: ProviderAvailability,
+) -> dict[str, CapabilityCompatibility]:
+    return {row.key: row for row in compatibility_report(availability)}
+
+
+def prompt_executable_capabilities(
+    availability: ProviderAvailability | None = None,
+) -> tuple[CapabilitySpec, ...]:
+    compatibility = compatibility_by_key(availability)
     return tuple(
         capability
         for capability in all_capabilities()
@@ -66,8 +91,10 @@ def prompt_executable_capabilities() -> tuple[CapabilitySpec, ...]:
     )
 
 
-def prompt_blocked_capabilities() -> tuple[CapabilitySpec, ...]:
-    compatibility = compatibility_by_key()
+def prompt_blocked_capabilities(
+    availability: ProviderAvailability | None = None,
+) -> tuple[CapabilitySpec, ...]:
+    compatibility = compatibility_by_key(availability)
     return tuple(
         capability
         for capability in all_capabilities()
@@ -78,6 +105,7 @@ def prompt_blocked_capabilities() -> tuple[CapabilitySpec, ...]:
 def _check_capability(
     capability: CapabilitySpec,
     indicators: IndicatorRegistry,
+    availability: ProviderAvailability,
 ) -> CapabilityCompatibility:
     notes: list[str] = []
     template_valid = True
@@ -117,11 +145,13 @@ def _check_capability(
         if operand.kind.value == "market_metric" and operand.name in TIME_CONDITION_NAMES:
             notes.append("time_context_supported")
 
-    availability = _availability(capability, template_valid, evaluator_supported)
+    resolved = _availability(capability, template_valid, evaluator_supported, availability)
+    if resolved == "provider_required":
+        notes.append(f"feed_not_configured:{capability.provider_required}")
     return CapabilityCompatibility(
         key=capability.key,
         label=capability.label,
-        availability=availability,
+        availability=resolved,
         template_valid=template_valid,
         evaluator_supported=evaluator_supported,
         prompt_alias_count=len(capability.aliases),
@@ -134,8 +164,15 @@ def _availability(
     capability: CapabilitySpec,
     template_valid: bool,
     evaluator_supported: bool,
+    availability: ProviderAvailability,
 ) -> Availability:
-    if capability.provider_required:
+    # Asked of the deployment, not read off the label. A capability that names a feed is
+    # hidden only while that feed cannot answer; when it can, the capability goes on to
+    # face exactly the same template and evaluator checks as every other one, and is
+    # published only if it passes them. The old code returned here unconditionally, so a
+    # feed the platform serves itself — the order book, the risk numbers, the alert
+    # budget — could never be reached however the product was configured.
+    if capability.provider_required and not availability.serves(capability.provider_required):
         return "provider_required"
     if not capability.executable or capability.availability == "unsupported":
         return "unsupported"

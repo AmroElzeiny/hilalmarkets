@@ -18,6 +18,10 @@ from ai_market_monitor.db.models.accounts import (
     UserIdentity,
     WebSession,
 )
+from ai_market_monitor.db.models.affiliate import (
+    AffiliateApplication,
+    AffiliatePayoutRequest,
+)
 from ai_market_monitor.db.models.capability_extensions import (
     CapabilityClarificationEvidence,
     CapabilityExtension,
@@ -223,6 +227,8 @@ from ai_market_monitor.db.models.whatsapp import (
 
 __all__ = [
     "AIAnalysisSnapshot",
+    "AffiliateApplication",
+    "AffiliatePayoutRequest",
     "AccountAdminAction",
     "AccountBan",
     "AccountEmailDelivery",

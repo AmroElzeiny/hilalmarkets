@@ -32,7 +32,7 @@ from ai_market_monitor.db.models import (
 from ai_market_monitor.db.models.enums import IdentityProvider, UserRole, UserStatus
 from ai_market_monitor.services.account_admin import identifier_is_banned
 from ai_market_monitor.services.email_delivery import AuthEmailService
-from ai_market_monitor.services.governance_bootstrap import grant_owner_governance_roles
+from ai_market_monitor.services.governance_bootstrap import ensure_configured_owner_grants
 
 SESSION_COOKIE_NAME = "amm_session"
 SESSION_DAYS = 30
@@ -123,8 +123,9 @@ class WebAuthService:
             user.last_seen_at = datetime.now(UTC)
         await self.session.flush()
         if created and user.role == UserRole.ADMIN:
-            await grant_owner_governance_roles(
+            await ensure_configured_owner_grants(
                 self.session,
+                settings=self.settings,
                 email=normalized,
                 reason="Configured System Brain administrator completed verified signup.",
             )
@@ -401,8 +402,9 @@ class WebAuthService:
         )
         await self.session.flush()
         if is_configured_admin:
-            await grant_owner_governance_roles(
+            await ensure_configured_owner_grants(
                 self.session,
+                settings=self.settings,
                 email=normalized,
                 reason="Configured System Brain administrator completed verified signup.",
             )
@@ -609,7 +611,42 @@ class WebAuthService:
         )
         self.session.add(row)
         await self.session.flush()
+        await self._reconcile_governance_authority(user)
         return WebSessionTokenService(self.settings).issue(row.id, raw)
+
+    async def _reconcile_governance_authority(self, user: User) -> None:
+        """Bring a configured System Brain owner's governance grants up to date.
+
+        Signing in is the one door every way into the dashboard passes through — sign-up,
+        password, emailed code and the one-click link all end here — so it is where the
+        grants named by ``SYSTEM_BRAIN_ADMIN_EMAILS`` are reconciled. Writing them only
+        while an account was being created left an owner whose account already existed
+        with no authority at all, and no way to gain any without a shell on the server.
+
+        Costs nothing for anybody else: an account that is not an administrator, or a
+        deployment with no configured owner, returns before touching the database.
+        """
+
+        if user.role != UserRole.ADMIN or not self.settings.system_brain_authorized_emails:
+            return
+        addresses = (
+            await self.session.scalars(
+                select(UserIdentity.normalized_identifier).where(
+                    UserIdentity.user_id == user.id,
+                    UserIdentity.provider == IdentityProvider.EMAIL,
+                    UserIdentity.is_verified.is_(True),
+                )
+            )
+        ).all()
+        for address in addresses:
+            granted = await ensure_configured_owner_grants(
+                self.session,
+                settings=self.settings,
+                email=address or "",
+                reason="Configured System Brain owner signed in.",
+            )
+            if granted:
+                return
 
     async def current_user(self, cookie_value: str | None) -> User | None:
         if not cookie_value:

@@ -14,7 +14,7 @@ project change what it does". Every caller imports the names from here rather th
 re-typing them, because the recurring failure in this codebase is two modules that each
 understood a different subset of the same word list.
 
-**The layers.** A link can be known in three ways, and they are not equally trustworthy:
+**The layers.** A link can be known in five ways, and they are not equally trustworthy:
 
 ======================  ==================================================  ==========
 Layer                   How it knows                                        Confidence
@@ -23,6 +23,11 @@ Layer                   How it knows                                        Conf
 ``IDENTITY``            Derived from the identity a reviewer already          0.75
                         approved: the official site, the docs, the
                         provider profile
+``SOCIAL``              A channel the project's own website links to —        0.70
+                        its Telegram channel, its X account, its forum
+``SEARCH``              Found by searching the open web for the project's     0.55/0.45
+                        own news, and kept only if it is provably the
+                        project's own page or handle
 ``CONVENTION``          Guessed from the official domain — ``/blog``,         0.45
                         ``/news``, ``/community``
 ======================  ==================================================  ==========
@@ -34,6 +39,13 @@ and — for news — recent. That ordering is what makes a guessed URL safe to p
 wrong guess cannot promote itself, it can only fail its proof and fall through to the
 next layer, and then to a person.
 
+The two layers that need the network are still decided here. ``sharia_source_discovery``
+does the fetching and the searching; it hands the raw links and the raw search results
+back to this module, and **this module alone** decides whether an address is the
+project's own and which category it belongs to. Splitting it the other way round is how
+the duplicate-vocabulary failure starts: the searcher would learn one set of rules about
+what "official" means and the catalog another.
+
 The confidence numbers are deliberately coarse. They rank candidates and decide when to
 give up on the machine and ask a human; they are not a probability of anything, and no
 Sharia status is ever read from them.
@@ -41,7 +53,8 @@ Sharia status is ever read from them.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from urllib.parse import urlsplit, urlunsplit
@@ -71,6 +84,28 @@ SOURCE_CATEGORIES: dict[str, str] = {
 #: which is the half a Sharia review has to keep watching after publication.
 REQUIRED_CATEGORIES: tuple[str, ...] = (NEWS, COMMUNITY)
 
+#: Everything a source row's ``verification_state`` may say, and the plain words for it.
+#:
+#: The states are vocabulary, so they live here with the categories rather than beside
+#: the code that writes them. ``sharia_source_resolution`` is still the only module
+#: allowed to *write* one; this is the only module that decides what they are called.
+#:
+#: ``not_permitted`` is the newest and the reason the plain words exist. It means the
+#: page is real and the site's own rules say the product may not read it — which is a
+#: completely different job for a person than a dead link, and both used to be shown as
+#: "unreachable". A reviewer went hunting for a replacement page that already existed.
+VERIFIED = "verified"
+CANDIDATE = "candidate"
+UNREACHABLE = "unreachable"
+NOT_PERMITTED = "not_permitted"
+
+VERIFICATION_STATES: dict[str, str] = {
+    VERIFIED: "working",
+    CANDIDATE: "not proved yet",
+    UNREACHABLE: "gone",
+    NOT_PERMITTED: "blocked to us",
+}
+
 #: Ordering inside an asset's source list. Lower is read first.
 CATEGORY_PRIORITY: dict[str, int] = {
     WEBSITE: 10,
@@ -85,6 +120,8 @@ class DiscoveryLayer(StrEnum):
 
     CURATED = "curated"
     IDENTITY = "identity"
+    SOCIAL = "social"
+    SEARCH = "search"
     CONVENTION = "convention"
 
 
@@ -93,7 +130,16 @@ class DiscoveryLayer(StrEnum):
 LAYER_ORDER: tuple[DiscoveryLayer, ...] = (
     DiscoveryLayer.CURATED,
     DiscoveryLayer.IDENTITY,
+    DiscoveryLayer.SOCIAL,
+    DiscoveryLayer.SEARCH,
     DiscoveryLayer.CONVENTION,
+)
+
+#: The layers that cannot answer from what is already known. They need somebody to go
+#: and look: fetch the project's own site, or ask a search engine. ``candidates_for``
+#: still decides what their findings mean — see the module note.
+NETWORK_LAYERS: frozenset[DiscoveryLayer] = frozenset(
+    {DiscoveryLayer.SOCIAL, DiscoveryLayer.SEARCH}
 )
 
 #: A curated link somebody checked against the project's own site.
@@ -102,9 +148,19 @@ CURATED_CONFIDENT = 0.95
 #: usually a site that has moved once. Still has to survive its proof.
 CURATED_LIKELY = 0.80
 
+#: A search result on the project's own domain, or a channel whose address the
+#: project's own site also carries. The address is the project's; which page it is
+#: still has to be proved.
+SEARCH_OWN_DOMAIN = 0.55
+#: A channel on somebody else's platform whose handle matches the project's name and
+#: nothing else vouches for it. The weakest thing this module will propose at all.
+SEARCH_NAME_MATCHED = 0.45
+
 LAYER_CONFIDENCE: dict[DiscoveryLayer, float] = {
     DiscoveryLayer.CURATED: CURATED_CONFIDENT,
     DiscoveryLayer.IDENTITY: 0.75,
+    DiscoveryLayer.SOCIAL: 0.70,
+    DiscoveryLayer.SEARCH: SEARCH_OWN_DOMAIN,
     DiscoveryLayer.CONVENTION: 0.45,
 }
 
@@ -120,6 +176,18 @@ PROOF_BONUS = 0.30
 #: A news page whose newest dated item is older than this is stale. The project may
 #: be fine; the page has stopped being a way to hear about it.
 NEWS_MAXIMUM_AGE_DAYS = 400
+
+#: How many proved links each required category should end up with. One working page
+#: is a single point of failure: the day it moves, the asset has no way to hear about
+#: the project at all. Layers keep running until a category has this many, which is
+#: why a coin is expected to carry six or more links rather than two.
+LINKS_WANTED_PER_CATEGORY = 3
+
+#: How few proved links a category may fall to before a person is asked. Below the
+#: wanted number the machine simply keeps looking; below *this* number the asset has
+#: a real gap and a task is opened. Keeping the two apart is what stops the review
+#: queue filling with "this coin has two news pages instead of three".
+LINKS_REQUIRED_PER_CATEGORY = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -645,11 +713,36 @@ def category_label(category: str) -> str:
     return SOURCE_CATEGORIES.get(category, category.replace("_", " "))
 
 
+def state_label(state: str) -> str:
+    """The plain words for a source's state, for anything a person reads.
+
+    The System Brain used to print the stored word straight onto the page, so a
+    reviewer read "candidate" and "unreachable". Neither says what to do about it.
+    """
+
+    return VERIFICATION_STATES.get(state, str(state).replace("_", " "))
+
+
+def categories_below(counts: Mapping[str, int], wanted: int) -> tuple[str, ...]:
+    """Which required categories have fewer than ``wanted`` proved links.
+
+    One owner for "is this asset short", asked with two different numbers. The
+    resolver asks with :data:`LINKS_WANTED_PER_CATEGORY` to decide whether to keep
+    looking, and with :data:`LINKS_REQUIRED_PER_CATEGORY` to decide whether to ask a
+    person. Two copies of this arithmetic would eventually disagree about which of
+    those two questions a caller was asking.
+    """
+
+    return tuple(
+        category for category in REQUIRED_CATEGORIES if counts.get(category, 0) < wanted
+    )
+
+
 def missing_categories(present: Iterable[str] | None) -> tuple[str, ...]:
-    """Which required categories an asset still cannot show."""
+    """Which required categories an asset cannot show even one link for."""
 
     held = {str(item) for item in present} if present is not None else set()
-    return tuple(category for category in REQUIRED_CATEGORIES if category not in held)
+    return categories_below({category: 1 for category in held}, 1)
 
 
 def _title(asset_name: str, category: str) -> str:
@@ -791,6 +884,509 @@ def convention_candidates(
     return tuple(candidates)
 
 
+# ---------------------------------------------------------------------------
+# Channels: the places a project talks that are not its own website
+# ---------------------------------------------------------------------------
+#
+# A Shariah reviewer needs to know when a project changed what it does. More and more
+# projects say that first on Telegram or on X and only later, if ever, on a blog. So
+# those channels are official sources in exactly the same sense the blog is — and they
+# are held to exactly the same proof.
+#
+# Two rules keep this safe, and both are here rather than in the searcher:
+#
+# 1. **A channel is only official if the project itself vouches for it.** Either the
+#    project's own website links to it, or the handle is the project's own name. A
+#    Telegram group somebody set up about a coin is not the coin's announcement channel,
+#    and a search engine cannot tell the difference.
+# 2. **A single post is never a source.** ``x.com/foo/status/123`` is one message;
+#    ``x.com/foo`` is the feed that keeps producing them. Only the feed is registered.
+
+#: Hosts that let anybody publish under them. The project's own domain is decided by
+#: comparing registrable domains, and on these hosts that comparison is meaningless —
+#: ``evil.github.io`` and ``project.github.io`` share a registrable domain and share
+#: nothing else. On these, only the exact host counts as the same project.
+SHARED_PUBLISHING_HOSTS: frozenset[str] = frozenset(
+    {
+        "blogspot.com",
+        "gitbook.io",
+        "github.io",
+        "medium.com",
+        "mirror.xyz",
+        "netlify.app",
+        "notion.site",
+        "pages.dev",
+        "substack.com",
+        "vercel.app",
+        "webflow.io",
+        "wixsite.com",
+        "wordpress.com",
+    }
+)
+
+#: Two-part public suffixes this product actually meets. Not the whole public suffix
+#: list — that is a downloadable file that goes stale, and being wrong here only ever
+#: makes the same-project test *stricter*, never looser.
+_COMPOUND_SUFFIXES: frozenset[str] = frozenset(
+    {
+        "ac.uk", "co.id", "co.il", "co.in", "co.jp", "co.kr", "co.nz", "co.uk",
+        "co.za", "com.ar", "com.au", "com.br", "com.cn", "com.hk", "com.mx",
+        "com.my", "com.sg", "com.tr", "com.tw", "gov.uk", "ne.jp", "net.au",
+        "net.cn", "or.jp", "org.au", "org.cn", "org.uk",
+    }
+)
+
+#: Words in a subdomain or a path that mean "this is where the project publishes".
+NEWS_PATH_WORDS: tuple[str, ...] = (
+    "announcement",
+    "announcements",
+    "article",
+    "articles",
+    "blog",
+    "changelog",
+    "currents",
+    "insights",
+    "media",
+    "news",
+    "newsroom",
+    "post",
+    "posts",
+    "press",
+    "release",
+    "releases",
+    "update",
+    "updates",
+)
+
+#: Words that mean "this is where the project's people talk".
+COMMUNITY_PATH_WORDS: tuple[str, ...] = (
+    "community",
+    "dao",
+    "discuss",
+    "discussion",
+    "discussions",
+    "forum",
+    "forums",
+    "gov",
+    "governance",
+    "research",
+    "talk",
+)
+
+#: Handles a platform keeps for itself. ``x.com/i/flow/login`` is not a project.
+_RESERVED_HANDLES: frozenset[str] = frozenset(
+    {
+        "about", "account", "explore", "help", "home", "i", "intent", "jobs",
+        "login", "messages", "notifications", "privacy", "search", "settings",
+        "share", "signup", "support", "tos", "compose", "hashtag", "status",
+        "s", "c", "user", "users", "joinchat", "addstickers", "proxy", "socks",
+    }
+)
+
+#: Suffixes a project bolts onto its own name when it registers a handle. Used only to
+#: decide that ``@aptos_network`` belongs to Aptos — never to decide anything else.
+_HANDLE_SUFFIXES: tuple[str, ...] = (
+    "ann",
+    "announcements",
+    "app",
+    "chain",
+    "coin",
+    "community",
+    "dao",
+    "en",
+    "eng",
+    "english",
+    "fdn",
+    "foundation",
+    "global",
+    "hq",
+    "io",
+    "labs",
+    "network",
+    "news",
+    "official",
+    "officialchannel",
+    "org",
+    "project",
+    "protocol",
+    "token",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class SearchResult:
+    """One row a search engine returned. Raw, unjudged."""
+
+    url: str
+    title: str = ""
+
+
+def _host_of(value: str) -> str:
+    return urlsplit(value.strip()).netloc.casefold().partition(":")[0]
+
+
+def registrable_domain(value: str) -> str:
+    """The part of a host that identifies who owns it.
+
+    ``blog.ethereum.org`` and ``ethereum.org`` are the same project; ``ethereum.org``
+    and ``ethereum-airdrop.example`` are not. Comparing whole hosts would miss the
+    first, and comparing a bare word would accept the second.
+    """
+
+    host = _host_of(value)
+    if not host:
+        return ""
+    labels = host.split(".")
+    if len(labels) <= 2:
+        return host
+    if ".".join(labels[-2:]) in _COMPOUND_SUFFIXES:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
+def is_same_project_site(value: str, official_website: str | None) -> bool:
+    """Whether an address belongs to the site a reviewer already approved.
+
+    On a host anybody can publish under, only the exact host counts. That is the
+    difference between "the project's own blog" and "a page somebody put on the same
+    free hosting".
+    """
+
+    site = (official_website or "").strip()
+    if not site or not value.strip():
+        return False
+    site_domain = registrable_domain(site)
+    if not site_domain:
+        return False
+    if site_domain in SHARED_PUBLISHING_HOSTS:
+        return _host_of(value) == _host_of(site)
+    return registrable_domain(value) == site_domain
+
+
+def _identity_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def handle_matches_project(handle: str, *, asset_name: str, symbol: str) -> bool:
+    """Whether a platform handle is plainly the project's own.
+
+    Deliberately strict. ``@aptos``, ``@aptos_network`` and ``@AptosOfficial`` are
+    Aptos; ``@aptosnews_daily`` is somebody's fan account and is refused. Refusing is
+    always safe here — the address simply is not proposed, and the next layer runs.
+    """
+
+    wanted = {_identity_text(asset_name), _identity_text(symbol)}
+    wanted.discard("")
+    found = _identity_text(handle)
+    if not found or not wanted:
+        return False
+    if found in wanted:
+        return True
+    return any(
+        found == f"{stem}{suffix}" or found == f"{suffix}{stem}"
+        for stem in wanted
+        for suffix in _HANDLE_SUFFIXES
+    )
+
+
+def _path_parts(value: str) -> list[str]:
+    return [part for part in urlsplit(value.strip()).path.split("/") if part]
+
+
+def _word_category(words: Iterable[str]) -> str | None:
+    """Which category a set of address words points at, if any."""
+
+    lowered = {str(word).casefold() for word in words}
+    if lowered & set(NEWS_PATH_WORDS):
+        return NEWS
+    if lowered & set(COMMUNITY_PATH_WORDS):
+        return COMMUNITY
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class Channel:
+    """A public channel, said the one way the product stores it."""
+
+    category: str
+    url: str
+    #: The account name on the platform, when there is one. Empty for a plain web page.
+    handle: str = ""
+    #: The platform's own name, for the reviewer's benefit.
+    platform: str = ""
+
+
+def classify_channel(value: str, *, official_website: str | None = None) -> Channel | None:
+    """What kind of source an address is, or ``None`` if it is not one at all.
+
+    The one owner of the question "is this a news page, a community page, or neither".
+    Everything that finds an address — the harvester, the searcher, a reviewer's paste —
+    asks this rather than keeping its own idea of what a Telegram link means.
+    """
+
+    text = value.strip()
+    if not is_official_url(text):
+        return None
+    host = _host_of(text)
+    parts = _path_parts(text)
+    root = host[4:] if host.startswith("www.") else host
+
+    if root in {"t.me", "telegram.me", "telegram.dog"}:
+        # ``/s/<name>`` is Telegram's own public web view of a channel: it renders the
+        # posts, with their dates, to an ordinary HTTP client. ``/<name>`` shows a join
+        # box and nothing else, so it is rewritten to the view that can actually be
+        # read and dated. An invite link is a private group and is refused outright.
+        names = [part for part in parts if part.casefold() != "s"]
+        if not names or names[0].startswith("+") or names[0].casefold() in _RESERVED_HANDLES:
+            return None
+        handle = names[0]
+        return Channel(
+            category=NEWS, url=f"https://t.me/s/{handle}", handle=handle, platform="Telegram"
+        )
+
+    if root in {"x.com", "twitter.com"}:
+        if not parts or parts[0].casefold() in _RESERVED_HANDLES or len(parts) > 1:
+            return None  # a single post, a search, or a platform page — not a feed
+        handle = parts[0]
+        return Channel(category=NEWS, url=f"https://x.com/{handle}", handle=handle, platform="X")
+
+    if root == "reddit.com" or root.endswith(".reddit.com"):
+        if len(parts) < 2 or parts[0].casefold() != "r":
+            return None
+        handle = parts[1]
+        return Channel(
+            category=COMMUNITY,
+            url=f"https://www.reddit.com/r/{handle}/",
+            handle=handle,
+            platform="Reddit",
+        )
+
+    if root == "discord.gg" or (root == "discord.com" and parts[:1] == ["invite"]):
+        code = parts[-1] if parts else ""
+        if not code:
+            return None
+        return Channel(
+            category=COMMUNITY, url=f"https://discord.gg/{code}", platform="Discord"
+        )
+
+    if root == "github.com" and len(parts) >= 2:
+        # The organisation is the handle. A repository under ``aptos-labs`` is Aptos's
+        # own; one under ``some-fan`` is not, and without a handle to check the search
+        # layer had no way to tell them apart and refused both.
+        repository = f"https://github.com/{parts[0]}/{parts[1]}"
+        if len(parts) >= 3 and parts[2].casefold() in {"discussions", "issues"}:
+            return Channel(
+                category=COMMUNITY,
+                url=f"{repository}/discussions",
+                handle=parts[0],
+                platform="GitHub",
+            )
+        return Channel(
+            category=NEWS,
+            url=f"{repository}/releases",
+            handle=parts[0],
+            platform="GitHub",
+        )
+
+    if root == "medium.com" and parts:
+        return Channel(
+            category=NEWS,
+            url=f"https://medium.com/{parts[0]}",
+            handle=parts[0].lstrip("@"),
+            platform="Medium",
+        )
+
+    if root.endswith(".medium.com"):
+        return Channel(
+            category=NEWS, url=f"https://{host}/", handle=root.split(".")[0], platform="Medium"
+        )
+
+    if root == "mirror.xyz" and parts:
+        return Channel(
+            category=NEWS, url=f"https://mirror.xyz/{parts[0]}", handle=parts[0], platform="Mirror"
+        )
+
+    if root.endswith(".mirror.xyz"):
+        return Channel(
+            category=NEWS, url=f"https://{host}/", handle=root.split(".")[0], platform="Mirror"
+        )
+
+    if root.endswith(".substack.com"):
+        return Channel(
+            category=NEWS, url=f"https://{host}/", handle=root.split(".")[0], platform="Substack"
+        )
+
+    if root in {"youtube.com", "youtu.be"} and parts:
+        if parts[0].startswith("@"):
+            return Channel(
+                category=NEWS,
+                url=f"https://www.youtube.com/{parts[0]}",
+                handle=parts[0].lstrip("@"),
+                platform="YouTube",
+            )
+        return None
+
+    # Anything else is only a channel when it sits on the project's own site and its
+    # address says what it is. A bare homepage is already registered as the website.
+    #
+    # The word has to be the **last** part of the address, and that is the whole rule:
+    # ``solana.com/news`` is the feed, ``solana.com/news/the-token-supercycle`` is one
+    # article inside it. Reading the words anywhere in the path filed eleven separate
+    # Solana articles as eleven news sources, which is the same defect as filing one X
+    # post as a feed — a single item stops being updated the moment it is published.
+    if is_same_project_site(text, official_website):
+        if parts:
+            category = _word_category([parts[-1]])
+        else:
+            subdomain_words = root.split(".")[:-2] if root.count(".") >= 2 else []
+            category = _word_category(subdomain_words)
+        if category is not None:
+            return Channel(category=category, url=text, platform="")
+    return None
+
+
+def channel_candidates(
+    *,
+    asset_name: str,
+    official_website: str | None,
+    links: Iterable[str],
+    limit: int = 16,
+) -> tuple[SourceCandidate, ...]:
+    """Layer 3 — the channels the project's own website points at.
+
+    Not a guess and not a search result: the project published these addresses itself,
+    on the page a reviewer approved. That is the strongest claim to "this is really
+    theirs" that exists short of somebody checking by hand, which is why it sits just
+    below the identity layer.
+    """
+
+    confidence = LAYER_CONFIDENCE[DiscoveryLayer.SOCIAL]
+    produced: list[SourceCandidate] = []
+    seen: set[str] = set()
+    # Shallowest address first. When a site links to both ``/community`` and
+    # ``/community/events``, the first is the one that keeps producing, and the cap
+    # below should never be spent on the second.
+    ordered = sorted(links, key=lambda item: (len(_path_parts(item)), item))
+    for link in ordered:
+        channel = classify_channel(link, official_website=official_website)
+        if channel is None:
+            continue
+        key = normalized_url(channel.url)
+        if key in seen:
+            continue
+        seen.add(key)
+        produced.append(
+            SourceCandidate(
+                category=channel.category,
+                title=_channel_title(asset_name, channel),
+                url=channel.url,
+                layer=DiscoveryLayer.SOCIAL,
+                confidence=confidence,
+            )
+        )
+        if len(produced) >= limit:
+            break
+    return tuple(produced)
+
+
+#: What the search layer asks for. One coin, several questions, because a project's
+#: announcements do not all live in one place: the blog, the Telegram channel and the
+#: X account are three different answers to "where does this project say things".
+SEARCH_QUERIES: tuple[str, ...] = (
+    '"{name}" {symbol} crypto official news',
+    '"{name}" {symbol} official blog announcements',
+    '"{name}" crypto official Telegram announcement channel',
+    '"{name}" {symbol} official X account',
+    '"{name}" crypto official community forum',
+)
+
+
+def search_queries(*, asset_name: str, symbol: str) -> tuple[str, ...]:
+    """The exact questions the searcher asks about one coin."""
+
+    name = asset_name.strip()
+    ticker = symbol.strip().upper()
+    if not name:
+        return ()
+    return tuple(query.format(name=name, symbol=ticker).strip() for query in SEARCH_QUERIES)
+
+
+def search_candidates(
+    *,
+    asset_name: str,
+    symbol: str,
+    official_website: str | None,
+    results: Iterable[SearchResult],
+    limit: int = 16,
+) -> tuple[SourceCandidate, ...]:
+    """Layer 4 — what an open-web search turned up, after the un-official half is dropped.
+
+    A search engine answers "pages about this coin". An official source is "pages *by*
+    this coin". Those are very different sets, and the second is a small part of the
+    first: a market-data site, an exchange listing page and a news outlet's coverage all
+    rank highly and none of them is the project speaking.
+
+    So a result is kept only when it is provably the project's own — its own domain, or
+    a handle that is its own name — and everything else is dropped without comment. A
+    third-party article can be perfectly true and still must never be filed as an
+    official source, because the whole point of the register is that it holds what the
+    project itself said.
+    """
+
+    produced: list[SourceCandidate] = []
+    seen: set[str] = set()
+    for result in results:
+        candidate = _search_candidate(
+            asset_name=asset_name,
+            symbol=symbol,
+            official_website=official_website,
+            result=result,
+        )
+        if candidate is None:
+            continue
+        key = candidate.normalized_url
+        if key in seen:
+            continue
+        seen.add(key)
+        produced.append(candidate)
+        if len(produced) >= limit:
+            break
+    return tuple(produced)
+
+
+def _search_candidate(
+    *,
+    asset_name: str,
+    symbol: str,
+    official_website: str | None,
+    result: SearchResult,
+) -> SourceCandidate | None:
+    channel = classify_channel(result.url, official_website=official_website)
+    if channel is None:
+        return None
+    if is_same_project_site(channel.url, official_website):
+        confidence = SEARCH_OWN_DOMAIN
+    elif channel.handle and handle_matches_project(
+        channel.handle, asset_name=asset_name, symbol=symbol
+    ):
+        confidence = SEARCH_NAME_MATCHED
+    else:
+        return None
+    return SourceCandidate(
+        category=channel.category,
+        title=_channel_title(asset_name, channel),
+        url=channel.url,
+        layer=DiscoveryLayer.SEARCH,
+        confidence=confidence,
+    )
+
+
+def _channel_title(asset_name: str, channel: Channel) -> str:
+    if channel.platform:
+        return f"{asset_name} {channel.platform} {category_label(channel.category)}"[:300]
+    return _title(asset_name, channel.category)
+
+
 def candidates_for(
     layer: DiscoveryLayer,
     *,
@@ -798,11 +1394,17 @@ def candidates_for(
     asset_name: str,
     official_website: str | None,
     official_documentation: str | None,
+    channel_links: Iterable[str] = (),
+    search_results: Iterable[SearchResult] = (),
 ) -> tuple[SourceCandidate, ...]:
     """Every candidate one layer can offer for one asset.
 
     The single entry point. A caller walks ``LAYER_ORDER`` and asks this for each
     layer rather than knowing which function belongs to which layer.
+
+    ``channel_links`` and ``search_results`` are what somebody went and fetched for the
+    two network layers. Passing nothing is not an error: a layer with no input offers
+    no candidates, which is exactly what happens when web search is not configured.
     """
 
     if layer is DiscoveryLayer.CURATED:
@@ -812,6 +1414,19 @@ def candidates_for(
             asset_name=asset_name,
             official_website=official_website,
             official_documentation=official_documentation,
+        )
+    if layer is DiscoveryLayer.SOCIAL:
+        return channel_candidates(
+            asset_name=asset_name,
+            official_website=official_website,
+            links=channel_links,
+        )
+    if layer is DiscoveryLayer.SEARCH:
+        return search_candidates(
+            asset_name=asset_name,
+            symbol=symbol,
+            official_website=official_website,
+            results=search_results,
         )
     return convention_candidates(
         asset_name=asset_name,

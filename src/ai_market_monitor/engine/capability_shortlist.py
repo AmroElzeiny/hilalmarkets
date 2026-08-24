@@ -22,6 +22,12 @@ from typing import Any
 
 from ai_market_monitor.engine.capabilities import CapabilitySpec, all_capabilities
 from ai_market_monitor.engine.capability_index import get_capability_index
+from ai_market_monitor.engine.provider_families import (
+    BASE_MARKET_DATA_CONTRACTS,
+    CCXT_MARKET_DATA_CONTRACTS,
+    ProviderAvailability,
+    runtime_availability,
+)
 
 #: How many candidates one turn may see. Enough for a genuine choice, small enough
 #: that the list stays readable and the prompt stays bounded.
@@ -32,23 +38,30 @@ _PER_FRAGMENT_LIMIT = 6
 
 # Provider contracts backed by every launch market-data adapter. Adapter-specific
 # contracts are added only when that adapter is actually configured.
-SETUP_BASE_PROVIDER_REQUIREMENTS = frozenset(
-    {"", "ohlcv", "market_data", "candles"}
-)
-SETUP_RUNTIME_PROVIDER_REQUIREMENTS = frozenset(
-    {*SETUP_BASE_PROVIDER_REQUIREMENTS, "ccxt"}
-)
+#
+# Both names are kept because callers and tests import them, but neither is a second
+# list any more: they are derived from `engine/provider_families.py`, which is the one
+# owner of what a feed is and whether it answers. They used to be hand-written here, and
+# because they named only the candle contracts, every capability that asked for the
+# order book, the risk numbers or the cross-market prices was reported to the Builder as
+# a rule needing a feed Hilal Markets could not read — while the scanner was reading all
+# three on every candle.
+SETUP_BASE_PROVIDER_REQUIREMENTS = BASE_MARKET_DATA_CONTRACTS
+SETUP_RUNTIME_PROVIDER_REQUIREMENTS = BASE_MARKET_DATA_CONTRACTS | CCXT_MARKET_DATA_CONTRACTS
 
 
 def configured_runtime_provider_requirements(
     market_data_provider: str,
+    availability: ProviderAvailability | None = None,
 ) -> frozenset[str]:
-    """Return only contracts implemented by the configured launch adapter."""
+    """Every provider contract a rule may ask for and still be runnable here.
 
-    provider = market_data_provider.strip().casefold()
-    if provider == "ccxt":
-        return SETUP_RUNTIME_PROVIDER_REQUIREMENTS
-    return SETUP_BASE_PROVIDER_REQUIREMENTS
+    The candle contracts the configured adapter implements, plus each context feed this
+    deployment can actually read.
+    """
+
+    resolved = availability or runtime_availability()
+    return resolved.contract_names(market_data_provider=market_data_provider)
 
 
 @dataclass(frozen=True, slots=True)

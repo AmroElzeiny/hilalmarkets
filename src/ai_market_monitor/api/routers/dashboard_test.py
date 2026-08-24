@@ -45,12 +45,12 @@ from ai_market_monitor.api.routers.dashboard import (
     _permanent_redirect,
     _plan_checkout_allowed,
     _require_user,
-    _short_datetime,
     _timezone_options,
     asset_passport_context,
     screened_market_context,
     templates,
 )
+from ai_market_monitor.api.template_env import short_datetime as _short_datetime
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.dashboard_paths import (

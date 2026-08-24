@@ -56,9 +56,14 @@ def concept_e2e_rows() -> list[dict[str, Any]]:
         availability = item.get("availability", "unknown")
         evaluator_supported = bool(compatibility_row and compatibility_row.evaluator_supported)
         prompt_aliases = item.get("prompt_aliases") or []
-        provider_required = bool(
-            item.get("provider_required") or availability == "provider_required"
-        )
+        # Whether the feed answers, never which feed it is. This read
+        # ``item["provider_required"] or availability == "provider_required"``, and the
+        # first half is the *name* of the feed a card needs — always set, whether or not
+        # the product can read it. So every card naming a feed was reported as blocked,
+        # including the 84 the platform serves itself, and the matrix said
+        # "PROVIDER_REQUIRED" beside "available" in the same row. The name is still
+        # carried out below, as a name.
+        provider_required = availability == "provider_required"
         manual_add = (
             "addable"
             if availability == "available" and item.get("executable", True)

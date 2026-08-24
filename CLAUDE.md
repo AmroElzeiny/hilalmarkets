@@ -103,6 +103,28 @@ Celery memory limits were written on 22 August 2026 and then not applied to the 
 - Changing the deployed file on the server is a separate step from changing it here; say
   so plainly, and give the command.
 
+## A database name is short enough, or it is marked
+
+PostgreSQL refuses any identifier over 63 characters. SQLite does not, so the whole
+offline suite runs on a database that accepts names the real one rejects — this class of
+bug is only ever found by a deployment that will not start.
+
+SQLAlchemy does two different things with a long name, and the difference is one call:
+
+| How it is written in a migration | What happens |
+|---|---|
+| `name=op.f("fk_…")` — marked as convention-made | **shortened**: first 55 characters + 4 hex digits of its own hash |
+| `name="fk_…"` — a plain string | **validated**: over 63 it raises `IdentifierError` and nothing runs |
+
+The naming convention in `db/base.py` marks every model-side name automatically, so the
+models and a marked migration always shorten the same string the same way and agree on
+what the constraint is really called. Hand-picking a short name in the migration only is
+what creates drift.
+
+**Write every constraint and index name in a migration through `op.f()`.** 83 identifiers
+in this schema already exceed the limit. `tests/unit/test_invariant_database_identifiers.py`
+checks every migration file and every table against SQLAlchemy's own PostgreSQL validator.
+
 ## Tests assert the rule, not the case
 
 Parametrise across the whole family — every operator phrase × every indicator, every

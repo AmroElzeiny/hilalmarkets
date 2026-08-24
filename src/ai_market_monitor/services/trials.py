@@ -36,6 +36,12 @@ from ai_market_monitor.engine.dedup import stable_event_hash
 from ai_market_monitor.services.entitlements import PlanCatalogService
 from ai_market_monitor.services.monitor_scan_state import CHECK_FINISHED_STATUSES
 
+#: How many deliveries the reconcile job holds at once.
+#:
+#: It still visits every delivery — it simply does so a page at a time, so the memory it
+#: needs stays the same whether the product has sent a thousand notifications or a million.
+DELIVERY_RECONCILE_BATCH = 500
+
 QUALIFYING_ALERT_TYPES = {
     AlertType.FORMING,
     AlertType.NEAR_MISS,
@@ -470,32 +476,46 @@ class TrialLifecycleService:
         return reminders
 
     async def reconcile_alert_deliveries(self, *, now: datetime | None = None) -> dict[str, int]:
-        rows = (
-            await self.session.execute(
-                select(Alert, AlertDelivery)
-                .join(AlertDelivery, AlertDelivery.alert_id == Alert.id)
-                .where(AlertDelivery.status.in_([DeliveryStatus.SENT, DeliveryStatus.DELIVERED]))
-            )
-        ).all()
         reminders_marked = 0
         qualifying_reconciled = 0
-        for alert, delivery in rows:
-            proof = alert.proof_receipt or {}
-            message_type = str(proof.get("trial_message_type") or "")
-            if message_type.endswith("_day_remaining") or message_type == "trial_ending":
-                trial_id = proof.get("trial_id")
-                if trial_id is None:
-                    continue
-                delivered_at = delivery.delivered_at or delivery.last_attempt_at or alert.created_at
-                trial = await self.session.get(Trial, UUID(str(trial_id)))
-                if trial is not None and (
-                    trial.reminder_sent_at is None or trial.reminder_sent_at < delivered_at
-                ):
-                    trial.reminder_sent_at = delivered_at
-                    reminders_marked += 1
-            attribution = await self.record_successful_delivery(delivery)
-            if attribution is not None:
-                qualifying_reconciled += 1
+        # Every delivery ever made is still visited, but a page at a time. Asking for them
+        # all in one answer meant this job's memory grew with the product's whole history,
+        # and it carried each alert's `proof_receipt` blob along with it — the receipt is
+        # the only part of the alert this needs, so it is the only part it asks for.
+        after_id: UUID | None = None
+        while True:
+            statement = (
+                select(AlertDelivery, Alert.proof_receipt, Alert.created_at)
+                .join(Alert, Alert.id == AlertDelivery.alert_id)
+                .where(AlertDelivery.status.in_([DeliveryStatus.SENT, DeliveryStatus.DELIVERED]))
+                .order_by(AlertDelivery.id)
+                .limit(DELIVERY_RECONCILE_BATCH)
+            )
+            if after_id is not None:
+                statement = statement.where(AlertDelivery.id > after_id)
+            rows = (await self.session.execute(statement)).all()
+            if not rows:
+                break
+            for delivery, proof_receipt, alert_created_at in rows:
+                proof = proof_receipt or {}
+                message_type = str(proof.get("trial_message_type") or "")
+                if message_type.endswith("_day_remaining") or message_type == "trial_ending":
+                    trial_id = proof.get("trial_id")
+                    if trial_id is None:
+                        continue
+                    delivered_at = (
+                        delivery.delivered_at or delivery.last_attempt_at or alert_created_at
+                    )
+                    trial = await self.session.get(Trial, UUID(str(trial_id)))
+                    if trial is not None and (
+                        trial.reminder_sent_at is None or trial.reminder_sent_at < delivered_at
+                    ):
+                        trial.reminder_sent_at = delivered_at
+                        reminders_marked += 1
+                attribution = await self.record_successful_delivery(delivery)
+                if attribution is not None:
+                    qualifying_reconciled += 1
+            after_id = rows[-1][0].id
         await self.session.flush()
         return {
             "reminders_marked_sent": reminders_marked,

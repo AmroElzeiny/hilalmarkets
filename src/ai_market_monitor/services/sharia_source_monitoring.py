@@ -35,6 +35,7 @@ from ai_market_monitor.services.sharia_research import (
     ShariaResearchError,
     ShariaResearchPipeline,
 )
+from ai_market_monitor.services.sharia_source_catalog import VERIFIED
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,7 +163,7 @@ class ShariaSourceMonitoringService:
                     select(OfficialSource)
                     .where(
                         OfficialSource.canonical_asset_id == asset.id,
-                        OfficialSource.verification_state == "verified",
+                        OfficialSource.verification_state == VERIFIED,
                         OfficialSource.is_active.is_(True),
                     )
                     .order_by(OfficialSource.priority.asc(), OfficialSource.source_url.asc())
