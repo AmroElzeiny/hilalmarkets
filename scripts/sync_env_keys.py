@@ -3,6 +3,15 @@
     python scripts/sync_env_keys.py              # report only, writes nothing
     python scripts/sync_env_keys.py --apply      # write, after taking a backup
 
+    # change a value on purpose, in every real file at once
+    python scripts/sync_env_keys.py --apply --set SCAN_HISTORY_RETENTION_DAYS=3
+    python scripts/sync_env_keys.py --apply --set KEY=VALUE --only .env.production
+
+This is the tool for the deployed file too. ``.env.production`` on the server is not in
+git, so a new setting never arrives with a ``git pull`` — but the two *examples* do, and
+this fills the real file from them. Running it on the server after a deploy is the
+supported way to add a release's new keys, rather than typing them by hand.
+
 Why this is not a copy-paste job
 --------------------------------
 A key absent from a file is not "unset". It is running on its code default. Writing the
@@ -25,7 +34,22 @@ One equivalence is allowed. A field typed ``str | None`` defaulting to ``None`` 
 such field here is read as ``(value or "").strip()``, so the two are the same to the code.
 Anything else counts as a difference and is reverted.
 
-Values are never printed. Only key names, line numbers, and counts.
+``--set`` is the deliberate exception
+-------------------------------------
+The rule above makes changing a value impossible by design, which is right for a tool that
+runs on its own. But some releases really do mean to change one — the scan-history window
+went from 30 days to 3 on 24 August 2026 because fifty monitors on one-minute candles write
+about 6.7 GB a day against a 40 GB disk.
+
+``--set`` allows exactly that, and only that: the key and the value are both typed out by a
+person, so nothing is silent. It runs as its own pass, after the fill, and never borrows the
+fill's revert logic — reverting is precisely what a deliberate change must not do. The new
+file is loaded through ``Settings`` before it is kept, so a value the application cannot
+parse restores the backup instead of leaving the server with a file it will not start on.
+
+Values are never printed, with one exception: a value passed to ``--set`` is echoed back,
+because the person running the command has just typed it. An existing value is never
+printed, so replacing a secret shows that it changed and never what it was.
 """
 
 from __future__ import annotations
@@ -173,7 +197,15 @@ def sync_one(root: Path, name: str, stamp: str, apply: bool) -> int:
     print(f"  None -> '' (same to code):   {len(equivalent)} {sorted(equivalent)}")
 
     if not apply:
-        print("  DRY RUN, nothing written\n")
+        # Named, not counted. A dry run exists to be *reviewed*, and "12 keys will be
+        # added" to a production file is not something a person can agree or disagree
+        # with. The names are safe to print; these keys are absent from this file, so
+        # there is no live value here to leak — and the value shown is the example's,
+        # which is in git already.
+        print("  DRY RUN, nothing written. It would add:")
+        for key, value in additions:
+            print(f"      {key}={value}")
+        print()
         return 0
 
     backup = root / f"{name}.backup.{stamp}"
@@ -188,8 +220,116 @@ def sync_one(root: Path, name: str, stamp: str, apply: bool) -> int:
     return 0
 
 
+def set_one(root: Path, name: str, overrides: dict[str, str], stamp: str, apply: bool) -> int:
+    """Write named values into one real file, or say why it will not.
+
+    A value change is not something this tool may decide, so every part of it is typed by
+    a person. What is left to the tool is doing it safely: back up, rewrite only the lines
+    named, load the result through ``Settings``, and put the backup back if it will not
+    load. A server left holding an env file the application cannot parse does not start.
+    """
+
+    path = root / name
+    lines = read_lines(path)
+    if not lines:
+        print(f"{name}: not on disk, skipped\n")
+        return 0
+
+    present = keys_with_lines(lines)
+    changing: dict[str, str] = {}
+    unchanged: list[str] = []
+    adding: list[str] = []
+    for key, value in overrides.items():
+        if key not in present:
+            adding.append(key)
+            changing[key] = value
+        elif value_of(lines, key) == value:
+            unchanged.append(key)
+        else:
+            changing[key] = value
+
+    print(f"=== {name} ===")
+    for key in sorted(unchanged):
+        print(f"  {key}: already {overrides[key]}, nothing to do")
+    for key in sorted(adding):
+        print(f"  {key}: absent, will be added as {overrides[key]}")
+    for key in sorted(set(changing) - set(adding)):
+        # The old value is deliberately not shown: this same command replaces secrets.
+        print(f"  {key}: will change to {overrides[key]}")
+    if not changing:
+        print("  nothing to change\n")
+        return 0
+    if not apply:
+        print("  DRY RUN, nothing written\n")
+        return 0
+
+    backup = root / f"{name}.backup.{stamp}"
+    shutil.copy2(path, backup)
+
+    written = list(lines)
+    for index, line in enumerate(written):
+        match = KEY_LINE.match(line)
+        if match and match.group(1) in changing and match.group(1) not in adding:
+            written[index] = f"{match.group(1)}={changing[match.group(1)]}"
+    if adding:
+        while written and not written[-1].strip():
+            written.pop()
+        written += [
+            "",
+            f"# --- Set on purpose {stamp}. ---",
+            *[f"{key}={changing[key]}" for key in sorted(adding)],
+        ]
+    path.write_text("\n".join(written) + "\n", encoding="utf-8")
+
+    try:
+        loaded = settings_from(path)
+    except Exception as error:  # noqa: BLE001 - any parse failure means put it back
+        shutil.copy2(backup, path)
+        print(f"  STOP. The result would not load, backup restored: {error}\n")
+        return 1
+
+    wrong = [
+        key
+        for key, value in changing.items()
+        if key.lower() in loaded and serialise(loaded[key.lower()]) != value
+    ]
+    if wrong:
+        shutil.copy2(backup, path)
+        print(f"  STOP. Read back differently, backup restored: {sorted(wrong)}\n")
+        return 1
+
+    after = keys_with_lines(read_lines(path))
+    print(f"  backup: {backup.name}")
+    print(f"  keys before: {len(present)}   keys after: {len(after)}")
+    for key in sorted(changing):
+        print(f"      line {after[key]:>5}  {key}")
+    print()
+    return 0
+
+
+def parse_overrides(argv: list[str]) -> dict[str, str]:
+    overrides: dict[str, str] = {}
+    for index, argument in enumerate(argv):
+        if argument != "--set":
+            continue
+        if index + 1 >= len(argv) or "=" not in argv[index + 1]:
+            raise SystemExit("--set needs KEY=VALUE")
+        key, _, value = argv[index + 1].partition("=")
+        if not KEY_LINE.match(key + "="):
+            raise SystemExit(f"--set: {key!r} is not a usable environment key name")
+        overrides[key] = value
+    return overrides
+
+
 def main() -> int:
     apply = "--apply" in sys.argv
+    overrides = parse_overrides(sys.argv)
+    only = (
+        sys.argv[sys.argv.index("--only") + 1]
+        if "--only" in sys.argv and sys.argv.index("--only") + 1 < len(sys.argv)
+        else None
+    )
+    targets = [only] if only else list(FILL_ORDER)
     root = Path.cwd()
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -200,8 +340,13 @@ def main() -> int:
     print()
 
     status = 0
-    for name in FILL_ORDER:
+    for name in targets:
         status |= sync_one(root, name, stamp, apply)
+
+    if overrides:
+        print("=== SET ON PURPOSE ===")
+        for name in targets:
+            status |= set_one(root, name, overrides, stamp, apply)
 
     print("=== AFTER ===")
     tables = {
