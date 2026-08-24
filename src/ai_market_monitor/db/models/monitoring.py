@@ -178,6 +178,11 @@ class ScanResult(UUIDPrimaryKeyMixin, Base):
             name="uq_scan_result_market",
         ),
         Index("ix_scan_result_version_candle", "strategy_version_id", "candle_closed_at"),
+        # When the check *ran*, which is a different column from when the candle it read
+        # closed. Every "how has this monitor behaved lately" question filters on this
+        # pair, and until 24 August 2026 none of them had an index to do it with: each one
+        # read the whole table, 549 MB of it, once per monitor on the dashboard.
+        Index("ix_scan_result_version_evaluated", "strategy_version_id", "evaluated_at"),
         Index("ix_scan_result_outcome_score", "outcome", "completion_score"),
     )
 

@@ -487,6 +487,136 @@ class StrategyCockpitService:
         sample_size = scans.total
         return await self._health_payload(strategy, version, components, sample_size, persist)
 
+    async def stored_health(
+        self,
+        strategy_ids: Sequence[UUID],
+    ) -> dict[UUID, dict[str, Any]]:
+        """The health the scheduled worker last worked out, for many monitors at once.
+
+        **A page should read this, not call :meth:`edge_health`.** Edge Health is a score
+        over thirty days of evidence and the worker already calculates it and writes it
+        down after every scan. Calculating it again while somebody waits produced about
+        thirteen queries per monitor — roughly nine hundred for a dashboard showing fifty —
+        to arrive at the number already sitting in ``edge_health_snapshots``.
+
+        The same reasoning was already applied to one piece of that payload and no further:
+        ``_market_regime_context`` reads the stored snapshot whenever no provider is
+        supplied, which is exactly the page's case. This finishes the thought.
+
+        Two queries answer it for every monitor a person owns, whatever the number:
+        the newest snapshot of each, and the last twenty scores of each for the trend line.
+        A monitor with no snapshot yet is simply absent from the answer, and the caller
+        works that one out live — see ``_monitor_cards_context``.
+        """
+
+        if not strategy_ids:
+            return {}
+        newest = func.row_number().over(
+            partition_by=EdgeHealthSnapshot.strategy_id,
+            order_by=EdgeHealthSnapshot.calculated_at.desc(),
+        )
+        ranked = (
+            select(
+                EdgeHealthSnapshot.strategy_id.label("strategy_id"),
+                EdgeHealthSnapshot.strategy_version_id.label("strategy_version_id"),
+                EdgeHealthSnapshot.score.label("score"),
+                EdgeHealthSnapshot.grade.label("grade"),
+                EdgeHealthSnapshot.status.label("status"),
+                EdgeHealthSnapshot.components.label("components"),
+                EdgeHealthSnapshot.explanation.label("explanation"),
+                EdgeHealthSnapshot.main_issue.label("main_issue"),
+                EdgeHealthSnapshot.suggested_action.label("suggested_action"),
+                EdgeHealthSnapshot.sample_size.label("sample_size"),
+                EdgeHealthSnapshot.calculated_at.label("calculated_at"),
+                newest.label("recency"),
+            )
+            .where(EdgeHealthSnapshot.strategy_id.in_(strategy_ids))
+            .subquery()
+        )
+        latest_rows = (
+            await self.session.execute(select(ranked).where(ranked.c.recency == 1))
+        ).all()
+
+        trend_rank = func.row_number().over(
+            partition_by=EdgeHealthSnapshot.strategy_id,
+            order_by=EdgeHealthSnapshot.calculated_at.desc(),
+        )
+        trend_ranked = (
+            select(
+                EdgeHealthSnapshot.strategy_id.label("strategy_id"),
+                EdgeHealthSnapshot.score.label("score"),
+                EdgeHealthSnapshot.status.label("status"),
+                EdgeHealthSnapshot.calculated_at.label("calculated_at"),
+                trend_rank.label("recency"),
+            )
+            .where(EdgeHealthSnapshot.strategy_id.in_(strategy_ids))
+            .subquery()
+        )
+        trends: dict[UUID, list[dict[str, Any]]] = defaultdict(list)
+        trend_rows = (
+            await self.session.execute(
+                select(trend_ranked)
+                .where(trend_ranked.c.recency <= HEALTH_TREND_POINTS)
+                .order_by(trend_ranked.c.strategy_id, trend_ranked.c.recency.desc())
+            )
+        ).all()
+        for row in trend_rows:
+            trends[row.strategy_id].append(
+                {
+                    "score": float(row.score),
+                    "status": row.status,
+                    "calculated_at": row.calculated_at,
+                }
+            )
+        return {
+            row.strategy_id: _health_payload_from_snapshot(row, trends.get(row.strategy_id, []))
+            for row in latest_rows
+        }
+
+    async def stored_main_bottlenecks(
+        self,
+        strategy_ids: Sequence[UUID],
+    ) -> dict[UUID, dict[str, Any]]:
+        """The blocking rule each monitor's last aggregation found, for many at once.
+
+        Written down by the same worker run that wrote the health score, and read here
+        rather than recalculated. The dashboard called ``condition_bottlenecks`` once per
+        monitor **and** it was calculated a second time inside ``edge_health`` for the same
+        monitor on the same page load — one number, worked out twice, for every card.
+        """
+
+        if not strategy_ids:
+            return {}
+        newest = func.row_number().over(
+            partition_by=ConditionBottleneckAggregate.strategy_id,
+            order_by=(
+                ConditionBottleneckAggregate.calculated_at.desc(),
+                ConditionBottleneckAggregate.blocking_rate.desc(),
+                ConditionBottleneckAggregate.pass_rate.asc(),
+            ),
+        )
+        ranked = (
+            select(
+                ConditionBottleneckAggregate.strategy_id.label("strategy_id"),
+                ConditionBottleneckAggregate.condition_key.label("condition_key"),
+                ConditionBottleneckAggregate.condition_label.label("condition_label"),
+                ConditionBottleneckAggregate.sample_count.label("sample_count"),
+                ConditionBottleneckAggregate.passed_count.label("passed_count"),
+                ConditionBottleneckAggregate.failed_count.label("failed_count"),
+                ConditionBottleneckAggregate.pending_count.label("pending_count"),
+                ConditionBottleneckAggregate.unavailable_count.label("unavailable_count"),
+                ConditionBottleneckAggregate.error_count.label("error_count"),
+                ConditionBottleneckAggregate.pass_rate.label("pass_rate"),
+                ConditionBottleneckAggregate.blocking_rate.label("blocking_rate"),
+                ConditionBottleneckAggregate.details.label("details"),
+                newest.label("recency"),
+            )
+            .where(ConditionBottleneckAggregate.strategy_id.in_(strategy_ids))
+            .subquery()
+        )
+        rows = (await self.session.execute(select(ranked).where(ranked.c.recency == 1))).all()
+        return {row.strategy_id: _bottleneck_from_aggregate(row) for row in rows}
+
     async def alert_frequency_forecast(self, strategy: Strategy) -> dict[str, Any]:
         version = await self.latest_version(strategy)
         if version is None:
@@ -1484,18 +1614,23 @@ class StrategyCockpitService:
     ) -> dict[str, Any]:
         score = round(sum(item["score"] for item in components), 2)
         status, grade = health_status(score)
-        weak = min(components, key=lambda item: item["score"] / item["maximum"])
+        calculated_at = datetime.now(UTC)
+        weak = _weakest_component(components) or components[0]
         explanation = (
             f"Edge Health is {score:.0f}/100. "
             f"The weakest component is {weak['name'].lower()}: {weak['explanation']}"
         )
         suggested_action = _component_action(weak["name"])
         trend = (
-            await self.session.scalars(
-                select(EdgeHealthSnapshot)
+            await self.session.execute(
+                select(
+                    EdgeHealthSnapshot.score,
+                    EdgeHealthSnapshot.status,
+                    EdgeHealthSnapshot.calculated_at,
+                )
                 .where(EdgeHealthSnapshot.strategy_id == strategy.id)
                 .order_by(EdgeHealthSnapshot.calculated_at.desc())
-                .limit(20)
+                .limit(HEALTH_TREND_POINTS)
             )
         ).all()
         payload = {
@@ -1529,6 +1664,10 @@ class StrategyCockpitService:
                 }
                 for snapshot in reversed(trend)
             ],
+            # When this was worked out. Present on both paths — the live one and the one
+            # that reads the stored snapshot — so a screen never has to guess whether the
+            # number in front of it is from this second or from the last worker run.
+            "calculated_at": calculated_at,
             "non_advisory_notice": (
                 "Edge Health describes monitor behavior and evidence quality, not profitability."
             ),
@@ -1546,7 +1685,7 @@ class StrategyCockpitService:
                 main_issue=weak["explanation"],
                 suggested_action=suggested_action,
                 sample_size=sample_size,
-                calculated_at=datetime.now(UTC),
+                calculated_at=calculated_at,
             )
             self.session.add(snapshot)
             await self.session.flush()
@@ -2453,6 +2592,93 @@ def _decay_findings(
             }
         )
     return events
+
+
+#: How many past scores the health trend line shows. The same twenty the live calculation
+#: used, kept here so the stored reader and the live one draw the same line.
+HEALTH_TREND_POINTS = 20
+
+
+def _weakest_component(components: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
+    """The component holding the score down — one owner for "which one is weakest".
+
+    Every reader used to re-derive this, and the two that mattered disagreed about ties.
+    """
+
+    usable = [item for item in components if item.get("maximum")]
+    if not usable:
+        return None
+    return min(usable, key=lambda item: item["score"] / item["maximum"])
+
+
+def _health_payload_from_snapshot(
+    row: Any,
+    trend: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Rebuild the health payload from what the worker wrote down.
+
+    Every field is either stored or derived from stored components, so a page reading this
+    shows the same numbers the live calculation produced — the difference is *when* they
+    were worked out, not *what* they say. ``calculated_at`` is part of the payload so a
+    screen can tell somebody which moment they are looking at, which the live version could
+    never honestly do either: it was a thirty-day score presented as if it were this second.
+    """
+
+    components = list(row.components or [])
+    weak = _weakest_component(components)
+    return {
+        "strategy_id": str(row.strategy_id),
+        "strategy_version_id": str(row.strategy_version_id) if row.strategy_version_id else None,
+        "score": float(row.score),
+        "grade": row.grade,
+        "status": row.status,
+        "components": components,
+        "explanation": row.explanation,
+        "main_issue": row.main_issue,
+        "main_issue_component": weak["name"] if weak else None,
+        "main_issue_blocker_known": bool((weak or {}).get("details", {}).get("blocker_known")),
+        "suggested_action": row.suggested_action,
+        "sample_size": int(row.sample_size or 0),
+        "trend": trend,
+        "calculated_at": row.calculated_at,
+        "non_advisory_notice": (
+            "Edge Health describes monitor behavior and evidence quality, not profitability."
+        ),
+    }
+
+
+def _bottleneck_from_aggregate(row: Any) -> dict[str, Any]:
+    """Rebuild one ``main_bottleneck`` entry from the aggregate the worker stored.
+
+    ``suggested_fix`` is worked out again rather than stored, from the same counts and the
+    same function the live path uses. Storing a sentence would freeze the wording of every
+    old row the day it was written; storing the counts keeps one owner for the words.
+    """
+
+    outcomes = Counter(
+        {
+            "passed": int(row.passed_count or 0),
+            "failed": int(row.failed_count or 0),
+            "pending": int(row.pending_count or 0),
+            "unavailable": int(row.unavailable_count or 0),
+            "error": int(row.error_count or 0),
+        }
+    )
+    pass_rate = float(row.pass_rate or 0)
+    return {
+        "condition_key": row.condition_key,
+        "condition_label": row.condition_label,
+        "sample_count": int(row.sample_count or 0),
+        "passed_count": outcomes["passed"],
+        "failed_count": outcomes["failed"],
+        "pending_count": outcomes["pending"],
+        "unavailable_count": outcomes["unavailable"],
+        "error_count": outcomes["error"],
+        "pass_rate": round(pass_rate, 2),
+        "blocking_rate": round(float(row.blocking_rate or 0), 2),
+        "average_proximity": round(float((row.details or {}).get("average_proximity") or 0), 2),
+        "suggested_fix": _bottleneck_suggestion(row.condition_key, pass_rate, outcomes),
+    }
 
 
 def _proof_is_reconstructable(receipt: dict[str, Any] | None) -> bool:

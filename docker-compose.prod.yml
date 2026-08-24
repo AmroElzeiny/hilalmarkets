@@ -89,11 +89,17 @@ services:
 
   api:
     logging: *default_logging
-    # The largest share, because this is the one a customer notices. It was killed at
-    # 694 MB against a 768 MB ceiling on 22 August 2026, when it ran as a single process.
-    # It now runs two workers plus a parent, and each worker retires on a request count
-    # long before it could reach this number.
-    mem_limit: 1280m
+    # It was killed at 694 MB against a 768 MB ceiling on 22 August 2026, when it ran as a
+    # single process, and this became the largest share on the machine in response.
+    #
+    # It is no longer the largest share, because the reason it needed one is gone. That
+    # 694 MB was a page reading a month of scan rows to count them; a page now counts in
+    # SQL and the container was measured at 367 MB of 1280 on 24 August 2026. The 320 MB
+    # given up here goes to the database, which was the one actually short of room.
+    #
+    # The floor is not arbitrary: `test_invariant_container_memory_limits.py` requires two
+    # workers plus a parent to fit inside three quarters of this number.
+    mem_limit: 960m
     build: .
     restart: unless-stopped
     env_file: *tracedge_env
@@ -187,11 +193,34 @@ services:
 
   db:
     logging: *default_logging
-    # Measured at 113 MB. PostgreSQL's default shared_buffers is 128 MB, so 512m is still
-    # four times what it asks for, and the room it gives up goes to the api.
-    mem_limit: 512m
+    # 512m was measured when this database held 113 MB. On 24 August 2026 it was sitting at
+    # 476 MB of that 512 — 93% — and the data had not finished growing: `scan_results` was
+    # 549 MB holding only 7.6 days of a 30-day window, so the table alone is heading for
+    # about 2 GB at today's rate and three times that at the 50 monitors this is being
+    # sized for.
+    #
+    # A database container's memory is not just its own working set. Everything above
+    # `shared_buffers` is page cache holding the hot parts of the tables and indexes, and
+    # when that cache is too small every count goes back to the disk. Squeezing it was
+    # false economy: the room came from the api, which was using 367 MB of 1280.
+    mem_limit: 960m
     image: postgres:16-alpine
     restart: unless-stopped
+    # PostgreSQL's own defaults are sized for a much smaller container than this one, and
+    # they do not read the container's limit. `shared_buffers` is a quarter of the ceiling,
+    # the standard starting point; `effective_cache_size` is not an allocation but a hint,
+    # telling the planner how much cache it may assume when it chooses between an index and
+    # a table scan.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=640MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env.production}
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env.production}
@@ -214,6 +243,16 @@ services:
     # keys under pressure would silently drop queued background jobs. The container limit
     # above is the ceiling; if Redis ever reaches it, the answer is a bigger limit or less
     # queued work, never eviction.
+    #
+    # The shared market cache (`services/market_cache.py`) also lives in here, under the
+    # `hm:mkt:` prefix. Because eviction is not available, that cache has to bound itself
+    # instead, and does so two ways: every entry expires within a minute, and any single
+    # reading over 256 KB is answered but not stored. Expected footprint is single-figure
+    # megabytes — a few hundred readings of about 24 KB, each living one minute.
+    #
+    # If Redis memory ever climbs here, look at that prefix first: `redis-cli --scan
+    # --pattern 'hm:mkt:*' | wc -l` counts them, and turning MARKET_CACHE_ENABLED off
+    # removes them all within a minute without a deploy.
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data

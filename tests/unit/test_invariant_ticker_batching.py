@@ -48,6 +48,7 @@ class FakeExchange:
         self.single_works = single_works
         self.offline = offline or set()
         self.batch_sizes: list[int] = []
+        self.named: list[str] = []
         self.unfiltered_calls = 0
         self.single_calls: list[str] = []
 
@@ -68,6 +69,7 @@ class FakeExchange:
             served = self.symbols
         else:
             self.batch_sizes.append(len(symbols))
+            self.named.extend(symbols)
             if len(symbols) > self.url_limit:
                 # Binance answers 414 with an HTML body; ccxt then fails while parsing it.
                 raise AttributeError("'str' object has no attribute 'keys'")
@@ -171,6 +173,55 @@ async def test_a_symbol_no_read_can_serve_carries_no_invented_values():
         assert metadata[symbol]["percentage_24h"] is None
     for symbol in set(symbols) - dark:
         assert metadata[symbol]["data_quality_ok"] is True
+
+
+#: Quote currencies a universe can be priced in. `BTC` is the one that used to be broken;
+#: it is in the list rather than being the test, so the rule is checked for all of them.
+QUOTE_CURRENCIES = ["BTC", "USDT", "USDC", "ETH", "BNB", "EUR", "TRY"]
+
+
+@pytest.mark.parametrize("quote", QUOTE_CURRENCIES)
+@pytest.mark.parametrize("size", [1, 5, 20, 120])
+async def test_no_universe_asks_the_exchange_for_a_currency_against_itself(quote, size):
+    """A benchmark of a currency against itself is not listed on any exchange.
+
+    Every quote currency in a universe gets a `BTC/<quote>` benchmark to compare against.
+    For a BTC-quoted universe that asked for `BTC/BTC`, which no exchange lists, so
+    `still_missing()` was never empty — and a non-empty `still_missing()` is exactly the
+    condition that reaches for the unfiltered ticker read.
+
+    That read costs 1,886,437 bytes and 4,000 ms of rate-limit sleep on Binance (weight 80
+    against a 50 ms unit), measured on 24 August 2026. It was being paid on every scan, to
+    look up a price that is 1 by definition.
+    """
+
+    symbols = [f"A{index:04d}/{quote}" for index in range(size)]
+    exchange = FakeExchange([*symbols, f"BTC/{quote}", "BTC/USDT"])
+
+    await provider_for(exchange).fetch_universe_metadata("binance", symbols)
+
+    self_paired = [
+        name for name in exchange.named if name.partition("/")[0] == name.partition("/")[2]
+    ]
+    assert self_paired == [], f"asked the exchange for {self_paired}, which cannot exist"
+
+
+@pytest.mark.parametrize("quote", QUOTE_CURRENCIES)
+async def test_a_healthy_universe_never_reaches_for_the_whole_exchange(quote):
+    """The expensive fallback is for an exchange that would not answer, not for routine work.
+
+    Whatever the universe is priced in, when every named symbol comes back there is nothing
+    missing and no reason to download every market on the exchange.
+    """
+
+    symbols = [f"A{index:04d}/{quote}" for index in range(20)]
+    exchange = FakeExchange([*symbols, f"BTC/{quote}", "BTC/USDT"])
+
+    metadata = await provider_for(exchange).fetch_universe_metadata("binance", symbols)
+
+    assert exchange.unfiltered_calls == 0
+    assert exchange.single_calls == []
+    assert all(metadata[symbol]["data_quality_ok"] for symbol in symbols)
 
 
 async def test_a_total_provider_outage_reports_no_data_rather_than_a_price():

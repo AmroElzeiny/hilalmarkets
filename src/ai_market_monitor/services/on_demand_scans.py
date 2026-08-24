@@ -967,7 +967,7 @@ class OnDemandScanService:
                 )
 
         if request.light_scan and version is None:
-            semaphore = asyncio.Semaphore(self.settings.on_demand_scan_concurrency)
+            semaphore = asyncio.Semaphore(self.settings.scan_symbol_concurrency)
 
             async def bounded_evaluate(
                 symbol: str,

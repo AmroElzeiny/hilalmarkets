@@ -1,4 +1,6 @@
+import asyncio
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -48,6 +50,7 @@ from ai_market_monitor.engine.runtime_preflight import (
     RuntimeDataContract,
     skip_reason,
 )
+from ai_market_monitor.engine.scan_cadence import scan_interval_seconds
 from ai_market_monitor.provider_context import ProviderContextService
 from ai_market_monitor.schemas.strategy import (
     ConditionGroup,
@@ -60,7 +63,7 @@ from ai_market_monitor.services.entitlements import (
     EntitlementService,
     UsageService,
 )
-from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.interfaces import Candle, MarketDataProvider
 from ai_market_monitor.services.lifecycle import transition_setup
 from ai_market_monitor.services.market_preview import (
     assess_candle_data_quality,
@@ -88,6 +91,19 @@ class ScanRunSummary:
     matches_found: int
     notifications_created: int
     failures: int
+
+
+@dataclass(frozen=True, slots=True)
+class SymbolMarketData:
+    """What one symbol's check needs from the exchange, fetched before it is judged.
+
+    It exists so that the waiting and the deciding are two separate steps. Waiting for the
+    exchange can be done for many symbols at once; deciding cannot, because deciding
+    writes to the database and one session serves one caller at a time.
+    """
+
+    candle_sets: dict[str, list[Candle]]
+    provider_metadata: dict[str, Any]
 
 
 class ScanJobNotRunnable(RuntimeError):
@@ -170,7 +186,7 @@ class ScanScheduler:
             )
         ).all()
         jobs: list[ScanJob] = []
-        for _strategy, version, universe in rows:
+        for _strategy, version, _universe in rows:
             in_flight = await self.session.scalar(
                 select(ScanJob.id)
                 .where(
@@ -182,7 +198,11 @@ class ScanScheduler:
             )
             if in_flight is not None:
                 continue
-            interval = max(1, universe.scan_interval_seconds)
+            # The candle decides, not a stored number. See `engine/scan_cadence.py`: this
+            # read `universe.scan_interval_seconds`, which nothing kept in step with the
+            # timeframe, and every monitor on the live server was watching one-minute
+            # candles while being checked about once an hour.
+            interval = scan_interval_seconds(version.schema_json)
             bucket_epoch = int(scheduled_for.timestamp()) // interval * interval
             bucket = datetime.fromtimestamp(bucket_epoch, tz=UTC)
             key = stable_event_hash(
@@ -236,12 +256,10 @@ class ScanScheduler:
                 version = await self.session.get(StrategyVersion, version_id)
                 if version is None or version.strategy_id != experiment.strategy_id:
                     continue
-                universe = await self.session.scalar(
-                    select(StrategyUniverse).where(
-                        StrategyUniverse.strategy_version_id == version.id
-                    )
-                )
-                interval = max(1, universe.scan_interval_seconds if universe else 60)
+                # The same rule as a live monitor, from the same owner. An experiment that
+                # ran on a different cadence from the version it is testing would not be
+                # comparable with it, which is the only reason an experiment exists.
+                interval = scan_interval_seconds(version.schema_json)
                 bucket_epoch = int(scheduled_for.timestamp()) // interval * interval
                 bucket = datetime.fromtimestamp(bucket_epoch, tz=UTC)
                 job_type = (
@@ -1224,97 +1242,123 @@ class ScanOrchestrator:
         failures: list[dict[str, object]] = []
         matches = job.matches_found
         notifications_created = int((job.metrics or {}).get("notifications_created") or 0)
-        for symbol in symbols:
-            if symbol in completed_symbols:
-                continue
-            try:
-                async with self.session.begin_nested():
-                    result = await self._evaluate_symbol(
-                        strategy, version, definition, symbol, job.scheduled_for
-                    )
-                    is_complete = self._base_candle_complete(
-                        definition, result["candle_sets"], job.scheduled_for
-                    )
-                    confirmed_evaluations = 0
-                    plan_budget_value = entitlement.limit("alerts_per_day")
-                    plan_alert_budget = (
-                        int(plan_budget_value) if plan_budget_value is not None else None
-                    )
-                    plan_weekly_budget_value = entitlement.limit("alerts_per_week")
-                    plan_weekly_alert_budget = (
-                        int(plan_weekly_budget_value)
-                        if plan_weekly_budget_value is not None
-                        else None
-                    )
-                    for evaluation in result["evaluations"]:
-                        _, _, alert = await self.persistence.persist_evaluation(
-                            job=job,
-                            strategy=strategy,
-                            version=version,
-                            definition=definition,
-                            result=evaluation,
-                            is_candle_complete=is_complete,
-                            plan_alert_budget=plan_alert_budget,
-                            plan_weekly_alert_budget=plan_weekly_alert_budget,
-                            evidence_only=experiment_mode == "dry_run",
-                            scan_context={
-                                **(
-                                    {
-                                    "experiment_id": str(experiment.id),
-                                    "mode": experiment_mode,
-                                    "evidence_only": experiment_mode == "dry_run",
-                                    }
-                                    if experiment is not None
-                                    else {}
-                                ),
-                                "sharia_screening": {
-                                    "methodology_id": str(screening.methodology_id)
-                                    if screening.methodology_id
-                                    else None,
-                                    "methodology_code": screening.methodology_code,
-                                    "methodology_version": screening.methodology_version,
-                                    "universe_snapshot_id": str(screening.snapshot_id)
-                                    if screening.snapshot_id
-                                    else None,
-                                    "universe_snapshot_hash": screening.snapshot_hash,
-                                    "asset": (
-                                        screening_by_symbol[symbol].model_dump(mode="json")
-                                        if symbol in screening_by_symbol
-                                        else None
-                                    ),
-                                    "policy_decision": "included",
-                                    "policy_reason": (
-                                        "Asset met the approved screened-market policy at "
-                                        "evaluation time."
-                                    ),
-                                    "legacy_local_bypass": screening.legacy_local_bypass,
-                                },
-                            },
+        # The exchange is asked about several symbols at once; each answer is then judged
+        # and written one at a time.
+        #
+        # The split is not a preference, it is the only shape that is safe here. Judging a
+        # symbol writes through `self.session`, and one AsyncSession cannot serve two
+        # callers at the same time. Fetching touches nothing shared, and fetching is where
+        # the time went: 198 seconds for a 22-symbol scan on 24 August 2026, of which almost
+        # all was waiting for an answer. Monitors watching one-minute candles were being
+        # checked about once an hour because of it.
+        pending = [symbol for symbol in symbols if symbol not in completed_symbols]
+        batch_size = max(1, self.settings.scan_symbol_concurrency if self.settings else 8)
+        # Read once for the whole universe, before any batch. This used to happen inside
+        # `_fetch_market_data`, once per symbol, and a single miss in the answer sends the
+        # provider to the unfiltered ticker endpoint — 1.9 MB and 4 seconds of rate-limit
+        # sleep each time. See `_fetch_universe_metadata`.
+        metadata_by_symbol = await self._fetch_universe_metadata(definition, pending)
+        for offset in range(0, len(pending), batch_size):
+            batch = pending[offset : offset + batch_size]
+            fetched = await self._prefetch_market_data(definition, batch, metadata_by_symbol)
+            for symbol, market_data in zip(batch, fetched, strict=True):
+                try:
+                    if isinstance(market_data, BaseException):
+                        raise market_data
+                    async with self.session.begin_nested():
+                        result = await self._evaluate_symbol(
+                            strategy,
+                            version,
+                            definition,
+                            symbol,
+                            job.scheduled_for,
+                            prefetched=market_data,
                         )
-                        if alert is not None:
-                            notifications_created += int(
-                                getattr(alert, "_enqueued_delivery_count", 0)
+                        is_complete = self._base_candle_complete(
+                            definition, result["candle_sets"], job.scheduled_for
+                        )
+                        confirmed_evaluations = 0
+                        plan_budget_value = entitlement.limit("alerts_per_day")
+                        plan_alert_budget = (
+                            int(plan_budget_value) if plan_budget_value is not None else None
+                        )
+                        plan_weekly_budget_value = entitlement.limit("alerts_per_week")
+                        plan_weekly_alert_budget = (
+                            int(plan_weekly_budget_value)
+                            if plan_weekly_budget_value is not None
+                            else None
+                        )
+                        for evaluation in result["evaluations"]:
+                            _, _, alert = await self.persistence.persist_evaluation(
+                                job=job,
+                                strategy=strategy,
+                                version=version,
+                                definition=definition,
+                                result=evaluation,
+                                is_candle_complete=is_complete,
+                                plan_alert_budget=plan_alert_budget,
+                                plan_weekly_alert_budget=plan_weekly_alert_budget,
+                                evidence_only=experiment_mode == "dry_run",
+                                scan_context={
+                                    **(
+                                        {
+                                        "experiment_id": str(experiment.id),
+                                        "mode": experiment_mode,
+                                        "evidence_only": experiment_mode == "dry_run",
+                                        }
+                                        if experiment is not None
+                                        else {}
+                                    ),
+                                    "sharia_screening": {
+                                        "methodology_id": str(screening.methodology_id)
+                                        if screening.methodology_id
+                                        else None,
+                                        "methodology_code": screening.methodology_code,
+                                        "methodology_version": screening.methodology_version,
+                                        "universe_snapshot_id": str(screening.snapshot_id)
+                                        if screening.snapshot_id
+                                        else None,
+                                        "universe_snapshot_hash": screening.snapshot_hash,
+                                        "asset": (
+                                            screening_by_symbol[symbol].model_dump(mode="json")
+                                            if symbol in screening_by_symbol
+                                            else None
+                                        ),
+                                        "policy_decision": "included",
+                                        "policy_reason": (
+                                            "Asset met the approved screened-market policy at "
+                                            "evaluation time."
+                                        ),
+                                        "legacy_local_bypass": screening.legacy_local_bypass,
+                                    },
+                                },
                             )
-                        confirmed_evaluations += int(evaluation.outcome == ScanOutcome.CONFIRMED)
-                    job.symbols_scanned += 1
-                    matches += confirmed_evaluations
-                    job.matches_found = matches
+                            if alert is not None:
+                                notifications_created += int(
+                                    getattr(alert, "_enqueued_delivery_count", 0)
+                                )
+                            confirmed_evaluations += int(
+                                evaluation.outcome == ScanOutcome.CONFIRMED
+                            )
+                        job.symbols_scanned += 1
+                        matches += confirmed_evaluations
+                        job.matches_found = matches
+                        job.heartbeat_at = datetime.now(UTC)
+                        await self.session.flush()
+                        await self.session.commit()
+                except Exception as exc:
+                    retryable = self._is_retryable_provider_error(exc)
+                    failures.append(
+                        {
+                            "symbol": symbol,
+                            "error": type(exc).__name__,
+                            "detail": str(exc)[:300],
+                            "retryable": retryable,
+                        }
+                    )
                     job.heartbeat_at = datetime.now(UTC)
                     await self.session.flush()
                     await self.session.commit()
-            except Exception as exc:
-                retryable = self._is_retryable_provider_error(exc)
-                failures.append(
-                    {
-                        "symbol": symbol,
-                        "error": type(exc).__name__,
-                        "detail": str(exc)[:300],
-                        "retryable": retryable,
-                    }
-                )
-                job.heartbeat_at = datetime.now(UTC)
-                await self.session.flush()
-                await self.session.commit()
 
         job.matches_found = matches
         completed_at = datetime.now(UTC)
@@ -1382,6 +1426,114 @@ class ScanOrchestrator:
         await self.session.flush()
         return self._summary(job, failures=len(failures))
 
+    #: What a symbol's extra details look like when the exchange would not give them.
+    _METADATA_UNAVAILABLE: dict[str, Any] = {
+        "data_quality_ok": False,
+        "exchange_available": False,
+        "metadata_source": "provider_metadata_unavailable",
+    }
+
+    async def _fetch_universe_metadata(
+        self,
+        definition: StrategyDefinition,
+        symbols: Sequence[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Every symbol's extra details in **one** request for the whole scan.
+
+        ``fetch_universe_metadata`` has always taken a list. It was being called with one
+        symbol at a time from inside the per-symbol loop, so its cost was multiplied by the
+        size of the universe — and that cost is not small. When any named symbol is missing
+        from the answer, the provider falls back to reading *every* ticker on the exchange:
+        measured against Binance on 24 August 2026 that is 1,886,437 bytes and 4,000 ms of
+        rate-limit sleep, because the unfiltered endpoint carries a weight of 80 against a
+        50 ms unit. Paid once per scan it is affordable. Paid once per symbol it was most
+        of why a 22-symbol scan took 198 seconds.
+
+        The two failure shapes the per-symbol version had are both kept. A request that
+        raises marks every symbol unavailable — that is what it did for the one symbol it
+        was asked about. A symbol simply absent from a successful answer keeps an empty
+        record rather than an unavailable one, which is also what it did.
+        """
+
+        metadata_loader = getattr(self.provider, "fetch_universe_metadata", None)
+        if not callable(metadata_loader) or not symbols:
+            return {}
+        try:
+            answer = await metadata_loader(
+                definition.universe.exchange,
+                list(symbols),
+                include_listing_dates=(definition.universe.min_listing_age_days is not None),
+            )
+        except Exception:
+            # A fresh copy per symbol: one shared dict would let a later reader's edit
+            # appear against every other symbol in the scan.
+            return {symbol: dict(self._METADATA_UNAVAILABLE) for symbol in symbols}
+        return {symbol: dict(answer.get(symbol) or {}) for symbol in symbols}
+
+    async def _fetch_market_data(
+        self,
+        definition: StrategyDefinition,
+        symbol: str,
+        provider_metadata: dict[str, Any] | None = None,
+    ) -> SymbolMarketData:
+        """Everything about one symbol that has to come off the network, and nothing else.
+
+        Kept apart from evaluating the symbol so that many symbols can be waited for at
+        the same time. **The database session is deliberately not touched here**: one
+        ``AsyncSession`` cannot serve two callers at once, so the only part of a symbol's
+        work that may overlap is the part that is pure waiting — and on this product that
+        is nearly all of it.
+
+        ``provider_metadata`` is passed in by a batched scan, which reads it once for the
+        whole universe. A caller that has none — a single symbol checked on its own — still
+        gets the old behaviour of reading it here.
+        """
+
+        timeframes = {definition.base_timeframe, *definition.supporting_timeframes}
+        candle_sets: dict[str, list[Candle]] = {}
+        for timeframe in sorted(timeframes):
+            candle_sets[timeframe] = await self.provider.fetch_ohlcv(
+                definition.universe.exchange,
+                symbol,
+                timeframe,
+                self._history_limit(definition, timeframe),
+            )
+        if provider_metadata is None:
+            provider_metadata = (await self._fetch_universe_metadata(definition, [symbol])).get(
+                symbol, {}
+            )
+        return SymbolMarketData(candle_sets=candle_sets, provider_metadata=provider_metadata)
+
+    async def _prefetch_market_data(
+        self,
+        definition: StrategyDefinition,
+        symbols: Sequence[str],
+        metadata_by_symbol: dict[str, dict[str, Any]] | None = None,
+    ) -> list[SymbolMarketData | BaseException]:
+        """Wait for a batch of symbols at once, keeping each symbol's own failure.
+
+        ``return_exceptions=True`` matters: one symbol whose exchange call fails must not
+        cancel the other seven. The caller re-raises it against that symbol alone, which
+        is what the serial loop did — a failure was recorded per symbol and the scan
+        carried on.
+        """
+
+        # `None` means "no batch was read, look it up yourself" and is what a caller
+        # without a batch gets. An empty record for a symbol the batch *did* cover is a
+        # real answer — the exchange had nothing extra to say — and must not be retried
+        # per symbol, which is the cost this whole batching exists to remove.
+        return await asyncio.gather(
+            *(
+                self._fetch_market_data(
+                    definition,
+                    symbol,
+                    None if metadata_by_symbol is None else metadata_by_symbol.get(symbol, {}),
+                )
+                for symbol in symbols
+            ),
+            return_exceptions=True,
+        )
+
     async def _evaluate_symbol(
         self,
         strategy: Strategy,
@@ -1389,17 +1541,11 @@ class ScanOrchestrator:
         definition: StrategyDefinition,
         symbol: str,
         evaluation_time: datetime,
+        prefetched: SymbolMarketData | None = None,
     ) -> dict:
         timeframes = {definition.base_timeframe, *definition.supporting_timeframes}
-        candle_sets = {
-            timeframe: await self.provider.fetch_ohlcv(
-                definition.universe.exchange,
-                symbol,
-                timeframe,
-                self._history_limit(definition, timeframe),
-            )
-            for timeframe in timeframes
-        }
+        market_data = prefetched or await self._fetch_market_data(definition, symbol)
+        candle_sets = market_data.candle_sets
         reliability = ReliabilityService(self.session)
         for timeframe, candles in candle_sets.items():
             await reliability.record_market_data_health(
@@ -1418,25 +1564,7 @@ class ScanOrchestrator:
                 ),
                 source_status="ok" if candles else "unavailable",
             )
-        provider_metadata: dict[str, Any] = {}
-        metadata_loader = getattr(self.provider, "fetch_universe_metadata", None)
-        if callable(metadata_loader):
-            try:
-                provider_metadata = (
-                    await metadata_loader(
-                        definition.universe.exchange,
-                        [symbol],
-                        include_listing_dates=(
-                            definition.universe.min_listing_age_days is not None
-                        ),
-                    )
-                ).get(symbol, {})
-            except Exception:
-                provider_metadata = {
-                    "data_quality_ok": False,
-                    "exchange_available": False,
-                    "metadata_source": "provider_metadata_unavailable",
-                }
+        provider_metadata = market_data.provider_metadata
         market = market_snapshot_from_candles(
             definition,
             symbol,

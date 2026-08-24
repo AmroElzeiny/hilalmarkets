@@ -379,10 +379,21 @@ class CcxtMarketDataProvider:
         client = await self._client(exchange)
         markets = await client.load_markets()
         normalized_symbols = sorted({_canonical_symbol(symbol) for symbol in symbols})
+        # Every quote currency in the universe gets a BTC benchmark to compare against —
+        # except a BTC-quoted pair, whose benchmark would be `BTC/BTC`.
+        #
+        # `BTC/BTC` is not listed on any exchange, so asking for it left `still_missing()`
+        # permanently non-empty. That is the condition that reaches for the unfiltered
+        # `fetch_tickers()` in `_fetch_tickers`, which costs 4 seconds of rate-limit sleep
+        # (weight 80) and downloads about 1.9 MB covering every market on the exchange.
+        # A single `*/BTC` market in a universe therefore paid that price on every symbol
+        # of every scan, for ever, to look up a price that is 1 by definition.
         benchmark_symbols = {
-            f"BTC/{symbol.partition('/')[2].upper()}"
-            for symbol in normalized_symbols
-            if "/" in symbol
+            f"BTC/{quote}"
+            for quote in {
+                symbol.partition("/")[2].upper() for symbol in normalized_symbols if "/" in symbol
+            }
+            if quote != "BTC"
         }
         ticker_symbols = sorted({*normalized_symbols, *benchmark_symbols})
         tickers = await self._fetch_tickers(client, ticker_symbols)

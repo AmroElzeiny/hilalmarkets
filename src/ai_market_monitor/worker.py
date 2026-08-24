@@ -658,10 +658,8 @@ async def _poll_telegram_updates() -> dict:
     from ai_market_monitor.api.routers.telegram import process_telegram_update
     from ai_market_monitor.core.database import SessionFactory
     from ai_market_monitor.db.models import TelegramUpdateReceipt
-    from ai_market_monitor.services.market_preview import (
-        CcxtMarketDataProvider,
-        MarketPreviewService,
-    )
+    from ai_market_monitor.services.market_preview import MarketPreviewService
+    from ai_market_monitor.services.market_provider import market_data_provider
     from ai_market_monitor.telegram.adapter import TelegramDeliveryError, TelegramHttpAdapter
 
     adapter = TelegramHttpAdapter(settings)
@@ -679,7 +677,7 @@ async def _poll_telegram_updates() -> dict:
     except TelegramDeliveryError as exc:
         return {"processed": 0, "failed": 1, "error_code": exc.code}
 
-    provider = CcxtMarketDataProvider(settings)
+    provider = market_data_provider(settings)
     previewer = MarketPreviewService(
         provider,
         candle_limit=settings.preview_candle_limit,
@@ -903,10 +901,10 @@ async def _run_scan_job(job_id: str, *, worker_id: str) -> dict:
 
     from ai_market_monitor.core.database import SessionFactory
     from ai_market_monitor.db.models import ScanJob, StrategyExperiment
-    from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
+    from ai_market_monitor.services.market_provider import market_data_provider
     from ai_market_monitor.services.scanner import ScanOrchestrator
 
-    provider = CcxtMarketDataProvider(settings)
+    provider = market_data_provider(settings)
     try:
         async with SessionFactory() as session:
             summary = await ScanOrchestrator(session, provider, settings=settings).run_job(
@@ -957,9 +955,9 @@ async def _process_capability_extensions() -> dict:
     from ai_market_monitor.db.models import CapabilityExtension
     from ai_market_monitor.services.capability_extensions import CapabilityExtensionService
     from ai_market_monitor.services.capability_registry import CapabilityRegistryService
-    from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
+    from ai_market_monitor.services.market_provider import market_data_provider
 
-    provider = CcxtMarketDataProvider(settings)
+    provider = market_data_provider(settings)
     processed = 0
     failed = 0
     try:
@@ -1051,7 +1049,7 @@ async def _process_sharia_authority_imports() -> dict:
         ReviewCase,
     )
     from ai_market_monitor.services.fasset_import import FassetImporter
-    from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
+    from ai_market_monitor.services.market_provider import market_data_provider
     from ai_market_monitor.services.sc_malaysia_import import SCMalaysiaImporter
     from ai_market_monitor.services.sharia_governance import ShariaAdminTelegramService
     from ai_market_monitor.services.sharia_identity import (
@@ -1085,7 +1083,7 @@ async def _process_sharia_authority_imports() -> dict:
             }
 
     package_enrichment = await _process_package_enrichment_queue()
-    provider = CcxtMarketDataProvider(settings)
+    provider = market_data_provider(settings)
     try:
         exchange_symbols = await _fetch_exchange_symbols(provider, ("binance", "bybit"))
         imports: dict[str, dict] = {}
@@ -1706,9 +1704,9 @@ async def _expire_setup_instances() -> dict:
 async def _process_dashboard_replay_jobs() -> dict:
     from ai_market_monitor.core.database import SessionFactory
     from ai_market_monitor.services.dashboard_jobs import DashboardJobService
-    from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
+    from ai_market_monitor.services.market_provider import market_data_provider
 
-    provider = CcxtMarketDataProvider(settings)
+    provider = market_data_provider(settings)
     try:
         async with SessionFactory() as session:
             jobs = await DashboardJobService(session, provider, settings).process_replay_jobs()
@@ -1721,9 +1719,9 @@ async def _process_dashboard_replay_jobs() -> dict:
 async def _process_dashboard_export_jobs() -> dict:
     from ai_market_monitor.core.database import SessionFactory
     from ai_market_monitor.services.dashboard_jobs import DashboardJobService
-    from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
+    from ai_market_monitor.services.market_provider import market_data_provider
 
-    provider = CcxtMarketDataProvider(settings)
+    provider = market_data_provider(settings)
     try:
         async with SessionFactory() as session:
             jobs = await DashboardJobService(session, provider, settings).process_export_jobs()
@@ -1740,9 +1738,9 @@ async def _evaluate_strategy_health() -> dict:
     from ai_market_monitor.core.database import SessionFactory
     from ai_market_monitor.db.models import Strategy
     from ai_market_monitor.db.models.enums import StrategyStatus
-    from ai_market_monitor.services.market_preview import CcxtMarketDataProvider
+    from ai_market_monitor.services.market_provider import market_data_provider
 
-    provider = CcxtMarketDataProvider(settings)
+    provider = market_data_provider(settings)
     try:
         async with SessionFactory() as session:
             strategies = (

@@ -46,6 +46,7 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.engine.data_freshness import measure_freshness, timeframe_duration
 from ai_market_monitor.engine.models import EvaluationResult
+from ai_market_monitor.engine.scan_cadence import scan_interval_seconds
 from ai_market_monitor.schemas.strategy import ConditionGroup, ConditionRule, StrategyDefinition
 from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.strategy_cockpit import validate_strategy_conflicts
@@ -1303,14 +1304,18 @@ class SetupObservabilityService:
         return int(getattr(result, "rowcount", 0) or 0)
 
     async def _scan_interval(self, version_id: UUID) -> int:
-        from ai_market_monitor.db.models import StrategyUniverse
+        """How often this monitor is meant to be checked — asked of the same owner.
 
-        value = await self.session.scalar(
-            select(StrategyUniverse.scan_interval_seconds).where(
-                StrategyUniverse.strategy_version_id == version_id
-            )
+        It read ``strategy_universes.scan_interval_seconds``, the stored number the
+        scheduler no longer uses. Two readers of one fact, and only one of them was
+        right: health would have judged a monitor "late" or "on time" against a cadence
+        nothing was actually running to. See ``engine/scan_cadence.py``.
+        """
+
+        schema_json = await self.session.scalar(
+            select(StrategyVersion.schema_json).where(StrategyVersion.id == version_id)
         )
-        return int(value or 60)
+        return scan_interval_seconds(schema_json)
 
     async def _notification_channels(self, user_id: UUID) -> list[str]:
         telegram = await self.session.scalar(

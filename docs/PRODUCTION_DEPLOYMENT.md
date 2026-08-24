@@ -90,8 +90,21 @@ MARKET_METADATA_API_KEY=
 CONTEXT_PROVIDER_TIMEOUT_SECONDS=15
 CONTEXT_FETCH_CONCURRENCY=8
 MARKET_BREADTH_MAX_SYMBOLS=100
-ON_DEMAND_SCAN_CONCURRENCY=8
+SCAN_SYMBOL_CONCURRENCY=8
+MARKET_CACHE_ENABLED=true
+MARKET_CACHE_MAX_AGE_SECONDS=60
 ```
+
+`MARKET_CACHE_ENABLED` is what makes many monitors on short candles affordable. Every
+monitor that wants the same market inside the same window is served one reading instead
+of asking the exchange again. It matters because ccxt's rate limiter charges in real
+sleeping — 100 ms per candle request, shared by the whole process — so fifty monitors
+each asking separately cannot fit their work into a minute however fast the machine is.
+
+The cache lives in the same Redis as the Celery broker, under the `hm:mkt:` prefix. It
+bounds itself rather than relying on eviction, which is not available there: every entry
+expires within a minute, and any single reading over 256 KB is answered but not stored.
+Turning it off removes every entry within a minute and needs no deploy.
 
 For Bybit-backed spot data, use `BYBIT_REST_BASE_URL`, `BYBIT_WS_BASE_URL`,
 `BYBIT_API_KEY`, and `BYBIT_API_SECRET`. Do not put Bybit credentials into

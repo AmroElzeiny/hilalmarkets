@@ -280,8 +280,22 @@ async def test_deleting_a_job_takes_its_results_with_it(env: Env) -> None:
     assert await env.count(ScanResult) == 0
 
 
-async def test_one_run_removes_no_more_than_the_batch_and_reports_the_rest(env: Env) -> None:
-    """A first run against years of history must be several short transactions, not one."""
+async def test_one_run_clears_the_whole_backlog_however_many_batches_that_takes(
+    env: Env,
+) -> None:
+    """The batch bounds a transaction. It must not bound a night's work.
+
+    This test asserted the opposite until 24 August 2026: that one run removed exactly one
+    batch and reported the rest as ``remaining``. That reads like a safety property and is
+    really a leak. The purge runs once a night, so a batch-per-run means the table can
+    never lose more rows in a day than fit in one transaction, whatever arrived that day.
+    At today's 204 jobs a day against a batch of 5000 it is invisible; fifty monitors on
+    one-minute candles write about 72,000 a day, and the deletion would fall 67,000 rows
+    behind every night until the disk filled.
+
+    The short transaction is still the rule — it is asserted below, by the number of
+    batches the run needed — but finishing the work is no longer optional.
+    """
 
     env.settings.scan_history_purge_batch = 2
     for index in range(5):
@@ -289,6 +303,32 @@ async def test_one_run_removes_no_more_than_the_batch_and_reports_the_rest(env: 
             status=ScanJobStatus.SUCCEEDED,
             created_at=NOW - timedelta(days=400 + index),
             key=f"batch-{index}",
+        )
+    await env.session.flush()
+
+    result = await ScanRetentionService(env.session, env.settings).purge_expired(now=NOW)
+
+    assert result["purged_jobs"] == 5
+    assert result["remaining"] == 0
+    assert await env.count(ScanJob) == 0
+
+
+async def test_a_run_stops_at_its_batch_ceiling_and_reports_what_is_left(env: Env) -> None:
+    """The loop has an end, and it says plainly what it could not reach.
+
+    A run that could go on for ever is its own kind of outage on a one-worker server: every
+    other background task waits behind it. The ceiling is deliberately far above any real
+    day's work, so reaching it means something is wrong and ``remaining`` is how anyone
+    finds out.
+    """
+
+    env.settings.scan_history_purge_batch = 2
+    env.settings.scan_history_purge_max_batches = 1
+    for index in range(5):
+        env.add_job(
+            status=ScanJobStatus.SUCCEEDED,
+            created_at=NOW - timedelta(days=400 + index),
+            key=f"capped-{index}",
         )
     await env.session.flush()
 
@@ -303,6 +343,7 @@ async def test_the_oldest_rows_go_first(env: Env) -> None:
     """A capped run must make progress from the far end, not sample the middle."""
 
     env.settings.scan_history_purge_batch = 1
+    env.settings.scan_history_purge_max_batches = 1
     oldest = env.add_job(
         status=ScanJobStatus.SUCCEEDED,
         created_at=NOW - timedelta(days=500),

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Any
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request
@@ -13,8 +14,8 @@ from ai_market_monitor.core.security import (
 )
 from ai_market_monitor.db.models import User
 from ai_market_monitor.db.models.enums import UserRole, UserStatus
-from ai_market_monitor.services.fixture_market_data import FixtureMarketDataProvider
-from ai_market_monitor.services.market_preview import CcxtMarketDataProvider, MarketPreviewService
+from ai_market_monitor.services.market_preview import MarketPreviewService
+from ai_market_monitor.services.market_provider import market_data_provider
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
 
@@ -53,14 +54,11 @@ def get_onboarding_principal(
 
 
 @lru_cache
-def get_market_data_provider() -> CcxtMarketDataProvider | FixtureMarketDataProvider:
-    settings = get_settings()
-    if (
-        settings.tracedge_market_data_mode == "fixture"
-        or settings.tracedge_fixture_market_data_enabled
-    ):
-        return FixtureMarketDataProvider()
-    return CcxtMarketDataProvider(settings)
+def get_market_data_provider() -> Any:
+    # Which provider, and whether its answers are shared, is decided in one place for the
+    # whole product — the worker used to make this choice seven more times, by hand, and
+    # without the fixture branch. See services/market_provider.py.
+    return market_data_provider(get_settings())
 
 
 def get_market_previewer(settings: Settings = Depends(get_settings)) -> MarketPreviewService:

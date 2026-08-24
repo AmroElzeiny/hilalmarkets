@@ -531,14 +531,27 @@ async def _monitor_cards_context(session: AsyncSession, user: User) -> list[dict
         )
     ).all()
     cockpit_service = StrategyCockpitService(session)
+    # Read once for every monitor, instead of worked out again for each one.
+    #
+    # Edge Health is a score over thirty days of evidence, and the scheduled worker already
+    # calculates it after every scan and writes it down. Recalculating it here cost about
+    # thirteen queries per monitor, plus a second calculation of the same bottleneck inside
+    # it — roughly nine hundred queries to draw a page of fifty cards, all to arrive at
+    # numbers already sitting in two tables. These two calls answer for every monitor a
+    # person owns, whatever the number.
+    strategy_ids = [strategy.id for strategy in strategies]
+    stored_health = await cockpit_service.stored_health(strategy_ids)
+    stored_bottlenecks = await cockpit_service.stored_main_bottlenecks(strategy_ids)
     monitor_cards = []
     for strategy in strategies:
-        health = await cockpit_service.edge_health(strategy, persist=False)
-        bottlenecks = await cockpit_service.condition_bottlenecks(
-            strategy,
-            limit=300,
-            persist=False,
-        )
+        health = stored_health.get(strategy.id)
+        if health is None:
+            # A monitor the worker has not reached yet — usually one made moments ago.
+            # Worked out live so a new card says the same thing it always said, rather
+            # than an empty placeholder. It costs the old price, and only for the few
+            # monitors in that state, and only until the next worker run.
+            health = await cockpit_service.edge_health(strategy, persist=False)
+        main_bottleneck = stored_bottlenecks.get(strategy.id)
         # One reader for "what has this monitor's scanning done", because the question
         # has two halves and the newest row cannot answer both. See
         # `services/monitor_scan_state.py`: the newest row of a live monitor is almost
@@ -617,7 +630,7 @@ async def _monitor_cards_context(session: AsyncSession, user: User) -> list[dict
             {
                 "strategy": strategy,
                 "health": health,
-                "main_bottleneck": bottlenecks.get("main_bottleneck"),
+                "main_bottleneck": main_bottleneck,
                 "scan_state": scan_state,
                 "latency_label": latency_label,
                 "last_check_label": last_check_label,

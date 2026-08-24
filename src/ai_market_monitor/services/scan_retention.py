@@ -110,43 +110,60 @@ class ScanRetentionService:
         return _rowcount(result)
 
     async def purge_expired(self, *, now: datetime | None = None) -> dict[str, int]:
-        """Delete finished jobs past the retention window, in bounded batches.
+        """Delete finished jobs past the retention window, one bounded batch at a time.
 
         Results and evaluation cycles are not deleted here by name. They hang off the job
         with ``ON DELETE CASCADE``, so removing the job removes them — and writing a second
         delete against ``scan_results`` would be a parallel rule that could disagree with
         the first one about what "old" means.
+
+        **It keeps going until the backlog is gone.** It used to delete one batch and stop,
+        and the batch is deliberately small so that no single transaction holds a long lock
+        on a live table. Those two facts together meant this job could only ever remove
+        ``scan_history_purge_batch`` rows a night, however many had arrived that day — and
+        it ran nightly. It even measured what it had failed to reach, returned it as
+        ``remaining``, and nothing read it.
+
+        Today that is invisible: 204 jobs a day against a batch of 5000. It stops being
+        invisible the moment the product grows. Fifty monitors watching one-minute candles
+        write about 72,000 jobs a day, so the deletion would fall 67,000 rows behind every
+        night, for ever, and the first symptom would be a full disk.
+
+        Each batch is still its own short transaction, committed before the next begins, so
+        the lock behaviour the batch size was chosen for is unchanged. What changed is that
+        finishing the work is no longer optional.
         """
 
         current_time = now or datetime.now(UTC)
         cutoff = current_time - timedelta(days=self.settings.scan_history_retention_days)
         batch = self.settings.scan_history_purge_batch
-
-        doomed = (
-            select(ScanJob.id)
-            .where(
-                ScanJob.status.in_(tuple(TERMINAL_STATUSES)),
-                ScanJob.created_at < cutoff,
-            )
-            .order_by(ScanJob.created_at)
-            .limit(batch)
+        expired_jobs = (
+            ScanJob.status.in_(tuple(TERMINAL_STATUSES)),
+            ScanJob.created_at < cutoff,
         )
-        ids = list((await self.session.scalars(doomed)).all())
-        if not ids:
-            return {"purged_jobs": 0, "remaining": 0}
 
-        await self.session.execute(delete(ScanJob).where(ScanJob.id.in_(ids)))
+        purged = 0
+        for _ in range(self.settings.scan_history_purge_max_batches):
+            doomed = (
+                select(ScanJob.id)
+                .where(*expired_jobs)
+                .order_by(ScanJob.created_at)
+                .limit(batch)
+            )
+            ids = list((await self.session.scalars(doomed)).all())
+            if not ids:
+                break
+            await self.session.execute(delete(ScanJob).where(ScanJob.id.in_(ids)))
+            # Committed per batch, which is what keeps each lock short. Without it every
+            # batch would join one transaction that grows for the whole run, which is the
+            # long lock the batching exists to avoid.
+            await self.session.commit()
+            purged += len(ids)
 
         remaining = await self.session.scalar(
-            select(func.count())
-            .select_from(ScanJob)
-            .where(
-                ScanJob.status.in_(tuple(TERMINAL_STATUSES)),
-                ScanJob.created_at < cutoff,
-                ScanJob.id.notin_(ids),
-            )
+            select(func.count()).select_from(ScanJob).where(*expired_jobs)
         )
-        return {"purged_jobs": len(ids), "remaining": int(remaining or 0)}
+        return {"purged_jobs": purged, "remaining": int(remaining or 0)}
 
 
 def _rowcount(result: Any) -> int:

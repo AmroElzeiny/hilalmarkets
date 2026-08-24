@@ -628,7 +628,46 @@ class Settings(BaseSettings):
     market_metadata_api_key: SecretStr | None = None
     market_metadata_timeout_seconds: int = Field(default=15, ge=1, le=120)
     universe_metadata_concurrency: int = Field(default=8, ge=1, le=50)
-    on_demand_scan_concurrency: int = Field(default=8, ge=1, le=50)
+    #: How many symbols the product asks the exchange about at the same time.
+    #:
+    #: One number for both kinds of scan, because it answers one question — how hard we
+    #: may lean on the exchange at once — and the exchange does not care which of our
+    #: containers is asking. It was `ON_DEMAND_SCAN_CONCURRENCY`, read only by the scan a
+    #: person triggers by hand; the scheduled scan that runs all day did not overlap
+    #: anything at all.
+    #:
+    #: That cost more than it sounds. Measured on the live server on 24 August 2026: a
+    #: scheduled scan took **198 seconds**, while monitors watching one-minute candles were
+    #: being checked about once an hour. Waiting for eight answers at once costs almost no
+    #: extra memory, because waiting is not work.
+    #:
+    #: Raising it further does less than it looks like it should, and the reason is worth
+    #: knowing: ccxt is configured with `enableRateLimit`, so it spaces requests by its own
+    #: clock — 50 ms per unit of weight, shared by everything in the process. Concurrency
+    #: overlaps the *waiting for an answer*; it cannot overlap the spacing. Past the point
+    #: where the rate limiter is the slow part, more concurrency buys nothing. Sending
+    #: fewer requests is what buys something, which is what `market_cache_enabled` is for.
+    scan_symbol_concurrency: int = Field(default=8, ge=1, le=50)
+    #: Share one reading of a market between every monitor that wants it.
+    #:
+    #: Fifty monitors on one-minute candles are fifty checks a minute, nearly all asking
+    #: about the same markets. Measured against Binance on 24 August 2026, one request for
+    #: 302 candles costs 100 ms of rate-limit sleep, and the unfiltered ticker endpoint
+    #: costs 4,000 ms and 1.9 MB. Fifty monitors × 22 symbols × 100 ms is 110 seconds of
+    #: sleeping to fill a 60-second minute: the work does not fit in the time, and no
+    #: amount of concurrency changes that, because a rate limit is not a queue that goes
+    #: faster when more callers join it.
+    #:
+    #: Off is the old behaviour, kept as a way back that needs no code change.
+    market_cache_enabled: bool = True
+    #: The longest one stored reading may be reused, in seconds.
+    #:
+    #: The real window is `min(one candle, this)`. The candle half is free — inside a
+    #: single one-minute candle, every monitor asking about one-minute candles wants the
+    #: same closed candles. This half is the guard for the other end: without it a daily
+    #: monitor would hold one reading for a whole day and its forming candle would never
+    #: move. 60 keeps the worst case at one minute on every timeframe.
+    market_cache_max_age_seconds: int = Field(default=60, ge=1, le=3600)
     crypto_index_api_url: AnyHttpUrl | None = None
     crypto_index_api_key: SecretStr | None = None
     macro_market_api_url: AnyHttpUrl | None = None
@@ -1007,7 +1046,18 @@ class Settings(BaseSettings):
     # Deleting a job takes its results and evaluation cycles with it through the existing
     # CASCADE, and leaves incident records and capability-extension rows intact through
     # their SET NULL. That is why retention is expressed on the job alone.
-    scan_history_retention_days: int = Field(default=30, ge=1, le=3650)
+    #
+    # 3 days, decided on 24 August 2026, and the reason is arithmetic rather than taste.
+    # Measured on the live server: 4.22 KB per scan row. Fifty monitors watching one-minute
+    # candles write about 1.58 million rows a day — 6.7 GB a day — against a 40 GB disk.
+    # Thirty days of that is roughly 200 GB, so the disk fills in under a week.
+    #
+    # What survives this: the alerts a person received, which have no retention rule at
+    # all, and the setups that were found. What does not survive is the proof behind them —
+    # the per-condition results and near-miss snapshots that answer "why did this fire?".
+    # A person can see an alert from any time; they can see the working behind it for three
+    # days. Raising this number is safe only while the disk can hold the answer above.
+    scan_history_retention_days: int = Field(default=3, ge=1, le=3650)
     # A queued job whose dispatch message is gone can never run: nothing re-sends it, and
     # `recover_stale_or_retryable` only rescues queued rows that carry a retry time. Past
     # this age it is abandoned, not pending, and saying so is what lets retention reach it.
@@ -1016,6 +1066,14 @@ class Settings(BaseSettings):
     # An upper bound on rows removed per run, so a first run against years of history is a
     # series of short transactions rather than one long lock on a live table.
     scan_history_purge_batch: int = Field(default=5000, ge=100, le=100000)
+    #: How many of those batches one nightly run may do before it stops.
+    #:
+    #: It exists so the loop has an end, not to limit how much is deleted: 200 batches of
+    #: 5000 is a million jobs a night, which is far above anything this product writes.
+    #: The number that used to limit deletion was the batch size itself, because the purge
+    #: did exactly one batch and stopped — so it could never remove more in a night than it
+    #: removed in a single transaction, whatever had arrived that day.
+    scan_history_purge_max_batches: int = Field(default=200, ge=1, le=10000)
     observability_detail_retention_days: int = Field(default=14, ge=1, le=365)
     observability_lifecycle_retention_days: int = Field(default=730, ge=30, le=3650)
     observability_aggregate_window_days: int = Field(default=30, ge=1, le=365)
