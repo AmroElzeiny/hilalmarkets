@@ -8,7 +8,12 @@
     <div class="cookie-actions">
       <button class="btn btn-secondary btn-sm" type="button" data-cookie-essential>Essential only</button>
       <button class="btn btn-secondary btn-sm" type="button" data-cookie-customize>Customize</button>
-      <button class="btn btn-secondary btn-sm" type="button" data-cookie-accept-analytics>Accept analytics</button>
+      {#- The main button of the three, so it is painted like every other main button in
+          the product: the brand's apple green behind near-black text. The three were all
+          outline buttons, which offered no answer at all and left the reader deciding
+          between three identical shapes. Green here is emphasis on a control, never a
+          status — see the note on `.cookie-banner .btn-primary`. -#}
+      <button class="btn btn-primary btn-sm" type="button" data-cookie-accept-analytics>Accept analytics</button>
     </div>
   </div>
 </section>

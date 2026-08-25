@@ -123,6 +123,13 @@ class DiscoveryLayer(StrEnum):
     SOCIAL = "social"
     SEARCH = "search"
     CONVENTION = "convention"
+    #: A language model asked, in the exact words a person would use, where a project
+    #: publishes. The **last** layer and the only paid one: it runs for a coin only when
+    #: every free way of finding a page has already produced nothing. Its answers are
+    #: proposals like every other layer's — they are filtered by
+    #: :func:`search_candidates`, which keeps only addresses provably the project's own,
+    #: and then fetched and proved. A model that invents an address cannot promote it.
+    ASSISTED = "assisted"
 
 
 #: The order the layers are tried in. A layer runs only for the categories the
@@ -133,14 +140,19 @@ LAYER_ORDER: tuple[DiscoveryLayer, ...] = (
     DiscoveryLayer.SOCIAL,
     DiscoveryLayer.SEARCH,
     DiscoveryLayer.CONVENTION,
+    DiscoveryLayer.ASSISTED,
 )
 
 #: The layers that cannot answer from what is already known. They need somebody to go
-#: and look: fetch the project's own site, or ask a search engine. ``candidates_for``
-#: still decides what their findings mean — see the module note.
+#: and look: fetch the project's own site, ask a search engine, or ask a model.
+#: ``candidates_for`` still decides what their findings mean — see the module note.
 NETWORK_LAYERS: frozenset[DiscoveryLayer] = frozenset(
-    {DiscoveryLayer.SOCIAL, DiscoveryLayer.SEARCH}
+    {DiscoveryLayer.SOCIAL, DiscoveryLayer.SEARCH, DiscoveryLayer.ASSISTED}
 )
+
+#: The layer that costs money every time it runs. Kept separate from the rest so the one
+#: gate that matters — "everything free has already failed" — is written once.
+PAID_LAYERS: frozenset[DiscoveryLayer] = frozenset({DiscoveryLayer.ASSISTED})
 
 #: A curated link somebody checked against the project's own site.
 CURATED_CONFIDENT = 0.95
@@ -156,12 +168,21 @@ SEARCH_OWN_DOMAIN = 0.55
 #: nothing else vouches for it. The weakest thing this module will propose at all.
 SEARCH_NAME_MATCHED = 0.45
 
+#: The same two numbers for an address a model suggested, one step lower. A model is a
+#: cheaper witness than a search engine — it is recalling rather than looking — so its
+#: proposals start below one, and like every guess they only become usable by surviving
+#: the proof. Both still clear ``CONFIDENCE_FLOOR`` once proved, and neither clears it
+#: unproved, which is the property that matters.
+ASSISTED_OWN_DOMAIN = 0.45
+ASSISTED_NAME_MATCHED = 0.40
+
 LAYER_CONFIDENCE: dict[DiscoveryLayer, float] = {
     DiscoveryLayer.CURATED: CURATED_CONFIDENT,
     DiscoveryLayer.IDENTITY: 0.75,
     DiscoveryLayer.SOCIAL: 0.70,
     DiscoveryLayer.SEARCH: SEARCH_OWN_DOMAIN,
     DiscoveryLayer.CONVENTION: 0.45,
+    DiscoveryLayer.ASSISTED: ASSISTED_OWN_DOMAIN,
 }
 
 #: Below this a link is not good enough to stand as evidence on its own. It is not
@@ -1318,6 +1339,7 @@ def search_candidates(
     official_website: str | None,
     results: Iterable[SearchResult],
     limit: int = 16,
+    layer: DiscoveryLayer = DiscoveryLayer.SEARCH,
 ) -> tuple[SourceCandidate, ...]:
     """Layer 4 — what an open-web search turned up, after the un-official half is dropped.
 
@@ -1341,6 +1363,7 @@ def search_candidates(
             symbol=symbol,
             official_website=official_website,
             result=result,
+            layer=layer,
         )
         if candidate is None:
             continue
@@ -1360,23 +1383,29 @@ def _search_candidate(
     symbol: str,
     official_website: str | None,
     result: SearchResult,
+    layer: DiscoveryLayer = DiscoveryLayer.SEARCH,
 ) -> SourceCandidate | None:
+    own_domain, name_matched = (
+        (ASSISTED_OWN_DOMAIN, ASSISTED_NAME_MATCHED)
+        if layer is DiscoveryLayer.ASSISTED
+        else (SEARCH_OWN_DOMAIN, SEARCH_NAME_MATCHED)
+    )
     channel = classify_channel(result.url, official_website=official_website)
     if channel is None:
         return None
     if is_same_project_site(channel.url, official_website):
-        confidence = SEARCH_OWN_DOMAIN
+        confidence = own_domain
     elif channel.handle and handle_matches_project(
         channel.handle, asset_name=asset_name, symbol=symbol
     ):
-        confidence = SEARCH_NAME_MATCHED
+        confidence = name_matched
     else:
         return None
     return SourceCandidate(
         category=channel.category,
         title=_channel_title(asset_name, channel),
         url=channel.url,
-        layer=DiscoveryLayer.SEARCH,
+        layer=layer,
         confidence=confidence,
     )
 
@@ -1421,12 +1450,18 @@ def candidates_for(
             official_website=official_website,
             links=channel_links,
         )
-    if layer is DiscoveryLayer.SEARCH:
+    if layer in {DiscoveryLayer.SEARCH, DiscoveryLayer.ASSISTED}:
+        # The model's answers go through the **same** filter a search engine's answers go
+        # through — kept only when provably the project's own domain or its own handle.
+        # Giving the assisted layer its own judgement is precisely the duplicate-vocabulary
+        # failure this module exists to prevent: one of the two would eventually learn a
+        # looser idea of "official" than the other.
         return search_candidates(
             asset_name=asset_name,
             symbol=symbol,
             official_website=official_website,
             results=search_results,
+            layer=layer,
         )
     return convention_candidates(
         asset_name=asset_name,

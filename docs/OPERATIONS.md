@@ -300,6 +300,62 @@ Production must provide real secrets through the deployment platform, not `.env`
 The local `.env.example` intentionally uses SQLite and localhost Redis so host-run commands such as
 `alembic upgrade head` do not try to resolve Docker-only hostnames.
 
+### Getting a release's new settings into `.env.production` on the server
+
+`.env.production` is not in git, so `git pull` never brings a new setting into it. The two
+*examples* are in git, and `scripts/sync_env_keys.py` fills the real file from them — writing each
+missing key at the value the application was **already** running on, so nothing it reads changes.
+
+A key absent from the file is not "unset"; it is running on its code default. That is why this is a
+tool and not a copy-paste job, and why it never touches a key the file already has.
+
+**Run it after the code is on the server and before the containers are recreated.** The order
+matters: the examples only carry the new keys once the pull has landed, and the containers only read
+the file at start.
+
+The server has no project Python on the host, so it runs inside the application's own image. The
+repository directory is mounted over `/app` because the script needs four files the image does not
+carry — the two examples, the real file, and the backup it writes next to it:
+
+```bash
+cd /opt/hilalmarkets   # wherever the checkout lives
+
+# 1. See exactly what it would add. Writes nothing.
+docker compose --env-file .env.production -f docker-compose.prod.yml \
+  run --rm --no-deps -v "$PWD:/app" -w /app api \
+  python scripts/sync_env_keys.py
+
+# 2. Do it. Takes a timestamped backup next to the file first.
+docker compose --env-file .env.production -f docker-compose.prod.yml \
+  run --rm --no-deps -v "$PWD:/app" -w /app api \
+  python scripts/sync_env_keys.py --apply
+```
+
+`--no-deps` keeps it from starting the database and Redis for a job that needs neither. The
+`--env-file` is still passed because Compose needs it to resolve the file's own variables; the script
+knows the container injects those and hides the ones it is writing while it checks its work.
+
+Read the dry run before applying it. It names every key it would add and the value it would write,
+and both are already in git — no live value is ever printed.
+
+To change a value on purpose, name it and the file:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml \
+  run --rm --no-deps -v "$PWD:/app" -w /app api \
+  python scripts/sync_env_keys.py --apply \
+    --set SHARIA_SOURCE_AI_DISCOVERY_ENABLED=true --only .env.production
+```
+
+Then recreate the containers, because a running container keeps the environment it started with:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --force-recreate api worker scheduler
+```
+
+The backups the script leaves behind (`.env.production.backup.<stamp>`) hold real secrets. They are
+covered by `.gitignore`, and old ones should be deleted once a release is known good.
+
 ## Worker And Scheduler
 
 Worker:

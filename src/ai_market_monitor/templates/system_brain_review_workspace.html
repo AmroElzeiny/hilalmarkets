@@ -24,7 +24,8 @@
         </div>
         <h2>{{ asset.name if asset else case.title }}{% if asset %} <small>{{ asset.symbol }}</small>{% endif %}</h2>
         <div class="brain-review-meta">
-          <span>{{ case.case_reference }}</span>
+          {#- The assistant in the corner reads this to know which case is open. -#}
+          <span data-case-reference="{{ case.case_reference }}">{{ case.case_reference }}</span>
           <span>{{ case.case_type.replace('_',' ').title() }}</span>
           <span>{{ detail.case_age_hours }}h open{% if case.due_at %} · due {{ case.due_at.strftime('%d %b, %H:%M UTC') }}{% endif %}</span>
           <span>{{ methodology.name if methodology else 'No methodology' }}{% if methodology %} v{{ methodology.version }}{% endif %}</span>
@@ -70,7 +71,19 @@
     {% endif %}
 
     <article class="brain-panel brain-case-reason">
-      <div class="brain-panel-title"><i data-icon="alert"></i><div><h3>{{ detail.why_case.trigger }}</h3></div></div>
+      {#- The same tag the Cases list shows, from the same owner, so the two screens
+          cannot describe one case differently. The heading is the specific sentence
+          about this coin; the producer's own words are below it. -#}
+      <div class="brain-panel-title">
+        <i data-icon="alert"></i>
+        <div>
+          <span class="brain-case-tag tone-{{ detail.tag.tone }}" title="{{ detail.tag.meaning }}">{{ detail.tag.label }}</span>
+          <h3>{{ detail.tag.reason }}</h3>
+          {% if detail.why_case.trigger and detail.why_case.trigger != detail.tag.reason %}
+          <p class="brain-muted">{{ detail.why_case.trigger }}</p>
+          {% endif %}
+        </div>
+      </div>
       <dl class="brain-facts brain-facts-four">
         <div><dt>Area</dt><dd>{{ detail.why_case.assessment_area }}</dd></div>
         <div><dt>Severity</dt><dd>{{ detail.why_case.severity.title() }}</dd></div>

@@ -12,6 +12,18 @@ git, so a new setting never arrives with a ``git pull`` — but the two *example
 this fills the real file from them. Running it on the server after a deploy is the
 supported way to add a release's new keys, rather than typing them by hand.
 
+On the server there is no project Python on the host, so it runs inside the application's
+own image, with the repository mounted over ``/app`` — it needs four files the image does
+not carry: the two examples, the real file, and the backup it writes beside it::
+
+    docker compose --env-file .env.production -f docker-compose.prod.yml \
+      run --rm --no-deps -v "$PWD:/app" -w /app api \
+      python scripts/sync_env_keys.py --apply
+
+Run it **after** the pull and **before** the containers are recreated: the examples only
+carry the new keys once the pull has landed, and a running container keeps the environment
+it started with. ``docs/OPERATIONS.md`` has the whole sequence.
+
 Why this is not a copy-paste job
 --------------------------------
 A key absent from a file is not "unset". It is running on its code default. Writing the

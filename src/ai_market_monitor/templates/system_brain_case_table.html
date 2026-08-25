@@ -15,6 +15,11 @@
         {% endif %}
         <th>Priority</th>
         <th>Case</th>
+        {#- Two columns where there was one. "What kind of problem" is what lets a queue
+            be sorted and counted; "why" is the one sentence about this coin. The single
+            free-text column carried whatever five different producers happened to write,
+            so two rows with the same problem never looked alike. -#}
+        <th>What kind</th>
         <th>Why</th>
         <th>State</th>
         <th>Evidence</th>
@@ -41,9 +46,23 @@
         <td><span class="brain-status risk-{{ item.priority }}">{{ item.priority }}</span></td>
         <td>
           <strong>{{ item.asset_name }} <small>{{ item.symbol }}</small></strong>
-          <small>{{ item.reference }} · {{ item.case_type }}</small>
+          {#- `data-case-reference` is how the assistant in the corner knows which cases
+              are in front of the reader. It is the reference itself, not the internal id:
+              the reference is the only name a person ever sees, and it is what they type
+              when they ask about one. -#}
+          <small data-case-reference="{{ item.reference }}">{{ item.reference }} · {{ item.case_type }}</small>
         </td>
-        <td class="brain-reason-cell">{{ item.review_reason }}</td>
+        <td class="brain-tag-cell">
+          <span class="brain-case-tag tone-{{ item.tag_tone }}" title="{{ item.tag_meaning }}">{{ item.tag_label }}</span>
+        </td>
+        <td class="brain-reason-cell">
+          <span>{{ item.why }}</span>
+          {#- The producer's own words, kept and folded away. They are the audit record of
+              what was actually written; they are not the sentence a reviewer works from. -#}
+          {% if item.review_reason and item.review_reason != item.why %}
+          <details class="brain-reason-raw"><summary>What the system recorded</summary><p>{{ item.review_reason }}</p></details>
+          {% endif %}
+        </td>
         <td>
           <span class="brain-status {{ item.state }}">{{ item.state.replace('_',' ') }}</span>
           <small>{{ item.publication_state.replace('_',' ').title() }}</small>
@@ -65,7 +84,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="{{ 9 if select_mode else 8 }}" class="brain-empty">Nothing needs action here.</td></tr>
+      <tr><td colspan="{{ 10 if select_mode else 9 }}" class="brain-empty">Nothing needs action here.</td></tr>
       {% endfor %}
     </tbody>
   </table>

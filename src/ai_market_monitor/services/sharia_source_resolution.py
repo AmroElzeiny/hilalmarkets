@@ -10,13 +10,17 @@ The order matters and is the whole idea:
 
 1. Ask the highest layer that has not answered yet for candidates.
 2. Fetch each candidate and prove it: it must be reachable, permitted by the site's own
-   robots policy, readable as text, and — for a news page — recently updated.
+   robots policy, readable as text, and — for a news page — recently updated. A page a
+   plain request could not read is tried once more through a real browser, because a
+   growing share of project blogs and forums only exist after JavaScript has run.
 3. Score it. Proof adds; failure removes. A candidate that cannot be proved scores zero
    however confident the layer that proposed it was.
 4. If a required category still has fewer proved links than the product wants, drop to
    the next layer and repeat.
-5. When the layers are exhausted and a category has no working link at all, raise a task
-   for a person.
+5. When every free layer has run and a required category still has **nothing**, ask a
+   model where the project publishes — the one paid layer, and the last.
+6. When that is exhausted too, raise a task for a person, saying what was tried and what
+   is stopping the machine going further.
 
 Because proof can only ever *lower* a guess, the cheap guessing layer is safe to have.
 A wrong ``https://example.com/blog`` fails step 2 and disappears; it can never talk its
@@ -48,7 +52,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -59,6 +63,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import CanonicalAsset, OfficialSource, ReviewCase
 from ai_market_monitor.db.models.enums import ReviewCaseType
+from ai_market_monitor.services.sharia_page_render import (
+    RETRYABLE_WITH_BROWSER,
+    BrowserPageRenderer,
+)
 
 # One owner for turning a fetched body into text. Re-implementing it here is how the
 # two-parsers-that-disagree problem starts: this module would decide a page was
@@ -74,6 +82,7 @@ from ai_market_monitor.services.sharia_source_activity import (
     measure,
     newest_published_at,
 )
+from ai_market_monitor.services.sharia_source_ai_discovery import AISourceDiscovery
 from ai_market_monitor.services.sharia_source_catalog import (
     CANDIDATE,
     CATEGORY_PRIORITY,
@@ -85,6 +94,7 @@ from ai_market_monitor.services.sharia_source_catalog import (
     NEWS,
     NEWS_MAXIMUM_AGE_DAYS,
     NOT_PERMITTED,
+    PAID_LAYERS,
     PROOF_BONUS,
     REQUIRED_CATEGORIES,
     UNREACHABLE,
@@ -285,6 +295,8 @@ class SourceResolutionService:
         *,
         fetcher: OfficialEvidenceFetcher | None = None,
         discovery: WebSourceDiscovery | None = None,
+        renderer: BrowserPageRenderer | None = None,
+        ai_discovery: AISourceDiscovery | None = None,
         now: datetime | None = None,
         force_recheck: bool = False,
     ) -> None:
@@ -292,6 +304,11 @@ class SourceResolutionService:
         self.settings = settings
         self.fetcher = fetcher or OfficialEvidenceFetcher(settings)
         self.discovery = discovery or WebSourceDiscovery(settings, fetcher=self.fetcher)
+        #: The second way of reading a page, for the ones a plain request cannot read.
+        #: One browser for the whole sweep, started only if a page actually needs it.
+        self.renderer = renderer or BrowserPageRenderer(settings)
+        #: The last way of finding one, for a coin every free layer gave up on.
+        self.ai_discovery = ai_discovery or AISourceDiscovery(settings)
         self._now = now
         #: Ignore the recheck calendar and fetch everything. The scheduled sweep never
         #: does this — it exists for the operator's full re-check, which is the only
@@ -332,8 +349,13 @@ class SourceResolutionService:
                 )
             ).all()
         )
-        for asset in assets:
-            sweep.assets.append(await self.resolve_asset(asset, deep=deep))
+        try:
+            for asset in assets:
+                sweep.assets.append(await self.resolve_asset(asset, deep=deep))
+        finally:
+            # One browser for the whole sweep, and it has to be shut down whatever
+            # happened — a Chromium left running is the largest thing on a 3.9 GB server.
+            await self.renderer.aclose()
         return sweep
 
     async def add_reviewed_source(
@@ -428,6 +450,12 @@ class SourceResolutionService:
                 coverage.counts, deep=deep, look_due=look_due
             ):
                 continue
+            if layer in PAID_LAYERS and not self._may_ask_a_model(coverage.counts):
+                # The one gate that matters for the paid layer: every free way of finding
+                # a page has already run for this coin and a required category still has
+                # nothing at all. "Fewer than we would like" is not enough — that is what
+                # the free layers keep working on.
+                continue
             await self._run_layer(
                 layer,
                 asset=asset,
@@ -481,6 +509,24 @@ class SourceResolutionService:
         if categories_below(counts, LINKS_REQUIRED_PER_CATEGORY):
             return True
         return look_due
+
+    def _may_ask_a_model(self, counts: Counter[str]) -> bool:
+        """Whether this coin has earned the one paid question.
+
+        Two conditions, both required, and neither is "we would like more links":
+
+        * asking is switched on and possible at all;
+        * a required category has **no working link whatsoever** after every free layer
+          has run for this coin.
+
+        The second is the important one. ``LINKS_REQUIRED_PER_CATEGORY`` is the number
+        below which a person is asked for help; anything above it is the machine tidying
+        up, and tidying up is not worth a model call per coin per sweep.
+        """
+
+        if not self.ai_discovery.configured:
+            return False
+        return bool(categories_below(counts, LINKS_REQUIRED_PER_CATEGORY))
 
     async def _existing_rows(self, asset_id: UUID) -> dict[str, OfficialSource]:
         rows = list(
@@ -695,8 +741,9 @@ class SourceResolutionService:
         layer: DiscoveryLayer,
         *,
         asset: CanonicalAsset,
+        tried: tuple[str, ...] = (),
     ) -> tuple[SourceCandidate, ...]:
-        """One layer's proposals, including the two that have to go and look."""
+        """One layer's proposals, including the three that have to go and look."""
 
         channel_links: tuple[str, ...] = ()
         search_results: tuple[SearchResult, ...] = ()
@@ -705,6 +752,13 @@ class SourceResolutionService:
         elif layer is DiscoveryLayer.SEARCH:
             search_results = await self.discovery.search(
                 asset_name=asset.name, symbol=asset.symbol
+            )
+        elif layer is DiscoveryLayer.ASSISTED:
+            search_results = await self.ai_discovery.suggest(
+                asset_name=asset.name,
+                symbol=asset.symbol,
+                official_website=asset.official_website,
+                already_tried=tried,
             )
         return candidates_for(
             layer,
@@ -732,7 +786,11 @@ class SourceResolutionService:
         # when to stop; the asset's real coverage is re-read from its rows afterwards.
         stop_when_full = layer is not DiscoveryLayer.CURATED
         found: Counter[str] = Counter()
-        candidates = await self._candidates(layer, asset=asset)
+        # The addresses the free layers have just proved do not work, so the paid layer
+        # does not spend its one answer offering them back.
+        candidates = await self._candidates(
+            layer, asset=asset, tried=tuple(outcome.rejected[-12:])
+        )
         for candidate in candidates:
             held = lively.get(candidate.category, 0) + found.get(candidate.category, 0)
             if stop_when_full and held >= self.wanted_per_category:
@@ -822,6 +880,52 @@ class SourceResolutionService:
             row.verification_state = CANDIDATE
 
     async def _prove(self, row: OfficialSource, category: str) -> SourceProof:
+        proof = await self._prove_once(row, category)
+        if proof.usable or not self._browser_could_help(proof):
+            return proof
+        # The plain request could not read this page. A growing share of project blogs and
+        # forums only exist after JavaScript has run, so the same address is asked for a
+        # second time through a real browser. Robots has already decided — a disallowed
+        # address never reaches here — and whatever comes back is proved by exactly the
+        # same rules. Rendering makes a page legible; it never makes one trusted.
+        rendered = await self.renderer.render(row.source_url)
+        if not rendered.ok:
+            if rendered.unavailable_reason:
+                return replace(
+                    proof,
+                    detail={**proof.detail, "browser": _capped(rendered.unavailable_reason)},
+                )
+            return proof
+        second = self._judge_document(
+            rendered.html,
+            row=row,
+            category=category,
+            content_type="text/html",
+            status=proof.status,
+        )
+        return replace(
+            second,
+            detail={**second.detail, "read_with": rendered.engine or "browser"},
+        )
+
+    @staticmethod
+    def _browser_could_help(proof: SourceProof) -> bool:
+        """Whether a browser might read what a plain request could not.
+
+        A settled "no" — robots said no, the address is gone, the site forbids us — is an
+        answer, and asking a second time with a browser is only a second way of hearing
+        it. Those are excluded here rather than at the call site so there is one place
+        that decides what is worth a retry.
+        """
+
+        if proof.forbidden or proof.definitively_dead:
+            return False
+        if proof.reachable and proof.readable:
+            # Read fine; it is only stale. A browser cannot make a page publish.
+            return False
+        return (proof.error_code or "too_short") in RETRYABLE_WITH_BROWSER
+
+    async def _prove_once(self, row: OfficialSource, category: str) -> SourceProof:
         try:
             body, headers, status = await self.fetcher.fetch(row)
         except ShariaResearchError as exc:
@@ -834,9 +938,32 @@ class SourceResolutionService:
                 error_code=exc.code,
                 detail={"message": str(exc)},
             )
+        return self._judge_document(
+            body,
+            row=row,
+            category=category,
+            content_type=headers.get("content-type"),
+            status=status,
+        )
+
+    def _judge_document(
+        self,
+        body: str | bytes,
+        *,
+        row: OfficialSource,
+        category: str,
+        content_type: str | None,
+        status: int | None,
+    ) -> SourceProof:
+        """Read one fetched document and say what it proves.
+
+        One owner, used by both the plain fetch and the browser render, so a page cannot
+        be judged readable by one route and unreadable by the other.
+        """
+
         try:
             _title, headings, text = _extract_document(
-                body, row.source_url, content_type=headers.get("content-type")
+                body, row.source_url, content_type=content_type
             )
         except Exception as exc:  # noqa: BLE001 - an unreadable page is an answer
             return SourceProof(
@@ -872,6 +999,10 @@ class SourceResolutionService:
             fresh=fresh,
             status=status,
             published_at=published,
+            # "too_short" is a real, separate answer from "we could not parse it": it is
+            # the exact shape a JavaScript-only page has, and it is what tells the browser
+            # fallback this address is worth a second look.
+            error_code=None if readable else "too_short",
             detail={"characters": len(text.strip())},
             activity=activity,
         )
@@ -896,18 +1027,7 @@ class SourceResolutionService:
             f"A working replacement for this link, which is gone: {item}"
             for item in outcome.withdrawn
         )
-        tried = outcome.rejected[:10]
-        reason = " ".join(
-            [
-                f"The system could not find every official page for {asset.name}.",
-                (
-                    "It tried these and none worked: " + "; ".join(tried) + "."
-                    if tried
-                    else "It had no address to try."
-                ),
-                "Please add the correct address on the asset, or say there is not one.",
-            ]
-        )
+        reason = self._gap_reason(asset, outcome)
         if existing is not None:
             if existing.done_at is not None:
                 # It was closed and the gap came back. Reopen rather than open a second.
@@ -936,6 +1056,80 @@ class SourceResolutionService:
         await self.session.flush()
         outcome.escalated = True
         outcome.case_reference = reference
+
+    def _gap_reason(self, asset: CanonicalAsset, outcome: AssetSourceOutcome) -> str:
+        """Why this coin still has no working page, in words that name the real cause.
+
+        The old sentence ended "Please add the correct address on the asset, or say there
+        is not one." on **every** gap, including the ones the machine had simply not been
+        allowed to look for yet — no web search key, no official website to read, no
+        browser to render a page that needs one. A reviewer was being asked to do the
+        machine's job, two hundred times, for a reason nobody had told them.
+
+        This says three things instead, and only the ones that are true:
+
+        * what is missing — the category, not "every official page";
+        * what was already tried, and what it did;
+        * what is stopping the machine from going further, when something is.
+        """
+
+        missing = ", ".join(category_label(item) for item in outcome.missing)
+        parts: list[str] = []
+        if missing:
+            parts.append(
+                f"{asset.name} ({asset.symbol}) still has no working {missing} page."
+            )
+        if outcome.withdrawn:
+            parts.append(
+                f"{len(outcome.withdrawn)} link(s) that used to work are gone: "
+                + "; ".join(outcome.withdrawn[:5])
+                + "."
+            )
+        tried = outcome.rejected[:5]
+        if tried:
+            more = len(outcome.rejected) - len(tried)
+            tail = f" and {more} more" if more > 0 else ""
+            parts.append(
+                "The system tried these and none of them proved usable: "
+                + "; ".join(tried)
+                + f"{tail}."
+            )
+        blocked = self._what_stops_looking(asset)
+        if blocked:
+            parts.append("It cannot look any further because " + " ".join(blocked))
+        else:
+            parts.append(
+                "The system keeps looking on every sweep. Open this only if you already "
+                "know the right address."
+            )
+        return " ".join(parts)
+
+    def _what_stops_looking(self, asset: CanonicalAsset) -> list[str]:
+        """The reasons a layer could not run at all, said plainly. Empty when none apply.
+
+        Each of these is a **configuration** fact, not a fact about the coin, and each one
+        silently removed a whole discovery layer. Naming them here is what turns "please
+        add the address" into "switch this on and the machine will find it".
+        """
+
+        blocked: list[str] = []
+        site = (asset.official_website or "").strip()
+        if not site or not is_official_url(site):
+            blocked.append(
+                "this coin has no approved official website, so the pages a project "
+                "links to and the usual /blog and /community addresses cannot be tried;"
+            )
+        if not self.discovery.search_configured:
+            blocked.append(f"web search is not usable: {self.discovery.search_requirement()}")
+        browser = self.renderer.why_unavailable()
+        if browser:
+            blocked.append(
+                f"pages that only appear after JavaScript runs cannot be read: {browser}"
+            )
+        assisted = self.ai_discovery.requirement()
+        if assisted:
+            blocked.append(assisted)
+        return blocked
 
     async def _close_gap_case(self, asset: CanonicalAsset) -> None:
         """The gap was filled, so the task stops asking.

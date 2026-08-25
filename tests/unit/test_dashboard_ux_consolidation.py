@@ -389,16 +389,23 @@ def test_opportunity_cards_use_the_shared_real_asset_logo_loader():
 
 def test_system_brain_is_reviewer_first_and_uses_five_sections():
     template = _read("templates/system_brain.html")
+    dock = _read("templates/system_brain_agent_dock.html")
     review = _read("templates/system_brain_review_workspace.html")
     styles = _read("static/system-brain.css")
     runtime = _read("static/system-brain.js")
+    agent = _read("static/system-brain-agent.js")
     shared_renderer = _read("static/chat-message-renderer.js")
 
     for label in ("Inbox", "Cases", "Operations", "Governance", "Audit &amp; Settings"):
         assert f"<span>{label}</span>" in template
     assert template.count("<nav>") == 1
-    assert 'data-testid="system-brain-assistant"' in template
-    assert "/api/v1/system-brain/conversations/" in runtime
+    # The assistant is a window in the corner of every System Brain page, not a panel on
+    # one of them. It is included from the page shell, so it is present whichever section
+    # is being looked at.
+    assert "system_brain_agent_dock.html" in template
+    assert "data-brain-agent-dock" in dock
+    assert "/api/v1/system-brain/conversations/" in agent
+    assert "page_context" in agent, "the assistant must be told which page it is on"
     assert "customer-conversation-stream" in runtime
     assert "X-CSRF-Token" in runtime
     assert "HilalChatMessageRenderer.render" in runtime

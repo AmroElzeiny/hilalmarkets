@@ -1,0 +1,85 @@
+{#- The System Brain assistant, in the corner of every System Brain page.
+
+    Same shape as Hilal on the dashboard and the Support assistant on the public site —
+    a round button that opens a window with a transcript and a writing box — because a
+    person who has used one already knows how to use this.
+
+    Deliberately a **different mark**: Hilal is a spark, this is a robot head. They are
+    not the same assistant, they read completely different things, and a reader must
+    never have to guess which one they are talking to.
+
+    Almost nothing is written here. The chat list, the transcript and the running turn all
+    come from the server, so the page cannot show an answer the server would not give. -#}
+
+<div class="brain-agent-dock" data-brain-agent-dock
+     data-brain-agent-focus="{{ agent_focus | default('') }}">
+
+  <button class="brain-agent-orb" type="button" data-brain-agent-open
+          aria-expanded="false" aria-controls="brain-agent-window"
+          aria-label="Open the System Brain assistant. It reads the product's own records and can see the page you are on.">
+    <span class="brain-agent-orb-ring" aria-hidden="true"></span>
+    <span class="brain-agent-orb-face" aria-hidden="true"><i data-icon="bot"></i></span>
+  </button>
+
+  <section class="brain-agent-window" id="brain-agent-window" data-brain-agent-window
+           role="dialog" aria-modal="false" aria-labelledby="brain-agent-heading" hidden>
+
+    <header class="brain-agent-head">
+      <span class="brain-agent-mark" aria-hidden="true"><i data-icon="bot"></i></span>
+      <div>
+        <h2 id="brain-agent-heading" data-brain-agent-title>System Brain</h2>
+        {#- What it is reading is said in the frame, not in a sentence it writes, so it is
+            true of every answer and cannot be forgotten in one. -#}
+        <p data-brain-agent-context>It can see this page and the product's own records.</p>
+      </div>
+      <div class="brain-agent-head-actions">
+        <span class="brain-status {{ 'success' if assistant_enabled else 'warning' }}">{{ (assistant_model ~ ' · ' ~ assistant_reasoning_effort) if assistant_enabled else 'Disabled' }}</span>
+        <button class="brain-icon-button" type="button" data-brain-agent-close aria-label="Close the assistant"><i data-icon="close"></i></button>
+      </div>
+    </header>
+
+    <div class="brain-agent-body">
+      <aside class="brain-agent-chats" aria-label="Your chats">
+        <div class="brain-agent-chats-head">
+          <button class="brain-secondary-button" type="button" data-brain-agent-new><i data-icon="plus"></i>New chat</button>
+          <label class="sr-only" for="brain-agent-search">Search your chats</label>
+          <input id="brain-agent-search" type="search" maxlength="160" data-brain-agent-search placeholder="Search chats">
+        </div>
+        <div class="brain-agent-conversation-list" data-brain-agent-conversations role="list"></div>
+        <div class="brain-agent-chats-foot">
+          <button class="brain-secondary-button" type="button" data-brain-agent-rename>Rename</button>
+          <button class="brain-secondary-button" type="button" data-brain-agent-archive>Archive</button>
+        </div>
+      </aside>
+
+      <div class="brain-agent-thread">
+        <div class="brain-agent-progress" data-brain-agent-progress hidden role="status">Choosing evidence tools…</div>
+        <div class="brain-agent-messages" data-brain-agent-messages aria-live="polite" role="log">
+          <p class="brain-muted">Ask anything about the product, the cases or the code.</p>
+        </div>
+        <form class="brain-agent-compose" data-brain-agent-form>
+          <label class="sr-only" for="brain-agent-input">Write to the System Brain assistant</label>
+          <textarea id="brain-agent-input" rows="1" maxlength="4000" required
+                    placeholder="اسأل أي حاجة…"
+                    {{ 'disabled' if not assistant_enabled else '' }}></textarea>
+          <button type="submit" class="brain-action-button" aria-label="Send"
+                  {{ 'disabled' if not assistant_enabled else '' }}><i data-icon="send"></i></button>
+          <button type="button" class="brain-secondary-button" data-brain-agent-cancel hidden>Stop</button>
+        </form>
+      </div>
+
+      <aside class="brain-agent-evidence" aria-label="Evidence and actions">
+        <h3>Evidence</h3>
+        <div data-brain-agent-evidence><p class="brain-muted">What it looked at appears here.</p></div>
+        <div data-brain-agent-proposals></div>
+        <h3>Saved notes</h3>
+        <div data-brain-agent-artifacts><p class="brain-muted">Nothing saved in this chat.</p></div>
+      </aside>
+    </div>
+
+    <p class="brain-agent-foot">
+      It explains what is on record and never decides anything. It cannot approve, publish
+      or reject a case, and it never states a Shariah status — that stays your decision.
+    </p>
+  </section>
+</div>

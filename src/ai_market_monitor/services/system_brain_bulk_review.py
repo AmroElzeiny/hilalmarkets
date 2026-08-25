@@ -11,6 +11,18 @@ review rules:
 * the reviewer's own written reason is what is recorded on every case. Nothing is
   written by a model, and nothing is filled in with a default.
 
+**One refusal never stops the click.** Each case is decided inside its own savepoint, so
+a case that fails — for a rule, or for a database error — undoes only itself. 190 selected
+and 8 refused means 182 recorded, every time. Before the savepoints a refusal raised
+half-way through a governance call left its half-written rows in the transaction, and a
+database error poisoned the transaction so the final commit lost the whole click.
+
+**A refusal that research cures is cured here.** An imported case has no research folder
+until research runs, and every decision needs one, so a reviewer selecting two hundred
+imported cases used to get two hundred copies of "open it and run research". Those cases
+are now sent for research in the same click — reported apart from the ones that were
+decided, never counted as approved, and never given a decision nobody made.
+
 **Approve means published.** A reviewer approving an asset is asking for it to be in
 front of customers, so the approval and the publication run together, as two recorded
 governed steps rather than two clicks. Where publication legitimately has to wait — a
@@ -37,6 +49,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
@@ -110,6 +123,10 @@ class CaseOutcome:
     previous_publication_state: str = ""
     decision_id: UUID | None = None
     publication_id: UUID | None = None
+    #: Set when the decision was refused and this run sent the case for research
+    #: instead. The case is not decided, but nothing is left for the reviewer to do
+    #: by hand either, so it is reported apart from a plain refusal.
+    sent_for_research: bool = False
 
 
 @dataclass(slots=True)
@@ -129,6 +146,18 @@ class BatchOutcome:
     @property
     def failed(self) -> int:
         return sum(1 for item in self.results if not item.applied)
+
+    @property
+    def researched(self) -> int:
+        """Refused for missing evidence, and sent to gather it in the same click."""
+
+        return sum(1 for item in self.results if item.sent_for_research)
+
+    @property
+    def stuck(self) -> int:
+        """Refused, and still waiting for a person. The only number to act on."""
+
+        return sum(1 for item in self.results if not item.applied and not item.sent_for_research)
 
     @property
     def published(self) -> int:
@@ -151,26 +180,28 @@ class BatchOutcome:
             done = f"{self.applied} case(s) sent for research. {when}"
             if not self.failed:
                 return f"{done} Come back when it finishes, then decide them."
-            return (
-                f"{done} {self.failed} could not be sent and are listed below — "
-                "open them one by one."
-            )
+            return f"{done} {self.stuck} could not be sent — see below."
         if self.action == "reject":
-            done = f"{self.applied} case(s) rejected and stored"
+            done = f"{self.applied} of {len(self.results)} case(s) rejected and stored"
         elif self.published == self.applied:
-            done = f"{self.applied} case(s) approved and published"
+            done = f"{self.applied} of {len(self.results)} case(s) approved and published"
         else:
             waiting = self.applied - self.published
             done = (
-                f"{self.applied} case(s) approved, {self.published} published, "
-                f"{waiting} waiting to be published"
+                f"{self.applied} of {len(self.results)} case(s) approved, "
+                f"{self.published} published, {waiting} waiting to be published"
             )
-        if not self.failed:
-            return f"{done}. Use Undo if this was a mistake."
-        return (
-            f"{done}. {self.failed} could not be decided this way and are listed below "
-            "— open them one by one."
-        )
+        parts = [f"{done}."]
+        if self.researched:
+            parts.append(
+                f"{self.researched} had no finished evidence yet and were sent for "
+                "research automatically — decide those when it finishes."
+            )
+        if self.stuck:
+            parts.append(f"{self.stuck} still need you — see below.")
+        if self.applied and not self.stuck:
+            parts.append("Use Undo if this was a mistake.")
+        return " ".join(parts)
 
 
 class BulkReviewError(ValueError):
@@ -213,7 +244,7 @@ class BulkReviewService:
         outcome = BatchOutcome(batch_id=None, action=action)
         for case_id in unique_ids:
             outcome.results.append(
-                await self._apply_one(
+                await self._apply_isolated(
                     case_id,
                     action=action,
                     reason=reason,
@@ -222,6 +253,11 @@ class BulkReviewService:
             )
 
         applied = [item for item in outcome.results if item.applied]
+        if outcome.researched and action in BULK_DECISION_ACTIONS:
+            # Some cases were refused for missing evidence and sent to gather it. The
+            # sweep reads them from the database, so it is queued by the caller after
+            # the commit, exactly as the explicit research action does.
+            outcome.research_queued = False
         if action == "start_research":
             # Deliberately does **not** queue the worker here. This runs inside the
             # caller's transaction, and the sweep reads the cases from the database — a
@@ -281,6 +317,57 @@ class BulkReviewService:
             return False
         return True
 
+    async def _apply_isolated(
+        self,
+        case_id: UUID,
+        *,
+        action: str,
+        reason: str,
+        admin_user_id: UUID,
+    ) -> CaseOutcome:
+        """One case, decided inside its own savepoint.
+
+        This is what makes "190 selected, 8 refused, 182 recorded" true rather than
+        hopeful. Two failures used to reach past the case that caused them:
+
+        * a refusal raised **after** the governance service had already written part of
+          its work left that half-written row in the transaction, and the commit at the
+          end carried it in with the cases that really were decided;
+        * a database-level error — a constraint, a lost connection, anything not a
+          governance refusal — poisoned the whole transaction, so the final commit threw
+          and *every* case in the click was lost, including the ones that had gone
+          through perfectly.
+
+        A savepoint per case closes both. Rolling back to it undoes only that case, the
+        session stays usable, and the loop carries on. A failure is reported next to its
+        own case and nowhere else.
+        """
+
+        savepoint = await self.session.begin_nested()
+        try:
+            result = await self._apply_one(
+                case_id, action=action, reason=reason, admin_user_id=admin_user_id
+            )
+        except SQLAlchemyError:
+            # Not a refusal — the database itself said no. Reported against this case so
+            # the rest of the selection is still decided, and logged because nobody can
+            # act on it from the screen.
+            logger.exception("Quick decision failed on case %s at the database", case_id)
+            await savepoint.rollback()
+            return CaseOutcome(
+                case_id,
+                str(case_id),
+                False,
+                "The system could not save this one. The others were saved. Try this "
+                "case on its own.",
+            )
+        if result.applied or result.sent_for_research:
+            await savepoint.commit()
+        else:
+            # Nothing was recorded for this case, so nothing it half-wrote may survive.
+            await savepoint.rollback()
+        return result
+
     async def _apply_one(
         self,
         case_id: UUID,
@@ -303,13 +390,18 @@ class BulkReviewService:
                 case_id,
                 reference,
                 False,
-                "This is a job to find a missing link, not a case to decide. "
-                "Open it and add the address.",
+                "This one is a job to find a missing official page, not a case with a "
+                "verdict. The system keeps looking for it by itself; open it only if "
+                "you already know the address.",
             )
         previous_state = case.state
         previous_publication_state = case.publication_state
         publication_id: UUID | None = None
         message = "Recorded."
+        # The decision gets a savepoint of its own, inside the one this case already
+        # holds. A refusal raised half-way through leaves rows pending; without this the
+        # research that follows would be written on top of them and committed together.
+        attempt = await self.session.begin_nested()
         try:
             if action == "start_research":
                 # Asks for the evidence; decides nothing. Returns early because there is
@@ -319,6 +411,7 @@ class BulkReviewService:
                     admin_user_id=admin_user_id,
                     reason=reason,
                 )
+                await attempt.commit()
                 return CaseOutcome(
                     case_id,
                     reference,
@@ -355,9 +448,18 @@ class BulkReviewService:
             # One case refusing must not roll back the ones already recorded, so the
             # failure is reported next to its case and the loop continues — in the plain
             # words every screen uses for that refusal, never the raw rule sentence.
-            return CaseOutcome(
-                case_id, reference, False, explain_error(exc).sentence()
-            )
+            await attempt.rollback()
+            blocker = explain_error(exc)
+            if blocker.research_clears and action in BULK_DECISION_ACTIONS:
+                return await self._research_instead(
+                    case_id,
+                    reference=reference,
+                    blocker_sentence=blocker.what_happened,
+                    reason=reason,
+                    admin_user_id=admin_user_id,
+                )
+            return CaseOutcome(case_id, reference, False, blocker.sentence())
+        await attempt.commit()
         return CaseOutcome(
             case_id,
             reference,
@@ -367,6 +469,58 @@ class BulkReviewService:
             previous_publication_state=previous_publication_state,
             decision_id=decision.id,
             publication_id=publication_id,
+        )
+
+    async def _research_instead(
+        self,
+        case_id: UUID,
+        *,
+        reference: str,
+        blocker_sentence: str,
+        reason: str,
+        admin_user_id: UUID,
+    ) -> CaseOutcome:
+        """The decision was refused for want of evidence, so go and get the evidence.
+
+        This is the whole reason a reviewer selects two hundred imported cases at once.
+        Every one of them arrives with an asset identity and a provider row and **no
+        research folder**, so every decision on them is refused with the same sentence and
+        the same instruction: open it and run research. Two hundred times that is not
+        review work.
+
+        Three things this is careful **not** to be:
+
+        * it is not a decision. No ``ReviewDecision`` is written, the case is not
+          approved, and Undo has nothing to take back;
+        * it does not hide the refusal. The case is reported apart from the ones that
+          went through, with the refusal that caused it said in full;
+        * it does not guess. Only the refusals whose recorded next step *is* research —
+          :data:`sharia_review_blockers.RESEARCH_CLEARS_CODES` — come here. Anything else
+          goes back to the reviewer untouched.
+        """
+
+        try:
+            await self.governance.start_research(
+                case_id,
+                admin_user_id=admin_user_id,
+                reason=reason,
+            )
+        except ShariaGovernanceError as exc:
+            # It could not even be sent for research. Say both halves: what stopped the
+            # decision, and what stopped the way out of it.
+            return CaseOutcome(
+                case_id,
+                reference,
+                False,
+                f"{blocker_sentence} {explain_error(exc).sentence()}",
+            )
+        return CaseOutcome(
+            case_id,
+            reference,
+            False,
+            f"{blocker_sentence} It was sent for research automatically; decide it when "
+            "the evidence is in.",
+            sent_for_research=True,
         )
 
     async def _all_conditions_pass(

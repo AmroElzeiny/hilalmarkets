@@ -4,18 +4,19 @@
   {#- First script on the page, deliberately, and without `defer`: it puts a time limit
       on every request this product sends to its own server, and it can only do that for
       a request sent after it has run. See `static/hm-request.js`. -#}
-  <script src="/static/hm-request.js?v=20260824-affiliate-share"></script>
+  <script src="/static/hm-request.js?v=20260825-brain-agent-dock"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
   <title>System Brain | Hilal Markets</title>
   <link rel="icon" type="image/png" href="/static/favicon-dark.png">
-  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260824-affiliate-share">
-  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260824-affiliate-share">
-  <link rel="stylesheet" href="/static/system-brain.css?v=20260824-affiliate-share">
+  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260825-brain-agent-dock">
+  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260825-brain-agent-dock">
+  <link rel="stylesheet" href="/static/system-brain.css?v=20260825-brain-agent-dock">
   <script src="/static/hilalmarkets-icons.js" defer></script>
-  <script src="/static/chat-message-renderer.js?v=20260824-affiliate-share" defer></script>
-  <script src="/static/system-brain.js?v=20260824-affiliate-share" defer></script>
+  <script src="/static/chat-message-renderer.js?v=20260825-brain-agent-dock" defer></script>
+  <script src="/static/system-brain.js?v=20260825-brain-agent-dock" defer></script>
+  <script src="/static/system-brain-agent.js?v=20260825-brain-agent-dock" defer></script>
 </head>
 <body data-system-brain-csrf="{{ csrf_token }}" data-brain-section="{{ section }}">
   <a class="brain-skip" href="#admin-content">Skip to admin content</a>
@@ -136,46 +137,11 @@
       </aside>
     </section>
 
+    {#- The assistant used to be a box here, on this page only. It is a window in the
+        corner of every System Brain page now — see `system_brain_agent_dock.html`. Two
+        reasons: the questions people actually have happen while looking at a *different*
+        page, and a box you have to walk away from is a box nobody asks. -#}
     <section class="brain-section brain-reveal brain-workspace" data-system-brain-workspace data-testid="system-brain-workspace">
-      <aside class="brain-panel brain-agent-sidebar" aria-label="System Brain conversations">
-        <div class="brain-panel-title"><i data-icon="spark"></i><div><h3>Your chats</h3></div></div>
-        <button class="brain-action-button" type="button" data-brain-new-conversation><i data-icon="plus"></i>New chat</button>
-        <label class="brain-compact-field"><span>Search</span><input type="search" maxlength="160" data-brain-agent-search placeholder="Chat title"></label>
-        <div class="brain-agent-conversation-list" data-brain-agent-conversations role="list"></div>
-      </aside>
-
-      <article class="brain-panel brain-assistant" data-system-brain-assistant data-testid="system-brain-assistant">
-        <div class="brain-assistant-head">
-          <span class="brain-metric-icon"><i data-icon="spark"></i></span>
-          <div><h2 data-brain-agent-title>Ask System Brain</h2><p>It reads only the evidence it needs, and every change waits for you to confirm it.</p></div>
-          <div class="brain-agent-heading-actions">
-            <span class="brain-status {{ 'success' if assistant_enabled else 'warning' }}">{{ (assistant_model ~ ' · ' ~ assistant_reasoning_effort) if assistant_enabled else 'Disabled' }}</span>
-            <button type="button" class="brain-secondary-button" data-brain-rename-conversation>Rename</button>
-            <button type="button" class="brain-secondary-button" data-brain-archive-conversation>Archive</button>
-          </div>
-        </div>
-        <div class="brain-agent-progress" data-brain-agent-progress hidden role="status">Choosing evidence tools…</div>
-        <div class="brain-assistant-messages" data-brain-assistant-messages aria-live="polite">
-          <div class="brain-assistant-message assistant"><p>Ask about customers, quality, money, support, governance, operations or the code.</p></div>
-        </div>
-        <form class="brain-assistant-form" data-brain-assistant-form>
-          <label for="brain-assistant-input">Your question</label>
-          <textarea id="brain-assistant-input" maxlength="4000" required placeholder="For example: where do trial users stop, and what proves it?" {{ 'disabled' if not assistant_enabled else '' }}></textarea>
-          <button type="submit" class="brain-action-button" {{ 'disabled' if not assistant_enabled else '' }}><span>Ask</span><i data-icon="arrow"></i></button>
-          <button type="button" class="brain-secondary-button" data-brain-cancel-turn hidden>Cancel</button>
-        </form>
-      </article>
-
-      <aside class="brain-panel brain-evidence-drawer" aria-label="Evidence and actions">
-        <div class="brain-panel-title"><i data-icon="search"></i><div><h3>Evidence</h3></div></div>
-        <div data-brain-evidence><p class="brain-muted">What the assistant looked at appears here.</p></div>
-        <div data-brain-action-proposals></div>
-        <div class="brain-saved-insights">
-          <h4>Saved notes</h4>
-          <div data-brain-artifacts><p class="brain-muted">Nothing saved in this chat.</p></div>
-        </div>
-      </aside>
-
       <article class="brain-panel brain-customer-explorer" data-customer-conversation-explorer>
         <div class="brain-section-head">
           <div>
@@ -754,10 +720,28 @@
         {% endfor %}
         <a href="/dashboard/system-brain/cases">Clear</a>
       </nav>
+      {#- One row per kind of problem, with its own count. This is the answer to "which
+          coins could not find their pages, which ones need reading first, and which ones
+          are only short of a fact" — asked once, on the page, instead of read out of two
+          hundred free-text sentences. -#}
+      <nav class="brain-tag-filters" aria-label="Filter by kind of problem">
+        {% set tag_counts = cases | map(attribute='tag') | list %}
+        {% for definition in case_tags %}
+        {% set count = tag_counts | select('equalto', definition.key) | list | length %}
+        {% if count or review_tag == definition.key %}
+        <a class="brain-case-tag tone-{{ definition.tone }} {{ 'active' if review_tag == definition.key else '' }}"
+           href="/dashboard/system-brain/cases?tag={{ definition.key }}{{ '&kind=' ~ review_kind if review_kind else '' }}"
+           title="{{ definition.meaning }}">{{ definition.label }} <strong>{{ count }}</strong></a>
+        {% endif %}
+        {% endfor %}
+        {% if review_tag %}<a class="brain-tag-clear" href="/dashboard/system-brain/cases">Show every kind</a>{% endif %}
+      </nav>
+
       <details class="brain-filter-drawer" {{ 'open' if review_asset or review_kind or review_state or review_priority or review_deadline else '' }}>
         <summary><i data-icon="filter"></i> Filters</summary>
         <form class="brain-case-filters" method="get">
           <label>Search<input class="brain-search" name="asset" value="{{ review_asset }}" placeholder="Asset, case, source or reviewer"></label>
+          <label>What kind<select name="tag"><option value="">All</option>{% for definition in case_tags %}<option value="{{ definition.key }}" {{ 'selected' if review_tag == definition.key else '' }}>{{ definition.label }}</option>{% endfor %}</select></label>
           <label>Type<select name="kind"><option value="">All</option>{% for value in ['initial_asset_review','material_source_change','evidence_refresh','source_identity_conflict','methodology_change','user_factual_report'] %}<option value="{{ value }}" {{ 'selected' if review_kind == value else '' }}>{{ value.replace('_',' ').title() }}</option>{% endfor %}</select></label>
           <label>State<select name="state"><option value="">All</option>{% for value in ['draft','researching','ready_for_review','needs_evidence','approved','rejected','stored','published','superseded','safety_hold','research_failed'] %}<option value="{{ value }}" {{ 'selected' if review_state == value else '' }}>{{ value.replace('_',' ').title() }}</option>{% endfor %}</select></label>
           <label>Priority<select name="priority"><option value="">All</option>{% for value in ['low','normal','high','urgent'] %}<option value="{{ value }}" {{ 'selected' if review_priority == value else '' }}>{{ value.title() }}</option>{% endfor %}</select></label>
@@ -801,7 +785,7 @@
             type="submit"
             name="action"
             value="approve"
-            data-confirm="Mark every condition as passed on the selected cases, approve them and publish their Passports?"
+            data-confirm="Mark every condition as passed on the selected cases, approve them and publish their Passports? Any case whose evidence is not finished is not approved — it is sent for research by itself, and the rest still go through."
           ><i data-icon="check"></i>Approve &amp; publish</button>
           <button
             class="danger"
@@ -887,5 +871,8 @@
     </section>
     {% endif %}
   </main>
+
+  {#- Outside <main> on purpose: it floats over every page and belongs to none of them. -#}
+  {% include 'system_brain_agent_dock.html' %}
 </body>
 </html>

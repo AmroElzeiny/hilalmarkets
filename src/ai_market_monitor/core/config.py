@@ -257,6 +257,33 @@ class Settings(BaseSettings):
     #: and the layers go looking for a replacement alongside it. Activity says how alive
     #: and how relevant a page is; it is never a Shariah status and is never shown as one.
     sharia_source_activity_floor: float = Field(default=0.45, ge=0.0, le=1.0)
+    #: Whether a page that a plain HTTP request could not read may be tried again with a
+    #: real browser. More and more project blogs and forums only exist after JavaScript
+    #: has run, and a plain fetch sees an empty shell and calls the page unreadable.
+    #:
+    #: **Off by default, and deliberately.** The production image ships no browser, and
+    #: the server it runs on has 3.9 GB of memory and no swap — Chromium is the largest
+    #: thing that would ever run there. Switching it on means installing the browser too
+    #: (`python -m playwright install chromium`); until then the resolver says so in the
+    #: case rather than pretending it looked.
+    sharia_source_browser_render_enabled: bool = False
+    sharia_source_browser_render_timeout_seconds: float = Field(default=25, ge=5, le=120)
+    #: How much rendered HTML is kept. A rendered page is read for its text and its
+    #: dates; an unbounded document would be a memory limit waiting to be hit.
+    sharia_source_browser_render_max_characters: int = Field(
+        default=2_000_000, ge=50_000, le=20_000_000
+    )
+    #: Whether a model may be asked where a coin publishes, **after** every free layer has
+    #: come back with nothing for a required category. It is the last layer and the only
+    #: paid one; what it returns is filtered and proved exactly like a search result, so
+    #: an invented address cannot become evidence.
+    sharia_source_ai_discovery_enabled: bool = False
+    sharia_source_ai_model: str = "gpt-5.6-luna"
+    sharia_source_ai_reasoning_effort: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh"
+    ] = "none"
+    sharia_source_ai_timeout_seconds: float = Field(default=45, ge=5, le=300)
+    sharia_source_ai_max_output_tokens: int = Field(default=900, ge=200, le=8000)
     sharia_external_rights_enforcement: bool = True
     sharia_ai_enrichment_enabled: bool = True
     sharia_ai_enrichment_official_sources_only: bool = True

@@ -802,8 +802,12 @@ async def test_a_link_hunting_job_is_never_treated_as_a_case_to_decide(
         assert outcome.applied == 0
         assert outcome.failed == 1
         said = outcome.results[0].message
-        assert "find a missing link" in said, said
+        assert "find a missing official page" in said, said
         assert "research folder" not in said, "the confusing old sentence came back"
+        # And it never asks the reviewer to do the machine's job. The resolver walks its
+        # layers again on every sweep; telling somebody to go and type an address for two
+        # hundred coins is what this wording replaced.
+        assert "keeps looking" in said, said
 
 
 # --------------------------------------------------------------------------

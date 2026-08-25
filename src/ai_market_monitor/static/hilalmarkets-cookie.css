@@ -268,6 +268,14 @@ label.cookie-category:hover {
   transform: translateY(-1px);
 }
 
+/* The main button of the group. Two of them exist: "Accept analytics" on the banner and
+ * "Save choices" in the settings window.
+ *
+ * The apple green is the brand's primary-CTA colour, and it is used here as *emphasis on
+ * a control* — never as a status. Near-black on #cbfa4d measures 11.9:1, so the label is
+ * readable; the reverse (green text on white) would measure 1.21:1 and is exactly what
+ * the brand guide forbids. See `apple-green-cannot-carry-meaning`.
+ */
 .cookie-banner .btn-primary,
 .cookie-modal .btn-primary {
   border-color: var(--hm-apple, #cbfa4d);

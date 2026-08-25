@@ -83,8 +83,9 @@ async def test_system_brain_renders_live_sharia_governance_workspace(test_contex
     assert dashboard.status_code == 200
     assert dashboard.headers["cache-control"] == "no-store, max-age=0"
     assert "Needs attention" in dashboard.text
-    assert "Ask System Brain" in dashboard.text
-    assert 'data-testid="system-brain-assistant"' in dashboard.text
+    # The assistant is a window in the corner, drawn on every System Brain page.
+    assert "data-brain-agent-dock" in dashboard.text
+    assert "system-brain-agent.js" in dashboard.text
     assert 'href="/dashboard/system-brain/cases"' in dashboard.text
     assert 'href="/dashboard/system-brain/operations"' in dashboard.text
     assert 'href="/dashboard/system-brain/governance"' in dashboard.text

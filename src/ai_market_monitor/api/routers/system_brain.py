@@ -63,6 +63,7 @@ from ai_market_monitor.services.affiliate_payout_options import MINIMUM_PAYOUT_U
 from ai_market_monitor.services.sharia_admin_dashboard import (
     ShariaAdminDashboardService,
 )
+from ai_market_monitor.services.sharia_case_tags import TAG_DEFINITIONS
 from ai_market_monitor.services.sharia_governance import (
     ShariaGovernanceError,
     ShariaGovernanceService,
@@ -279,6 +280,13 @@ async def _base_context(
         "csrf_token": _csrf(settings, principal.user_id),
         "success": request.query_params.get("success"),
         "error": request.query_params.get("error"),
+        # The assistant is a window in the corner of **every** System Brain page, so what
+        # it will really call belongs in the base context rather than on one route. The
+        # badge used to spell out a model name by hand and kept saying "5.4 nano" after
+        # the setting moved on.
+        "assistant_enabled": settings.system_brain_ai_enabled,
+        "assistant_model": settings.system_brain_ai_model,
+        "assistant_reasoning_effort": settings.system_brain_ai_reasoning_effort,
     }
 
 
@@ -297,11 +305,6 @@ async def system_brain_home(
     context = await _base_context(request, session, settings, principal, section="overview")
     data = await ShariaAdminDashboardService(session).reviewer_overview()
     context["data"] = data
-    context["assistant_enabled"] = settings.system_brain_ai_enabled
-    # The badge used to spell out a model name by hand, so it kept saying "5.4 nano"
-    # after the setting moved on. It now reports what the assistant will really call.
-    context["assistant_model"] = settings.system_brain_ai_model
-    context["assistant_reasoning_effort"] = settings.system_brain_ai_reasoning_effort
     return _protect(
         templates.TemplateResponse(
             request=request,
@@ -330,6 +333,7 @@ async def system_brain_reviews(
     deadline: str | None = None,
     asset: str | None = None,
     view: str | None = None,
+    tag: str | None = None,
     principal: UserPrincipal = Depends(_require_application_admin),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
@@ -338,6 +342,10 @@ async def system_brain_reviews(
     # here offered two filters nothing ever created, and hid any kind added later.
     allowed_kinds = {item.value for item in ReviewCaseType}
     if kind is not None and kind not in allowed_kinds:
+        raise HTTPException(status_code=404, detail="Review queue not found.")
+    # Same rule for the "what kind of problem" filter: the list of tags is owned by
+    # sharia_case_tags, so a tag the page offers is a tag a case can really carry.
+    if tag and tag not in TAG_DEFINITIONS:
         raise HTTPException(status_code=404, detail="Review queue not found.")
     section = (
         "cases"
@@ -358,6 +366,7 @@ async def system_brain_reviews(
         assignee_id=assignee,
         deadline=deadline,
         asset_query=asset,
+        tag=tag,
         limit=CASES_PAGE_LIMIT,
     )
     cases = _apply_case_view(cases, view=view, reviewer_id=principal.user_id)
@@ -370,6 +379,11 @@ async def system_brain_reviews(
             "review_deadline": deadline,
             "review_asset": asset or "",
             "review_view": view or "",
+            "review_tag": tag or "",
+            # The kinds of problem a case can be, in the order the queue should be
+            # worked. Rendered from the one owner so the menu can never offer a filter
+            # nothing produces, or miss one added later.
+            "case_tags": list(TAG_DEFINITIONS.values()),
             "cases": cases,
             # The ceiling comes from the service that enforces it, never from a number
             # typed into the page. The browser stops the reviewer at the same count the
@@ -468,19 +482,21 @@ async def system_brain_bulk_case_decision(
     except BulkReviewError as exc:
         await session.rollback()
         return _cases_redirect(request, error=str(exc))
-    if action == "start_research" and outcome.applied:
-        # Only once the marked cases are really in the database. The sweep reads them
-        # from there, so a task sent before the commit can look and find nothing.
+    # Only once the marked cases are really in the database. The sweep reads them from
+    # there, so a task sent before the commit can look and find nothing. It is sent for
+    # an approval too, because an approval that met missing evidence sends those cases
+    # for research in the same click.
+    if outcome.researched or (action == "start_research" and outcome.applied):
         outcome.research_queued = service.queue_research_sweep()
     refused = _refused_summary(outcome.results)
-    if not outcome.applied:
+    if not outcome.applied and not outcome.researched:
         return _cases_redirect(
             request,
             error=refused or "No case could be decided this way.",
         )
     return _cases_redirect(
         request,
-        success=outcome.message() + (f" Not decided — {refused}" if refused else ""),
+        success=outcome.message() + (f" Still waiting for you — {refused}" if refused else ""),
     )
 
 
@@ -522,28 +538,49 @@ async def system_brain_undo_bulk_case_decision(
     )
 
 
-#: How many refused cases the message after a quick decision names one by one.
+#: How many different reasons the message after a quick decision spells out.
 #:
 #: The message travels back in the address bar. Naming 300 refusals there builds a web
 #: address longer than servers and browsers accept, so the reviewer would get a broken
 #: page instead of the outcome — the report of a problem becoming a second, worse
-#: problem. Beyond this many, the rest are counted rather than listed.
-CASES_NAMED_IN_MESSAGE = 5
+#: problem. Beyond this many *reasons*, the rest are counted rather than listed.
+REASONS_NAMED_IN_MESSAGE = 3
+
+#: How many case references are named beside a reason before it becomes a count.
+CASES_NAMED_PER_REASON = 2
 
 
 def _refused_summary(results: list[CaseOutcome]) -> str:
-    """The refused cases, named while that stays a readable, sendable message."""
+    """Why the leftover cases are stuck, grouped by reason rather than by case.
 
-    refused = [item for item in results if not item.applied]
+    Eight cases refused for the same missing evidence is **one** problem, not eight. The
+    old message named five case references and then said "and 3 more", which told the
+    reviewer nothing about what was wrong and gave them eight cases to open one by one.
+    Grouping says the actual thing: *this many cases are waiting for this*.
+
+    Cases that the click sent for research are deliberately not here. Nothing is waiting
+    for the reviewer on those, and listing them as failures is what made a successful
+    batch read like a page of errors.
+    """
+
+    refused = [item for item in results if not item.applied and not item.sent_for_research]
     if not refused:
         return ""
-    named = "; ".join(
-        f"{item.reference}: {item.message}" for item in refused[:CASES_NAMED_IN_MESSAGE]
-    )
-    remaining = len(refused) - CASES_NAMED_IN_MESSAGE
+    grouped: dict[str, list[str]] = {}
+    for item in refused:
+        grouped.setdefault(item.message, []).append(item.reference)
+    ordered = sorted(grouped.items(), key=lambda row: (-len(row[1]), row[0]))
+    parts: list[str] = []
+    for message, references in ordered[:REASONS_NAMED_IN_MESSAGE]:
+        named = ", ".join(references[:CASES_NAMED_PER_REASON])
+        extra = len(references) - CASES_NAMED_PER_REASON
+        if extra > 0:
+            named = f"{named} and {extra} more"
+        parts.append(f"{len(references)} case(s) ({named}): {message}")
+    remaining = len(ordered) - REASONS_NAMED_IN_MESSAGE
     if remaining > 0:
-        return f"{named}; and {remaining} more — open the list to see them."
-    return named
+        parts.append(f"and {remaining} other reason(s) — open the list to see them.")
+    return " ".join(parts)
 
 
 def _cases_redirect(
@@ -557,7 +594,7 @@ def _cases_redirect(
     filters = {
         key: value
         for key, value in request.query_params.items()
-        if key in {"kind", "state", "priority", "assignee", "deadline", "asset", "view"}
+        if key in {"kind", "state", "priority", "assignee", "deadline", "asset", "view", "tag"}
     }
     filters.update({"success": success} if success else {"error": error or "Action failed."})
     return RedirectResponse(
@@ -588,6 +625,8 @@ async def system_brain_review_detail(
         context["detail"] = await ShariaAdminDashboardService(session).case_detail(case_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # One case is open, so "this one" in the assistant means exactly this one.
+    context["agent_focus"] = context["detail"]["case"].case_reference
     # Say what stops this decision *before* the reviewer presses Approve, in the same
     # words the refusal would use. A button that always fails is the thing being fixed.
     case = await session.get(ReviewCase, case_id)

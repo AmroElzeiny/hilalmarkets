@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SystemBrainAssistantHistoryItem(BaseModel):
@@ -164,14 +164,104 @@ class SystemBrainConversationRead(BaseModel):
     messages: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
 
 
+class SystemBrainPageContext(BaseModel):
+    """What the person asking is actually looking at.
+
+    The assistant lives in a corner of every System Brain page now, so "what does this
+    one want?" is a question about the screen in front of somebody. Without this it was a
+    question about nothing: the agent had the whole database and no idea which of four
+    hundred cases was on the page.
+
+    Deliberately small and deliberately typed. It carries **where** the reader is and
+    **which records** the page named — never a copy of the page's text, which would be an
+    unbounded field full of customer data travelling to a provider on every turn.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: The address of the page, e.g. ``/dashboard/system-brain/cases``.
+    path: str = Field(default="", max_length=300)
+    #: Which part of the System Brain it is: ``cases``, ``operations``, ``stats``…
+    section: str = Field(default="", max_length=80)
+    #: The page's own heading, as the reader sees it.
+    heading: str = Field(default="", max_length=200)
+    #: Case references the page is showing, in the order they appear. This is what turns
+    #: "why is this one stuck?" into a question with an answer.
+    case_references: list[str] = Field(default_factory=list, max_length=40)
+    #: Whatever the reader has selected or opened — one case reference, one user id.
+    focus: str = Field(default="", max_length=160)
+
+
 class SystemBrainAgentTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     message: str = Field(min_length=2, max_length=4000)
     client_message_id: str = Field(min_length=8, max_length=120)
+    page_context: SystemBrainPageContext | None = None
+
+
+#: How deep a payload may nest before the rest is summarised rather than walked. A
+#: research dossier holds evidence records that hold snapshots that hold text; there is no
+#: useful bottom to it, and an unbounded walk is a way to run out of memory politely.
+_MAX_PAYLOAD_DEPTH = 8
+#: How long any single value may be once it has been turned into text.
+_MAX_PAYLOAD_TEXT = 4000
+
+
+def json_safe(value: Any, depth: int = 0) -> Any:
+    """Turn any tool payload into something that can actually be sent.
+
+    Every tool result is serialised with ``model_dump_json`` before it reaches the model.
+    Pydantic refuses an unknown type, and that refusal was raised **outside** the per-tool
+    guard — an HTTP 500 for the whole turn rather than one failed tool call.
+
+    ``inspect_review_case`` is exactly the tool that hit it: it answers with the case, the
+    asset, the dossier and the methodology as database rows. So the question the assistant
+    is asked most — "what does this case want?" — was the one question that could not be
+    answered at all.
+
+    It is **total**: anything it does not recognise becomes its text rather than an
+    exception, because a diagnostic must never become the failure.
+    """
+
+    if value is None or isinstance(value, bool | int | float):
+        return value
+    if isinstance(value, str):
+        return value[:_MAX_PAYLOAD_TEXT]
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, UUID | Decimal):
+        return str(value)
+    if isinstance(value, BaseModel):
+        return json_safe(value.model_dump(mode="json"), depth + 1)
+    if depth >= _MAX_PAYLOAD_DEPTH:
+        return str(value)[:_MAX_PAYLOAD_TEXT]
+    if isinstance(value, dict):
+        return {str(key): json_safe(item, depth + 1) for key, item in value.items()}
+    if isinstance(value, list | tuple | set | frozenset):
+        return [json_safe(item, depth + 1) for item in value]
+    table = getattr(type(value), "__table__", None)
+    if table is not None:
+        # A database row, said as the columns it actually has. Reading the mapper rather
+        # than ``__dict__`` keeps lazy relationships out of it: touching one here would
+        # run a query inside a serialiser, which is how one tool call becomes a hundred.
+        return {
+            column.name: json_safe(getattr(value, column.name, None), depth + 1)
+            for column in table.columns
+        }
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)[:_MAX_PAYLOAD_TEXT]
 
 
 class EvidenceEnvelope(BaseModel):
+    """One tool's answer, in a shape that is always sendable.
+
+    The coercion lives on the model rather than in the helper that builds most of them,
+    because "most" is the whole problem: four producers build an envelope directly, and
+    any one of them handing over a database row used to break the turn.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     data: Any
@@ -179,6 +269,11 @@ class EvidenceEnvelope(BaseModel):
     freshness: str
     coverage: str
     limitations: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("data", mode="before")
+    @classmethod
+    def _sendable(cls, value: Any) -> Any:
+        return json_safe(value)
 
 
 class SystemBrainToolArguments(BaseModel):

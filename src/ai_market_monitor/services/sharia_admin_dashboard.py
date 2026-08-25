@@ -31,6 +31,11 @@ from ai_market_monitor.db.models.enums import (
     UserRole,
 )
 from ai_market_monitor.schemas.sharia_methodology import MethodologyRulesDefinition
+from ai_market_monitor.services.sharia_case_tags import (
+    EMPTY_COVERAGE,
+    classify,
+    coverage_from_rows,
+)
 
 
 class ShariaAdminDashboardService:
@@ -428,6 +433,7 @@ class ShariaAdminDashboardService:
         assignee_id: UUID | None = None,
         deadline: str | None = None,
         asset_query: str | None = None,
+        tag: str | None = None,
         limit: int = 100,
         include_published: bool = False,
     ) -> list[dict]:
@@ -535,6 +541,58 @@ class ShariaAdminDashboardService:
             )
             bucket["users"].add(impact.user_id)
             bucket["strategies"].add(impact.strategy_id)
+        # Four columns, one query, for every asset on the page. The tag "no working
+        # official page yet" cannot be answered without them, and loading whole
+        # OfficialSource objects per row is exactly the shape that turned another list
+        # view into a query nobody could serve.
+        source_coverage = (
+            coverage_from_rows(
+                (
+                    await self.session.execute(
+                        select(
+                            OfficialSource.canonical_asset_id,
+                            OfficialSource.category,
+                            OfficialSource.verification_state,
+                            OfficialSource.is_active,
+                        ).where(OfficialSource.canonical_asset_id.in_(asset_ids))
+                    )
+                ).all()
+            )
+            if asset_ids
+            else {}
+        )
+        signals = {
+            row.id: classify(
+                case_type=row.case_type,
+                state=row.state,
+                risk_severity=row.risk_severity,
+                asset_name=(
+                    assets[row.canonical_asset_id].name
+                    if row.canonical_asset_id in assets
+                    else row.title
+                ),
+                done=row.done_at is not None,
+                dossier_present=row.dossier_id in dossiers,
+                evidence_completeness=(
+                    float(dossiers[row.dossier_id].evidence_completeness)
+                    if row.dossier_id in dossiers
+                    else 0.0
+                ),
+                missing_information_count=(
+                    int(dossiers[row.dossier_id].missing_information_count)
+                    if row.dossier_id in dossiers
+                    else 0
+                ),
+                contradiction_count=(
+                    int(dossiers[row.dossier_id].contradiction_count)
+                    if row.dossier_id in dossiers
+                    else 0
+                ),
+                coverage=source_coverage.get(row.canonical_asset_id, EMPTY_COVERAGE),
+                fallback_reason=row.human_review_reason,
+            )
+            for row in rows
+        }
         result = [
             {
                 "id": row.id,
@@ -554,6 +612,15 @@ class ShariaAdminDashboardService:
                 "created_at": row.created_at,
                 "updated_at": row.updated_at,
                 "done_at": row.done_at,
+                # What kind of problem this is, and the one specific sentence about it.
+                # The producer's own sentence stays as `review_reason` — it is what the
+                # importer, the pipeline or a reader actually wrote, and the case page
+                # still shows it — but the queue is read through the tag.
+                "tag": signals[row.id].tag,
+                "tag_label": signals[row.id].label,
+                "tag_tone": signals[row.id].tone,
+                "tag_meaning": signals[row.id].meaning,
+                "why": signals[row.id].reason,
                 "review_reason": row.human_review_reason,
                 "age_hours": round(
                     (datetime.now(UTC) - _aware(row.created_at)).total_seconds() / 3600, 1
@@ -649,6 +716,11 @@ class ShariaAdminDashboardService:
                     )
                 )
             ]
+        if tag:
+            # Filtered after the tag is worked out rather than in SQL, because the tag is
+            # not a stored column — it is read from the case's own facts by one owner, so
+            # the filter and the badge on the row can never disagree.
+            result = [item for item in result if item["tag"] == tag]
         return result
 
     async def case_detail(self, case_id: UUID) -> dict:
@@ -894,6 +966,9 @@ class ShariaAdminDashboardService:
                 field_reviews=field_reviews,
                 snapshot_ids=[str(item.id) for item in snapshots],
             ),
+            # The same tag the queue shows, worked out by the same owner. Two screens
+            # describing one case differently is how a reviewer stops trusting either.
+            "tag": _case_signal(case, dossier, asset),
             "why_case": {
                 "trigger": case.human_review_reason,
                 "assessment_area": (
@@ -1227,6 +1302,33 @@ def _snapshot_summary(row: SourceSnapshot) -> str:
     return (
         "The source was captured successfully, but no accessible text excerpt was retained. "
         f"Content fingerprint {row.content_hash[:12]}."
+    )
+
+
+def _case_signal(
+    case: ReviewCase,
+    dossier: AssetResearchDossier | None,
+    asset: CanonicalAsset | None,
+):
+    """One case's tag and reason, for the single-case page.
+
+    The coverage of official links is deliberately left empty here: the source-gap tag
+    reads it, and the single-case page shows the asset's whole source register in a panel
+    of its own a few lines further down. Loading it twice to produce a sentence somebody
+    can already read in full would be work for nothing.
+    """
+
+    return classify(
+        case_type=case.case_type,
+        state=case.state,
+        risk_severity=case.risk_severity,
+        asset_name=asset.name if asset is not None else case.title,
+        done=case.done_at is not None,
+        dossier_present=dossier is not None,
+        evidence_completeness=float(dossier.evidence_completeness) if dossier else 0.0,
+        missing_information_count=int(dossier.missing_information_count) if dossier else 0,
+        contradiction_count=int(dossier.contradiction_count) if dossier else 0,
+        fallback_reason=case.human_review_reason,
     )
 
 

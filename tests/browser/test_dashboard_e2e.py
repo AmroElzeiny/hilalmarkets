@@ -65,7 +65,12 @@ def test_system_brain_reviewer_first_desktop_and_mobile(
     output.mkdir(parents=True, exist_ok=True)
 
     page.goto(f"{base_url}/dashboard/system-brain", wait_until="domcontentloaded")
-    expect(page.get_by_test_id("system-brain-assistant")).to_be_visible()
+    # The assistant is a button in the corner now, and its window opens from it.
+    expect(page.locator("[data-brain-agent-open]")).to_be_visible()
+    page.locator("[data-brain-agent-open]").click()
+    expect(page.locator("[data-brain-agent-window]")).to_be_visible()
+    page.locator("[data-brain-agent-close]").click()
+    expect(page.locator("[data-brain-agent-window]")).to_be_hidden()
     # Inbox, Cases, Stats, Operations, Governance, Users, Audit & Settings.
     expect(page.locator(".brain-sidebar nav a")).to_have_count(7)
     expect(page.get_by_role("heading", name="Needs attention")).to_be_visible()

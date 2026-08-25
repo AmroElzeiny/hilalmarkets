@@ -35,6 +35,7 @@ from ai_market_monitor.services.sharia_governance import (
     ShariaGovernanceError,
     ShariaGovernanceService,
 )
+from ai_market_monitor.services.sharia_review_blockers import explain, research_would_clear
 from ai_market_monitor.services.system_brain_bulk_review import (
     BULK_ACTIONS,
     BULK_DECISION_ACTIONS,
@@ -52,6 +53,34 @@ from tests.services.test_sc_malaysia_governance import (
 )
 
 REASON = "Every condition is met by the retained official evidence for this asset."
+
+
+async def _case_without_evidence(session, ready: ReviewCase, *, reference: str) -> ReviewCase:
+    """A second case on the same asset, in the shape every imported one arrives in.
+
+    ``dossier_id`` is what the approval path checks first, and an imported case has none
+    until research runs. Everything else is copied from a case that *is* decidable, so
+    the missing research folder is the only difference between the two.
+    """
+
+    case = ReviewCase(
+        case_reference=reference,
+        case_type=ready.case_type,
+        state="ready_for_review",
+        publication_state="unpublished",
+        canonical_asset_id=ready.canonical_asset_id,
+        external_assessment_id=ready.external_assessment_id,
+        dossier_id=None,
+        methodology_id=ready.methodology_id,
+        title=ready.title,
+        priority="normal",
+        risk_severity="none",
+        human_review_reason="Imported row waiting for its first research run.",
+        idempotency_key=f"review:{reference}",
+    )
+    session.add(case)
+    await session.flush()
+    return case
 
 #: How many fields the web framework will accept in one posted form. Read out of
 #: Starlette rather than written down, so an upgrade that changes it changes this too
@@ -274,6 +303,121 @@ async def test_a_case_that_cannot_be_decided_this_way_is_named_and_the_rest_go_t
     assert refused[0].message
     # The message names the case, so a reviewer knows which one to open.
     assert str(missing) in outcome.message() or refused[0].reference
+
+
+async def test_one_case_missing_its_evidence_never_stops_the_others(test_context):
+    """190 selected, some refused, the rest recorded. Every time.
+
+    The refused case here has no research folder, which is exactly the shape every
+    imported case arrives in. It must not take the good cases down with it, and the
+    click must not come back with nothing decided.
+    """
+
+    async with test_context["session_factory"]() as session:
+        good, _ = await _ready_case(session)
+        blocked = await _case_without_evidence(session, good, reference="SC-BLOCKED-1")
+        reviewer = await _reviewer(session)
+        outcome = await BulkReviewService(session, test_context["settings"]).apply(
+            [good.id, blocked.id],
+            action="approve",
+            reason=REASON,
+            admin_user_id=reviewer.id,
+        )
+        await session.commit()
+        decided = await session.get(ReviewCase, good.id)
+        refused = await session.get(ReviewCase, blocked.id)
+
+    assert outcome.applied == 1
+    assert decided is not None and decided.state == "published"
+    # The one that could not be decided was sent to gather what it is missing, rather
+    # than handed back with an instruction to press the same button by hand.
+    assert outcome.researched == 1
+    assert outcome.stuck == 0
+    assert refused is not None and refused.state == "researching"
+
+
+async def test_a_case_sent_for_research_is_never_counted_as_approved(test_context):
+    """It is not a decision. No ReviewDecision, no Undo, no publication."""
+
+    async with test_context["session_factory"]() as session:
+        ready, _ = await _ready_case(session)
+        blocked = await _case_without_evidence(session, ready, reference="SC-BLOCKED-2")
+        reviewer = await _reviewer(session)
+        outcome = await BulkReviewService(session, test_context["settings"]).apply(
+            [blocked.id],
+            action="approve",
+            reason=REASON,
+            admin_user_id=reviewer.id,
+        )
+        await session.commit()
+        decisions = (
+            await session.scalars(
+                select(ReviewDecision).where(ReviewDecision.review_case_id == blocked.id)
+            )
+        ).all()
+        refreshed = await session.get(ReviewCase, blocked.id)
+
+    assert outcome.applied == 0
+    assert outcome.researched == 1
+    assert outcome.batch_id is None, "an undoable batch was recorded for a non-decision"
+    assert not decisions, "a case that was only sent for research recorded a decision"
+    assert refreshed is not None
+    assert refreshed.publication_state == "unpublished"
+    # And the reviewer is told what happened rather than being told it was approved.
+    assert "research" in outcome.results[0].message.casefold()
+
+
+async def test_the_message_says_what_went_through_before_what_did_not(test_context):
+    """The outcome leads with the work that was done, not with a page of errors."""
+
+    async with test_context["session_factory"]() as session:
+        good, _ = await _ready_case(session)
+        blocked = await _case_without_evidence(session, good, reference="SC-BLOCKED-3")
+        reviewer = await _reviewer(session)
+        outcome = await BulkReviewService(session, test_context["settings"]).apply(
+            [good.id, blocked.id],
+            action="approve",
+            reason=REASON,
+            admin_user_id=reviewer.id,
+        )
+        await session.commit()
+
+    message = outcome.message()
+    assert message.startswith("1 of 2 case(s) approved")
+    assert "sent for research automatically" in message
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "case_evidence_incomplete",
+        "case_evidence_missing",
+        "dossier_not_complete",
+        "required_evidence_stale",
+        "criterion_evidence_missing",
+        "case_external_assessment_missing",
+    ],
+)
+def test_every_refusal_whose_cure_is_research_is_recognised_as_one(code):
+    """The rule, not the one case that was reported.
+
+    ``RESEARCH_CLEARS_CODES`` is read out of the explanation table rather than typed
+    beside it, so a refusal added later whose next step is research is picked up without
+    anybody remembering a second list.
+    """
+
+    assert research_would_clear(code)
+    assert explain(code, "fallback").research_clears
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["criteria_not_approvable", "admin_required", "case_already_decided", "invalid_priority"],
+)
+def test_a_refusal_research_cannot_cure_is_never_treated_as_one(code):
+    """Fails closed. Sending these for research would hide a refusal, not clear it."""
+
+    assert not research_would_clear(code)
 
 
 async def test_the_same_case_selected_twice_is_decided_once(test_context):

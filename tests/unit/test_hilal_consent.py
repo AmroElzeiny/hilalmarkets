@@ -105,11 +105,33 @@ def test_public_document_shells_and_standalone_source_do_not_preload_gtm():
 
 
 def test_first_visit_banner_has_equal_explicit_choices_and_preference_center():
+    """Refusing must cost exactly what accepting costs.
+
+    "Equal" here is about **effort**, not about colour. All three answers are buttons in
+    the same row of the same banner, at the same size, one click each — refusing analytics
+    is never a second step behind "Customize", and never a smaller target.
+
+    "Accept analytics" is the emphasised one, which is a design choice about where the
+    eye lands, not about what is possible: the refusal is not hidden, not shrunk, and not
+    moved. If that emphasis ever has to go, this test is the place that says what may not
+    change with it.
+    """
+
     banner = BANNER.read_text(encoding="utf-8")
     assert "Essential only" in banner
     assert "Customize" in banner
     assert "Accept analytics" in banner
-    assert banner.count("btn btn-secondary btn-sm") >= 3
+    # Three buttons, same size class, all inside the banner's own actions row.
+    actions = banner.split('<div class="cookie-actions">', 1)[1].split("</div>", 1)[0]
+    assert actions.count("btn-sm") == 3
+    assert actions.count("<button") == 3
+    for marker in (
+        "data-cookie-essential",
+        "data-cookie-customize",
+        "data-cookie-accept-analytics",
+    ):
+        assert marker in actions
+    # Refusing is a first-class button, never only a choice inside the settings window.
     assert 'role="dialog"' in banner
     assert 'aria-modal="true"' in banner
     assert "data-cookie-save" in banner

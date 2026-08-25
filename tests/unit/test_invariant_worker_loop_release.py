@@ -72,16 +72,22 @@ def test_release_replaces_the_module_lock(settings: Settings) -> None:
     same defect, moved one level down into the thing that was supposed to protect it.
     """
 
-    async def one_task() -> int:
-        await _acquire_everything(settings)
-        before = id(provider_runtime._lock)
-        await provider_runtime.release_provider_runtime_for_loop()
-        assert id(provider_runtime._lock) != before
-        return id(provider_runtime._lock)
+    held: list[Any] = []
 
-    first = asyncio.run(one_task())
-    second = asyncio.run(one_task())
-    assert first != second
+    async def one_task() -> None:
+        await _acquire_everything(settings)
+        before = provider_runtime._lock
+        await provider_runtime.release_provider_runtime_for_loop()
+        # Both locks are alive at this moment, so `is not` is a real comparison. Comparing
+        # `id()` across the two loops is not: a freed object's address is handed straight
+        # back to the next allocation, which made this pass alone and fail in a full run.
+        assert provider_runtime._lock is not before
+        held.append(provider_runtime._lock)
+
+    asyncio.run(one_task())
+    asyncio.run(one_task())
+
+    assert held[0] is not held[1]
 
 
 def test_release_closes_the_pool_it_drops(settings: Settings) -> None:
@@ -100,18 +106,31 @@ def test_release_closes_the_pool_it_drops(settings: Settings) -> None:
 
 @pytest.mark.parametrize("name", CACHED_SINGLETONS)
 def test_a_second_task_loop_gets_a_fresh_object(name: str, settings: Settings) -> None:
-    """Two successive ``asyncio.run`` calls, exactly as the worker makes them."""
+    """Two successive ``asyncio.run`` calls, exactly as the worker makes them.
 
-    async def one_task() -> int:
+    The **object** is kept, not its ``id()``. Two objects that never exist at the same
+    moment can share an address: CPython hands the freed block straight back to the next
+    allocation of the same size. So comparing ids across the two loops was a coin flip —
+    it passed alone and failed inside a full run, which is worse than no test, because a
+    real reuse and a recycled address were indistinguishable.
+
+    Holding a reference to the first object while the second is built makes them coexist,
+    and then ``is`` means what it says.
+    """
+
+    held: list[Any] = []
+
+    async def one_task() -> None:
         await _acquire_everything(settings)
-        obtained = id(getattr(provider_runtime, name))
+        held.append(getattr(provider_runtime, name))
         await provider_runtime.release_provider_runtime_for_loop()
-        return obtained
 
-    first = asyncio.run(one_task())
-    second = asyncio.run(one_task())
+    asyncio.run(one_task())
+    asyncio.run(one_task())
 
-    assert first != second, f"{name} was reused across two event loops"
+    assert len(held) == 2
+    assert held[0] is not None and held[1] is not None
+    assert held[0] is not held[1], f"{name} was reused across two event loops"
 
 
 def test_the_worker_cleanup_path_releases_the_runtime(settings: Settings) -> None:

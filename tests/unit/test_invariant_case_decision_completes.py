@@ -512,10 +512,13 @@ def test_a_long_list_of_refusals_still_fits_in_a_message_a_browser_will_take():
     The outcome travels back in the address bar. Naming every one of a few hundred
     refused cases builds an address longer than servers accept, and the reviewer gets a
     broken page instead of being told what happened.
+
+    The summary groups by **reason**, because four hundred cases stuck on the same
+    missing evidence are one problem, not four hundred.
     """
 
     from ai_market_monitor.api.routers.system_brain import (
-        CASES_NAMED_IN_MESSAGE,
+        CASES_NAMED_PER_REASON,
         _refused_summary,
     )
 
@@ -531,11 +534,31 @@ def test_a_long_list_of_refusals_still_fits_in_a_message_a_browser_will_take():
 
     summary = _refused_summary(many)
 
-    assert summary.count("SB-") == CASES_NAMED_IN_MESSAGE
-    assert "and 395 more" in summary
+    assert summary.count("SB-") == CASES_NAMED_PER_REASON
+    assert "400 case(s)" in summary
+    assert f"and {400 - CASES_NAMED_PER_REASON} more" in summary
     assert len(summary) < 1000
     # Nothing refused means nothing to say about refusals.
     assert _refused_summary([]) == ""
+
+
+def test_cases_sent_for_research_are_not_reported_as_waiting_for_the_reviewer():
+    """They are handled. Listing them as failures is what made a good batch read badly."""
+
+    from ai_market_monitor.api.routers.system_brain import _refused_summary
+
+    handled = [
+        CaseOutcome(
+            case_id=uuid4(),
+            reference=f"SB-{index:04d}",
+            applied=False,
+            message="This case is missing part of its evidence. It was sent for research.",
+            sent_for_research=True,
+        )
+        for index in range(50)
+    ]
+
+    assert _refused_summary(handled) == ""
 
 
 def test_an_unmapped_refusal_keeps_the_original_sentence_rather_than_inventing_one():

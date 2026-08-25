@@ -408,34 +408,164 @@ tbody tr:hover { background: var(--hm-apple-soft); }
 .brain-health-dot.critical,
 .brain-health-dot.failed { background: var(--hm-danger); }
 
-/* Read-only diagnostic assistant */
-.brain-assistant { display: grid; gap: 14px; }
-.brain-assistant-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 12px; }
-.brain-assistant-head h2 { margin: 0; font-size: 21px; }
-.brain-assistant-head p:not(.brain-kicker) { margin: 5px 0 0; }
-.brain-assistant-messages {
-  max-height: 420px;
-  min-height: 92px;
+/* ── The assistant, in a window in the corner ────────────────────────────────
+ *
+ * The System Brain assistant used to be a panel on the Inbox page. It is a floating
+ * window on every System Brain page now — the same shape as Hilal on the dashboard and
+ * the Support assistant on the public site, and a different mark from both, because it
+ * is a different assistant reading different things.
+ *
+ * The old panel rules are gone rather than left behind. A stylesheet that still paints a
+ * component nobody renders is how two of these ended up disagreeing about the same box.
+ */
+/* A label only a screen reader hears.
+ *
+ * Declared here because the System Brain loads exactly two stylesheets and neither of
+ * them had it: `hilalmarkets-brand.css` does not define it, and `hilalmarkets-public.css`
+ * — which does — is never loaded on this page. A class that is not defined does not hide
+ * anything, so every "sr-only" label would have been ordinary visible text in the middle
+ * of the layout. It is a real rule rather than `display: none`, because a hidden label is
+ * a label a screen reader does not read either.
+ */
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.brain-agent-dock { position: fixed; z-index: 520; right: 18px; bottom: 18px; }
+
+.brain-agent-orb {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border: 1px solid var(--hm-ink);
+  border-radius: 50%;
+  background: var(--hm-ink);
+  color: var(--hm-surface);
+  cursor: pointer;
+  box-shadow: 0 18px 42px -14px rgba(43, 46, 53, .6);
+  transition: transform var(--hm-motion, 220ms ease);
+}
+.brain-agent-orb:hover { transform: translateY(-2px); }
+.brain-agent-orb:focus-visible { outline: 3px solid var(--hm-apple-deep); outline-offset: 3px; }
+.brain-agent-orb .icon { width: 24px; height: 24px; }
+.brain-agent-orb-ring {
+  position: absolute;
+  inset: -5px;
+  border: 1px solid var(--hm-apple);
+  border-radius: 50%;
+  opacity: .55;
+}
+.brain-agent-dock.is-open .brain-agent-orb { transform: scale(.92); }
+
+.brain-agent-window {
+  position: fixed;
+  right: 18px;
+  bottom: 88px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(1020px, calc(100vw - 36px));
+  height: min(660px, calc(100vh - 130px));
+  overflow: hidden;
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: 20px;
+  background: var(--hm-surface);
+  box-shadow: 0 30px 90px -26px rgba(43, 46, 53, .55);
+}
+.brain-agent-window[hidden] { display: none; }
+
+.brain-agent-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 13px 15px;
+  border-bottom: 1px solid var(--hm-hairline);
+}
+.brain-agent-head h2 { margin: 0; font-size: 17px; }
+.brain-agent-head p { margin: 3px 0 0; color: var(--hm-muted); font-size: 11px; }
+.brain-agent-head-actions { display: flex; gap: 8px; align-items: center; }
+.brain-agent-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--hm-apple-soft);
+  color: var(--hm-ink);
+}
+
+.brain-agent-body {
+  display: grid;
+  grid-template-columns: minmax(178px, .7fr) minmax(0, 2fr) minmax(200px, .85fr);
+  min-height: 0;
+}
+.brain-agent-chats,
+.brain-agent-evidence {
   display: grid;
   align-content: start;
   gap: 9px;
+  min-height: 0;
   padding: 12px;
   overflow-y: auto;
-  border: 1px solid var(--hm-hairline);
-  border-radius: 14px;
-  background: var(--hm-surface-soft);
 }
-.brain-assistant-message { max-width: min(760px, 90%); padding: 11px 13px; border: 1px solid var(--hm-hairline); border-radius: 13px 13px 13px 4px; background: var(--hm-surface); }
+.brain-agent-chats { border-right: 1px solid var(--hm-hairline); }
+.brain-agent-evidence { border-left: 1px solid var(--hm-hairline); }
+.brain-agent-evidence h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--hm-muted); }
+.brain-agent-evidence details { margin: 0; border-top: 1px solid var(--hm-hairline); padding-top: 8px; }
+.brain-agent-evidence li { overflow-wrap: anywhere; }
+.brain-agent-chats-head { display: grid; gap: 7px; }
+.brain-agent-chats-foot { display: flex; gap: 7px; margin-top: 4px; }
+.brain-agent-chats input[type="search"] {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 9px;
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+}
+.brain-agent-conversation-list, .brain-conversation-results { display: grid; gap: 7px; }
+.brain-conversation-button, .brain-customer-conversation { width: 100%; display: grid; gap: 3px; text-align: left; border: 1px solid var(--hm-hairline); border-radius: 10px; background: var(--hm-surface); color: var(--hm-ink); padding: 10px; cursor: pointer; }
+.brain-conversation-button[data-active="true"], .brain-customer-conversation[data-unread="true"] { border-color: var(--hm-apple-deep); box-shadow: inset 3px 0 var(--hm-apple-deep); }
+.brain-conversation-button small, .brain-customer-conversation small, .brain-customer-conversation span, .brain-muted { color: var(--hm-muted); }
+
+.brain-agent-thread { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; }
+.brain-agent-progress { margin: 10px 12px 0; padding: 8px 10px; border-radius: 9px; background: var(--hm-apple-soft); color: var(--hm-ink); font-size: 11px; }
+.brain-agent-messages {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+}
+.brain-assistant-message { max-width: min(760px, 92%); padding: 11px 13px; border: 1px solid var(--hm-hairline); border-radius: 13px 13px 13px 4px; background: var(--hm-surface); }
 .brain-assistant-message.user { justify-self: end; border-color: var(--hm-ink); border-radius: 13px 13px 4px 13px; background: var(--hm-ink); color: var(--hm-surface); }
 .brain-assistant-message p { margin: 0; white-space: pre-wrap; }
 .brain-assistant-message ul { margin: 8px 0 0; padding-left: 19px; color: inherit; }
 .brain-assistant-message small { display: block; margin-top: 8px; color: var(--hm-muted); }
 .brain-assistant-message.user small { color: rgba(255, 255, 255, .7); }
 .brain-assistant-message.error { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); color: var(--hm-danger); }
-.brain-assistant-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 9px; }
-.brain-assistant-form label { grid-column: 1 / -1; color: var(--hm-copy); font-size: 11px; font-weight: 620; }
-.brain-assistant-form textarea {
-  min-height: 72px;
+
+.brain-agent-compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: end;
+  padding: 11px 12px;
+  border-top: 1px solid var(--hm-hairline);
+}
+.brain-agent-compose textarea {
+  min-height: 44px;
+  max-height: 140px;
   padding: 11px 13px;
   border: 1px solid var(--hm-hairline-strong);
   border-radius: 13px;
@@ -443,25 +573,14 @@ tbody tr:hover { background: var(--hm-apple-soft); }
   color: var(--hm-ink);
   resize: vertical;
 }
-.brain-assistant-form textarea:focus { border-color: var(--hm-apple-deep); outline: 3px solid rgba(203, 250, 77, .28); }
-.brain-assistant-form button { min-width: 112px; }
-.brain-workspace { display: grid; grid-template-columns: minmax(190px, .72fr) minmax(420px, 2fr) minmax(220px, .9fr); gap: 12px; align-items: start; }
-.brain-agent-sidebar, .brain-evidence-drawer { position: sticky; top: 18px; max-height: 76vh; overflow: auto; }
-.brain-agent-sidebar { display: grid; gap: 12px; }
-.brain-compact-field { display: grid; gap: 5px; font-size: 11px; color: var(--hm-copy); }
-.brain-compact-field input, .brain-explorer-filters input, .brain-explorer-filters select { min-width: 0; border: 1px solid var(--hm-hairline); border-radius: 9px; background: var(--hm-surface); padding: 9px 10px; color: var(--hm-ink); }
-.brain-agent-conversation-list, .brain-conversation-results { display: grid; gap: 7px; }
-.brain-conversation-button, .brain-customer-conversation { width: 100%; display: grid; gap: 3px; text-align: left; border: 1px solid var(--hm-hairline); border-radius: 10px; background: var(--hm-surface); color: var(--hm-ink); padding: 10px; cursor: pointer; }
-.brain-conversation-button[data-active="true"], .brain-customer-conversation[data-unread="true"] { border-color: var(--hm-apple-deep); box-shadow: inset 3px 0 var(--hm-apple-deep); }
-.brain-conversation-button small, .brain-customer-conversation small, .brain-customer-conversation span, .brain-muted { color: var(--hm-muted); }
-.brain-agent-progress { padding: 8px 10px; border-radius: 9px; background: var(--hm-apple-soft); color: var(--hm-ink); }
-.brain-evidence-drawer details { margin: 8px 0; border-top: 1px solid var(--hm-hairline); padding-top: 8px; }
-.brain-evidence-drawer li { overflow-wrap: anywhere; }
+.brain-agent-compose textarea:focus { border-color: var(--hm-apple-deep); outline: 3px solid rgba(203, 250, 77, .28); }
+.brain-agent-foot { margin: 0; padding: 0 15px 12px; color: var(--hm-muted); font-size: 10px; }
+
+.brain-workspace { display: grid; gap: 12px; align-items: start; }
 .brain-action-proposal { margin-top: 12px; padding: 11px; border: 1px solid var(--hm-warning-bg); border-radius: 10px; background: var(--hm-warning-bg); }
 .brain-action-proposal pre, .brain-conversation-detail pre { max-height: 220px; overflow: auto; white-space: pre-wrap; font-size: 11px; }
 .brain-action-proposal small { display: block; margin: 8px 0; }
-.brain-saved-insights { border-top: 1px solid var(--hm-hairline); margin-top: 16px; padding-top: 14px; }
-.brain-saved-insights pre, .brain-confirmation-dialog pre { max-height: 260px; overflow: auto; white-space: pre-wrap; }
+.brain-agent-evidence pre, .brain-confirmation-dialog pre { max-height: 260px; overflow: auto; white-space: pre-wrap; }
 .brain-related-links { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
 .brain-confirmation-dialog { border: 0; border-radius: 16px; box-shadow: 0 24px 64px rgb(15 23 42 / 28%); max-width: min(672px, calc(100vw - 32px)); padding: 20px; }
 .brain-confirmation-dialog::backdrop { background: rgb(15 23 42 / 58%); }
@@ -496,9 +615,60 @@ tbody tr:hover { background: var(--hm-apple-soft); }
 }
 .brain-saved-views a:hover,
 .brain-saved-views a.active { border-color: var(--hm-ink); background: var(--hm-ink); color: var(--hm-surface); }
+/* ── What kind of problem a case is ──────────────────────────────────────────
+ *
+ * One chip per kind, painted by tone rather than by name, so a queue can be read at a
+ * glance and rows of the same kind look the same. The tones are the product's existing
+ * status colours: nothing new is invented, and none of them ever means a Shariah answer.
+ *
+ * The chip carries text, so the colour is a background with dark text on it — never the
+ * accent as small text on white, which measures 1.21:1 and cannot be read.
+ */
+.brain-tag-filters { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 12px; }
+.brain-tag-filters a { text-decoration: none; }
+.brain-tag-filters a.active { outline: 2px solid var(--hm-ink); outline-offset: 1px; }
+.brain-tag-clear {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 11px;
+  border-radius: 999px;
+  color: var(--hm-copy);
+  font-size: 11px;
+  font-weight: 620;
+  text-decoration: underline;
+}
+
+.brain-case-tag {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 999px;
+  background: var(--hm-neutral-bg);
+  color: var(--hm-ink);
+  font-size: 11px;
+  font-weight: 620;
+  line-height: 1.2;
+}
+.brain-case-tag strong { font-variant-numeric: tabular-nums; }
+.brain-case-tag.tone-attention { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); color: var(--hm-danger); }
+.brain-case-tag.tone-watch { border-color: var(--hm-warning-bg); background: var(--hm-warning-bg); color: var(--hm-warning); }
+.brain-case-tag.tone-waiting { border-color: var(--hm-hairline); background: var(--hm-neutral-bg); color: var(--hm-neutral); }
+.brain-case-tag.tone-ready { border-color: var(--hm-apple-pale); background: var(--hm-apple-pale); color: var(--hm-success); }
+.brain-case-tag.tone-done { border-color: var(--hm-hairline); background: var(--hm-surface); color: var(--hm-muted); }
+
+.brain-tag-cell { white-space: normal; }
+.brain-reason-cell > span { display: block; }
+.brain-reason-raw { margin-top: 6px; }
+.brain-reason-raw summary { color: var(--hm-muted); cursor: pointer; font-size: 10px; }
+.brain-reason-raw p { margin: 4px 0 0; color: var(--hm-muted); font-size: 11px; }
+
 .brain-case-filters {
   display: grid;
-  grid-template-columns: minmax(220px, 1.8fr) repeat(4, minmax(130px, .8fr)) auto;
+  grid-template-columns: minmax(200px, 1.6fr) repeat(5, minmax(120px, .8fr)) auto;
   align-items: end;
   gap: 8px;
   margin-bottom: 12px;
@@ -929,12 +1099,20 @@ tbody tr:hover { background: var(--hm-apple-soft); }
   .brain-status-header { align-items: flex-start; flex-direction: column; }
   .brain-action-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .brain-health-list { grid-template-columns: 1fr; }
-  .brain-assistant-head { grid-template-columns: auto minmax(0, 1fr); }
-  .brain-assistant-head > .brain-status { grid-column: 2; width: max-content; }
-  .brain-assistant-form { grid-template-columns: 1fr; }
-  .brain-assistant-form button { width: 100%; }
+  /* On a narrow screen the window is the screen, and the chat list and the evidence
+     drawer come off with it: three columns in 360px is three unusable columns. Both are
+     reachable again the moment the window is wide enough to hold them. */
+  .brain-agent-window {
+    right: 8px;
+    bottom: 78px;
+    width: calc(100vw - 16px);
+    height: min(74vh, calc(100vh - 110px));
+  }
+  .brain-agent-body { grid-template-columns: 1fr; }
+  .brain-agent-chats, .brain-agent-evidence { display: none; }
+  .brain-agent-head { grid-template-columns: auto minmax(0, 1fr); }
+  .brain-agent-head-actions { grid-column: 2; }
   .brain-workspace { grid-template-columns: 1fr; }
-  .brain-agent-sidebar, .brain-evidence-drawer { position: static; max-height: none; }
   .brain-customer-explorer { grid-column: auto; }
   .brain-explorer-filters, .brain-explorer-grid { grid-template-columns: 1fr; }
   .brain-conversation-detail { border-left: 0; border-top: 1px solid var(--hm-hairline); padding: 12px 0 0; }

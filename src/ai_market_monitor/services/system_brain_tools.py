@@ -1047,12 +1047,17 @@ class SystemBrainToolRegistry:
                 data, ["db:review_cases:overview"], coverage="current governed review queue"
             )
         if name == "inspect_review_case":
-            if not args.target_id:
-                return _missing("target_id is required")
-            try:
-                case_id = UUID(args.target_id)
-            except ValueError:
-                return _missing("target_id must be a review-case UUID")
+            wanted = (args.target_id or args.query or "").strip()
+            if not wanted:
+                return _missing("target_id is required: a case reference or its id")
+            # A case reference is what a person can actually see. It is printed on every
+            # row of the Cases page, in every refusal message and in the address bar; the
+            # internal id is printed nowhere. Accepting only the id meant the one question
+            # the assistant is asked most — "what does IMP-FASSET-170-HTX want?" — could
+            # not be answered at all.
+            case_id = await _case_id_for(session, wanted)
+            if case_id is None:
+                return _missing(f"no review case is recorded as {wanted[:60]}")
             data = await dashboard.case_detail(case_id)
             return _envelope(
                 data, [f"db:review_cases:{case_id}"], coverage="one exact persisted review case"
@@ -1367,6 +1372,9 @@ class SystemBrainToolRegistry:
 def _envelope(
     data: Any, refs: list[str], *, coverage: str, limitations: list[str] | None = None
 ) -> EvidenceEnvelope:
+    # ``data`` is made sendable by the envelope itself — see ``json_safe`` in
+    # ``schemas/system_brain.py``. It is done there rather than here because four other
+    # producers build an envelope without going through this helper.
     return EvidenceEnvelope(
         data=data,
         evidence_refs=list(dict.fromkeys(refs))[:100],
@@ -1374,6 +1382,24 @@ def _envelope(
         coverage=coverage,
         limitations=limitations or [],
     )
+
+
+async def _case_id_for(session: AsyncSession, wanted: str) -> UUID | None:
+    """Find one review case by its reference or by its id. One owner, both spellings.
+
+    The reference is matched exactly and case-insensitively, never as a prefix: two cases
+    whose references share a prefix would otherwise be one lookup away from being confused
+    with each other, and the answer is about a governed review.
+    """
+
+    try:
+        return UUID(wanted)
+    except ValueError:
+        pass
+    row = await session.scalar(
+        select(ReviewCase.id).where(func.lower(ReviewCase.case_reference) == wanted.casefold())
+    )
+    return row
 
 
 def _missing(message: str) -> EvidenceEnvelope:

@@ -411,6 +411,28 @@ _EXPLANATIONS: dict[str, tuple[str, str]] = {
 }
 
 
+#: The refusals whose one and only cure is "go and gather the evidence again".
+#:
+#: Read out of the table above rather than typed a second time: a refusal whose next step
+#: says *research* is, by definition, one research clears. A hand-written list beside the
+#: table is the duplicate-vocabulary failure this codebase keeps meeting — somebody adds a
+#: new evidence refusal, forgets the second list, and the quick decision silently stops
+#: curing it.
+#:
+#: The Cases page uses this to finish the job in one click: a case refused for one of
+#: these is sent for research instead of being handed back to the reviewer with an
+#: instruction to open it and press the same button.
+RESEARCH_CLEARS_CODES: frozenset[str] = frozenset(
+    code for code, (_what, step) in _EXPLANATIONS.items() if "research" in step.casefold()
+)
+
+
+def research_would_clear(code: str | None) -> bool:
+    """Whether gathering the evidence again is the answer to this refusal."""
+
+    return (code or "") in RESEARCH_CLEARS_CODES
+
+
 @dataclass(frozen=True, slots=True)
 class BlockerExplanation:
     """One refusal, in the two parts a reviewer needs."""
@@ -421,6 +443,10 @@ class BlockerExplanation:
 
     def sentence(self) -> str:
         return f"{self.what_happened} {self.next_step}".strip()
+
+    @property
+    def research_clears(self) -> bool:
+        return research_would_clear(self.code)
 
 
 def explain(code: str | None, fallback: str) -> BlockerExplanation:

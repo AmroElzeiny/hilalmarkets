@@ -716,12 +716,32 @@ class _Internet:
 
 
 class _Discovery:
-    """A stand-in for the two layers that go and look."""
+    """A stand-in for the two layers that go and look.
 
-    def __init__(self, links: tuple[str, ...] = (), results: tuple[SearchResult, ...] = ()) -> None:
+    It answers **every** question ``WebSourceDiscovery`` answers, including the two that
+    are only about configuration. A stub that implements a subset passes its own tests
+    while the real caller meets an attribute that is not there — which is exactly what
+    happened when the gap-case wording started naming the layers that could not run.
+    """
+
+    def __init__(
+        self,
+        links: tuple[str, ...] = (),
+        results: tuple[SearchResult, ...] = (),
+        *,
+        configured: bool = True,
+    ) -> None:
         self._links = links
         self._results = results
+        self._configured = configured
         self.searched = 0
+
+    @property
+    def search_configured(self) -> bool:
+        return self._configured
+
+    def search_requirement(self) -> str:
+        return "" if self._configured else "Web search is not configured in this test."
 
     async def channel_links(self, official_website):
         return self._links

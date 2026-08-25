@@ -398,6 +398,105 @@ async def test_a_quick_approval_reaches_customers_and_can_be_taken_back(test_con
     assert held is not None and held.is_active is False
 
 
+async def test_a_batch_with_a_blocked_case_still_records_every_other_one(test_context):
+    """The whole reason this work exists, driven through the real route.
+
+    A reviewer picks 190 imported cases and presses Approve. A few of them have no
+    research folder yet. The ones that can be decided are decided; the ones that cannot
+    are sent to gather their evidence; and the message leads with the work that was done
+    instead of being a page of errors.
+    """
+
+    admin = await _admin(test_context, email="mixed-admin@hilalmarkets.test")
+    headers = {"X-User-ID": str(admin.id)}
+    async with test_context["session_factory"]() as session:
+        good, _ = await _ready_case(session)
+        good_id = good.id
+        blocked = ReviewCase(
+            case_reference="IMP-FASSET-170-HTX-TEST",
+            case_type="initial_asset_review",
+            state="ready_for_review",
+            publication_state="unpublished",
+            canonical_asset_id=good.canonical_asset_id,
+            external_assessment_id=good.external_assessment_id,
+            dossier_id=None,
+            methodology_id=good.methodology_id,
+            title="Imported row with no research folder",
+            priority="normal",
+            risk_severity="none",
+            human_review_reason="Imported row waiting for its first research run.",
+            requested_evidence=[],
+            admin_notes=[],
+            idempotency_key="bulk-mixed-web-test",
+        )
+        session.add(blocked)
+        await session.commit()
+        blocked_id = blocked.id
+
+    page = await test_context["client"].get(
+        "/dashboard/system-brain/cases", headers=headers
+    )
+    posted = await test_context["client"].post(
+        "/dashboard/system-brain/cases/bulk-decision",
+        headers=headers,
+        data={
+            "action": "approve",
+            "reason": "The retained official evidence supports every condition here.",
+            "case_id": [str(good_id), str(blocked_id)],
+            "csrf_token": _csrf(page.text),
+        },
+    )
+
+    assert posted.status_code == 303
+    location = posted.headers["location"]
+    # Success, not error: one case out of two going through is a batch that worked.
+    assert "success=" in location
+    assert "error=" not in location
+
+    async with test_context["session_factory"]() as session:
+        decided = await session.get(ReviewCase, good_id)
+        sent = await session.get(ReviewCase, blocked_id)
+    assert decided is not None and decided.state == "published"
+    # Not approved — sent to gather what it is missing, without anybody opening it.
+    assert sent is not None and sent.state == "researching"
+    assert sent.publication_state == "unpublished"
+
+
+async def test_the_cases_page_says_what_kind_of_problem_each_case_is(test_context):
+    """Two hundred free-text sentences is not a queue. A tag is."""
+
+    admin = await _admin(test_context, email="tag-admin@hilalmarkets.test")
+    await _open_case(test_context)
+
+    page = await test_context["client"].get(
+        "/dashboard/system-brain/cases", headers={"X-User-ID": str(admin.id)}
+    )
+
+    assert page.status_code == 200
+    assert "<th>What kind</th>" in page.text
+    assert "brain-case-tag" in page.text
+    # The kinds can be filtered, so "show me only the ones that cannot find their pages"
+    # is one click rather than reading every row.
+    assert 'name="tag"' in page.text
+    assert "Pages not found" in page.text
+    # And the assistant in the corner can see which cases are on the page.
+    assert "data-case-reference=" in page.text
+    assert "data-brain-agent-dock" in page.text
+
+
+async def test_a_tag_the_product_does_not_have_is_refused_rather_than_ignored(test_context):
+    """One owner for the list of tags. A filter nothing produces is a filter that lies."""
+
+    admin = await _admin(test_context, email="tag-filter-admin@hilalmarkets.test")
+
+    refused = await test_context["client"].get(
+        "/dashboard/system-brain/cases?tag=definitely_not_a_tag",
+        headers={"X-User-ID": str(admin.id)},
+    )
+
+    assert refused.status_code == 404
+
+
 async def test_a_quick_decision_without_a_valid_form_token_is_refused(test_context):
     admin = await _admin(test_context, email="csrf-admin@hilalmarkets.test")
     case = await _open_case(test_context)
