@@ -127,23 +127,50 @@ SECTIONS = {
 }
 
 
+def _matches_any(value: str, allowed: frozenset[str]) -> bool:
+    """Constant-time membership test that cannot itself become the failure.
+
+    ``hmac.compare_digest`` raises ``TypeError`` when handed a non-ASCII ``str``, and both
+    values here arrive straight from request headers. Comparing bytes removes that edge
+    entirely: a header full of accents now fails the check, where it used to answer an
+    unauthorised request with HTTP 500 instead of 403.
+    """
+
+    if not value or not allowed:
+        return False
+    candidate = value.encode("utf-8")
+    return any(hmac.compare_digest(candidate, item.encode("utf-8")) for item in allowed)
+
+
 async def _require_cloudflare_access(
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> None:
     if not settings.system_brain_cloudflare_access_required:
         return
-    access_email = request.headers.get("cf-access-authenticated-user-email", "")
-    access_assertion = request.headers.get("cf-access-jwt-assertion", "")
-    allowed_emails = settings.system_brain_authorized_emails
-    if (
-        not access_assertion
-        or not allowed_emails
-        or not any(
-            hmac.compare_digest(access_email.strip().casefold(), email) for email in allowed_emails
-        )
-    ):
-        raise HTTPException(status_code=403, detail="Cloudflare Access is required.")
+    # Cloudflare Access sets these headers, and the origin is only reachable through
+    # Cloudflare, which is the whole reason they are worth trusting.
+    refused = HTTPException(status_code=403, detail="Cloudflare Access is required.")
+    if not request.headers.get("cf-access-jwt-assertion", "").strip():
+        raise refused
+
+    # A person is identified by their verified email. A service token is identified by its
+    # client ID, because Access issues no email for a machine — which is why the earlier
+    # email-only check refused every service token no matter how it was configured.
+    #
+    # Both allowlists default to empty and an empty one matches nothing, so a deployment
+    # that has not named its operators refuses everyone rather than admitting an unnamed
+    # caller that got past the edge.
+    known_person = _matches_any(
+        request.headers.get("cf-access-authenticated-user-email", "").strip().casefold(),
+        settings.system_brain_authorized_emails,
+    )
+    known_service = _matches_any(
+        request.headers.get("cf-access-client-id", "").strip().casefold(),
+        settings.system_brain_authorized_service_token_ids,
+    )
+    if not (known_person or known_service):
+        raise refused
 
 
 async def _require_application_admin(

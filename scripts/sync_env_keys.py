@@ -77,6 +77,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+from pydantic import SecretStr
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -116,8 +118,19 @@ def value_of(lines: list[str], key: str) -> str | None:
 
 
 def serialise(value: object) -> str:
-    """Render a loaded setting back into the text form an env file uses."""
+    """Render a loaded setting back into the text form an env file uses.
 
+    ``SecretStr`` is unwrapped first, and that is not a convenience. ``str()`` on one
+    returns ``'**********'``, which broke this tool in two ways for every secret setting:
+    ``--set`` on one compared the mask against the value just written, decided the file
+    had been written wrongly and restored the backup over a correct write; and a secret
+    missing from one real file was refilled with the literal ten asterisks, replacing a
+    live credential with a mask. The value is only ever compared or written to the file
+    it belongs in -- ``set_one`` still prints nothing but what the caller typed.
+    """
+
+    if isinstance(value, SecretStr):
+        return value.get_secret_value()
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -129,6 +142,20 @@ def serialise(value: object) -> str:
 
 def settings_from(path: Path) -> dict:
     return Settings(_env_file=str(path)).model_dump()
+
+
+def backup_once(path: Path, backup: Path) -> Path:
+    """Copy the file aside, but never over an existing copy from this same run.
+
+    A fill pass and a ``--set`` pass share one timestamp, so they name the same backup
+    file. The second pass used to copy over the first, and what it copied was the file the
+    first pass had *already rewritten* -- leaving no way back to the state the run started
+    from. The first copy is the valuable one, so it is the one that is kept.
+    """
+
+    if not backup.exists():
+        shutil.copy2(path, backup)
+    return backup
 
 
 @contextmanager
@@ -247,8 +274,7 @@ def sync_one(root: Path, name: str, stamp: str, apply: bool) -> int:
         print()
         return 0
 
-    backup = root / f"{name}.backup.{stamp}"
-    shutil.copy2(path, backup)
+    backup = backup_once(path, root / f"{name}.backup.{stamp}")
     final = merged_lines(current, additions, stamp)
     path.write_text("\n".join(final) + "\n", encoding="utf-8")
     placed = keys_with_lines(final)
@@ -302,8 +328,7 @@ def set_one(root: Path, name: str, overrides: dict[str, str], stamp: str, apply:
         print("  DRY RUN, nothing written\n")
         return 0
 
-    backup = root / f"{name}.backup.{stamp}"
-    shutil.copy2(path, backup)
+    backup = backup_once(path, root / f"{name}.backup.{stamp}")
 
     written = list(lines)
     for index, line in enumerate(written):

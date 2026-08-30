@@ -589,6 +589,58 @@ proxy. Remove alternate public origin ports and DNS records. From an external ne
 5. Spoofed `cf-access-*` headers sent to any reachable origin do not bypass the edge.
 6. System Brain is absent from sitemap, customer navigation, analytics, and robots indexing.
 
+### Two Cloudflare credentials that are easy to confuse
+
+They have similar names and do completely different jobs. Sending the wrong one gets you a
+redirect to a login page, which reads like a broken password and is not.
+
+| You want | Use | Setting | Sent as |
+|---|---|---|---|
+| Read DNS, TLS mode, zone status | an **API token** | `CLOUDFLARE_API_TOKEN` | `Authorization: Bearer …` to `api.cloudflare.com` |
+| Open a page behind Access | a **service token** | `SYSTEM_BRAIN_ACCESS_CLIENT_ID` + `…_CLIENT_SECRET` | `CF-Access-Client-Id` / `CF-Access-Client-Secret` to the site |
+
+An API token sent to the site does nothing. Cloudflare Access never looks at
+`Authorization`; with no Access headers and no login cookie it answers `302` to the login
+screen, however powerful that API token is.
+
+### Letting a script in, without letting anyone else in
+
+A person signs in to Access with their email. A script cannot, so Access has a second kind
+of credential for machines. Cloudflare issues **no email** for one, which is why the
+application identifies it by client ID instead — before 30 August 2026 the check read the
+email only, so every service token was refused no matter how Cloudflare was set up.
+
+1. Cloudflare → Zero Trust → Access → Service Auth → **Create Service Token**. Copy both
+   halves now; the secret is shown once.
+2. Zero Trust → Access → Applications → the application guarding `/system-brain` →
+   Policies → add a policy with **Include → Service Auth →** that token. Without this step
+   Cloudflare still sends the caller to the login screen.
+3. Put the client ID in `SYSTEM_BRAIN_ACCESS_SERVICE_TOKEN_IDS` so the application accepts
+   it as well. It holds only public client IDs, never the secret, and several may be listed
+   separated by commas.
+4. Only the machine making the calls needs `SYSTEM_BRAIN_ACCESS_CLIENT_ID` and
+   `SYSTEM_BRAIN_ACCESS_CLIENT_SECRET`.
+
+Both allowlists start empty and an empty one matches nobody, so a deployment that has named
+no operator refuses every caller rather than admitting an unnamed one.
+
+**A service token opens the edge, not the console.** Past Cloudflare the application still
+requires a signed-in `ADMIN` session, and a service token is not a person, so it never has
+one. `403` on `/system-brain` with a valid service token is the correct answer, not a
+misconfiguration. Use service tokens for health and configuration checks; a human still
+signs in for System Brain itself.
+
+Check the whole path end to end with:
+
+```powershell
+.venv\Scripts\python.exe scripts\cloudflare_probe.py                    # zone configuration
+.venv\Scripts\python.exe scripts\cloudflare_probe.py --page /system-brain
+```
+
+The probe writes nothing. It also lists any `A`, `AAAA` or `CNAME` record that is **not**
+proxied through Cloudflare — that is point 4 of the checklist above, asked continuously
+rather than once, because Access can only guard a hostname whose traffic reaches Cloudflare.
+
 Use `scripts/test_compliance_notification.py` without `--live` for safe payload/delivery-state
 inspection. A live test requires the explicit live flag, confirmation phrase, and dedicated test
 chat ID; never use a customer chat for deployment verification.

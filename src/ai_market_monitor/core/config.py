@@ -890,6 +890,12 @@ class Settings(BaseSettings):
     waitlist_google_sheets_max_attempts: int = Field(default=8, ge=1, le=30)
     waitlist_google_sheets_retry_minutes: int = Field(default=15, ge=1, le=1440)
     waitlist_trust_cloudflare_country_header: bool = False
+    #: Read-only Cloudflare API credentials, used by ``scripts/cloudflare_probe.py`` to
+    #: answer "is the site configured the way we think it is" — DNS, TLS mode, analytics.
+    #: This is a key for Cloudflare's *API*. It is not a key for a page behind Cloudflare
+    #: Access; that is a service token, three fields below.
+    cloudflare_api_token: SecretStr | None = None
+    cloudflare_zone_id: str = ""
     system_brain_admin_username: str | None = None
     system_brain_admin_emails: str = ""
     system_brain_admin_password_hash: SecretStr | None = None
@@ -898,6 +904,20 @@ class Settings(BaseSettings):
     system_brain_session_hours: int = Field(default=8, ge=1, le=72)
     system_brain_login_attempts_per_15_minutes: int = Field(default=5, ge=1, le=20)
     system_brain_cloudflare_access_required: bool = False
+    #: Cloudflare Access service tokens allowed into System Brain, as comma-separated
+    #: client IDs. These two halves face opposite ways and are not interchangeable:
+    #:
+    #:   * ``..._service_token_ids`` is the **server** side. It answers "may this caller
+    #:     in?", so it holds only public client IDs and never a secret.
+    #:   * ``..._client_id`` / ``..._client_secret`` is the **caller** side, used by
+    #:     ``scripts/cloudflare_probe.py`` to prove who it is.
+    #:
+    #: A service token authenticates as a machine, so Cloudflare sets no
+    #: ``cf-access-authenticated-user-email`` for it. Leaving this empty therefore keeps
+    #: machine access closed, which is the safe default.
+    system_brain_access_service_token_ids: str = ""
+    system_brain_access_client_id: str = ""
+    system_brain_access_client_secret: SecretStr | None = None
     system_brain_ai_enabled: bool = True
     system_brain_ai_model: str = "gpt-5.4-nano"
     system_brain_ai_reasoning_effort: Literal[
@@ -1464,6 +1484,15 @@ class Settings(BaseSettings):
             for value in values
             for email in re.split(r"[,;\n]", value)
             if email.strip()
+        )
+
+    @property
+    def system_brain_authorized_service_token_ids(self) -> frozenset[str]:
+        """Cloudflare Access service tokens allowed into System Brain, by client ID."""
+        return frozenset(
+            token.strip().casefold()
+            for token in re.split(r"[,;\n]", self.system_brain_access_service_token_ids)
+            if token.strip()
         )
 
 
