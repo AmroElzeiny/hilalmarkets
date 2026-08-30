@@ -57,7 +57,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
@@ -333,18 +333,50 @@ class SourceResolutionService:
 
         Verified identities only. An asset whose identity a reviewer has not approved
         has no address worth trusting to derive anything from.
+
+        **The order is the whole design.** One sweep may only touch
+        ``sharia_source_resolution_batch_size`` assets, because each one costs a handful
+        of fetches against somebody else's site. That is only safe if the next sweep
+        carries on somewhere new, so the queue is ordered by how long ago each asset was
+        last looked at: never-checked first, then longest-ago.
+
+        Ordering by ``created_at`` instead — as this did until 30 August 2026 — is what a
+        cursor looks like when it has none. Every sweep re-read the same oldest 25 assets
+        for ever and no asset past position 25 was checked once, so a scan could run all
+        month and the review queue never moved. The symptom is the giveaway: the run
+        reports success, and the number of open cases is identical afterwards.
+
+        Rechecking is served by the same order rather than by a filter. A settled asset
+        sinks to the back and resurfaces only when its links are the oldest thing on the
+        list, which is what ``sharia_source_recheck_days`` is measured against; filtering
+        settled assets out would mean a link that died was never noticed again.
         """
 
         sweep = ResolutionSweep()
         if not self.settings.sharia_source_resolution_enabled:
             return sweep
         batch = limit or self.settings.sharia_source_resolution_batch_size
+        last_looked_at = (
+            select(func.max(OfficialSource.last_checked_at))
+            .where(OfficialSource.canonical_asset_id == CanonicalAsset.id)
+            .correlate(CanonicalAsset)
+            .scalar_subquery()
+        )
+        # NULL means "no link of this asset has ever been fetched", which has to sort
+        # first and cannot be expressed by comparing the column: NULL orders differently
+        # per database. A CASE says it the same way everywhere, PostgreSQL and the
+        # SQLite the tests run on alike.
+        never_looked = case((last_looked_at.is_(None), 0), else_=1)
         assets = list(
             (
                 await self.session.scalars(
                     select(CanonicalAsset)
                     .where(CanonicalAsset.mapping_state == "verified")
-                    .order_by(CanonicalAsset.created_at.asc())
+                    .order_by(
+                        never_looked.asc(),
+                        last_looked_at.asc(),
+                        CanonicalAsset.created_at.asc(),
+                    )
                     .limit(batch)
                 )
             ).all()

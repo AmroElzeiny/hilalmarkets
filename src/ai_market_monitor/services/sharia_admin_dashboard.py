@@ -36,6 +36,7 @@ from ai_market_monitor.services.sharia_case_tags import (
     classify,
     coverage_from_rows,
 )
+from ai_market_monitor.services.sharia_governance import DEFAULT_QUEUE_HIDDEN_STATES
 
 
 class ShariaAdminDashboardService:
@@ -443,10 +444,17 @@ class ShariaAdminDashboardService:
         if state:
             query = query.where(ReviewCase.state == state)
         elif not include_published:
-            # A completed publication belongs to the immutable case registry and
-            # audit trail, not the human-attention queue. Keep it available when
-            # an operator explicitly asks for the published state.
-            query = query.where(ReviewCase.publication_state != "published")
+            # A finished case belongs to the immutable case registry and audit trail, not
+            # the human-attention queue. Two different columns say "finished" and both
+            # have to be asked: ``publication_state`` for a completed publication, and
+            # ``state`` for a case replaced by a newer version of itself. Checking only
+            # the first left every superseded case in the queue.
+            #
+            # Either stays available when an operator asks for that state by name.
+            query = query.where(
+                ReviewCase.publication_state != "published",
+                ReviewCase.state.notin_(DEFAULT_QUEUE_HIDDEN_STATES),
+            )
         if case_type:
             query = query.where(ReviewCase.case_type == case_type)
         if priority:

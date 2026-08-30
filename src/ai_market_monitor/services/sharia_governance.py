@@ -58,6 +58,19 @@ SC_METHODOLOGY_CODE = "SC_MALAYSIA_SAC_REFERENCE"
 FASSET_METHODOLOGY_CODE = "FASSET_SHARIAH_REPORTS"
 SRB_METHODOLOGY_CODE = "SHARIAH_REVIEW_BUREAU"
 TERMINAL_CASE_STATES = {"published", "rejected", "stored", "superseded"}
+#: Terminal states kept out of the review queue's default view.
+#:
+#: A superseded case has been replaced by a newer version of itself. It is a signpost,
+#: not work — its own suggested next action is "open the current version". On 30 August
+#: 2026 the live queue held 213 cases and 192 of them were these, so the 21 that were
+#: real work sat behind ten screens of finished ones, every one of them still carrying a
+#: priority and a waiting clock.
+#:
+#: Deliberately narrower than ``TERMINAL_CASE_STATES``. Rejected and stored cases stay in
+#: the default view because a reviewer still looks for those in the days after deciding
+#: them; only the replaced ones are noise. Asking for a state explicitly is untouched —
+#: the State filter still reaches every state, this one included.
+DEFAULT_QUEUE_HIDDEN_STATES = {"superseded"}
 #: The states an undo may put a case back into.
 #:
 #: Only states a case can legitimately be *waiting* in. Undo is a way back from a
