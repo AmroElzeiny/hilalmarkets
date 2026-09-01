@@ -616,7 +616,6 @@ class HilalMarketsEmailRenderer:
         """
 
         base_url = str(self.settings.public_base_url).rstrip("/")
-        legal_name = self.settings.site_legal_name or "Hilal Markets"
         reason = footer_reason or (
             "You are receiving this because you have a Hilal Markets account. "
             "You can change which messages you receive in your dashboard."
@@ -666,16 +665,21 @@ class HilalMarketsEmailRenderer:
             "Hilal Markets supports research, screening and monitoring. It does not "
             "execute trades, hold funds, promise returns, or make personal religious "
             "rulings. Nothing in this email is financial advice.<br>"
+            # Who sent this: Hilal Markets, and nothing else.
+            #
+            # These two lines used to print `SITE_LEGAL_NAME` and `SITE_COMPANY_ADDRESS`
+            # straight out of the environment, which put a founder's personal name, an
+            # unrelated company and a street address at the bottom of every message the
+            # product sends — a sign-in code, a market alert, a receipt. It is the wrong
+            # name in front of a customer and it hands out a home address to anybody who
+            # ever asked for a one-time code.
+            #
+            # The two settings still exist and the legal pages on the website still use
+            # them, because a Terms page really does have to name a legal entity. An
+            # email footer does not: the sender is the product.
             f'<a href="{_attr(base_url)}" style="color:{APPLE_DEEP};font-weight:700;'
-            f'text-decoration:none">{_e(legal_name)}</a>'
-            # Who sent this, and from where. The receipt used to be the only email that
-            # said it, because it had a frame of its own; now every email does.
-            + (
-                f"<br>{_e(self.settings.site_company_address)}"
-                if self.settings.site_company_address
-                else ""
-            )
-            + "</td></tr></table></td></tr></table></body></html>"
+            f'text-decoration:none">Hilal Markets</a>'
+            "</td></tr></table></td></tr></table></body></html>"
         )
 
     # ── Templates ────────────────────────────────────────────────────────────

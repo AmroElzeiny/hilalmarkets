@@ -1,0 +1,34 @@
+{
+  "generated_at": "2026-07-24",
+  "sources": [
+    {
+      "id": "SC_MY",
+      "url": "https://www.sc.com.my/digital-assets",
+      "authority": "Securities Commission Malaysia",
+      "extracted": "Only explicit Shariah-compliant rows with SAC meeting and decision date",
+      "records": 15
+    },
+    {
+      "id": "SRB",
+      "url": "https://shariyah.net/cryptocurrency/",
+      "authority": "Shariyah Review Bureau W.L.L.",
+      "extracted": "Current compliant statuses and concise HilalMarkets paraphrases",
+      "records": 31,
+      "rights_warning": "Source pages state that unauthorized extraction, storage, display and commercial use are prohibited. Public display requires permission or legal clearance."
+    },
+    {
+      "id": "FASSET",
+      "url": "https://www.fasset.com/shariah-reports/",
+      "authority": "Fasset",
+      "extracted": "All source rows and status labels; only compliant rows included in methodology seed",
+      "compliant_records": 188,
+      "noncompliant_guard_records": 52
+    }
+  ],
+  "quality_limits": [
+    "This package is a source-attributed seed, not a qualified independent Sharia ruling.",
+    "Canonical identity must be verified before publication.",
+    "AI enrichment is a separate factual layer and cannot fill external-authority reasoning.",
+    "No methodology may inherit a coin merely because another methodology accepts it."
+  ]
+}

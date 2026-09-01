@@ -58,6 +58,9 @@ from ai_market_monitor.services.billing import (
     billing_provider_capabilities,
     configured_billing_provider,
 )
+from ai_market_monitor.services.hilal_methodology import (
+    page_payload as hilal_page_payload,
+)
 from ai_market_monitor.services.public_site import PublicSiteReadService
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
@@ -427,6 +430,11 @@ def _public_context(
         },
         "public_chat_enabled": settings.public_chat_enabled,
         "site_visit_measurement_enabled": settings.site_visit_measurement_enabled,
+        # Null on every page but the methodology one, which replaces it through `extra`.
+        # Declared here rather than only there so the shared template can read it
+        # unconditionally — a Jinja name that exists on one page and not on another is
+        # an `UndefinedError` waiting for the next page to be added.
+        "methodology_runtime_config": None,
         **extra,
     }
 
@@ -446,6 +454,12 @@ async def _render_public_page(
         extra["active_methodology"] = (
             service.methodology_view(methodology) if methodology else None
         )
+    if page == "hilal_methodology":
+        # Handed to the page at render time, never built into the bundle. The page says
+        # how many conditions are approved and which coins were judged; both change when
+        # the owner edits a decision file, and a number baked into a JavaScript bundle
+        # would keep saying the old one until somebody remembered to rebuild it.
+        extra["methodology_runtime_config"] = hilal_page_payload()
     return templates.TemplateResponse(
         request=request,
         name=metadata.template,
@@ -613,6 +627,32 @@ async def how_we_screen(
         session=session,
         settings=settings,
         page="how_we_screen",
+    )
+
+
+@router.get(
+    "/hilal-methodology",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    name="public_hilal_methodology",
+)
+async def hilal_methodology(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    """What the Hilal Markets automated standard is, in public and in full.
+
+    Public on purpose. Every surface that shows a result from this standard says it is
+    automated and links here; a page explaining the limits of a screen would be worth
+    very little if only people who already have an account could read it.
+    """
+
+    return await _render_public_page(
+        request=request,
+        session=session,
+        settings=settings,
+        page="hilal_methodology",
     )
 
 

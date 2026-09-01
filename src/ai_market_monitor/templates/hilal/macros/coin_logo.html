@@ -11,11 +11,13 @@
     Which pictures exist is not decided here, and is never decided in a template. It is
     `core/asset_logos.py`, reached through the `asset_logo` global, which answers with:
 
-      `image_url`   the picture stored on the coin's own record. Exists for far more
-                    coins than the catalogue covers, and is the only picture a small or
-                    newly listed token has.
-      `module_url`  the shared icon catalogue, addressed by ticker.
-      `monogram`    the letters to show until one of those has actually loaded.
+      `image_url`     the picture stored on the coin's own record when a reviewer
+                      verified its identity.
+      `provider_url`  the market-data provider's picture, gathered by the coin
+                      researcher. Exists for far more coins than the catalogue covers,
+                      and is often the only picture a small or newly listed token has.
+      `module_url`    the shared icon catalogue, addressed by ticker.
+      `monogram`      the letters to show until one of those has actually loaded.
 
     A caller that already holds a resolved record passes both addresses in; a caller
     holding only a ticker passes neither and gets the same answer. Each address is
@@ -33,15 +35,16 @@
     coin it is showing.
 -#}
 
-{%- macro coin_logo(symbol, module_url=none, image_url=none, class='', element='span', decorative=false) -%}
+{%- macro coin_logo(symbol, module_url=none, image_url=none, provider_url=none, class='', element='span', decorative=false) -%}
 {%- set resolved = asset_logo(symbol) -%}
 {%- set module = module_url or resolved.module_url -%}
 {%- set image = image_url or resolved.image_url -%}
-<{{ element }} class="{{ class }}" data-asset-logo-symbol="{{ resolved.ticker or (symbol|string|upper) }}"{% if module %} data-asset-logo-module="{{ module }}"{% endif %}{% if image %} data-asset-logo-url="{{ image }}"{% endif %}{% if decorative %} aria-hidden="true"{% endif %}>{{ resolved.monogram }}</{{ element }}>
+{%- set provider = provider_url or resolved.provider_url -%}
+<{{ element }} class="{{ class }}" data-asset-logo-symbol="{{ resolved.ticker or (symbol|string|upper) }}"{% if module %} data-asset-logo-module="{{ module }}"{% endif %}{% if image %} data-asset-logo-url="{{ image }}"{% endif %}{% if provider and provider != image %} data-asset-logo-provider-url="{{ provider }}"{% endif %}{% if decorative %} aria-hidden="true"{% endif %}>{{ resolved.monogram }}</{{ element }}>
 {%- endmacro -%}
 
 {#- The same thing where the surrounding markup needs a `<div>` — the shipped dashboard
     styles `.coin-logo` as a block. Same owner, same attributes, same letters. -#}
-{%- macro coin_logo_block(symbol, module_url=none, image_url=none, class='coin-logo', decorative=false) -%}
-{{ coin_logo(symbol, module_url=module_url, image_url=image_url, class=class, element='div', decorative=decorative) }}
+{%- macro coin_logo_block(symbol, module_url=none, image_url=none, provider_url=none, class='coin-logo', decorative=false) -%}
+{{ coin_logo(symbol, module_url=module_url, image_url=image_url, provider_url=provider_url, class=class, element='div', decorative=decorative) }}
 {%- endmacro -%}

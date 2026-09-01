@@ -154,9 +154,10 @@ async def test_dashboard_entry_uses_saved_session_or_signup(test_context):
     assert anonymous.headers["location"] == "/signup"
 
     requested = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data={
             "email": "entry@example.com",
+            "display_name": "Test Person",
             "password": "CorrectHorse123!",
             "repeat_password": "CorrectHorse123!",
         },
@@ -211,11 +212,12 @@ async def test_subscription_selection_is_validated_and_preserved_through_signup(
     assert invalid.headers["location"] == "/#pricing"
 
     requested = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data={
             "first_name": "Plan",
             "last_name": "Tester",
             "email": "pricing-selection@example.com",
+            "display_name": "Test Person",
             "password": "CorrectHorse123!",
             "repeat_password": "CorrectHorse123!",
             "plan_code": "trader",

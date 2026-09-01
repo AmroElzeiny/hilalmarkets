@@ -31,7 +31,20 @@ from tests.browser.conftest import (
 #: `/cookies`, `/features` and `/how-it-works` joined the other three when they were
 #: rebuilt as React pages. They use the same header, footer, cards and controls, so a
 #: rule proved on one of them is only proved on the rest if the rest are measured too.
-PAGES = ("/contact", "/privacy", "/terms", "/cookies", "/features", "/how-it-works")
+PAGES = (
+    "/contact",
+    "/privacy",
+    "/terms",
+    "/cookies",
+    "/features",
+    "/how-it-works",
+    # The published screening standard. It is here rather than exempted because it is
+    # the page most likely to grow a palette of its own: it has to show "clean",
+    # "problem" and "not judged" side by side, and the temptation is a second green and
+    # a second red. It paints the product's existing semantic tones instead, and this is
+    # what keeps it that way.
+    "/hilal-methodology",
+)
 
 #: Every public page a visitor can open, including the landing page.
 #:
@@ -100,6 +113,13 @@ ALLOWED_COLOURS = {
     "28,95,128",  # blue badge ink
     "122,84,16",  # counter near limit
     "248,250,251",  # review panel fill
+    # `.hm-chip-live` — the "working today" availability chip. An apple-family tint, in
+    # the shared stylesheet and on the landing page since the ecosystem section shipped.
+    # It only became measurable when `/hilal-methodology` joined `PAGES` and used the
+    # chip inside `main`; the landing page is in `ALL_PUBLIC_PAGES` only, which does not
+    # run the palette rule. Recorded, not an exception: this is a colour the product
+    # already paints, and the list is meant to be what it paints.
+    "241,248,224",  # availability chip fill
 }
 
 

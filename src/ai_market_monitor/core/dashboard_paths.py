@@ -162,3 +162,12 @@ LIFECYCLES_PATH: Final[str] = "/dashboard/lifecycles"
 
 #: Where a screening change is explained, for everything that links straight to one.
 COMPLIANCE_CHANGES_PATH: Final[str] = f"{LIFECYCLES_PATH}?tab=compliance_changes"
+
+#: What the automated screen read about coins no authority has ruled on.
+#:
+#: Deliberately **not** part of ``MARKET_PATH``. The Market page shows coins an authority
+#: has assessed; these are proposals a machine made from a project's own pages, reviewed
+#: by nobody. Putting them behind the same address would let one list contain two kinds
+#: of claim, and a reader has no way to tell which one they are looking at — which is
+#: exactly the confusion the product exists to remove.
+RESEARCH_PATH: Final[str] = "/dashboard/research"

@@ -41,8 +41,8 @@
   },
   {
     "path": "data/methodologies.json",
-    "sha256": "814494636beb187e5e8b9e879220a1226aa892109672de37d5eb3e45e624d302",
-    "bytes": 2348
+    "sha256": "88d59401ad118d82249c1fa154cd6746ad5efe49ab0b04a460bdd8cb1b15c4c2",
+    "bytes": 4433
   },
   {
     "path": "data/methodology_union_matrix.csv",
@@ -121,8 +121,8 @@
   },
   {
     "path": "schemas/methodology.schema.json",
-    "sha256": "d5ca384ee478be92f30ddcb24c64d42981a170791e5e9fec69a1be75747c5ba6",
-    "bytes": 993
+    "sha256": "3dcd2602f81bf1563fc182e52f48cc5b8b143a2e4bbd642e40a191547ccb3430",
+    "bytes": 3736
   },
   {
     "path": "schemas/passport_enrichment.schema.json",
@@ -131,12 +131,12 @@
   },
   {
     "path": "scripts/inspect_bundle.py",
-    "sha256": "6f4c8d31c211c943f84661c9abdef34709a6d891648344e2afccd9facf653ead",
-    "bytes": 534
+    "sha256": "e33a3201885e737f025ea8024b087f39eb07ba659deb9a332f23ddd556d299fa",
+    "bytes": 587
   },
   {
     "path": "scripts/validate_bundle.py",
-    "sha256": "5885a218e7a00bc76811747ffc1e28b63fff4f424fa36621a25f7abb6395b232",
-    "bytes": 2152
+    "sha256": "5aaeaf4f67af0a32c98ce581db59365fe5cb98b78b74bd67f933cc13b72d4576",
+    "bytes": 4741
   }
 ]

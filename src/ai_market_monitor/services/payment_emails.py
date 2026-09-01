@@ -121,8 +121,6 @@ class PaymentEmailRenderer:
             "support_url": support_url,
             "terms_url": terms_url,
             "risk_url": risk_url,
-            "legal_name": self.settings.site_legal_name or "Hilal Markets",
-            "company_address": self.settings.site_company_address,
         }
 
         rows: list[tuple[str, str | EmailLink]] = [

@@ -14,6 +14,7 @@ import ContactPage from './pages/ContactPage'
 import FeaturesPage from './pages/FeaturesPage'
 import HowItWorksPage from './pages/HowItWorksPage'
 import LegalPage from './pages/LegalPage'
+import MethodologyPage from './pages/MethodologyPage'
 
 /* -------------------------------------------------------------------------- */
 /*  Responsive imported-section wrapper                                       */
@@ -444,6 +445,7 @@ export default function App() {
   if (path === '/cookies') return <LegalPage kind="cookies" />
   if (path === '/features') return <FeaturesPage />
   if (path === '/how-it-works') return <HowItWorksPage />
+  if (path === '/hilal-methodology') return <MethodologyPage />
   return (
     <div className="hm-page min-h-screen bg-canvas text-ink">
       <SiteNav />

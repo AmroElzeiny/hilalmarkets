@@ -1,4 +1,4 @@
-{# One shape for every control on the five sign-in pages.
+{# One shape for every control on the six sign-in pages.
 
    Before this the same field was written out by hand in each branch of the template,
    which is how the sign-up email box ended up with a hint and the sign-in one without,
@@ -36,7 +36,7 @@
 
 {# The password box, with the three things it never had: a way to see what you typed, a
    warning when Caps Lock is on, and the rule itself as a list that ticks itself off
-   while you type. The rules are read from `core/auth_pages.py` — the same five the
+   while you type. The rules are read from `core/auth_pages.py` — the same ones the
    server checks — so the page can never promise something the server will refuse. #}
 {% macro password_field(name, label, testid, autocomplete, rules=False, confirm=False, forgot=False) %}
   {% set id = 'auth-' ~ name|replace('_', '-') %}
@@ -139,14 +139,69 @@
 
 {# "We sent it to this address" — so a typo is visible before somebody waits ten minutes
    for an email that was never going to arrive. It used to be an editable email box
-   filled in for you, which invited exactly the edit that makes the code stop matching. #}
-{% macro sent_to(address) %}
+   filled in for you, which invited exactly the edit that makes the code stop matching.
+
+   `verb` lets the middle step of signing up reuse the same line for a different fact:
+   there, nothing has been sent yet, and saying "sent to" would be a small lie on the one
+   screen where a person is deciding whether the address above is really theirs. #}
+{% macro sent_to(address, verb='Sent to') %}
   {% if address %}
     <p class="auth-sentto">
       <span class="auth-sentto-mark" aria-hidden="true"><span data-icon="send" data-icon-class="icon"></span></span>
-      <span>Sent to <strong>{{ address }}</strong></span>
+      <span>{{ verb }} <strong>{{ address }}</strong></span>
     </p>
   {% endif %}
+{% endmacro %}
+
+
+{# The other doors, under the button.
+
+   One divider, then whatever ways in this page really has. The Google button is only
+   drawn when `auth_google_enabled` says the server can actually complete the trip —
+   `Settings.google_signin_enabled` is the single owner of that, so the page can never
+   offer a button the two routes behind it would refuse. A button that opens a window and
+   then fails is worse than no button.
+
+   It is a real link, with a real address, and the script only upgrades it to a popup. So
+   it still works with scripting off, and it still works when a browser blocks the popup:
+   both of those fall back to opening Google in this tab. #}
+{% macro google_button(extra_href='', extra_label='', extra_icon='mail') %}
+  {% if auth_google_enabled or extra_href %}
+    <div class="auth-or"><span>or</span></div>
+    <div class="auth-alts">
+      {% if auth_google_enabled %}
+        <a class="auth-alt" href="{{ auth_google_href }}" data-google-signin data-testid="auth-google">
+          <span class="auth-alt-mark auth-alt-mark-plain" aria-hidden="true"><span data-icon="google" data-icon-class="icon"></span></span>
+          <span class="auth-alt-text">{{ auth_google_label }}</span>
+        </a>
+      {% endif %}
+      {% if extra_href %}
+        <a class="auth-alt" href="{{ extra_href }}" data-testid="auth-code-door">
+          <span class="auth-alt-mark" aria-hidden="true"><span data-icon="{{ extra_icon }}" data-icon-class="icon"></span></span>
+          <span class="auth-alt-text">{{ extra_label }}</span>
+        </a>
+      {% endif %}
+    </div>
+    <p class="hm-sr-only" aria-live="polite" data-google-live></p>
+  {% endif %}
+{% endmacro %}
+
+
+{# Three ticks under the button: two things the product does, one thing it never does.
+
+   The words are read from `core/auth_pages.py`, which is also what the copy rules and the
+   sentence-case tests read. Written out here they would be a second copy of a promise —
+   and a promise this product makes about Shariah screening and about never trading is
+   exactly the wrong thing to keep two copies of. #}
+{% macro promises() %}
+  <ul class="auth-promises" aria-label="What Hilal Markets does and does not do">
+    {% for promise in auth_promises %}
+      <li class="auth-promise" data-promise="{{ promise.key }}">
+        <span class="auth-promise-mark" aria-hidden="true"><span data-icon="check" data-icon-class="icon"></span></span>
+        <span class="auth-promise-text">{{ promise.title }}</span>
+      </li>
+    {% endfor %}
+  </ul>
 {% endmacro %}
 
 

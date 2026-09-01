@@ -119,6 +119,17 @@ class DiscoveryLayer(StrEnum):
     """How a candidate link was arrived at."""
 
     CURATED = "curated"
+    #: A market-data provider's own record of where a project publishes — its website,
+    #: its whitepaper, its repository, its forum. Second only to a link a person
+    #: checked, because a provider maintains these records deliberately and corrects
+    #: them, which is more than can be said for a guessed ``/blog``.
+    #:
+    #: It is still a **third party's claim**, so it is filtered by exactly the same
+    #: "is this provably the project's own address" rules as a search result, and it
+    #: still has to be fetched and proved. A provider that lists its *own* profile page
+    #: as a project's announcement feed — CoinMarketCap does this for several coins —
+    #: is refused here rather than published as the project's news.
+    PROVIDER = "provider"
     IDENTITY = "identity"
     SOCIAL = "social"
     SEARCH = "search"
@@ -136,6 +147,7 @@ class DiscoveryLayer(StrEnum):
 #: layers before it could not settle.
 LAYER_ORDER: tuple[DiscoveryLayer, ...] = (
     DiscoveryLayer.CURATED,
+    DiscoveryLayer.PROVIDER,
     DiscoveryLayer.IDENTITY,
     DiscoveryLayer.SOCIAL,
     DiscoveryLayer.SEARCH,
@@ -147,7 +159,12 @@ LAYER_ORDER: tuple[DiscoveryLayer, ...] = (
 #: and look: fetch the project's own site, ask a search engine, or ask a model.
 #: ``candidates_for`` still decides what their findings mean — see the module note.
 NETWORK_LAYERS: frozenset[DiscoveryLayer] = frozenset(
-    {DiscoveryLayer.SOCIAL, DiscoveryLayer.SEARCH, DiscoveryLayer.ASSISTED}
+    {
+        DiscoveryLayer.PROVIDER,
+        DiscoveryLayer.SOCIAL,
+        DiscoveryLayer.SEARCH,
+        DiscoveryLayer.ASSISTED,
+    }
 )
 
 #: The layer that costs money every time it runs. Kept separate from the rest so the one
@@ -176,8 +193,14 @@ SEARCH_NAME_MATCHED = 0.45
 ASSISTED_OWN_DOMAIN = 0.45
 ASSISTED_NAME_MATCHED = 0.40
 
+#: A provider's maintained record of a project's own addresses. Below a link a person
+#: checked, above one derived from an approved identity, because the provider is
+#: asserting the address directly rather than inferring it.
+PROVIDER_RECORD = 0.85
+
 LAYER_CONFIDENCE: dict[DiscoveryLayer, float] = {
     DiscoveryLayer.CURATED: CURATED_CONFIDENT,
+    DiscoveryLayer.PROVIDER: PROVIDER_RECORD,
     DiscoveryLayer.IDENTITY: 0.75,
     DiscoveryLayer.SOCIAL: 0.70,
     DiscoveryLayer.SEARCH: SEARCH_OWN_DOMAIN,
@@ -839,6 +862,202 @@ def identity_candidates(
     return tuple(candidates)
 
 
+#: Hosts that are *about* projects rather than *owned by* them. A provider listing its
+#: own profile page as a project's announcement feed is the specific failure this
+#: catches: CoinMarketCap returns ``coinmarketcap.com/community/profile/Solana`` as
+#: Solana's announcement URL, and publishing that as "the project's own news" would
+#: point a Shariah reviewer at an aggregator instead of the project.
+_AGGREGATOR_HOSTS: frozenset[str] = frozenset(
+    {
+        "coinmarketcap.com",
+        "coingecko.com",
+        "cryptocompare.com",
+        "messari.io",
+        "nomics.com",
+        "livecoinwatch.com",
+        "coinpaprika.com",
+        "dexscreener.com",
+        "dextools.io",
+        "tradingview.com",
+        # Encyclopedias and news outlets. The provider lists
+        # `en.wikipedia.org/wiki/Ethereum` among Ethereum's own links, and an
+        # encyclopedia article is the clearest possible case of writing *about* a
+        # project rather than *by* it. Read as Ethereum's own description, Wikipedia's
+        # paragraph on futures regulation refused Ethereum for running a derivatives
+        # business.
+        "wikipedia.org",
+        "wikimedia.org",
+        "britannica.com",
+        "investopedia.com",
+        "coindesk.com",
+        "cointelegraph.com",
+        "theblock.co",
+        "decrypt.co",
+        "bloomberg.com",
+        "reuters.com",
+        "forbes.com",
+        # `medium.com` and `substack.com` are deliberately **not** here. Plenty of
+        # projects publish their own blog there, which makes those posts the project's
+        # own voice on somebody else's paper. `SHARED_PUBLISHING_HOSTS` already handles
+        # them by requiring an exact host match, which is the right test.
+    }
+)
+
+#: Exchanges, which are the same problem with one difference that matters.
+#:
+#: The provider returns ``gate.com/trade/GUSD_USDT`` as Gemini Dollar's website — a
+#: trading page on somebody else's exchange. Read as the project's own description,
+#: Gate's product menu ("Tokenized Stocks, backed by real stock assets") became a
+#: statement about Gemini Dollar and refused a coin three authorities call compliant.
+#:
+#: But an exchange host cannot simply be banned, because an exchange is sometimes the
+#: issuer: Gemini Dollar really is published on ``gemini.com``, and Cronos really is
+#: published on ``crypto.com``. Banning the host would silence the project's own site
+#: while trying to silence somebody else's listing of it. So the *path* decides — see
+#: :data:`_LISTING_PATH_WORDS`.
+_EXCHANGE_HOSTS: frozenset[str] = frozenset(
+    {
+        "binance.com",
+        "bybit.com",
+        "gate.com",
+        "gate.io",
+        "okx.com",
+        "kucoin.com",
+        "kraken.com",
+        "coinbase.com",
+        "crypto.com",
+        "mexc.com",
+        "bitget.com",
+        "htx.com",
+        "bitfinex.com",
+        "gemini.com",
+        "upbit.com",
+        "bithumb.com",
+    }
+)
+
+#: Path words that make an exchange address a listing rather than a publication.
+_LISTING_PATH_WORDS: frozenset[str] = frozenset(
+    {
+        "trade", "trading", "markets", "market", "price", "prices",
+        "currencies", "buy", "sell", "spot", "futures", "convert", "exchange",
+    }
+)
+
+#: Which provider field answers which of this product's four categories.
+#:
+#: The provider's own field names are its vocabulary, not ours — ``technical_doc`` is
+#: what everyone else calls a whitepaper — so the translation happens once, here, and
+#: no caller learns the provider's words.
+_PROVIDER_FIELD_CATEGORY: tuple[tuple[str, str], ...] = (
+    ("website", WEBSITE),
+    ("whitepaper", DOCUMENTATION),
+    ("source_code", DOCUMENTATION),
+    ("announcement", NEWS),
+    ("message_board", COMMUNITY),
+    ("reddit", COMMUNITY),
+    ("chat", COMMUNITY),
+)
+
+
+#: The provider's field names, as a plain mapping, for callers that hold one address and
+#: already know which field it came from. Reads the same table as
+#: :func:`provider_candidates` so a whitepaper cannot be documentation to one reader and
+#: a website to another.
+PROVIDER_FIELD_CATEGORY: dict[str, str] = dict(_PROVIDER_FIELD_CATEGORY)
+
+
+def is_aggregator_url(value: str) -> bool:
+    """Is this somebody else's page *about* a project, rather than the project's own?
+
+    A market-data site is always somebody else. An exchange is somebody else only on a
+    listing path — ``gate.com/trade/GUSD_USDT`` is Gate describing its own market, while
+    ``gemini.com/dollar`` is the issuer describing its own coin, and one host serves both
+    kinds of page.
+    """
+
+    domain = registrable_domain(value)
+    if domain in _AGGREGATOR_HOSTS:
+        return True
+    if domain not in _EXCHANGE_HOSTS:
+        return False
+    return bool({part.casefold() for part in _path_parts(value)} & _LISTING_PATH_WORDS)
+
+
+def provider_candidates(
+    *,
+    asset_name: str,
+    symbol: str,
+    official_website: str | None,
+    links: Mapping[str, Iterable[str]],
+) -> tuple[SourceCandidate, ...]:
+    """Layer 1 — addresses a market-data provider holds for this project.
+
+    ``links`` is the provider's raw record, keyed by this module's own field names
+    (see :data:`_PROVIDER_FIELD_CATEGORY`). The fetching lives in
+    ``services/coinmarketcap.py``; deciding what an address *means* lives here, so a
+    provider's answers pass the same test as a search engine's and a model's.
+
+    Two filters, and both matter:
+
+    * an aggregator's own page is never the project's page, however the provider
+      labelled it;
+    * a link is kept only when it is a real, absolute, non-local address.
+
+    A website the provider gives is trusted to *be* the project's site — that is the
+    provider's core record and the thing every other check is measured against. For the
+    rest, when we already know the official website, anything on a different domain has
+    to prove itself as a channel rather than being taken on the provider's word.
+    """
+
+    candidates: list[SourceCandidate] = []
+    seen: set[str] = set()
+    confidence = LAYER_CONFIDENCE[DiscoveryLayer.PROVIDER]
+    known_site = (official_website or "").strip() or None
+
+    for field, category in _PROVIDER_FIELD_CATEGORY:
+        for raw in links.get(field) or ():
+            url = (raw or "").strip()
+            if not url or not is_official_url(url) or is_aggregator_url(url):
+                continue
+            key = normalized_url(url)
+            if key in seen:
+                continue
+
+            # A community or news address on somebody else's platform is a channel, and
+            # `classify_channel` is the one owner of what those look like. If it does
+            # not recognise the address and the address is not on the project's own
+            # domain, the provider's label is not enough on its own.
+            resolved = category
+            if category in {NEWS, COMMUNITY}:
+                channel = classify_channel(url, official_website=known_site)
+                same_site = bool(known_site) and is_same_project_site(url, known_site)
+                if known_site and not same_site and channel is None:
+                    continue
+                # The provider's own filing is the weakest signal about which of the
+                # two this is: CoinMarketCap files `solana.com/news` under
+                # `message_board`. The address itself says more, and `_word_category`
+                # is already the one owner of what those words mean, so a page that
+                # calls itself news is news whatever field it arrived in.
+                by_words = _word_category(
+                    [*_path_parts(url), *urlsplit(url).netloc.split(".")]
+                )
+                resolved = by_words or (channel.category if channel else category)
+
+            seen.add(key)
+            candidates.append(
+                SourceCandidate(
+                    category=resolved,
+                    title=_title(asset_name, resolved),
+                    url=url,
+                    layer=DiscoveryLayer.PROVIDER,
+                    confidence=confidence,
+                )
+            )
+    del symbol
+    return tuple(candidates)
+
+
 #: The paths a project is most likely to publish under, in the order they are worth
 #: trying. Every one of these is a guess and is scored as one.
 _CONVENTION_PATHS: dict[str, tuple[str, ...]] = {
@@ -979,6 +1198,38 @@ NEWS_PATH_WORDS: tuple[str, ...] = (
     "updates",
 )
 
+#: Words that mean "this is where the project explains itself".
+#:
+#: These are the pages a Shariah reviewer actually reads: what the protocol does, what
+#: the token is for, where a holder's money comes from. Kept in the same module as the
+#: other two lists because "what kind of page is this address" must have one answer —
+#: the crawler that gathers a project's own pages and the resolver that files a provider
+#: link both ask :func:`page_category`, so neither can decide `/tokenomics` is something
+#: the other has never heard of.
+DOCUMENTATION_PATH_WORDS: tuple[str, ...] = (
+    "developer",
+    "developers",
+    "doc",
+    "docs",
+    "documentation",
+    "faq",
+    "guide",
+    "guides",
+    "learn",
+    "lightpaper",
+    "litepaper",
+    "manual",
+    "paper",
+    "papers",
+    "protocol",
+    "spec",
+    "specification",
+    "technology",
+    "tokenomics",
+    "whitepaper",
+    "wiki",
+)
+
 #: Words that mean "this is where the project's people talk".
 COMMUNITY_PATH_WORDS: tuple[str, ...] = (
     "community",
@@ -1115,14 +1366,34 @@ def _path_parts(value: str) -> list[str]:
 
 
 def _word_category(words: Iterable[str]) -> str | None:
-    """Which category a set of address words points at, if any."""
+    """Which category a set of address words points at, if any.
+
+    Documentation is tested first because its words are the specific ones. ``paper``,
+    ``tokenomics`` and ``whitepaper`` name one kind of page and nothing else, while
+    ``research`` and ``media`` are broad enough to appear on a docs site as easily as on
+    a forum. Specific before general, so ``/research/whitepaper`` files as documentation
+    rather than as a discussion.
+    """
 
     lowered = {str(word).casefold() for word in words}
+    if lowered & set(DOCUMENTATION_PATH_WORDS):
+        return DOCUMENTATION
     if lowered & set(NEWS_PATH_WORDS):
         return NEWS
     if lowered & set(COMMUNITY_PATH_WORDS):
         return COMMUNITY
     return None
+
+
+def page_category(url: str) -> str:
+    """What kind of page one address is. The public form of the rule above.
+
+    Always answers: an address that matches no word is the project's own website, which
+    is what the root of a project's site actually is. Callers that need "no category"
+    should compare against :data:`WEBSITE` rather than expecting ``None``.
+    """
+
+    return _word_category([*_path_parts(url), *urlsplit(url).netloc.split(".")]) or WEBSITE
 
 
 @dataclass(frozen=True, slots=True)
@@ -1425,6 +1696,7 @@ def candidates_for(
     official_documentation: str | None,
     channel_links: Iterable[str] = (),
     search_results: Iterable[SearchResult] = (),
+    provider_links: Mapping[str, Iterable[str]] | None = None,
 ) -> tuple[SourceCandidate, ...]:
     """Every candidate one layer can offer for one asset.
 
@@ -1438,6 +1710,13 @@ def candidates_for(
 
     if layer is DiscoveryLayer.CURATED:
         return curated_candidates(symbol, asset_name)
+    if layer is DiscoveryLayer.PROVIDER:
+        return provider_candidates(
+            asset_name=asset_name,
+            symbol=symbol,
+            official_website=official_website,
+            links=provider_links or {},
+        )
     if layer is DiscoveryLayer.IDENTITY:
         return identity_candidates(
             asset_name=asset_name,

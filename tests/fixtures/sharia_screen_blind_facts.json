@@ -1,0 +1,1657 @@
+{
+ "1INCH": {
+  "activities": [
+   "spot_exchange",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "AAVE": {
+  "activities": [
+   "lending_borrowing",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "lending_borrowing"
+  ]
+ },
+ "ADA": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "ADI": {
+  "activities": [
+   "own_settlement_network",
+   "infrastructure_service",
+   "staking_or_validation"
+  ]
+ },
+ "AERO": {
+  "activities": [
+   "spot_exchange",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "AGIX": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "AIOZ": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "AKT": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "ALE": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "ALGO": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "ALT": {
+  "activities": [
+   "staking_or_validation",
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "ANKR": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "APE": {
+  "activities": [
+   "consumer_application",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "consumer_application"
+  ]
+ },
+ "APEPE": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "APT": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "AR": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "ARB": {
+  "activities": [
+   "own_settlement_network",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "ARIA": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "ARKM": {
+  "activities": [
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "ASI": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "ASTR": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "ATOM": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "AUSD": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "AVAX": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "AXS": {
+  "activities": [
+   "consumer_application",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "consumer_application"
+  ]
+ },
+ "BAL": {
+  "activities": [
+   "spot_exchange",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "BANANAS31": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "BASE_NETWORK": {
+  "activities": [
+   "own_settlement_network"
+  ]
+ },
+ "BAT": {
+  "activities": [
+   "consumer_application",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "consumer_application"
+  ]
+ },
+ "BCH": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "BDX": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "BEAM": {
+  "activities": [
+   "own_settlement_network",
+   "consumer_application",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "consumer_application"
+  ]
+ },
+ "BGB": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange",
+   "derivatives_or_leverage"
+  ]
+ },
+ "BLAST": {
+  "activities": [
+   "own_settlement_network",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "BNB": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange",
+   "derivatives_or_leverage"
+  ]
+ },
+ "BNT": {
+  "activities": [
+   "spot_exchange",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "BOME": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "BONK": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "BORG": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "BRETT": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "BSV": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "BTC": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "BTG": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "BTT": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "BUSD": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "CAKE": {
+  "activities": [
+   "spot_exchange",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "CEL": {
+  "activities": [
+   "lending_borrowing",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "lending_borrowing"
+  ]
+ },
+ "CELO": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "CFX": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "CHZ": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "consumer_application",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "consumer_application"
+  ]
+ },
+ "CKB": {
+  "activities": [
+   "own_settlement_network"
+  ]
+ },
+ "COMP": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "lending_borrowing"
+  ]
+ },
+ "CORE": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "CRCLON": {
+  "activities": [
+   "tokenized_security"
+  ]
+ },
+ "CRV": {
+  "activities": [
+   "spot_exchange",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "CUSDC": {
+  "activities": [
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_lending_or_promise"
+ },
+ "CVX": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "DAI": {
+  "activities": []
+ },
+ "DASH": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "DCR": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "DOGE": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "DOT": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "DUCKY": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "DYDX": {
+  "activities": [
+   "own_settlement_network",
+   "spot_exchange",
+   "derivatives_or_leverage",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange",
+   "derivatives_or_leverage"
+  ]
+ },
+ "EGLD": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "EIGEN": {
+  "activities": [
+   "staking_or_validation"
+  ]
+ },
+ "ENA": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "derivatives_or_leverage"
+  ]
+ },
+ "ENJ": {
+  "activities": [
+   "own_settlement_network",
+   "consumer_application"
+  ]
+ },
+ "EOS": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "ESPORTS": {
+  "activities": [
+   "consumer_application"
+  ]
+ },
+ "ETC": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "ETH": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "ETHFI": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "staking_or_validation"
+  ]
+ },
+ "EURCV": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "FDUSD": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "FET": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "FIL": {
+  "activities": [
+   "own_settlement_network",
+   "infrastructure_service",
+   "staking_or_validation"
+  ]
+ },
+ "FLOKI": {
+  "activities": [
+   "consumer_application",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "consumer_application"
+  ]
+ },
+ "FLOW": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "consumer_application"
+  ]
+ },
+ "FRAX": {
+  "activities": []
+ },
+ "FRXETH": {
+  "activities": [
+   "staking_or_validation",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_work"
+ },
+ "FRXUSD": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "FTM": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "FTN": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "FXS": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "fully_backed_redeemable"
+  ]
+ },
+ "GALA": {
+  "activities": [
+   "consumer_application",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "consumer_application"
+  ]
+ },
+ "GHO": {
+  "activities": []
+ },
+ "GLM": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "GMX": {
+  "activities": [
+   "spot_exchange",
+   "derivatives_or_leverage",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange",
+   "derivatives_or_leverage"
+  ]
+ },
+ "GNO": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "GNS": {
+  "activities": [
+   "platform_access_or_governance",
+   "derivatives_or_leverage",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_lending_or_promise",
+  "governed_activities": [
+   "derivatives_or_leverage"
+  ]
+ },
+ "GOMINING": {
+  "activities": [
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "GRT": {
+  "activities": [
+   "infrastructure_service",
+   "staking_or_validation"
+  ]
+ },
+ "GT": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "GUSD": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "HBAR": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_work"
+ },
+ "HNT": {
+  "activities": [
+   "own_settlement_network",
+   "infrastructure_service",
+   "staking_or_validation"
+  ]
+ },
+ "HOT": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "HTX": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "ICNT": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "ICP": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "ILV": {
+  "activities": [
+   "consumer_application",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "consumer_application"
+  ]
+ },
+ "IMX": {
+  "activities": [
+   "own_settlement_network",
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network",
+   "infrastructure_service"
+  ]
+ },
+ "INJ": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange",
+   "derivatives_or_leverage"
+  ]
+ },
+ "JASMY": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "JLP": {
+  "activities": [
+   "derivatives_or_leverage",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_lending_or_promise"
+ },
+ "JTO": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "JUP": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange",
+   "derivatives_or_leverage"
+  ]
+ },
+ "KAS": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "KAVA": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "lending_borrowing"
+  ]
+ },
+ "KCS": {
+  "activities": [
+   "platform_access_or_governance",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_lending_or_promise",
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "KDA": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "KLAY": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "KNC": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "KOGE": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "KSM": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "LDO": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "staking_or_validation"
+  ]
+ },
+ "LEO": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "LINK": {
+  "activities": [
+   "infrastructure_service",
+   "staking_or_validation"
+  ]
+ },
+ "LPT": {
+  "activities": [
+   "infrastructure_service",
+   "staking_or_validation"
+  ]
+ },
+ "LRC": {
+  "activities": [
+   "own_settlement_network",
+   "spot_exchange",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "LTC": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "LUNA": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "LUNC": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "MANA": {
+  "activities": [
+   "consumer_application",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "consumer_application"
+  ]
+ },
+ "MASK": {
+  "activities": [
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "MATIC": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "MIOTA": {
+  "activities": [
+   "own_settlement_network",
+   "infrastructure_service"
+  ]
+ },
+ "MKR": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "lending_borrowing"
+  ]
+ },
+ "MNDE": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "staking_or_validation"
+  ]
+ },
+ "MNT": {
+  "activities": [
+   "own_settlement_network",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "MOG": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "NEAR": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "NEO": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_lending_or_promise"
+ },
+ "NEXO": {
+  "activities": [
+   "lending_borrowing",
+   "platform_access_or_governance",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_lending_or_promise",
+  "governed_activities": [
+   "lending_borrowing"
+  ]
+ },
+ "NOT": {
+  "activities": [
+   "consumer_application"
+  ]
+ },
+ "OCEAN": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "OKXBTC": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "ONDO": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "tokenized_security"
+  ]
+ },
+ "ONE": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "OP": {
+  "activities": [
+   "own_settlement_network",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "ORDI": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "OSMO": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "spot_exchange",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network",
+   "spot_exchange"
+  ]
+ },
+ "PAXG": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "PENDLE": {
+  "activities": [
+   "spot_exchange",
+   "derivatives_or_leverage",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange",
+   "derivatives_or_leverage"
+  ]
+ },
+ "PERP": {
+  "activities": [
+   "derivatives_or_leverage",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "derivatives_or_leverage"
+  ]
+ },
+ "POL": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "POPCAT": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "PYTH": {
+  "activities": [
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "PYUSD": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "QNT": {
+  "activities": [
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "QTUM": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "QUBIC": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "RAIN": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "RAY": {
+  "activities": [
+   "spot_exchange"
+  ]
+ },
+ "RENDER": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "RETH": {
+  "activities": [
+   "staking_or_validation",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_work"
+ },
+ "REZ": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "staking_or_validation"
+  ]
+ },
+ "RLB": {
+  "activities": [
+   "gambling"
+  ]
+ },
+ "RON": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "ROSE": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network",
+   "infrastructure_service"
+  ]
+ },
+ "RUNE": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "spot_exchange"
+  ]
+ },
+ "RVN": {
+  "activities": [
+   "own_settlement_network"
+  ]
+ },
+ "S": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "SAND": {
+  "activities": [
+   "consumer_application",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "consumer_application"
+  ]
+ },
+ "SATS": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "SC": {
+  "activities": [
+   "own_settlement_network",
+   "infrastructure_service"
+  ]
+ },
+ "SCRT": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "SEI": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "SHFL": {
+  "activities": [
+   "gambling",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "gambling"
+  ]
+ },
+ "SHIB": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "SN3": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "SNT": {
+  "activities": [
+   "consumer_application"
+  ]
+ },
+ "SNX": {
+  "activities": [
+   "derivatives_or_leverage",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "derivatives_or_leverage"
+  ]
+ },
+ "SOL": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "SOLV": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "staking_or_validation"
+  ]
+ },
+ "SOSO": {
+  "activities": [
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "SSV": {
+  "activities": [
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "STETH": {
+  "activities": [
+   "staking_or_validation",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_work"
+ },
+ "STORJ": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "STRK": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network"
+  ]
+ },
+ "STSOL": {
+  "activities": [
+   "staking_or_validation",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_work"
+ },
+ "STX": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "SUSD": {
+  "activities": [
+   "derivatives_or_leverage"
+  ]
+ },
+ "SUSHI": {
+  "activities": [
+   "spot_exchange",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "SUT": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "TAO": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "THETA": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "TIA": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "TON": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "TOSHI": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "TRUMP": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "TRX": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "TUSD": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "TWT": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "UDS": {
+  "activities": [
+   "consumer_application"
+  ]
+ },
+ "ULTIMA": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "UNI": {
+  "activities": [
+   "spot_exchange",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "USD0": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "USDAI": {
+  "activities": [
+   "fully_backed_redeemable",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_lending_or_promise"
+ },
+ "USDC": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "USDD": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "USDE": {
+  "activities": [
+   "derivatives_or_leverage",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_lending_or_promise"
+ },
+ "USDF": {
+  "activities": [
+   "fully_backed_redeemable",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_lending_or_promise"
+ },
+ "USDP": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "USDT": {
+  "activities": [
+   "fully_backed_redeemable"
+  ],
+  "holder_return": "none"
+ },
+ "USDY": {
+  "activities": [
+   "tokenized_security",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_lending_or_promise"
+ },
+ "USTC": {
+  "activities": []
+ },
+ "USX": {
+  "activities": [
+   "derivatives_or_leverage",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_lending_or_promise"
+ },
+ "VCNT": {
+  "activities": [
+   "tokenized_security",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_lending_or_promise"
+ },
+ "VET": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "interest_bearing_holding"
+  ],
+  "holder_return": "from_work"
+ },
+ "W": {
+  "activities": [
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "WAVES": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "WAXP": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "consumer_application"
+  ]
+ },
+ "WEN": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "WFI": {
+  "activities": [
+   "lending_borrowing",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "lending_borrowing"
+  ]
+ },
+ "WIF": {
+  "activities": [
+   "no_underlying_utility"
+  ]
+ },
+ "WLD": {
+  "activities": [
+   "infrastructure_service"
+  ]
+ },
+ "WMT": {
+  "activities": [
+   "infrastructure_service",
+   "staking_or_validation"
+  ]
+ },
+ "WOO": {
+  "activities": [
+   "spot_exchange",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange"
+  ]
+ },
+ "XEC": {
+  "activities": [
+   "own_settlement_network"
+  ]
+ },
+ "XLM": {
+  "activities": [
+   "own_settlement_network"
+  ]
+ },
+ "XMR": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "XRP": {
+  "activities": [
+   "own_settlement_network"
+  ]
+ },
+ "XTZ": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "YFI": {
+  "activities": [
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "lending_borrowing"
+  ]
+ },
+ "ZANO": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "ZETA": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation",
+   "infrastructure_service"
+  ]
+ },
+ "ZIL": {
+  "activities": [
+   "own_settlement_network",
+   "staking_or_validation"
+  ]
+ },
+ "ZK": {
+  "activities": [
+   "own_settlement_network",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "own_settlement_network",
+   "infrastructure_service"
+  ]
+ },
+ "ZRO": {
+  "activities": [
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "infrastructure_service"
+  ]
+ },
+ "ZRX": {
+  "activities": [
+   "spot_exchange",
+   "infrastructure_service",
+   "platform_access_or_governance"
+  ],
+  "governed_activities": [
+   "spot_exchange",
+   "infrastructure_service"
+  ]
+ }
+}

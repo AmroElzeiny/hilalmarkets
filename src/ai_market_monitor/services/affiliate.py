@@ -30,6 +30,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.person_name import greeting_name
 from ai_market_monitor.db.models import (
     AccountEmailDelivery,
     AffiliateApplication,
@@ -159,10 +160,18 @@ async def try_sending_now(
         await session.rollback()
 
 
-def first_name_of(user: User) -> str:
-    """The name to greet somebody by, or nothing rather than a guess."""
+def first_name_of(user: User, *, prefer: str | None = None) -> str:
+    """The name to greet an affiliate by, or nothing rather than a guess.
 
-    return ((str(user.display_name or "").strip().split() or [""])[0]) or ""
+    ``prefer`` is a name the person typed themselves for this very purpose: an affiliate
+    application carries one, and it is the better answer for the three affiliate emails,
+    because it is the name they gave *for the programme*.
+
+    The rule itself lives in :mod:`ai_market_monitor.core.person_name`, which every other
+    greeting in the product reads too.
+    """
+
+    return greeting_name(prefer, getattr(user, "display_name", ""))
 
 
 class AffiliateError(ValueError):

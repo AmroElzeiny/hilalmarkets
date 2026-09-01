@@ -10,7 +10,11 @@ from ai_market_monitor.api.route_security import (
 )
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.copy_rules import customer_copy_sources, scan_customer_copy
-from ai_market_monitor.core.launch_stage import LaunchStage, resolve_launch_stage
+from ai_market_monitor.core.launch_stage import (
+    LaunchStage,
+    resolve_launch_stage,
+    stage_exposure,
+)
 from ai_market_monitor.core.plans import (
     PUBLIC_PLAN_CODES,
     PURCHASABLE_PLAN_CODES,
@@ -107,6 +111,54 @@ def _production_example() -> dict[str, str]:
     return _example_values(ROOT / ".env.production.example")
 
 
+def _check_stage_coherence(effective: LaunchStage, failures: list[str]) -> None:
+    """Is the exposure this stage produces self-consistent?
+
+    Deliberately says nothing about *which* stage is right. That is a product decision,
+    it changes, and a gate that encodes today's answer becomes wrong the moment the
+    decision it copied is made again. What cannot change is that a stage must not
+    describe two contradictory products at once — and each of these four contradictions
+    is one a visitor would actually meet:
+
+    * a "Buy" button beside no price,
+    * a price the menu says is not there,
+    * a price list where nothing can be bought,
+    * a waitlist and an account entry offered as the same first step.
+    """
+
+    exposure = stage_exposure(effective)
+    name = effective.value
+
+    if exposure.exposes_checkout and not exposure.advertises_pricing:
+        failures.append(
+            f"LAUNCH_STAGE={name} opens checkout without advertising pricing; a "
+            "visitor would be asked to buy something with no price shown"
+        )
+    pricing_hidden = "pricing" in exposure.hidden_pages
+    if exposure.advertises_pricing and pricing_hidden:
+        failures.append(
+            f"LAUNCH_STAGE={name} advertises pricing but also hides the pricing page"
+        )
+    if not exposure.advertises_pricing and not pricing_hidden:
+        failures.append(
+            f"LAUNCH_STAGE={name} does not advertise pricing but leaves the pricing "
+            "page in the menus"
+        )
+    if exposure.advertises_pricing and not any(
+        plan_offer(code).monthly_available or plan_offer(code).annual_available
+        for code in visible_public_plan_codes(billing_enabled=True)
+    ):
+        failures.append(
+            f"LAUNCH_STAGE={name} advertises pricing, but no visible plan is on sale "
+            "on any interval"
+        )
+    if exposure.shows_waitlist and exposure.advertises_account_entry:
+        failures.append(
+            f"LAUNCH_STAGE={name} offers both the waitlist and account entry as the "
+            "way in; a visitor is given two different first steps"
+        )
+
+
 def main() -> int:
     failures: list[str] = []
     if tuple(PUBLIC_PLAN_CODES) != EXPECTED_PUBLIC_PLANS:
@@ -155,10 +207,14 @@ def main() -> int:
         "AI_AGENT_SHADOW_MODE": "false",
         "AI_AGENT_ROLLOUT_PERCENT": "0",
         "CAPABILITY_EXTENSION_ENABLED": "true",
-        # The public site ships pre-launch: waitlist, no plans, no account entry. Turning
-        # this off is a deliberate launch decision, not a deployment detail, so the
-        # production example has to state it.
-        "PUBLIC_WAITLIST_MODE": "true",
+        # `PUBLIC_WAITLIST_MODE` is deliberately **not** pinned here. It is the emergency
+        # ceiling over `LAUNCH_STAGE`, and the launch-stage block below is the one place
+        # that decides whether the two agree. Pinning a value here as well created the
+        # duplicate-authority failure this repository keeps repeating: the literal said
+        # the product was pre-launch, the stage said it had launched, and the gate failed
+        # on a disagreement between two of its own lines rather than on anything real.
+        # One reader, one rule — a ceiling that contradicts its stage is caught as a
+        # clamp, which is what a clamp check is for.
         "PUBLIC_CHAT_ENABLED": "true",
         "PUBLIC_CHAT_AI_ENABLED": "true",
         "PUBLIC_CHAT_INQUIRY_EMAIL": "office@hilalmarkets.com",
@@ -217,15 +273,16 @@ def main() -> int:
                 f"Production example sets LAUNCH_STAGE={stage.value} above its own "
                 "PUBLIC_WAITLIST_MODE ceiling"
             )
-        exposure = resolved.exposure
-        # Pricing exposure is the gate that matters here, not billing. A launched site
-        # with billing off is a supported state: the prices show and the button says
-        # the plan is not on sale yet.
-        if exposure.advertises_pricing:
-            failures.append(
-                f"LAUNCH_STAGE={resolved.effective.value} advertises pricing; the "
-                "product is not open yet"
-            )
+        # What is checked is that the stage in force is **coherent**, not which stage it
+        # is. This used to read `if exposure.advertises_pricing: fail` — a snapshot of
+        # one afternoon, hardened into a gate. The product launched, the snapshot did
+        # not, and the gate then failed on every correct deployment: it was asking an
+        # operator to un-launch a launched product. A release gate that has to be edited
+        # every time the product legitimately changes state is not protecting anything;
+        # it is a second, staler copy of the launch decision.
+        #
+        # These four rules hold in every stage, so none of them expires.
+        _check_stage_coherence(resolved.effective, failures)
 
     # -- Every setting exists in both examples ----------------------------
     development = _example_values(ROOT / ".env.example")

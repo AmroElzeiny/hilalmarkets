@@ -1,0 +1,161 @@
+{% extends "hilal/base_dashboard.html" %}
+{% from "hilal/macros/coin_logo.html" import coin_logo %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260831-auth-one-screen">{% endblock %}
+{% block content %}
+
+{#- Coins nobody has ruled on, and what the machine read about them.
+
+    This page exists because of a gap a person can fall into: an exchange lists hundreds
+    of coins, three authorities have ruled on a fraction of them, and for the rest the
+    product used to say nothing at all. Silence reads as "there is no problem", which is
+    the one thing it does not mean.
+
+    So the page shows the reading and never the ruling. Every row says who made the
+    judgement — a machine, not a scholar — and the words it read are on the page beside
+    the answer, so a reader can disagree with it by opening the link.
+
+    It is deliberately not the Market page. That page lists coins an authority assessed.
+    Mixing the two would put two different kinds of claim in one list, and the difference
+    between them is the whole product. -#}
+
+<div class="hm-t">
+
+  <header class="t-head" data-hm-part="The page heading">
+    <div class="t-head-copy">
+      <p class="t-eyebrow"><span data-icon="search" data-icon-class="icon-sm"></span>Machine research</p>
+      <h1>Coins we researched</h1>
+    </div>
+  </header>
+
+  {#- Said before anything else on the page, not in a footnote. A reader who takes one
+      of these answers for a Shariah ruling has been misled by us, so the warning goes
+      where it cannot be missed. -#}
+  <div class="t-banner" data-tone="info" role="status" data-hm-part="What this page is">
+    <span data-icon="info" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      <strong>Nobody has reviewed these answers</strong>
+      <p>
+        These coins have no ruling from any Shariah authority. We read what each project
+        writes about itself and applied the <strong>{{ automated_methodology_name }}</strong>
+        to it. {{ automated_methodology_disclosure }}
+      </p>
+      <p>
+        Treat every answer here as a starting point for your own reading, never as a
+        decision. The coins with a real review are on the
+        <a href="/dashboard/market">Halal Assets</a> page.
+      </p>
+    </div>
+  </div>
+
+  {#- The shared notice, on the page that is *only* ever about the automated standard.
+      There is no standard picker here, so it is told directly rather than left to work
+      it out from a list it will never be given. Without this the page carried the
+      banner above and no link to the published standard, which meant the one place a
+      reader could check the rule was reachable from every screen except this one. -#}
+  {% with automated_methodology_selected = true %}
+    {% include "hilal/partials/automated_methodology_notice.html" %}
+  {% endwith %}
+
+  {#- The tiles are the filter and the summary at once, exactly as on the Market page,
+      so the number a person reads is the number the filter acts on.
+
+      They are links rather than buttons here, because each one loads a filtered page
+      rather than toggling something in place — so the selected one is marked with
+      `aria-current="page"`, not `aria-pressed`. `aria-pressed` describes a toggle that
+      is held down; on a link it tells a screen reader the wrong thing about what the
+      control is. The shipped tile styling keys off both. -#}
+  <nav class="t-tiles" aria-label="Filter by what we found"
+       data-hm-part="The counters that filter the list">
+    <a class="t-tile" href="?verdict=all" {{ "aria-current='page'"|safe if research_verdict == 'all' }}>
+      <span class="t-tile-top"><span data-icon="coins" data-icon-class="icon-sm"></span>All researched</span>
+      <span class="t-tile-value t-figure">{{ research_counts.get('all', 0) }}</span>
+      <span class="t-tile-note">Coins we read pages for</span>
+      <span class="t-tile-bar" aria-hidden="true"></span>
+    </a>
+    {% for value in research_verdict_order %}
+    {% set shown = research_verdicts[value] %}
+    <a class="t-tile" href="?verdict={{ value }}" {{ "aria-current='page'"|safe if research_verdict == value }}>
+      <span class="t-tile-top">
+        <span data-icon="{{ 'alert' if value == 'not_eligible' else ('shield_check' if value == 'eligible' else 'circle_help') }}" data-icon-class="icon-sm"></span>
+        {{ shown.label }}
+      </span>
+      <span class="t-tile-value t-figure">{{ research_counts.get(value, 0) }}</span>
+      <span class="t-tile-note">{{ shown.meaning }}</span>
+      <span class="t-tile-bar" aria-hidden="true"></span>
+    </a>
+    {% endfor %}
+  </nav>
+
+  {#- "Not enough data" gets its own explanation rather than only a tile, because the
+      word people read into it is "no" and that is wrong. It means nobody has judged the
+      coin — not that the coin failed. -#}
+  {% if research_verdict == 'not_enough_data' %}
+  <div class="t-banner" data-tone="neutral" role="status">
+    <span data-icon="circle_help" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      <strong>These coins are not refused</strong>
+      <p>
+        We could not find enough written about them to say anything at all. Some have a
+        website that is only a picture, some publish nothing but a price. A coin stays
+        here until somebody finds a page that explains what it does.
+      </p>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if research_rows %}
+  <div class="t-table-wrap" data-hm-part="The list of researched coins">
+    <table class="t-table">
+      <caption class="sr-only">Coins researched by machine, with what was read for each</caption>
+      <thead>
+        <tr>
+          <th scope="col">Coin</th>
+          <th scope="col">What we found</th>
+          <th scope="col">Pages read</th>
+          <th scope="col">Pages describing the project</th>
+          <th scope="col">Last read</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in research_rows %}
+        <tr>
+          <td>
+            {#- The coin's name opens what we read for it. A verdict a reader cannot
+                check is an assertion, so the way to check it is the first link in
+                the row. -#}
+            <a class="t-cell-coin" href="/dashboard/research/{{ row.symbol }}">
+              {{ coin_logo(row.symbol, class='t-logo', decorative=true) }}
+              <span class="t-asset-name">
+                <span class="t-asset-symbol">{{ row.symbol }}</span>
+                <span class="t-asset-full">{{ row.name }}</span>
+              </span>
+            </a>
+          </td>
+          <td>
+            <span class="t-pill" data-tone="{{ row.presentation.tone }}">{{ row.presentation.label }}</span>
+          </td>
+          <td class="t-num">{{ row.documents_read }}</td>
+          {#- Shown separately because a refusal is only ever allowed to rest on a page
+              where the project describes itself. A coin judged from one blog post and a
+              coin judged from its whitepaper are not the same claim, and a reader can
+              see which is which here. -#}
+          <td class="t-num">{{ row.primary_documents_read }}</td>
+          <td>{{ row.decided_at | short_dt(user.timezone if user else 'UTC') if row.decided_at else 'Not read yet' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="t-state">
+    <div class="t-state-icon"><span data-icon="search" data-icon-class="icon"></span></div>
+    <h2>Nothing researched yet</h2>
+    <p>
+      The coin researcher runs on its own once a day. When it has read a project's
+      pages, what it found appears here.
+    </p>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

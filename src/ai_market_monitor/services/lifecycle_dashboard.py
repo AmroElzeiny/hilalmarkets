@@ -366,7 +366,7 @@ def _lifecycle_card(
         "symbol": setup.symbol,
         "asset_symbol": logo_symbol,
         "logo_module_url": logo.module_url,
-        "logo_url": logo.image_url,
+        "logo_url": logo.picture_url,
         "exchange": setup.exchange,
         "timeframe": setup.timeframe,
         "direction": setup.direction,

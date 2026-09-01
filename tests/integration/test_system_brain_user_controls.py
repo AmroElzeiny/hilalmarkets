@@ -252,11 +252,12 @@ async def test_ban_blocks_signup_login_code_and_password_with_exact_message(
         follow_redirects=False,
     )
     signup = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data={
             "first_name": "Banned",
             "last_name": "Customer",
             "email": "banned-customer@example.com",
+            "display_name": "Test Person",
             "password": "Valid1!",
             "repeat_password": "Valid1!",
         },
@@ -349,11 +350,12 @@ async def test_delete_anonymizes_profile_and_releases_email_for_new_signup(
         follow_redirects=False,
     )
     signup = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data={
             "first_name": "New",
             "last_name": "Profile",
             "email": "reusable-after-delete@example.com",
+            "display_name": "Test Person",
             "password": "Valid1!",
             "repeat_password": "Valid1!",
         },

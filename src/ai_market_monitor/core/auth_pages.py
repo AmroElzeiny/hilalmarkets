@@ -1,17 +1,18 @@
 """One owner for everything the sign-in pages say, count and check.
 
-Four pages — ``/signup``, ``/signin``, ``/signin/code`` and ``/reset-password`` — plus
-the confirm-your-email step each of them hands off to. Before this module every one of
-those facts lived in two places at once, and the two disagreed:
+Six pages — ``/signup``, ``/signup/password``, ``/signup/verify``, ``/signin``,
+``/signin/code`` and ``/reset-password``. Before this module every one of those facts
+lived in two places at once, and the two disagreed:
 
-*The password rule.* :func:`password_validation_error` checks five separate things and
-names the one that failed. The route threw that sentence away and forwarded a bare
-``invalid_password``, and the template wrote its own summary of the rule by hand — twice,
-in two different wordings. So a person was told "at least 6 characters with lowercase,
-capital, number and special character" *after* a round trip to the server, instead of
-being told which of the five was missing while they typed. The rules are data here, each
-one carrying the regular expression a browser needs to check the identical thing, so the
-checklist on the page and the check on the server can never drift apart.
+*The password rule.* :func:`password_validation_error` checks each rule in
+:data:`PASSWORD_RULES` and names the one that failed. The route threw that sentence away
+and forwarded a bare ``invalid_password``, and the template wrote its own summary of the
+rule by hand — twice, in two different wordings. So a person was told "at least 6
+characters with lowercase, capital, number and special character" *after* a round trip to
+the server, instead of being told which one was missing while they typed. The rules are
+data here, each one carrying the regular expression a browser needs to check the identical
+thing, so the checklist on the page and the check on the server can never drift apart —
+and the count lives in one tuple, so removing a rule cannot leave a page promising it.
 
 *The wait before a new code.* ``timedelta(seconds=60)`` was written twice inside
 :mod:`ai_market_monitor.services.web_auth`, and the page could not show a countdown
@@ -23,15 +24,14 @@ with ``error.replace('_', ' ').title()`` — which is how a customer came to rea
 "Smtp Authentication Failed" and "Invalid Login" on a login screen. Worse, four SMTP
 codes printed *operator* instructions to the customer: one of them told the person
 signing up to "set EMAIL_ADAPTER=smtp in the active environment and restart the app".
-Every code the four pages can receive is answered here, in plain words, with the next
+Every code these pages can receive is answered here, in plain words, with the next
 step attached to it, and anything unrecognised falls back to a sentence rather than to a
 prettified code.
 
-*Which step of the journey this is.* Signing up is two pages and nothing said so.
+*Which step of the journey this is.* Signing up is three pages and nothing said so.
 
-Nothing here decides policy. The password rules are the same five the server already
-enforced, the wait is the same sixty seconds, and the journeys are the routes that
-already exist.
+Nothing here decides policy. The password rules are the ones the server already enforced,
+the wait is the same sixty seconds, and the journeys are the routes that already exist.
 """
 
 from __future__ import annotations
@@ -42,12 +42,14 @@ from typing import Final
 
 __all__ = [
     "AUTH_PAGES",
+    "PRODUCT_PROMISES",
     "AuthAlert",
     "AuthPageCopy",
     "CODE_RESEND_SECONDS",
     "JourneyStep",
     "PASSWORD_RULES",
     "PasswordRule",
+    "ProductPromise",
     "alert_for",
     "browser_password_rules",
     "journey_for",
@@ -76,8 +78,14 @@ class PasswordRule:
     That is why the Unicode property escapes are written out. ``str.islower()`` in Python
     is the Unicode *Lowercase* property, not ``[a-z]``, so ``[a-z]`` in the browser would
     refuse to tick a rule the server had already accepted. ``\\p{Lowercase}`` is the same
-    set. ``\\p{Nd}`` is a shade narrower than ``str.isdigit()`` and ``[^\\p{L}\\p{N}]`` a
-    shade narrower than ``not str.isalnum()`` — both on the safe side.
+    set, and ``\\p{Nd}`` is a shade narrower than ``str.isdigit()`` — on the safe side.
+
+    There were five rules. The fifth asked for a symbol, and it is gone: a symbol is the
+    rule people fail most often, it pushes them towards one predictable ``!`` on the end,
+    and length does far more for a password than punctuation does. Removing it is only
+    safe because this is the single owner — the server, the checklist on the page and the
+    tests all read this tuple, so nothing anywhere is still asking for the sixth
+    character somebody no longer has to type.
     """
 
     #: Stable name, used by tests and by the page's markup.
@@ -120,13 +128,6 @@ PASSWORD_RULES: Final[tuple[PasswordRule, ...]] = (
         failure="Password must include a number.",
         check=lambda value: any(character.isdigit() for character in value),
         browser_pattern=r"\p{Nd}",
-    ),
-    PasswordRule(
-        key="symbol",
-        label="a symbol, like ! or ?",
-        failure="Password must include a special character.",
-        check=lambda value: any(not character.isalnum() for character in value),
-        browser_pattern=r"[^\p{L}\p{N}]",
     ),
 )
 
@@ -220,18 +221,35 @@ _DASHBOARD = JourneyStep(
     destination=True,
 )
 
+#: Signing up is three screens, and each one asks for one thing.
+#:
+#: It used to be a single screen with five boxes on it — first name, last name, email,
+#: password, password again — plus a five-line checklist under the password. On a laptop
+#: that form did not fit the window, so the button a person came to press was below the
+#: fold on the first page of the product they had just decided to try.
+#:
+#: Two boxes on screen one still fits, and it fails better: a taken email address, and a
+#: name we cannot use, are both found before anybody has chosen a password rather than
+#: after. The two name boxes became one — a person with a single name, or four, should
+#: not have to decide which half of themselves to leave out.
 _SIGNUP_STEPS: Final[tuple[JourneyStep, ...]] = (
     JourneyStep(
         key="details",
         title="Your details",
-        hint="Name, email and a password you choose.",
+        hint="Your name, and where your code goes.",
         icon="user",
+    ),
+    JourneyStep(
+        key="password",
+        title="Your password",
+        hint="Something you will remember, typed twice.",
+        icon="lock",
     ),
     JourneyStep(
         key="confirm",
         title="Confirm your email",
         hint="We send a six-digit code. You type it back.",
-        icon="mail",
+        icon="shield_check",
     ),
     _DASHBOARD,
 )
@@ -286,6 +304,44 @@ _RESET_STEPS: Final[tuple[JourneyStep, ...]] = (
 
 
 # ---------------------------------------------------------------------------
+# The three things the product promises.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ProductPromise:
+    """One thing Hilal Markets does, or one thing it deliberately never does.
+
+    A title and nothing else. Each promise used to carry an explaining sentence under it,
+    and three sentences of small print under the button is the part of a sign-in page
+    nobody reads — it made the card taller for no one's benefit. The titles say the same
+    three things in four words each.
+    """
+
+    key: str
+    #: Four or five words. It is a tick in a row of three, not a paragraph.
+    title: str
+
+
+#: What sits under the button on every one of these pages.
+#:
+#: These three sentences were written out inside ``auth.html`` and drawn down the side of
+#: the screen in a tall dark panel. The panel is gone — it filled half of a laptop window
+#: with something nobody reads while they are signing in, and it pushed the form itself
+#: off the bottom. The same three promises are a compact row of ticks under the button
+#: now, where a person actually looks before they press it.
+#:
+#: They live here rather than in the template for the reason every vocabulary in this
+#: codebase does: two pages were already free to disagree about them, and the copy tests
+#: cannot check a sentence that only exists inside markup.
+PRODUCT_PROMISES: Final[tuple[ProductPromise, ...]] = (
+    ProductPromise(key="evidence", title="Evidence you can open"),
+    ProductPromise(key="approval", title="You approve every rule"),
+    ProductPromise(key="watching", title="Watching, never trading"),
+)
+
+
+# ---------------------------------------------------------------------------
 # What each page says.
 # ---------------------------------------------------------------------------
 
@@ -324,8 +380,10 @@ def _state_for(page: str, *, has_email: bool, code_sent: bool) -> str:
 def journey_for(page: str, state: str) -> Journey:
     if page == "signup":
         return Journey(_SIGNUP_STEPS, 0)
-    if page == "signup_verify":
+    if page == "signup_password":
         return Journey(_SIGNUP_STEPS, 1)
+    if page == "signup_verify":
+        return Journey(_SIGNUP_STEPS, 2)
     if page == "signin":
         return Journey(_SIGNIN_STEPS, 0)
     if page == "signin_code":
@@ -338,16 +396,31 @@ def journey_for(page: str, state: str) -> Journey:
 #: Every page the ``auth.html`` template can be asked to draw.
 AUTH_PAGES: Final[tuple[str, ...]] = (
     "signup",
+    "signup_password",
     "signup_verify",
     "signin",
     "signin_code",
     "reset_password",
 )
 
+#: Heading, the line under it, and the button.
+#:
+#: The middle one is empty on the four pages whose heading already said the whole thing.
+#: "Sign in" under a heading reading "Sign in" is a line a person reads and learns
+#: nothing from, and four such lines were making the card taller than the screen.
+#:
+#: It is kept exactly where it still teaches something, which is every page that has to
+#: explain the six-digit code: where it went, how long it lasts, what to do with it. That
+#: is an instruction, not a welcome.
 _TITLES: Final[dict[tuple[str, str], tuple[str, str, str]]] = {
     ("signup", ""): (
         "Create your account",
-        "About a minute. You confirm your email in the next step.",
+        "",
+        "Continue",
+    ),
+    ("signup_password", ""): (
+        "Choose a password",
+        "",
         "Send my code",
     ),
     ("signup_verify", ""): (
@@ -357,7 +430,7 @@ _TITLES: Final[dict[tuple[str, str], tuple[str, str, str]]] = {
     ),
     ("signin", ""): (
         "Sign in",
-        "Welcome back. Your Watchlists and monitors are where you left them.",
+        "",
         "Sign in",
     ),
     ("signin_code", "ask"): (
@@ -372,7 +445,7 @@ _TITLES: Final[dict[tuple[str, str], tuple[str, str, str]]] = {
     ),
     ("reset_password", "ask"): (
         "Reset your password",
-        "Tell us your email and we send a six-digit code.",
+        "",
         "Email me a code",
     ),
     ("reset_password", "enter"): (
@@ -516,6 +589,16 @@ _ERRORS: Final[dict[str, tuple[str, str, str, str, str]]] = {
         "",
         "",
     ),
+    # This code could always be raised and never had an answer written for it, so the
+    # page fell through to "Something went wrong" — which tells a person nothing about
+    # which of the boxes they need to change.
+    "invalid_name": (
+        "error",
+        "That name does not look right",
+        "Please write your name using letters. It can be up to 60 characters.",
+        "",
+        "",
+    ),
     "invalid_password": (
         "error",
         "That password is not strong enough",
@@ -634,6 +717,53 @@ _ERRORS: Final[dict[str, tuple[str, str, str, str, str]]] = {
         "Sign in here instead.",
         "",
         "",
+    ),
+    # ── The Google door ──────────────────────────────────────────────────────
+    #
+    # Every one of these is something a person can act on. Nothing here names OAuth, a
+    # token, a state parameter or a redirect address: those are our words for our
+    # problem, and a customer can do nothing with any of them.
+    "google_cancelled": (
+        "info",
+        "You closed the Google window",
+        "Nothing was created and nothing changed. Try again whenever you like.",
+        "",
+        "",
+    ),
+    "google_unavailable": (
+        "error",
+        "Google did not answer",
+        "This one is on us, not on you. Try again in a moment, or use your email.",
+        "",
+        "",
+    ),
+    "google_disabled": (
+        "error",
+        "Google sign-in is switched off",
+        "Use your email and a password instead. Both doors lead to the same account.",
+        "Create an account",
+        "signup",
+    ),
+    "google_link_expired": (
+        "error",
+        "That Google window was open too long",
+        "Press the Google button again and it will only take a moment.",
+        "",
+        "",
+    ),
+    "google_email_unverified": (
+        "error",
+        "Google has not confirmed that email",
+        "Confirm the address inside your Google account, or sign up with your email here.",
+        "Create an account",
+        "signup",
+    ),
+    "google_email_missing": (
+        "error",
+        "Google did not share an email address",
+        "We need one to make an account. Sign up with your email instead.",
+        "Create an account",
+        "signup",
     ),
 }
 

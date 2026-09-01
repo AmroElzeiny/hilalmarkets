@@ -1,0 +1,1933 @@
+[
+  {
+    "canonical_symbol": "1INCH",
+    "asset_name": "1inch",
+    "activities": [
+      "spot_exchange"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "AAVE",
+    "asset_name": "Aave",
+    "activities": [
+      "lending_borrowing"
+    ],
+    "notes": "Its business is lending and borrowing at interest."
+  },
+  {
+    "canonical_symbol": "ADA",
+    "asset_name": "Cardano",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "ADI",
+    "asset_name": "ADI",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Digital infrastructure."
+  },
+  {
+    "canonical_symbol": "AERO",
+    "asset_name": "Aerodrome",
+    "activities": [
+      "spot_exchange"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "AGIX",
+    "asset_name": "SingularityNET",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "AI marketplace."
+  },
+  {
+    "canonical_symbol": "AIOZ",
+    "asset_name": "AIOZ Network",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Content delivery."
+  },
+  {
+    "canonical_symbol": "AKT",
+    "asset_name": "Akash Network",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Compute."
+  },
+  {
+    "canonical_symbol": "ALE",
+    "asset_name": "Ailey",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Entertainment platform."
+  },
+  {
+    "canonical_symbol": "ALGO",
+    "asset_name": "Algorand",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "ALT",
+    "asset_name": "AltLayer",
+    "activities": [
+      "infrastructure_service",
+      "staking_or_validation"
+    ],
+    "notes": "Rollup-as-a-service."
+  },
+  {
+    "canonical_symbol": "ANKR",
+    "asset_name": "Ankr",
+    "activities": [
+      "staking_or_validation",
+      "infrastructure_service"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "APE",
+    "asset_name": "ApeCoin",
+    "activities": [
+      "consumer_application",
+      "platform_access_or_governance"
+    ],
+    "notes": "NFT ecosystem token."
+  },
+  {
+    "canonical_symbol": "APEPE",
+    "asset_name": "Ape and Pepe",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token."
+  },
+  {
+    "canonical_symbol": "APT",
+    "asset_name": "Aptos",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "AR",
+    "asset_name": "Arweave",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Storage."
+  },
+  {
+    "canonical_symbol": "ARB",
+    "asset_name": "Arbitrum",
+    "activities": [
+      "own_settlement_network",
+      "platform_access_or_governance"
+    ],
+    "notes": "Ethereum rollup."
+  },
+  {
+    "canonical_symbol": "ARIA",
+    "asset_name": "AriaAI",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "AI network."
+  },
+  {
+    "canonical_symbol": "ARKM",
+    "asset_name": "Arkham",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "On-chain analytics."
+  },
+  {
+    "canonical_symbol": "ASI",
+    "asset_name": "Artificial Superintelligence Alliance",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "AI network."
+  },
+  {
+    "canonical_symbol": "ASTR",
+    "asset_name": "Astar",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "ATOM",
+    "asset_name": "Cosmos",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "AUSD",
+    "asset_name": "AUSD",
+    "activities": [
+      "interest_bearing_holding"
+    ],
+    "notes": "Yield-bearing dollar token."
+  },
+  {
+    "canonical_symbol": "AVAX",
+    "asset_name": "Avalanche",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "AXS",
+    "asset_name": "Axie Infinity",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Game."
+  },
+  {
+    "canonical_symbol": "BAL",
+    "asset_name": "Balancer",
+    "activities": [
+      "spot_exchange"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "BANANAS31",
+    "asset_name": "Banana For Scale",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token."
+  },
+  {
+    "canonical_symbol": "BASE_NETWORK",
+    "asset_name": "Base",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": "Ethereum rollup."
+  },
+  {
+    "canonical_symbol": "BAT",
+    "asset_name": "Basic Attention Token",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Browser advertising."
+  },
+  {
+    "canonical_symbol": "BCH",
+    "asset_name": "Bitcoin Cash",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "BDX",
+    "asset_name": "Beldex",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "BEAM",
+    "asset_name": "Beam",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "BGB",
+    "asset_name": "Bitget Token",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": "Exchange fee token."
+  },
+  {
+    "canonical_symbol": "BLAST",
+    "asset_name": "Blast",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": "Rollup; its native return comes from staking."
+  },
+  {
+    "canonical_symbol": "BNB",
+    "asset_name": "Binance Coin",
+    "activities": [
+      "own_settlement_network",
+      "platform_access_or_governance"
+    ],
+    "notes": "Chain token and exchange fee token."
+  },
+  {
+    "canonical_symbol": "BNT",
+    "asset_name": "Bancor",
+    "activities": [
+      "spot_exchange"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "BOME",
+    "asset_name": "Book of Meme",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token."
+  },
+  {
+    "canonical_symbol": "BONK",
+    "asset_name": "Bonk",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token."
+  },
+  {
+    "canonical_symbol": "BORG",
+    "asset_name": "SwissBorg",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": "Wealth app token."
+  },
+  {
+    "canonical_symbol": "BRETT",
+    "asset_name": "Brett",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token."
+  },
+  {
+    "canonical_symbol": "BSV",
+    "asset_name": "Bitcoin SV",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "BTC",
+    "asset_name": "Bitcoin",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": "Proof-of-work settlement network."
+  },
+  {
+    "canonical_symbol": "BTG",
+    "asset_name": "Bitcoin Gold",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "BTT",
+    "asset_name": "Bittorrent",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "File sharing."
+  },
+  {
+    "canonical_symbol": "BUSD",
+    "asset_name": "Binance USD (legacy)",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "CAKE",
+    "asset_name": "PancakeSwap",
+    "activities": [
+      "spot_exchange"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "CEL",
+    "asset_name": "Celsius",
+    "activities": [
+      "lending_borrowing"
+    ],
+    "notes": "Lends customer deposits at interest."
+  },
+  {
+    "canonical_symbol": "CELO",
+    "asset_name": "Celo",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "CFX",
+    "asset_name": "Conflux",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "CHZ",
+    "asset_name": "Chiliz",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Sports fan tokens."
+  },
+  {
+    "canonical_symbol": "CKB",
+    "asset_name": "Nervos Network",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "COMP",
+    "asset_name": "Compound",
+    "activities": [
+      "lending_borrowing"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "CORE",
+    "asset_name": "Core",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "CRCLON",
+    "asset_name": "Circle Internet Group Tokenized Stock (Ondo)",
+    "activities": [
+      "tokenized_security"
+    ],
+    "notes": "A share."
+  },
+  {
+    "canonical_symbol": "CRV",
+    "asset_name": "Curve DAO",
+    "activities": [
+      "spot_exchange"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "CUSDC",
+    "asset_name": "cUSDC",
+    "activities": [
+      "interest_bearing_holding"
+    ],
+    "notes": "Interest-bearing deposit receipt."
+  },
+  {
+    "canonical_symbol": "CVX",
+    "asset_name": "Convex Finance",
+    "activities": [
+      "interest_bearing_holding"
+    ],
+    "notes": "Boosts and pays out lending-style yield."
+  },
+  {
+    "canonical_symbol": "DAI",
+    "asset_name": "Dai",
+    "activities": [
+      "interest_bearing_holding"
+    ],
+    "notes": "Carries a savings rate paid to holders."
+  },
+  {
+    "canonical_symbol": "DASH",
+    "asset_name": "Dash",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "DCR",
+    "asset_name": "Decred",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "DOGE",
+    "asset_name": "Dogecoin",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": "Runs its own proof-of-work chain and is used for payments."
+  },
+  {
+    "canonical_symbol": "DOT",
+    "asset_name": "Polkadot",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "DUCKY",
+    "asset_name": "Ducky",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token."
+  },
+  {
+    "canonical_symbol": "DYDX",
+    "asset_name": "dYdX",
+    "activities": [
+      "derivatives_or_leverage"
+    ],
+    "notes": "Perpetual futures exchange."
+  },
+  {
+    "canonical_symbol": "EGLD",
+    "asset_name": "MultiversX",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "EIGEN",
+    "asset_name": "EigenLayer",
+    "activities": [
+      "staking_or_validation"
+    ],
+    "notes": "Restaking: securing other services for a fee."
+  },
+  {
+    "canonical_symbol": "ENA",
+    "asset_name": "Ethena",
+    "activities": [
+      "interest_bearing_holding",
+      "derivatives_or_leverage"
+    ],
+    "notes": "Governs the funding-rate yield protocol."
+  },
+  {
+    "canonical_symbol": "ENJ",
+    "asset_name": "Enjin Coin",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Game items."
+  },
+  {
+    "canonical_symbol": "EOS",
+    "asset_name": "EOS",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "ESPORTS",
+    "asset_name": "Yooldo",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Esports platform."
+  },
+  {
+    "canonical_symbol": "ETC",
+    "asset_name": "Ethereum Classic",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "ETH",
+    "asset_name": "Ethereum",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": "Smart-contract network; validators are paid to secure it."
+  },
+  {
+    "canonical_symbol": "ETHFI",
+    "asset_name": "ether.fi",
+    "activities": [
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "EURCV",
+    "asset_name": "EUR CoinVertible",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "FDUSD",
+    "asset_name": "First Digital USD",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "FET",
+    "asset_name": "Fetch.ai",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "AI agents."
+  },
+  {
+    "canonical_symbol": "FIL",
+    "asset_name": "Filecoin",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Storage."
+  },
+  {
+    "canonical_symbol": "FLOKI",
+    "asset_name": "Floki",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token."
+  },
+  {
+    "canonical_symbol": "FLOW",
+    "asset_name": "Flow",
+    "activities": [
+      "own_settlement_network",
+      "consumer_application"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "FRAX",
+    "asset_name": "Frax",
+    "activities": [
+      "own_settlement_network",
+      "platform_access_or_governance"
+    ],
+    "notes": "Frax network token."
+  },
+  {
+    "canonical_symbol": "FRXETH",
+    "asset_name": "Frax Ether",
+    "activities": [
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "FRXUSD",
+    "asset_name": "Frax USD",
+    "activities": [
+      "interest_bearing_holding"
+    ],
+    "notes": "Yield-bearing dollar token."
+  },
+  {
+    "canonical_symbol": "FTM",
+    "asset_name": "Fantom",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "FTN",
+    "asset_name": "Fasttoken",
+    "activities": [
+      "gambling"
+    ],
+    "notes": "Token of a betting and gaming group."
+  },
+  {
+    "canonical_symbol": "FXS",
+    "asset_name": "Frax Share",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": "Governance token."
+  },
+  {
+    "canonical_symbol": "GALA",
+    "asset_name": "Gala",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Games."
+  },
+  {
+    "canonical_symbol": "GHO",
+    "asset_name": "GHO",
+    "activities": [
+      "interest_bearing_holding",
+      "lending_borrowing"
+    ],
+    "notes": "Debt token issued by a lending protocol."
+  },
+  {
+    "canonical_symbol": "GLM",
+    "asset_name": "Golem",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Compute."
+  },
+  {
+    "canonical_symbol": "GMX",
+    "asset_name": "GMX",
+    "activities": [
+      "derivatives_or_leverage"
+    ],
+    "notes": "Perpetual futures exchange."
+  },
+  {
+    "canonical_symbol": "GNO",
+    "asset_name": "Gnosis",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "GNS",
+    "asset_name": "Gains Network",
+    "activities": [
+      "derivatives_or_leverage"
+    ],
+    "notes": "Leveraged trading."
+  },
+  {
+    "canonical_symbol": "GOMINING",
+    "asset_name": "GoMining",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Mining capacity."
+  },
+  {
+    "canonical_symbol": "GRT",
+    "asset_name": "The Graph",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Data indexing."
+  },
+  {
+    "canonical_symbol": "GT",
+    "asset_name": "GateToken",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": "Exchange fee token."
+  },
+  {
+    "canonical_symbol": "GUSD",
+    "asset_name": "Gemini Dollar",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "HBAR",
+    "asset_name": "Hedera",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "HNT",
+    "asset_name": "Helium",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Wireless coverage."
+  },
+  {
+    "canonical_symbol": "HOT",
+    "asset_name": "Holo",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Distributed hosting."
+  },
+  {
+    "canonical_symbol": "HTX",
+    "asset_name": "HTX",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": "Exchange fee token."
+  },
+  {
+    "canonical_symbol": "ICNT",
+    "asset_name": "Impossible Cloud Network",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Cloud infrastructure."
+  },
+  {
+    "canonical_symbol": "ICP",
+    "asset_name": "Internet Computer",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "ILV",
+    "asset_name": "Illuvium",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Game."
+  },
+  {
+    "canonical_symbol": "IMX",
+    "asset_name": "Immutable",
+    "activities": [
+      "own_settlement_network",
+      "consumer_application"
+    ],
+    "notes": "Gaming rollup."
+  },
+  {
+    "canonical_symbol": "INJ",
+    "asset_name": "Injective",
+    "activities": [
+      "derivatives_or_leverage"
+    ],
+    "notes": "Derivatives exchange chain."
+  },
+  {
+    "canonical_symbol": "JASMY",
+    "asset_name": "JasmyCoin",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "IoT data."
+  },
+  {
+    "canonical_symbol": "JLP",
+    "asset_name": "Jupiter Perps LP",
+    "activities": [
+      "derivatives_or_leverage"
+    ],
+    "notes": "Liquidity pool backing perpetuals."
+  },
+  {
+    "canonical_symbol": "JTO",
+    "asset_name": "Jito",
+    "activities": [
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "JUP",
+    "asset_name": "Jupiter",
+    "activities": [
+      "spot_exchange"
+    ],
+    "notes": "Spot swap aggregator."
+  },
+  {
+    "canonical_symbol": "KAS",
+    "asset_name": "Kaspa",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "KAVA",
+    "asset_name": "Kava",
+    "activities": [
+      "lending_borrowing"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "KCS",
+    "asset_name": "KuCoin Token",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": "Exchange fee token."
+  },
+  {
+    "canonical_symbol": "KDA",
+    "asset_name": "Kadena",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "KLAY",
+    "asset_name": "Klaytn",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "KNC",
+    "asset_name": "KNC",
+    "activities": [
+      "spot_exchange"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "KOGE",
+    "asset_name": "48 Club Token",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Club membership meme token."
+  },
+  {
+    "canonical_symbol": "KSM",
+    "asset_name": "Kusama",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "LDO",
+    "asset_name": "Lido DAO",
+    "activities": [
+      "staking_or_validation",
+      "platform_access_or_governance"
+    ],
+    "notes": "Runs validators and is paid for that work."
+  },
+  {
+    "canonical_symbol": "LEO",
+    "asset_name": "UNUS SED LEO",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": "Exchange fee token."
+  },
+  {
+    "canonical_symbol": "LINK",
+    "asset_name": "Chainlink",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Price and data oracle."
+  },
+  {
+    "canonical_symbol": "LPT",
+    "asset_name": "LPT",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Video transcoding."
+  },
+  {
+    "canonical_symbol": "LRC",
+    "asset_name": "Loopring",
+    "activities": [
+      "own_settlement_network",
+      "spot_exchange"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "LTC",
+    "asset_name": "Litecoin",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "LUNA",
+    "asset_name": "Terra",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "LUNC",
+    "asset_name": "Luna Classic",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "MANA",
+    "asset_name": "Decentraland",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Virtual world."
+  },
+  {
+    "canonical_symbol": "MASK",
+    "asset_name": "Mask Network",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Social tooling."
+  },
+  {
+    "canonical_symbol": "MATIC",
+    "asset_name": "Polygon",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "MIOTA",
+    "asset_name": "IOTA",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "MKR",
+    "asset_name": "Maker",
+    "activities": [
+      "lending_borrowing"
+    ],
+    "notes": "Collateralised debt with a borrow rate."
+  },
+  {
+    "canonical_symbol": "MNDE",
+    "asset_name": "Marinade",
+    "activities": [
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "MNT",
+    "asset_name": "Mantle",
+    "activities": [
+      "own_settlement_network",
+      "platform_access_or_governance"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "MOG",
+    "asset_name": "Mog Coin",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token."
+  },
+  {
+    "canonical_symbol": "NEAR",
+    "asset_name": "Near Protocol",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "NEO",
+    "asset_name": "Neo",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "NEXO",
+    "asset_name": "Nexo",
+    "activities": [
+      "lending_borrowing"
+    ],
+    "notes": "Lends customer deposits at interest."
+  },
+  {
+    "canonical_symbol": "NOT",
+    "asset_name": "Notcoin",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Game."
+  },
+  {
+    "canonical_symbol": "OCEAN",
+    "asset_name": "Ocean Protocol",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Data marketplace."
+  },
+  {
+    "canonical_symbol": "OKXBTC",
+    "asset_name": "OKX Wrapped BTC",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": "Receipt for bitcoin held."
+  },
+  {
+    "canonical_symbol": "ONDO",
+    "asset_name": "Ondo",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": "Governance token."
+  },
+  {
+    "canonical_symbol": "ONE",
+    "asset_name": "Harmony",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "OP",
+    "asset_name": "Optimism",
+    "activities": [
+      "own_settlement_network",
+      "platform_access_or_governance"
+    ],
+    "notes": "Ethereum rollup."
+  },
+  {
+    "canonical_symbol": "ORDI",
+    "asset_name": "ORDI",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": "Token of the BRC-20 standard on Bitcoin."
+  },
+  {
+    "canonical_symbol": "OSMO",
+    "asset_name": "Osmosis",
+    "activities": [
+      "spot_exchange",
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "PAXG",
+    "asset_name": "PAX Gold",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": "One unit is one ounce of allocated gold."
+  },
+  {
+    "canonical_symbol": "PENDLE",
+    "asset_name": "Pendle",
+    "activities": [
+      "interest_bearing_holding"
+    ],
+    "notes": "Splits and trades future yield."
+  },
+  {
+    "canonical_symbol": "PERP",
+    "asset_name": "Perpetual Protocol",
+    "activities": [
+      "derivatives_or_leverage"
+    ],
+    "notes": "Perpetual futures."
+  },
+  {
+    "canonical_symbol": "POL",
+    "asset_name": "Polygon",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "POPCAT",
+    "asset_name": "Popcat",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token."
+  },
+  {
+    "canonical_symbol": "PYTH",
+    "asset_name": "Pyth Network",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Price oracle."
+  },
+  {
+    "canonical_symbol": "PYUSD",
+    "asset_name": "PayPal USD",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "QNT",
+    "asset_name": "Quant",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Network interoperability."
+  },
+  {
+    "canonical_symbol": "QTUM",
+    "asset_name": "Qtum",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "QUBIC",
+    "asset_name": "Qubic",
+    "activities": [
+      "own_settlement_network",
+      "infrastructure_service"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "RAIN",
+    "asset_name": "Rain",
+    "activities": [
+      "gambling"
+    ],
+    "notes": "Betting platform token."
+  },
+  {
+    "canonical_symbol": "RAY",
+    "asset_name": "Raydium",
+    "activities": [
+      "spot_exchange"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "RENDER",
+    "asset_name": "Render",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "GPU rendering."
+  },
+  {
+    "canonical_symbol": "RETH",
+    "asset_name": "Rocket Pool ETH",
+    "activities": [
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "REZ",
+    "asset_name": "Renzo",
+    "activities": [
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "RLB",
+    "asset_name": "Rollbit Coin",
+    "activities": [
+      "gambling"
+    ],
+    "notes": "Casino revenue token."
+  },
+  {
+    "canonical_symbol": "RON",
+    "asset_name": "Ronin",
+    "activities": [
+      "own_settlement_network",
+      "consumer_application"
+    ],
+    "notes": "Gaming-focused chain."
+  },
+  {
+    "canonical_symbol": "ROSE",
+    "asset_name": "Oasis Network",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "RPL",
+    "asset_name": "Rocket Pool",
+    "activities": [
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "RUNE",
+    "asset_name": "THORChain",
+    "activities": [
+      "spot_exchange",
+      "staking_or_validation"
+    ],
+    "notes": "Cross-chain spot swaps."
+  },
+  {
+    "canonical_symbol": "RVN",
+    "asset_name": "Ravencoin",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "S",
+    "asset_name": "Sonic",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "SAND",
+    "asset_name": "The Sandbox",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Virtual world."
+  },
+  {
+    "canonical_symbol": "SATS",
+    "asset_name": "Sats",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": "Token of the BRC-20 standard on Bitcoin."
+  },
+  {
+    "canonical_symbol": "SC",
+    "asset_name": "Siacoin",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Storage."
+  },
+  {
+    "canonical_symbol": "SCRT",
+    "asset_name": "Secret",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "SEI",
+    "asset_name": "Sei",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "SHFL",
+    "asset_name": "Shuffle",
+    "activities": [
+      "gambling"
+    ],
+    "notes": "Casino revenue token."
+  },
+  {
+    "canonical_symbol": "SHIB",
+    "asset_name": "Shiba Inu",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token with no protocol behind it."
+  },
+  {
+    "canonical_symbol": "SN3",
+    "asset_name": "τemplar",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Bittensor subnet."
+  },
+  {
+    "canonical_symbol": "SNT",
+    "asset_name": "Status",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Messaging."
+  },
+  {
+    "canonical_symbol": "SNX",
+    "asset_name": "Synthetix",
+    "activities": [
+      "derivatives_or_leverage"
+    ],
+    "notes": "Synthetic leveraged assets."
+  },
+  {
+    "canonical_symbol": "SOL",
+    "asset_name": "Solana",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "SOLV",
+    "asset_name": "Solv Protocol",
+    "activities": [
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "SOSO",
+    "asset_name": "SoSoValue",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Market data."
+  },
+  {
+    "canonical_symbol": "SSV",
+    "asset_name": "Ssv Network",
+    "activities": [
+      "staking_or_validation",
+      "infrastructure_service"
+    ],
+    "notes": "Distributed validator infrastructure."
+  },
+  {
+    "canonical_symbol": "STETH",
+    "asset_name": "Staked Ether",
+    "activities": [
+      "staking_or_validation"
+    ],
+    "notes": "Receipt for ether staked with validators."
+  },
+  {
+    "canonical_symbol": "STORJ",
+    "asset_name": "Storj",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Storage."
+  },
+  {
+    "canonical_symbol": "STRK",
+    "asset_name": "Starknet",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "STSOL",
+    "asset_name": "Lido Staked SOL",
+    "activities": [
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "STX",
+    "asset_name": "Stacks",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": "Bitcoin smart-contract layer."
+  },
+  {
+    "canonical_symbol": "SUSD",
+    "asset_name": "sUSD",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": "Pegged unit; pays its holder nothing."
+  },
+  {
+    "canonical_symbol": "SUSHI",
+    "asset_name": "SushiSwap",
+    "activities": [
+      "spot_exchange"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "SUT",
+    "asset_name": "SuperTrust",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "TAO",
+    "asset_name": "Bittensor",
+    "activities": [
+      "infrastructure_service",
+      "staking_or_validation"
+    ],
+    "notes": "Machine-learning network."
+  },
+  {
+    "canonical_symbol": "THETA",
+    "asset_name": "Theta Network",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Video delivery."
+  },
+  {
+    "canonical_symbol": "TIA",
+    "asset_name": "Celestia",
+    "activities": [
+      "infrastructure_service",
+      "staking_or_validation"
+    ],
+    "notes": "Data availability layer."
+  },
+  {
+    "canonical_symbol": "TON",
+    "asset_name": "Toncoin",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "TOSHI",
+    "asset_name": "Toshi",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token."
+  },
+  {
+    "canonical_symbol": "TRUMP",
+    "asset_name": "OFFICIAL TRUMP",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Celebrity meme token."
+  },
+  {
+    "canonical_symbol": "TRX",
+    "asset_name": "TRON",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "TUSD",
+    "asset_name": "TrueUSD",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "TWT",
+    "asset_name": "Trust Wallet",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": "Wallet token."
+  },
+  {
+    "canonical_symbol": "UDS",
+    "asset_name": "Undeads Games",
+    "activities": [
+      "consumer_application"
+    ],
+    "notes": "Game."
+  },
+  {
+    "canonical_symbol": "ULTIMA",
+    "asset_name": "Ultima",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "UNI",
+    "asset_name": "Uniswap",
+    "activities": [
+      "spot_exchange"
+    ],
+    "notes": "Swaps assets people already hold."
+  },
+  {
+    "canonical_symbol": "USD0",
+    "asset_name": "Usual USD",
+    "activities": [
+      "interest_bearing_holding"
+    ],
+    "notes": "Yield-bearing dollar token."
+  },
+  {
+    "canonical_symbol": "USDAI",
+    "asset_name": "USDai",
+    "activities": [
+      "interest_bearing_holding"
+    ],
+    "notes": "Yield-bearing dollar token."
+  },
+  {
+    "canonical_symbol": "USDC",
+    "asset_name": "USD Coin",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": "Redeemable dollar claim; pays holders nothing."
+  },
+  {
+    "canonical_symbol": "USDD",
+    "asset_name": "USDD",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "USDE",
+    "asset_name": "Ethena USDe",
+    "activities": [
+      "interest_bearing_holding",
+      "derivatives_or_leverage"
+    ],
+    "notes": "Return comes from funding-rate trades."
+  },
+  {
+    "canonical_symbol": "USDF",
+    "asset_name": "Falcon USD",
+    "activities": [
+      "interest_bearing_holding"
+    ],
+    "notes": "Yield-bearing dollar token."
+  },
+  {
+    "canonical_symbol": "USDP",
+    "asset_name": "USDP",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "USDT",
+    "asset_name": "Tether",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": "Redeemable dollar claim; pays holders nothing."
+  },
+  {
+    "canonical_symbol": "USDY",
+    "asset_name": "Ondo US Dollar Yield",
+    "activities": [
+      "interest_bearing_holding"
+    ],
+    "notes": "Pays holders a Treasury yield."
+  },
+  {
+    "canonical_symbol": "USTC",
+    "asset_name": "TerraUSD Classic",
+    "activities": [
+      "fully_backed_redeemable"
+    ],
+    "notes": "Pegged unit; pays its holder nothing."
+  },
+  {
+    "canonical_symbol": "USX",
+    "asset_name": "Solstice USX",
+    "activities": [
+      "interest_bearing_holding"
+    ],
+    "notes": "Yield-bearing dollar token."
+  },
+  {
+    "canonical_symbol": "VCNT",
+    "asset_name": "ViciCoin",
+    "activities": [
+      "platform_access_or_governance"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "VET",
+    "asset_name": "VeChain",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": "Supply-chain tracking network."
+  },
+  {
+    "canonical_symbol": "W",
+    "asset_name": "Wormhole",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Bridge."
+  },
+  {
+    "canonical_symbol": "WAVES",
+    "asset_name": "Waves",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "WAXP",
+    "asset_name": "WAX",
+    "activities": [
+      "own_settlement_network",
+      "consumer_application"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "WEN",
+    "asset_name": "Wen",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token."
+  },
+  {
+    "canonical_symbol": "WFI",
+    "asset_name": "WeFi",
+    "activities": [
+      "lending_borrowing"
+    ],
+    "notes": "Lending neobank."
+  },
+  {
+    "canonical_symbol": "WIF",
+    "asset_name": "dogwifhat",
+    "activities": [
+      "no_underlying_utility"
+    ],
+    "notes": "Meme token."
+  },
+  {
+    "canonical_symbol": "WLD",
+    "asset_name": "Worldcoin",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Proof of personhood."
+  },
+  {
+    "canonical_symbol": "WMT",
+    "asset_name": "World Mobile Token",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Mobile network."
+  },
+  {
+    "canonical_symbol": "WOO",
+    "asset_name": "WOO",
+    "activities": [
+      "derivatives_or_leverage"
+    ],
+    "notes": "Leveraged and derivatives trading."
+  },
+  {
+    "canonical_symbol": "XEC",
+    "asset_name": "eCash",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "XLM",
+    "asset_name": "Stellar",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": "Cross-border payment network."
+  },
+  {
+    "canonical_symbol": "XMR",
+    "asset_name": "Monero",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": "Privacy payment network."
+  },
+  {
+    "canonical_symbol": "XRP",
+    "asset_name": "XRP",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": "Payment settlement network."
+  },
+  {
+    "canonical_symbol": "XTZ",
+    "asset_name": "Tezos",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "YFI",
+    "asset_name": "Yearn Finance",
+    "activities": [
+      "lending_borrowing",
+      "interest_bearing_holding"
+    ],
+    "notes": "Routes deposits into lending markets."
+  },
+  {
+    "canonical_symbol": "ZANO",
+    "asset_name": "Zano",
+    "activities": [
+      "own_settlement_network"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "ZETA",
+    "asset_name": "ZetaChain",
+    "activities": [
+      "own_settlement_network",
+      "infrastructure_service"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "ZIL",
+    "asset_name": "Zilliqa",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": ""
+  },
+  {
+    "canonical_symbol": "ZK",
+    "asset_name": "ZKsync",
+    "activities": [
+      "own_settlement_network",
+      "staking_or_validation"
+    ],
+    "notes": "Ethereum rollup."
+  },
+  {
+    "canonical_symbol": "ZRO",
+    "asset_name": "LayerZero",
+    "activities": [
+      "infrastructure_service"
+    ],
+    "notes": "Bridge."
+  },
+  {
+    "canonical_symbol": "ZRX",
+    "asset_name": "0x",
+    "activities": [
+      "spot_exchange"
+    ],
+    "notes": ""
+  }
+]

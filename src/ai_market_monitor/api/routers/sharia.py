@@ -54,6 +54,7 @@ from ai_market_monitor.services.compliance_watch import (
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.live_market_quotes import LiveMarketQuoteService
+from ai_market_monitor.services.market_numbers import MarketNumbersService
 from ai_market_monitor.services.sharia_governance import (
     ShariaGovernanceError,
     ShariaGovernanceService,
@@ -311,12 +312,19 @@ async def screened_market_quotes(
             statuses=DEFAULT_ALLOWED_STATUSES,
             limit=10_000,
         )
+        # Size, rank and how the coin moved over weeks. Read from the database, where a
+        # scheduled task put them — never fetched while this page is loading, because
+        # none of these numbers changes fast enough to be worth a provider call per view.
+        market_numbers = await MarketNumbersService(session, settings).read(
+            [item.canonical_asset for item in screened.items]
+        )
         return await quote_service.screened_snapshot(
             exchange=exchange,
             quote_asset=quote_asset,
             methodology=screening.methodology_summary(methodology),
             assessments=screened.items,
             warning=screened.warning,
+            market_numbers=market_numbers,
         )
     except ShariaScreeningError as exc:
         raise _screening_error(exc) from exc

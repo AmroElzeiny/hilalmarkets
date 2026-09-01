@@ -862,7 +862,7 @@ async def system_brain_approve_affiliate(
                 template_kind="affiliate_application_approved",
                 event_key=f"affiliate-approved:{application.id}",
                 payload={
-                    "first_name": first_name_of(applicant),
+                    "first_name": first_name_of(applicant, prefer=application.display_name),
                     "discount_code": application.discount_code,
                     "discount_percent": f"{application.discount_percent:.0f}",
                     "commission_percent": f"{application.commission_percent:.0f}",
@@ -921,7 +921,7 @@ async def system_brain_reject_affiliate(
                     f"{int((application.decided_at or datetime.now(UTC)).timestamp())}"
                 ),
                 payload={
-                    "first_name": first_name_of(applicant),
+                    "first_name": first_name_of(applicant, prefer=application.display_name),
                     "reason": application.decision_note or "",
                 },
             )

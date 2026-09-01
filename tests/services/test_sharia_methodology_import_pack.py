@@ -16,7 +16,6 @@ from ai_market_monitor.services.sharia_admin_dashboard import (
     ShariaAdminDashboardService,
 )
 from ai_market_monitor.services.sharia_import_pack import (
-    EXPECTED_COUNTS,
     ShariaMethodologyImportPackService,
     load_import_pack,
 )
@@ -31,11 +30,25 @@ PACK_ROOT = (
 def test_methodology_import_pack_contract_has_exact_approved_rows():
     bundle = load_import_pack(str(PACK_ROOT))
 
+    # Each authority states its own expected row count in its definition, and the
+    # loader has already refused the pack if a dataset disagreed. Asserting the
+    # shipped numbers here keeps the approved contract visible in the test.
     assert {
         methodology_id: len(rows)
         for methodology_id, rows in bundle.rows.items()
-    } == EXPECTED_COUNTS
-    assert len(bundle.fasset_guard) == 52
+    } == {
+        "SC_MALAYSIA_SAC_DIGITAL_ASSETS": 15,
+        "SHARIAH_REVIEW_BUREAU": 31,
+        "FASSET_SHARIAH_REPORTS": 188,
+    }
+    assert {
+        methodology_id: len(rows)
+        for methodology_id, rows in bundle.rows.items()
+    } == {
+        package_id: spec.records_count
+        for package_id, spec in bundle.specs.items()
+    }
+    assert bundle.total_guard_rows == 52
     assert len(bundle.passport_seeds) == 234
     assert len(bundle.enrichment_tasks) == 234
     assert all(
@@ -66,7 +79,8 @@ async def test_import_pack_is_independent_idempotent_and_never_publishes(
     bundle = load_import_pack(str(PACK_ROOT))
     guard_ids = {
         row["source_row_id"]
-        for row in bundle.fasset_guard
+        for rows in bundle.guard_rows.values()
+        for row in rows
     }
 
     async with test_context["session_factory"]() as session:

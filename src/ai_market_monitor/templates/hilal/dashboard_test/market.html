@@ -1,5 +1,5 @@
 {% extends "hilal/base_dashboard.html" %}
-{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260825-brain-agent-dock">{% endblock %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260831-auth-one-screen">{% endblock %}
 {% block content %}
 
 <div
@@ -106,6 +106,18 @@
       <noscript><button class="t-action" type="submit">Apply</button></noscript>
     </form>
 
+    {#- Reachable whichever standard is picked, not only when the machine one is.
+
+        The full notice further down appears only when somebody has selected the
+        automated standard, which is right — a warning on every coin would train people
+        to ignore it. But a person comparing the standards needs to read what ours
+        actually is *before* choosing it, and that is what this link is for. -#}
+    <a class="t-action is-quiet" style="flex: 0 0 auto;" href="{{ automated_methodology_path }}"
+       target="_blank" rel="noopener">
+      <span data-icon="methodology" data-icon-class="icon-sm" aria-hidden="true"></span>
+      What is the {{ automated_methodology_name }}?
+    </a>
+
     <div class="t-segment" role="radiogroup" aria-label="How to show the list">
       <button type="button" role="radio" data-view="cards" aria-checked="true">
         <span data-icon="grid" data-icon-class="icon-sm"></span>Cards
@@ -123,6 +135,44 @@
 
     <p class="t-control-note" data-result-note aria-live="polite" data-hm-guide-target="market-live-status">Loading the list...</p>
   </div>
+
+  {#- Size and movement. Two questions the exchange price cannot answer on its own:
+      how big is this coin next to the others, and has it been going up or down for
+      longer than today. Every label is written for somebody who has never read a
+      market page — "The biggest coins", not "Large cap". -#}
+  <div class="t-controls" data-hm-part="Filters for how big a coin is and how it has moved">
+    <div class="t-segment" role="radiogroup" aria-label="How big the coin is">
+      <button type="button" role="radio" data-size="any" aria-checked="true">Any size</button>
+      <button type="button" role="radio" data-size="large" aria-checked="false">The biggest</button>
+      <button type="button" role="radio" data-size="mid" aria-checked="false">Medium</button>
+      <button type="button" role="radio" data-size="small" aria-checked="false">Smaller</button>
+    </div>
+
+    <div class="t-segment" role="radiogroup" aria-label="Which way the price moved">
+      <button type="button" role="radio" data-move="any" aria-checked="true">Any move</button>
+      <button type="button" role="radio" data-move="up" aria-checked="false">Went up</button>
+      <button type="button" role="radio" data-move="down" aria-checked="false">Went down</button>
+    </div>
+
+    <div class="t-segment" role="radiogroup" aria-label="Over how long">
+      <button type="button" role="radio" data-move-window="24h" aria-checked="true">1 day</button>
+      <button type="button" role="radio" data-move-window="7d" aria-checked="false">1 week</button>
+      <button type="button" role="radio" data-move-window="30d" aria-checked="false">1 month</button>
+      <button type="button" role="radio" data-move-window="90d" aria-checked="false">3 months</button>
+    </div>
+
+    <p class="t-control-note">
+      Size and longer moves come from CoinMarketCap and are refreshed once a day. They
+      describe the market only. They have nothing to do with whether a coin is Shariah
+      screened, and they are not advice.
+    </p>
+  </div>
+
+  {#- Both of these are full-width blocks about the list as a whole, so they sit after
+      the control row rather than inside it. The notice says how the selected standard
+      reached its answer; the strip says how the whole market is behaving today. -#}
+  {% include "hilal/partials/automated_methodology_notice.html" %}
+  {% include "hilal/partials/market_sentiment_strip.html" %}
 
   <div class="t-banner" data-tone="error" data-quote-error hidden role="alert">
     <span data-icon="alert" data-icon-class="icon"></span>
@@ -150,6 +200,8 @@
           <th scope="col">Shariah status</th>
           <th scope="col"><button type="button" data-sort="price">Price <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
           <th scope="col"><button type="button" data-sort="change">24h change <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
+          <th scope="col"><button type="button" data-sort="change30d">30d change <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
+          <th scope="col"><button type="button" data-sort="marketcap">Size <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
           <th scope="col"><button type="button" data-sort="volume">24h volume <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
           <th scope="col"><span class="sr-only">Actions</span></th>
         </tr>
@@ -218,4 +270,4 @@
 {% include "hilal/dashboard_test/partials/favorites_dialog.html" %}
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20260825-brain-agent-dock"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20260831-auth-one-screen"></script>{% endblock %}

@@ -49,6 +49,13 @@
   </div>
   {% endif %}
   {% if passport.main_qualification %}<div class="notice notice-warning"><span data-icon="alert" data-icon-class="icon"></span><div><strong>Main qualification</strong><p>{{ passport.main_qualification }}</p></div></div>{% endif %}
+  {#- This page shows a *past* version of a Passport, reached from the version list. A
+      historical record of a machine reading is still a machine reading, and somebody
+      comparing an old version with the current one is exactly the reader who must not
+      mistake one for a reviewed decision. -#}
+  {% with automated_methodology_selected = passport.assessment.methodology_code == automated_methodology_code %}
+    {% include "hilal/partials/automated_methodology_notice.html" %}
+  {% endwith %}
   <div class="row wrap passport-summary-actions">
     <a class="btn btn-secondary" href="/dashboard/market"><span data-icon="arrow" data-icon-class="icon"></span>Back to market</a>
     {% if passport.can_create_watch_plan %}<a class="btn btn-primary" href="{{ monitor_path }}?asset={{ passport.assessment.canonical_asset }}"><span data-icon="radar" data-icon-class="icon"></span>Create Watchlist</a>{% else %}<span class="badge badge-review">New Watchlist unavailable</span>{% endif %}
@@ -136,4 +143,4 @@
 <section class="passport-section"><article class="panel"><div class="panel-head"><div><span class="kicker">Report a factual issue</span><h2>Something looks wrong?</h2><p>Your report opens a review item. It never changes a published status automatically.</p></div></div><form class="passport-problem-form stack" data-passport-problem-form data-canonical-asset-id="{{ passport.identity.canonical_asset_id }}"><input type="hidden" name="passport_version_id" value="{{ passport.passport_version_id or '' }}"><label class="field"><span>Issue type</span><span class="passport-select-control"><select class="select" name="report_type" required><option value="wrong_asset_identity">Wrong asset identity</option><option value="broken_source">Broken source</option><option value="outdated_evidence">Outdated evidence</option><option value="incorrect_qualification">Incorrect qualification</option><option value="status_disagreement">Status disagreement</option><option value="other">Other factual issue</option></select><span data-icon="chevron" data-icon-class="icon-sm"></span></span></label><label class="field"><span>What should we review?</span><textarea class="textarea" name="details" minlength="20" maxlength="5000" rows="4" required></textarea></label><div class="row wrap"><button class="btn btn-secondary" type="submit">Report a problem</button><span class="field-help" data-passport-problem-status aria-live="polite"></span></div></form></article></section>
 {% endif %}
 {% endblock %}
-{% block page_scripts %}<script src="{{ url_for('static', path='/passport-page.js') }}?v=20260825-brain-agent-dock"></script>{% endblock %}
+{% block page_scripts %}<script src="{{ url_for('static', path='/passport-page.js') }}?v=20260831-auth-one-screen"></script>{% endblock %}

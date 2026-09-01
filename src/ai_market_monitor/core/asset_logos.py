@@ -70,14 +70,43 @@ class AssetLogo:
     #: Present for far more coins than the catalogue covers, and the only source for a
     #: small or newly listed token.
     image_url: str | None
+    #: The market-data provider's own picture for this coin, gathered by the coin
+    #: researcher. Sits between the two because of *how each one is addressed*: a
+    #: verified identity is this exact coin; a provider logo is this exact coin as the
+    #: provider resolved the symbol; the catalogue is addressed by ticker alone, so two
+    #: different coins sharing a ticker get the same file. Specific before generic.
+    provider_url: str | None = None
     #: The shared icon catalogue, addressed by ticker. Covers the well-known coins.
-    module_url: str | None
+    module_url: str | None = None
 
     @property
     def sources(self) -> tuple[str, ...]:
-        """Every address to try, best first. Empty when only the monogram is available."""
+        """Every address to try, best first. Empty when only the monogram is available.
 
-        return tuple(url for url in (self.image_url, self.module_url) if url)
+        Deduplicated, because the same address arriving from two records must not be
+        retried — a failed load costs a network round trip, and trying it twice doubles
+        the wait before the next source is reached.
+        """
+
+        seen: dict[str, None] = {}
+        for url in (self.image_url, self.provider_url, self.module_url):
+            if url:
+                seen.setdefault(url, None)
+        return tuple(seen)
+
+    @property
+    def picture_url(self) -> str | None:
+        """The best real photograph of this coin, or ``None``.
+
+        "Real" means a picture of *this coin*, so the ticker-keyed catalogue is not in
+        it — that address is resolved separately in the browser and is a different kind
+        of answer. This is what a caller should put in a payload field named
+        ``logo_url``; reaching for ``image_url`` there quietly means "the verified one
+        only", which is how a coin with a perfectly good provider logo ends up drawn as
+        three letters.
+        """
+
+        return self.image_url or self.provider_url
 
 
 def asset_logo_module_url(symbol: str) -> str | None:
@@ -107,12 +136,37 @@ def asset_logo(symbol: str, provider_ids: Any = None) -> AssetLogo:
         ticker=ticker,
         monogram=(ticker or str(symbol or "").upper())[:_MONOGRAM_LETTERS] or "?",
         image_url=stored_logo_url(provider_ids),
+        provider_url=provider_logo_url(provider_ids),
         module_url=f"{LOGO_CATALOG}/{ticker}.svg.js" if ticker else None,
     )
 
 
+#: Where the verified-identity picture is recorded on an asset.
+IDENTITY_LOGO_FIELD = "logo_url"
+
+#: Where the market-data provider's picture is recorded on an asset.
+#:
+#: A **separate key**, deliberately. Two different jobs write a coin's picture — identity
+#: discovery, and the coin researcher — and if both wrote ``logo_url`` whichever ran last
+#: would silently replace the other's answer. Keeping them apart means the order they are
+#: tried in is decided here, once, rather than by whichever job happened to run second.
+PROVIDER_LOGO_FIELD = "coinmarketcap_logo_url"
+
+
 def stored_logo_url(provider_ids: Any) -> str | None:
-    """The picture recorded on an asset, if there is a usable one.
+    """The picture recorded on an asset when a reviewer verified its identity."""
+
+    return _https_url(provider_ids, IDENTITY_LOGO_FIELD)
+
+
+def provider_logo_url(provider_ids: Any) -> str | None:
+    """The picture the market-data provider publishes for this coin."""
+
+    return _https_url(provider_ids, PROVIDER_LOGO_FIELD)
+
+
+def _https_url(provider_ids: Any, field: str) -> str | None:
+    """One stored address, if there is a usable one.
 
     Only ``https`` is accepted. A stored value that is blank, relative, or plain
     ``http`` is treated as absent rather than written into the page: a mixed-content
@@ -122,7 +176,7 @@ def stored_logo_url(provider_ids: Any) -> str | None:
 
     if not isinstance(provider_ids, dict):
         return None
-    url = str(provider_ids.get("logo_url") or "").strip()
+    url = str(provider_ids.get(field) or "").strip()
     return url if url.lower().startswith("https://") else None
 
 

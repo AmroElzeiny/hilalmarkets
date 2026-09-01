@@ -18,9 +18,10 @@ from tests.unit.test_setup_observability import _seed_lifecycle, _seed_monitor
 
 async def _signup(test_context, email: str) -> None:
     started = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data={
             "email": email,
+            "display_name": "Test Person",
             "password": "CorrectHorse123!",
             "repeat_password": "CorrectHorse123!",
         },

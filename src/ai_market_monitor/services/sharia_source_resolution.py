@@ -52,6 +52,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -63,6 +64,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import CanonicalAsset, OfficialSource, ReviewCase
 from ai_market_monitor.db.models.enums import ReviewCaseType
+from ai_market_monitor.services.coinmarketcap import (
+    CoinLinks,
+    CoinMarketCapClient,
+    CoinMarketCapError,
+)
 from ai_market_monitor.services.sharia_page_render import (
     RETRYABLE_WITH_BROWSER,
     BrowserPageRenderer,
@@ -74,8 +80,8 @@ from ai_market_monitor.services.sharia_page_render import (
 from ai_market_monitor.services.sharia_research import (
     OfficialEvidenceFetcher,
     ShariaResearchError,
-    _extract_document,
     extract_dates,
+    extract_document,
 )
 from ai_market_monitor.services.sharia_source_activity import (
     SourceActivity,
@@ -112,6 +118,24 @@ from ai_market_monitor.services.sharia_source_catalog import (
 from ai_market_monitor.services.sharia_source_discovery import WebSourceDiscovery
 
 logger = logging.getLogger(__name__)
+
+
+def _provider_link_fields(record: CoinLinks) -> dict[str, tuple[str, ...]]:
+    """Reshape a provider record into the field names the catalog understands.
+
+    The provider's own vocabulary stops here. ``sharia_source_catalog`` never learns
+    that CoinMarketCap calls a whitepaper ``technical_doc``.
+    """
+
+    return {
+        "website": record.website,
+        "whitepaper": record.whitepaper,
+        "source_code": record.source_code,
+        "announcement": record.announcement,
+        "message_board": record.message_board,
+        "reddit": record.reddit,
+        "chat": record.chat,
+    }
 
 __all__ = [
     "CANDIDATE",
@@ -297,6 +321,7 @@ class SourceResolutionService:
         discovery: WebSourceDiscovery | None = None,
         renderer: BrowserPageRenderer | None = None,
         ai_discovery: AISourceDiscovery | None = None,
+        coinmarketcap: CoinMarketCapClient | None = None,
         now: datetime | None = None,
         force_recheck: bool = False,
     ) -> None:
@@ -309,6 +334,15 @@ class SourceResolutionService:
         self.renderer = renderer or BrowserPageRenderer(settings)
         #: The last way of finding one, for a coin every free layer gave up on.
         self.ai_discovery = ai_discovery or AISourceDiscovery(settings)
+        #: A market-data provider's record of where each project publishes. It runs
+        #: second, right after the curated links, because it usually answers every
+        #: category outright — which is what stops the searching, the guessed ``/blog``
+        #: and the paid model question from ever being needed for that coin.
+        self.coinmarketcap = coinmarketcap or CoinMarketCapClient(settings)
+        #: Provider records already fetched in this sweep, keyed by symbol. One call
+        #: carries a hundred coins, so this is the difference between a few credits for
+        #: a whole sweep and one credit per coin.
+        self._provider_cache: dict[str, dict[str, tuple[str, ...]]] = {}
         self._now = now
         #: Ignore the recheck calendar and fetch everything. The scheduled sweep never
         #: does this — it exists for the operator's full re-check, which is the only
@@ -779,7 +813,10 @@ class SourceResolutionService:
 
         channel_links: tuple[str, ...] = ()
         search_results: tuple[SearchResult, ...] = ()
-        if layer is DiscoveryLayer.SOCIAL:
+        provider_links: dict[str, tuple[str, ...]] | None = None
+        if layer is DiscoveryLayer.PROVIDER:
+            provider_links = await self._provider_links(asset.symbol)
+        elif layer is DiscoveryLayer.SOCIAL:
             channel_links = await self.discovery.channel_links(asset.official_website)
         elif layer is DiscoveryLayer.SEARCH:
             search_results = await self.discovery.search(
@@ -800,7 +837,66 @@ class SourceResolutionService:
             official_documentation=asset.official_documentation,
             channel_links=channel_links,
             search_results=search_results,
+            provider_links=provider_links,
         )
+
+    async def _provider_links(self, symbol: str) -> dict[str, tuple[str, ...]]:
+        """What the market-data provider holds for this coin.
+
+        Answers from a per-sweep cache, because one provider call carries up to a
+        hundred coins: a sweep that pre-loads its symbols spends a few credits for the
+        whole run instead of one per coin. A coin the cache does not hold is fetched on
+        its own, which is correct but expensive, so ``preload_provider_links`` exists
+        for callers that know their list up front.
+
+        Never raises. The provider being down, switched off, or not carrying the
+        endpoint all mean the same thing here: this layer offers nothing and the layers
+        below it run exactly as they did before this integration existed.
+        """
+
+        key = symbol.strip().upper()
+        if key in self._provider_cache:
+            return self._provider_cache[key]
+        if self.coinmarketcap is None or not self.coinmarketcap.enabled:
+            return {}
+        try:
+            found = await self.coinmarketcap.coin_links([key])
+        except CoinMarketCapError as exc:
+            logger.info("provider_links_unavailable", extra={"symbol": key, "reason": exc.code})
+            self._provider_cache[key] = {}
+            return {}
+        for held_symbol, record in found.items():
+            self._provider_cache[held_symbol] = _provider_link_fields(record)
+        self._provider_cache.setdefault(key, {})
+        return self._provider_cache[key]
+
+    async def preload_provider_links(self, symbols: Sequence[str]) -> int:
+        """Fetch many coins' provider records in one call, before a sweep starts.
+
+        Returns how many coins the provider answered for. A sweep that calls this pays
+        single-figure credits for hundreds of coins; one that does not still works, one
+        credit at a time.
+        """
+
+        if self.coinmarketcap is None or not self.coinmarketcap.enabled:
+            return 0
+        wanted = [
+            s.strip().upper()
+            for s in symbols
+            if s and s.strip() and s.strip().upper() not in self._provider_cache
+        ]
+        if not wanted:
+            return 0
+        try:
+            found = await self.coinmarketcap.coin_links(wanted)
+        except CoinMarketCapError as exc:
+            logger.info("provider_preload_unavailable", extra={"reason": exc.code})
+            return 0
+        for symbol, record in found.items():
+            self._provider_cache[symbol] = _provider_link_fields(record)
+        for symbol in wanted:
+            self._provider_cache.setdefault(symbol, {})
+        return len(found)
 
     async def _run_layer(
         self,
@@ -994,7 +1090,7 @@ class SourceResolutionService:
         """
 
         try:
-            _title, headings, text = _extract_document(
+            _title, headings, text = extract_document(
                 body, row.source_url, content_type=content_type
             )
         except Exception as exc:  # noqa: BLE001 - an unreadable page is an answer

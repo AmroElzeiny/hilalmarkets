@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.person_name import greeting_name
 from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
 from ai_market_monitor.core.site_content import (
     PUBLIC_PAGES,
@@ -857,12 +858,17 @@ class PublicChatService:
                 )
             )
             ai_state = _public_ai_state(state)
+            # A name the visitor gave this conversation wins over the one on the account,
+            # and both go through the one rule that refuses an email address.
             if payload.profile is not None:
-                ai_state["visitor_profile"] = {"name": payload.profile.name.split()[0][:80]}
+                visitor_name = greeting_name(payload.profile.name)
+                if visitor_name:
+                    ai_state["visitor_profile"] = {"name": visitor_name}
             if user_id is not None and not (ai_state.get("visitor_profile") or {}).get("name"):
                 user = await self.session.get(User, user_id)
-                if user is not None and user.display_name:
-                    ai_state["visitor_profile"] = {"name": user.display_name.split()[0][:80]}
+                account_name = greeting_name(user.display_name) if user is not None else ""
+                if account_name:
+                    ai_state["visitor_profile"] = {"name": account_name}
             allowed_tools = ["public_passport"]
             if user_id is not None:
                 allowed_tools.extend(

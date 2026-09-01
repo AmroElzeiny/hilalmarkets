@@ -125,7 +125,7 @@ async def test_the_pricing_page_offers_no_annual_checkout(test_context: dict) ->
 
 async def _signup(test_context: dict, email: str) -> None:
     response = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data={
             "email": email,
             "display_name": "Launch Offer Test",

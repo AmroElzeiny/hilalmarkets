@@ -126,9 +126,10 @@ def _first_rule(node):
 async def _signup(test_context, email: str) -> None:
     client = test_context["client"]
     response = await client.post(
-        "/signup",
+        "/signup/password",
         data={
             "email": email,
+            "display_name": "Test Person",
             "password": "CorrectHorse123!",
             "repeat_password": "CorrectHorse123!",
         },

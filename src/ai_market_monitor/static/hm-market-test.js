@@ -60,6 +60,11 @@ function start(root) {
     exchange: root.dataset.exchange || "binance",
     quote: root.dataset.quote || "USDT",
     filter: "all",
+    // "any" | "large" | "mid" | "small" — how big the coin is.
+    size: "any",
+    // "any" | "up" | "down", read over `moveWindow`.
+    move: "any",
+    moveWindow: "24h",
     view: "cards",
     search: searchInput ? searchInput.value : "",
     sort: { key: "volume", direction: "desc" },
@@ -142,6 +147,8 @@ function start(root) {
       <td><span class="t-pill" data-status data-tone="neutral"><span data-status-icon></span><span data-status-text></span></span></td>
       <td class="t-num" data-price>--</td>
       <td class="t-num"><span class="t-change" data-change data-direction="flat"><span data-icon="trend_flat" data-icon-class="icon-sm"></span><span data-change-value>--</span></span></td>
+      <td class="t-num" data-change-30d>--</td>
+      <td class="t-num" data-marketcap>--</td>
       <td class="t-num" data-volume>--</td>
       <td>
         <span class="t-row-actions">
@@ -243,6 +250,27 @@ function start(root) {
       full.setAttribute("aria-label", `Open the full ${asset} Passport`);
     } else {
       node.querySelector("[data-volume]").textContent = formatCompact(item.quote_volume_24h);
+      // "Not known" rather than a dash and rather than a zero. A coin the market-data
+      // provider has never measured has no size; drawing "0" would say it is worthless,
+      // which is a claim nobody made.
+      const thirtyDay = node.querySelector("[data-change-30d]");
+      if (thirtyDay) {
+        thirtyDay.textContent = isFiniteNumber(item.percentage_30d)
+          ? `${item.percentage_30d > 0 ? "+" : ""}${item.percentage_30d.toFixed(1)}%`
+          : "Not known";
+        thirtyDay.dataset.direction = isFiniteNumber(item.percentage_30d)
+          ? item.percentage_30d > 0 ? "up" : item.percentage_30d < 0 ? "down" : "flat"
+          : "flat";
+      }
+      const size = node.querySelector("[data-marketcap]");
+      if (size) {
+        size.textContent = isFiniteNumber(item.market_cap_usd)
+          ? formatCompact(item.market_cap_usd)
+          : "Not known";
+        size.title = isFiniteNumber(item.market_rank)
+          ? `Number ${item.market_rank} by size across the whole market`
+          : "";
+      }
       node.querySelector("[data-quick-label]").textContent = `See the Shariah evidence for ${asset}`;
       node.querySelector("[data-full-label]").textContent = `Open the full ${asset} Passport`;
       priceNode.title = trustworthy
@@ -318,20 +346,65 @@ function start(root) {
     return true;
   }
 
+  /* ── Size and movement ──────────────────────────────────────────────────────
+   *
+   * Everything above answers "is this coin allowed". These answer "is this coin
+   * big, and has it been going up" — the two things a beginner asks next, and the
+   * two an exchange ticker cannot say on its own.
+   *
+   * Every rule here treats a missing number as "does not match" rather than as
+   * zero. A coin the market-data provider has never heard of must not appear under
+   * "the smallest coins" simply because nobody has measured it.
+   */
+  const SIZE_BANDS = {
+    large: (value) => value >= 10e9,
+    mid: (value) => value >= 1e9 && value < 10e9,
+    small: (value) => value < 1e9,
+  };
+
+  const MOVE_FIELDS = {
+    "24h": "percentage_24h",
+    "7d": "percentage_7d",
+    "30d": "percentage_30d",
+    "90d": "percentage_90d",
+  };
+
+  function matchesSize(item) {
+    if (state.size === "any") return true;
+    const test = SIZE_BANDS[state.size];
+    return Boolean(test) && isFiniteNumber(item.market_cap_usd) && test(item.market_cap_usd);
+  }
+
+  function matchesMove(item) {
+    if (state.move === "any") return true;
+    const value = item[MOVE_FIELDS[state.moveWindow] || "percentage_24h"];
+    if (!isFiniteNumber(value)) return false;
+    return state.move === "up" ? value > 0 : value < 0;
+  }
+
   function sortValue(item) {
     if (state.sort.key === "symbol") return String(item.canonical_asset || "");
-    if (state.sort.key === "price") {
-      return isFiniteNumber(item.last) ? item.last : Number.NEGATIVE_INFINITY;
+    // Rank counts upwards from the biggest coin, so rank 1 must sort as the largest
+    // value, not the smallest. Read straight it put Bitcoin last under "highest first".
+    if (state.sort.key === "rank") {
+      return isFiniteNumber(item.market_rank) ? -item.market_rank : Number.NEGATIVE_INFINITY;
     }
-    if (state.sort.key === "change") {
-      return isFiniteNumber(item.percentage_24h) ? item.percentage_24h : Number.NEGATIVE_INFINITY;
-    }
-    return isFiniteNumber(item.quote_volume_24h) ? item.quote_volume_24h : Number.NEGATIVE_INFINITY;
+    const field = {
+      price: "last",
+      change: "percentage_24h",
+      change7d: "percentage_7d",
+      change30d: "percentage_30d",
+      change90d: "percentage_90d",
+      marketcap: "market_cap_usd",
+      volume: "quote_volume_24h",
+    }[state.sort.key] || "quote_volume_24h";
+    return isFiniteNumber(item[field]) ? item[field] : Number.NEGATIVE_INFINITY;
   }
 
   function visibleItems() {
     const list = Array.from(items.values()).filter(
-      (item) => matchesSearch(item) && matchesFilter(item),
+      (item) =>
+        matchesSearch(item) && matchesFilter(item) && matchesSize(item) && matchesMove(item),
     );
     const factor = state.sort.direction === "asc" ? 1 : -1;
     return list.sort((left, right) => {
@@ -600,6 +673,24 @@ function start(root) {
     });
   });
 
+  /* The size and movement pickers. Each is a radio group over one state field, so
+   * adding a band means adding a button — never a second copy of this handler. */
+  [
+    ["[data-size]", "size", (button) => button.dataset.size],
+    ["[data-move]", "move", (button) => button.dataset.move],
+    ["[data-move-window]", "moveWindow", (button) => button.dataset.moveWindow],
+  ].forEach(([selector, field, read]) => {
+    root.querySelectorAll(selector).forEach((button) => {
+      button.addEventListener("click", () => {
+        state[field] = read(button);
+        root.querySelectorAll(selector).forEach((other) => {
+          other.setAttribute("aria-checked", String(other === button));
+        });
+        applyView();
+      });
+    });
+  });
+
   root.querySelectorAll("[data-exchange]").forEach((button) => {
     button.addEventListener("click", () => {
       if (state.exchange === button.dataset.exchange) return;
@@ -672,9 +763,21 @@ function start(root) {
   root.querySelector("[data-clear-filters]")?.addEventListener("click", () => {
     state.search = "";
     state.filter = "all";
+    // The size and movement pickers are cleared here too. Leaving them set is what
+    // makes "Show all screened coins" show an empty list and look broken: a person
+    // who filtered to small coins that fell this quarter, then searched, sees nothing
+    // and presses the button that promises everything.
+    state.size = "any";
+    state.move = "any";
     if (searchInput) searchInput.value = "";
     root.querySelectorAll("[data-filter]").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.filter === "all"));
+    });
+    root.querySelectorAll("[data-size]").forEach((button) => {
+      button.setAttribute("aria-checked", String(button.dataset.size === "any"));
+    });
+    root.querySelectorAll("[data-move]").forEach((button) => {
+      button.setAttribute("aria-checked", String(button.dataset.move === "any"));
     });
     applyView();
   });

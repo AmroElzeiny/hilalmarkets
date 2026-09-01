@@ -33,6 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.person_name import greeting_name
 from ai_market_monitor.db.models import (
     HilalChatConversation,
     HilalChatMessage,
@@ -564,11 +565,11 @@ class HilalChatService:
 def _first_name(user: User) -> str | None:
     """Something to call them, if we have anything.
 
-    Never their email address. Greeting somebody by the local part of their email reads
-    as a machine that has their details rather than a person who knows them.
+    ``None`` rather than an empty string, because the agent is told "use their name if
+    you have it" and an empty string is a name it would try to use.
+
+    The rule — never an email address, first word only — lives in
+    :mod:`ai_market_monitor.core.person_name`, with every other greeting in the product.
     """
 
-    full = (user.display_name or "").strip()
-    if not full:
-        return None
-    return full.split()[0][:40]
+    return greeting_name(user.display_name) or None

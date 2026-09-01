@@ -115,7 +115,7 @@ def _enable_whatsapp_test_routes(test_context, settings: Settings) -> None:
 
 async def _signup(test_context, email: str) -> None:
     response = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data={
             "email": email,
             "display_name": "WhatsApp User",

@@ -46,6 +46,13 @@ htmlcov/
 *.sqlite3-wal
 *.sqlite3-shm
 data/
+# ...but not the Shariah import pack's own data. Every published halal status traces
+# back to a row in there, and `data/` was silently excluding all of it: the three
+# authority datasets, the guard rows, the Passport seeds, the enrichment queue and the
+# methodology definitions. Only the pack's docs, schemas, scripts, manifest and
+# checksums were committed — checksums that referenced files git did not hold. A fresh
+# clone could not run the import or its tests at all.
+!HilalMarkets_Sharia_Methodology_Import_Pack/HilalMarkets_Sharia_Methodology_Import_Pack/data/
 instance/
 var/
 tmp/
@@ -101,3 +108,6 @@ Thumbs.db
 # Vvveb local SQLite storage
 VvvebJs/storage/sqlite/*
 !VvvebJs/storage/sqlite/.htaccess
+
+# The blind probe records its last control score here. A measurement, not source.
+.automated-screen-control-result.json

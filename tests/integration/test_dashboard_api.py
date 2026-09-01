@@ -109,7 +109,7 @@ class DashboardUnavailableRangeProvider(DashboardFakeMarketProvider):
 async def _signup(test_context, email: str = "dashboard-api@example.com") -> None:
     client = test_context["client"]
     response = await client.post(
-        "/signup",
+        "/signup/password",
         data={
             "email": email,
             "display_name": "Dashboard API",

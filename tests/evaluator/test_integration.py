@@ -1,4 +1,4 @@
-﻿import json
+import json
 
 from ai_market_monitor.api.routers.dashboard_api import get_ai_setup_chat_service
 from ai_market_monitor.services.ai_setup_chat import AISetupChatService
@@ -16,9 +16,10 @@ from tests.integration.test_setup_chat_launch_v2 import (
 async def _signup(test_context, email: str) -> None:
     client = test_context["client"]
     response = await client.post(
-        "/signup",
+        "/signup/password",
         data={
             "email": email,
+            "display_name": "Test Person",
             "password": "CorrectHorse123!",
             "repeat_password": "CorrectHorse123!",
         },

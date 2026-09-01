@@ -1,7 +1,9 @@
 import asyncio
 import hmac
+import json
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from html import escape as html_escape
 from pathlib import Path
 from typing import Any, Final, Literal, cast
 from urllib.parse import urlencode
@@ -19,6 +21,7 @@ from ai_market_monitor.api.template_env import register as register_template_hel
 from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.core.auth_pages import (
     CODE_RESEND_SECONDS,
+    PRODUCT_PROMISES,
     alert_for,
     browser_password_rules,
     page_copy,
@@ -133,8 +136,10 @@ from ai_market_monitor.services.coverage import market_coverage_for_user
 from ai_market_monitor.services.dashboard_links import DashboardLinkError, DashboardLinkService
 from ai_market_monitor.services.email_delivery import EmailDeliveryError
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
+from ai_market_monitor.services.google_oauth import GoogleOAuthError, GoogleOAuthService
 from ai_market_monitor.services.interfaces import MarketDataProvider, RecentMarketPreviewer
 from ai_market_monitor.services.lifecycle_dashboard import lifecycle_cards
+from ai_market_monitor.services.market_sentiment import MarketSentimentService
 from ai_market_monitor.services.monitor_operations import (
     MonitorOperationError,
     MonitorOperationService,
@@ -929,6 +934,11 @@ async def _auth_context(
     message = request.query_params.get("message")
     error = request.query_params.get("error")
     email = (request.query_params.get("email") or "").strip()
+    # The name travels with the address between the three sign-up screens, so a refusal
+    # on any of them hands both back rather than making somebody type their name again.
+    # It is capped at the length the server accepts, because a query string is the one
+    # input anybody can edit by hand.
+    name = (request.query_params.get("name") or "").strip()[:60]
     copy = page_copy(page, has_email=bool(email), code_sent=message == "code_sent")
 
     selected_plan_code, selected_billing_interval = _subscription_selection(
@@ -958,6 +968,15 @@ async def _auth_context(
         ("reset_password", "enter"): "/reset-password/request",
     }
 
+    # The Google door. It is offered on the two pages where it is a way *in* — never on
+    # the confirm step or the reset step, where the person is mid-way through something
+    # and a second door would only lose their place. `google_signin_enabled` is the one
+    # owner of "is this configured": a button that opens a window and then fails is
+    # worse than no button, which is why the page never decides this for itself.
+    google_query = dict(auth_query)
+    google_query["mode"] = "signup" if page == "signup" else "signin"
+    google_available = settings.google_signin_enabled and page in {"signup", "signin"}
+
     return await _context(
         request=request,
         session=session,
@@ -968,6 +987,7 @@ async def _auth_context(
         auth=copy,
         auth_resend_action=resend_actions.get((page, copy.state), ""),
         auth_email=email,
+        auth_name=name,
         auth_links=links,
         auth_alert=alert_for(
             page=page,
@@ -980,6 +1000,14 @@ async def _auth_context(
         auth_code_ttl_minutes=settings.auth_code_ttl_minutes,
         auth_code_resend_seconds=CODE_RESEND_SECONDS,
         auth_code_max_attempts=settings.auth_code_max_attempts,
+        # The three ticks under the button. Owned by `core/auth_pages.py` so the page
+        # cannot invent a fourth promise, and so the copy rules can read them.
+        auth_promises=PRODUCT_PROMISES,
+        auth_google_enabled=google_available,
+        auth_google_href=f"/auth/google/start?{urlencode(google_query)}",
+        auth_google_label=(
+            "Sign up with Google" if page == "signup" else "Sign in with Google"
+        ),
         support_email=settings.support_email,
     )
 
@@ -1067,6 +1095,10 @@ async def _builder_screening_context(
         "configured": methodology is not None,
         "methodology_name": methodology.name if methodology else None,
         "methodology_version": methodology.version if methodology else None,
+        # The builder banner used to carry only the name. A name cannot tell a person
+        # whether the standard behind their monitor is an authority's decision or a
+        # machine reading websites, and the template needs the code to ask.
+        "methodology_code": methodology.code if methodology else None,
         "policy": (
             {
                 "universe_mode": "eligible_market",
@@ -1145,11 +1177,77 @@ async def signup_page(
 
 @router.post("/signup", include_in_schema=False)
 async def signup_submit(
-    request: Request,
-    first_name: str = Form(default=""),
-    last_name: str = Form(default=""),
-    display_name: str | None = Form(default=None),
+    display_name: str = Form(default=""),
     email: str = Form(...),
+    telegram_link: str | None = Form(None),
+    plan_code: str | None = Form(None),
+    billing_interval: str | None = Form(None),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Step one of three: who they are and where to reach them.
+
+    It only checks. Nothing is written and no code is sent, so a person who changes
+    their mind here has left nothing behind. The point of asking on its own is that
+    "you already have an account" arrives now, rather than after somebody has invented
+    and re-typed a password they will never use.
+
+    The name is checked here too, on the screen it was typed on. A name refused later
+    would send somebody back past a password they had already chosen, to a box they
+    could no longer see.
+    """
+
+    clean_name = display_name.strip()[:60]
+    query: dict[str, str] = {"email": email}
+    # Only when there is one. An empty `name=` hanging off the address is noise in a bar
+    # the person can read, and it is the difference these routes' tests assert on.
+    if clean_name:
+        query["name"] = clean_name
+    query.update(_subscription_query(plan_code, billing_interval))
+    if telegram_link:
+        query["telegram_link"] = telegram_link
+    try:
+        await WebAuthService(session, settings).check_signup_details(
+            email=email,
+            display_name=display_name,
+        )
+    except WebAuthError as exc:
+        # The name and the address come back with the refusal. Without them a person
+        # whose email was already taken landed on an empty form and typed it all again.
+        query["error"] = getattr(exc, "code", "invalid_email")
+        return _redirect(f"/signup?{urlencode(query)}")
+    return _redirect(f"/signup/password?{urlencode(query)}")
+
+
+@router.get("/signup/password", response_class=HTMLResponse, include_in_schema=False)
+async def signup_password_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if not (request.query_params.get("email") or "").strip():
+        # Nobody can choose a password for an address they have not given us. Arriving
+        # here without one is a link somebody kept, not a step in the journey.
+        return _redirect("/signup")
+    return _no_store(
+        templates.TemplateResponse(
+            request,
+            "auth.html",
+            await _auth_context(
+                request=request,
+                session=session,
+                settings=settings,
+                page="signup_password",
+            ),
+        )
+    )
+
+
+@router.post("/signup/password", include_in_schema=False)
+async def signup_password_submit(
+    request: Request,
+    email: str = Form(...),
+    display_name: str = Form(default=""),
     password: str = Form(...),
     repeat_password: str = Form(...),
     telegram_link: str | None = Form(None),
@@ -1158,6 +1256,18 @@ async def signup_submit(
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
+    """Step two of three: the password, and then the code goes out.
+
+    Every check from step one runs again inside ``request_signup_email_code``. Step one
+    is a courtesy, not a gate — an address that became taken in between is caught here,
+    and so is a name that was edited out of the address bar on the way.
+
+    The name rides through as a hidden field rather than being asked for twice. It is the
+    only thing on this screen the person cannot see, so a refusal about it goes back to
+    step one where the box is.
+    """
+
+    clean_name = display_name.strip()[:60]
     signup_lock = await _signup_lock_for(email)
     async with signup_lock:
         service = WebAuthService(session, settings)
@@ -1167,9 +1277,7 @@ async def signup_submit(
             await service.request_signup_email_code(
                 email=email,
                 password=password,
-                first_name=first_name,
-                last_name=last_name,
-                display_name=display_name,
+                display_name=clean_name,
                 telegram_link=telegram_link,
                 requested_ip=request.client.host if request.client else None,
             )
@@ -1177,21 +1285,31 @@ async def signup_submit(
         except (WebAuthError, EmailDeliveryError) as exc:
             await session.rollback()
             code = getattr(exc, "code", "signup_failed")
-            if code == "code_recently_sent":
-                query = {"message": "code_sent", "email": email}
-                query.update(_subscription_query(plan_code, billing_interval))
-                if telegram_link:
-                    query["telegram_link"] = telegram_link
-                return _redirect(f"/signup/verify?{urlencode(query)}")
-            # The address comes back with the refusal. Without it a person whose email
-            # was already taken landed on an empty form and typed everything again.
             query = {"error": code, "email": email}
+            if clean_name:
+                query["name"] = clean_name
             query.update(_subscription_query(plan_code, billing_interval))
             if telegram_link:
                 query["telegram_link"] = telegram_link
-            return _redirect(f"/signup?{urlencode(query)}")
+            if code == "code_recently_sent":
+                query["message"] = "code_sent"
+                del query["error"]
+                return _redirect(f"/signup/verify?{urlencode(query)}")
+            # A taken address or a refused name is a step-one problem, so it goes back to
+            # step one. Being sent back to the password box to fix an email address or a
+            # name you cannot see is the kind of dead end a person simply gives up at.
+            back = (
+                "/signup"
+                if code in {"account_exists", "invalid_email", "invalid_name"}
+                else "/signup/password"
+            )
+            return _redirect(f"{back}?{urlencode(query)}")
 
+    # The name travels on to step three as well, so "Wrong email? Start again" goes back
+    # to a filled-in form rather than an empty one.
     query = {"message": "code_sent", "email": email}
+    if clean_name:
+        query["name"] = clean_name
     query.update(_subscription_query(plan_code, billing_interval))
     if telegram_link:
         query["telegram_link"] = telegram_link
@@ -1573,6 +1691,196 @@ async def reset_password_verify(
     return _redirect("/signin?message=password_reset_successful")
 
 
+# ---------------------------------------------------------------------------
+# The Google door.
+# ---------------------------------------------------------------------------
+#
+# Two addresses. `/auth/google/start` sends somebody to Google; `/auth/google/callback`
+# is where Google sends them back. Everything between the two is carried in a signed
+# state value rather than in a cookie, because the round trip happens inside a popup
+# window and a cookie written there is not reliably readable by the page underneath.
+
+
+def _google_failure(mode: str, code: str, suffix: str) -> str:
+    """Where a failed Google trip lands, with the plan the person chose still attached."""
+
+    page = "/signup" if mode == "signup" else "/signin"
+    joiner = "&" if suffix else "?"
+    return f"{page}{suffix}{joiner}error={code}"
+
+
+def _google_popup_close(target: str) -> HTMLResponse:
+    """The last thing the popup window does before it disappears.
+
+    It tells the page that opened it where to go and then closes itself. Two things
+    matter here and both are failure modes somebody hits on a real machine: the message
+    is sent to this origin only, and if there is no opener at all — the popup was
+    blocked, so this is an ordinary tab — the page navigates itself instead of closing
+    and leaving a person staring at a blank window.
+    """
+
+    safe_target = html_escape(target, quote=True)
+    return HTMLResponse(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<title>Signing you in</title>"
+        f'<meta http-equiv="refresh" content="0;url={safe_target}">'
+        "</head><body>"
+        "<p>Signing you in…</p>"
+        "<script>(function(){"
+        f'var target={json.dumps(target)};'
+        "try{"
+        "if(window.opener&&!window.opener.closed){"
+        'window.opener.postMessage({source:"hilal-markets-google",target:target},'
+        "window.location.origin);"
+        "window.close();return;}"
+        "}catch(e){}"
+        "window.location.replace(target);"
+        "})();</script>"
+        "</body></html>"
+    )
+
+
+@router.get("/auth/google/start", include_in_schema=False)
+async def google_start(
+    mode: str = Query(default="signin", max_length=20),
+    popup: str = Query(default="", max_length=4),
+    plan_code: str | None = Query(default=None, max_length=20),
+    billing_interval: str | None = Query(default=None, max_length=20),
+    telegram_link: str | None = Query(default=None, max_length=200),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    selected_plan, selected_interval = _subscription_selection(plan_code, billing_interval)
+    auth_query = _subscription_query(selected_plan, selected_interval)
+    if telegram_link:
+        auth_query["telegram_link"] = telegram_link
+    suffix = f"?{urlencode(auth_query)}" if auth_query else ""
+    chosen_mode = "signup" if mode == "signup" else "signin"
+
+    service = GoogleOAuthService(settings)
+    try:
+        state = service.issue_state(
+            {
+                "mode": chosen_mode,
+                "popup": "1" if popup else "",
+                "plan_code": selected_plan or "",
+                "billing_interval": selected_interval or "",
+                "telegram_link": telegram_link or "",
+            }
+        )
+        return _redirect(
+            service.authorization_url(
+                redirect_uri=settings.google_oauth_redirect_uri,
+                state=state,
+            )
+        )
+    except GoogleOAuthError as exc:
+        return _redirect(_google_failure(chosen_mode, exc.code, suffix))
+
+
+@router.get("/auth/google/callback", include_in_schema=False)
+async def google_callback(
+    request: Request,
+    code: str | None = Query(default=None, max_length=2048),
+    state: str | None = Query(default=None, max_length=2048),
+    error: str | None = Query(default=None, max_length=100),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    service = GoogleOAuthService(settings)
+    # The state is read before anything else, because it is the only thing that says
+    # whether this window is a popup and which page the person started on. Without it
+    # even the error has nowhere sensible to go.
+    carried: dict[str, str] = {}
+    try:
+        carried = service.read_state(state or "")
+    except GoogleOAuthError as exc:
+        return _redirect(_google_failure("signin", exc.code, ""))
+
+    mode = carried.get("mode") or "signin"
+    plan_code = carried.get("plan_code") or None
+    billing_interval = carried.get("billing_interval") or None
+    telegram_link = carried.get("telegram_link") or None
+    is_popup = bool(carried.get("popup"))
+    auth_query = _subscription_query(plan_code, billing_interval)
+    if telegram_link:
+        auth_query["telegram_link"] = telegram_link
+    suffix = f"?{urlencode(auth_query)}" if auth_query else ""
+
+    def _finish(target: str) -> Response:
+        return _google_popup_close(target) if is_popup else _redirect(target)
+
+    # Google says "access_denied" when somebody closes its window or presses cancel.
+    # That is not a failure, it is a person changing their mind, and it is worded that
+    # way in `core/auth_pages.py`.
+    if error or not code:
+        failed = "google_cancelled" if error == "access_denied" else "google_unavailable"
+        return _finish(_google_failure(mode, failed, suffix))
+
+    linked_telegram_user_id: str | None = None
+    try:
+        profile = await service.exchange(
+            code=code,
+            redirect_uri=settings.google_oauth_redirect_uri,
+        )
+        auth = WebAuthService(session, settings)
+        user, created = await auth.signin_or_signup_with_google(profile=profile)
+        telegram_connected = False
+        if telegram_link:
+            linked_telegram_user_id = await TelegramAccountLinkService(session, settings).complete(
+                telegram_link, user=user
+            )
+            telegram_connected = True
+        cookie = await auth.create_session(user, user_agent=request.headers.get("user-agent"))
+        if created:
+            # The same counter the six-digit door writes. An account is an account
+            # however the person got here, and a door that did not count would quietly
+            # under-report every Google sign-up on the Stats page.
+            await SiteAnalyticsService(session, settings).record_signup(
+                user_id=user.id,
+                remote_address=(
+                    (request.headers.get("cf-connecting-ip") or "").strip()
+                    or (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
+                    or (request.client.host if request.client else "unknown")
+                ),
+                user_agent=request.headers.get("user-agent", ""),
+                context={"door": "google", "plan_code": plan_code or ""},
+            )
+        await session.commit()
+    except (GoogleOAuthError, WebAuthError, TelegramAccountLinkError) as exc:
+        await session.rollback()
+        return _finish(
+            _google_failure(mode, getattr(exc, "code", "google_unavailable"), suffix)
+        )
+
+    if created:
+        await AdminNotificationService(settings).send_signup_created(
+            user_id=user.id,
+            email=profile.email,
+            source="google",
+        )
+    await _send_telegram_connected_notification(session, settings, linked_telegram_user_id)
+    default_message = "account_created" if created else "login_successful"
+    if telegram_connected:
+        default_message = "telegram_connected"
+    response = _finish(
+        _subscription_destination(
+            settings,
+            plan_code=plan_code,
+            billing_interval=billing_interval,
+            default_message=default_message,
+        )
+    )
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        cookie,
+        httponly=True,
+        secure=settings.is_deployed,
+        samesite="lax",
+        max_age=30 * 24 * 60 * 60,
+    )
+    return response
+
+
 @router.post("/logout", include_in_schema=False)
 async def logout(
     request: Request,
@@ -1829,6 +2137,13 @@ async def screened_market_context(
     def market_page_url(target_page: int) -> str:
         return f"{base_path}?" + urlencode([*market_query, ("page", str(target_page))])
 
+    # How the whole market is behaving today. Everything else on this page answers a
+    # question about one coin; a reader watching one coin fall cannot otherwise tell
+    # whether that coin is in trouble or whether everything fell together. Cached
+    # process-wide and never allowed to fail the page — an unavailable reading renders
+    # as unavailable rather than as a stale number presented as current.
+    market_sentiment = await MarketSentimentService(settings).read()
+
     return await _context(
         request=request,
         session=session,
@@ -1836,6 +2151,7 @@ async def screened_market_context(
         user=user,
         page="screened_market",
         title="Halal Assets",
+        market_sentiment=market_sentiment,
         screened=screened,
         methodologies=methodologies,
         selected_methodology_id=selected_methodology_id,
@@ -3819,7 +4135,10 @@ async def affiliate_apply(
         # second receipt rather than being swallowed as a duplicate of the first.
         event_key=f"affiliate-received:{application.id}:{int(application.submitted_at.timestamp())}",
         payload={
-            "first_name": first_name_of(user),
+            # The name on the application, not the one on the account: an account made
+            # through the three-screen email sign-up has no name, and this form has just
+            # asked for one.
+            "first_name": first_name_of(user, prefer=application.display_name),
             "requested_code": application.requested_discount_code,
             "decision_hours": DECISION_TARGET_HOURS,
         },

@@ -40,7 +40,7 @@ from tests.factories import (
 
 async def _signup(test_context, email: str) -> None:
     response = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data={
             "email": email,
             "display_name": "Screened market user",

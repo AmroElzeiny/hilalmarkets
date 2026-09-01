@@ -1,0 +1,2673 @@
+[
+  {
+    "canonical_symbol_candidate": "1INCH",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-070-1inch"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ADA",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-07-ADA"
+    ],
+    "srb_reference_ids": [
+      "SRB-18-ADA"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-003-cardano"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ADI",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-172-adi"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "AERO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-126-aerodrome"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "AGIX",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-114-singularitynet"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "AIOZ",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-112-aioz-network"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "AKT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-087-akash-network"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ALE",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-182-ailey"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ALGO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-28-ALGO"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-026-algorand"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ALT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-037-altlayer"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ANKR",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-134-ankr"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "APE",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-091-apecoin"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "APT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-061-aptos"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "AR",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-086-arweave"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ARB",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-062-arbitrum"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ARIA",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-185-ariaai"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ARKM",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-039-arkham"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ASI",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-031-artificial-superintelligence-alliance"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ASTR",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-079-astar"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ATOM",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-13-ATOM"
+    ],
+    "srb_reference_ids": [
+      "SRB-11-ATOM"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-023-cosmos"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "AVAX",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-11-AVAX"
+    ],
+    "srb_reference_ids": [
+      "SRB-26-AVAX"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-011-avalanche"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "AXS",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-092-axie-infinity"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BAL",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-147-balancer"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BASE_NETWORK",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-127-base"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BAT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-136-basic-attention-token"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BCH",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-05-BCH"
+    ],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-013-bitcoin-cash"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BDX",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-171-beldex"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BEAM",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-163-beam"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BGB",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-168-bitget-token"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BLAST",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-128-blast"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BNB",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-06-BNB"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-029-binance-coin"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BNT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-155-bancor"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BORG",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-173-swissborg"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BSV",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-080-bitcoin-sv"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BTC",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-01-BTC"
+    ],
+    "srb_reference_ids": [
+      "SRB-01-BTC"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-001-bitcoin"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BTG",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-081-bitcoin-gold"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BTT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-117-bittorrent"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "BUSD",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-21-BUSD"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-106-binance-usd-legacy"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "CAKE",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-069-pancakeswap"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "CELO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-140-celo"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "CFX",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-110-conflux"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "CHZ",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-097-chiliz"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "CKB",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-142-nervos-network"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "CORE",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-162-core"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "CRV",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-068-curve-dao"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "DASH",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-082-dash"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "DCR",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-027-decred"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "DOGE",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-24-DOGE"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-006-dogecoin"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "DOT",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-12-DOT"
+    ],
+    "srb_reference_ids": [
+      "SRB-25-DOT"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-007-polkadot"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "EGLD",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-111-multiversx"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "EIGEN",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-119-eigenlayer"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ENJ",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-096-enjin-coin"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "EOS",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-020-eos"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ESPORTS",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-175-yooldo"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ETC",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-20-ETC"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-017-ethereum-classic"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ETH",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-02-ETH"
+    ],
+    "srb_reference_ids": [
+      "SRB-02-ETH"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-002-ethereum"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ETHFI",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-120-ether-fi"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "EURCV",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-188-eur-coinvertible"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "FDUSD",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-053-first-digital-usd"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "FET",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-113-fetch-ai"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "FIL",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-15-FIL"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-015-filecoin"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "FLOW",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-098-flow"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "FRAX",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-059-frax"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "FRXETH",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-150-frax-ether"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "FTM",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-077-fantom"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "FXS",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-060-frax-share"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "GALA",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-036-gala",
+      "FASSET-090-gala"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "GLM",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-153-golem"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "GNO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-131-gnosis"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "GOMINING",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-181-gomining"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "GRT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-033-the-graph"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "GT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-052-gatetoken"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "GUSD",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-104-gemini-dollar",
+      "FASSET-176-gusd"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "HBAR",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-10-HBAR"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-034-hedera"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "HNT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-19-HNT"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-073-helium"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "HOT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-158-holo"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "HTX",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-170-htx"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ICNT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-186-impossible-cloud-network"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ICP",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-09-ICP"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-047-internet-computer"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ILV",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-148-illuvium"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "IMX",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-065-immutable"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "JASMY",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-118-jasmycoin"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "JTO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-123-jito"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "JUP",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-072-jupiter"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "KAS",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-050-kaspa"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "KCS",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-169-kucoin-token"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "KDA",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-143-kadena"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "KLAY",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-109-klaytn"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "KNC",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-149-knc"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "KSM",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-076-kusama"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "LDO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-056-lido-dao"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "LEO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-054-unus-sed-leo"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "LINK",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-08-LINK"
+    ],
+    "srb_reference_ids": [
+      "SRB-16-LINK"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-009-chainlink"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "LPT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-135-lpt"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "LRC",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-138-loopring"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "LTC",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-04-LTC"
+    ],
+    "srb_reference_ids": [
+      "SRB-29-LTC"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-008-litecoin"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "LUNA",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-152-terra"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "LUNC",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-151-luna-classic"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "MANA",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-095-decentraland"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "MASK",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-154-mask-network"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "MATIC",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-10-MATIC"
+    ],
+    "srb_reference_ids": [
+      "SRB-31-MATIC"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-014-polygon"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "MIOTA",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-022-iota"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "MNDE",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-124-marinade"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "MNT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-042-mantle"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "NEAR",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-17-NEAR"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-075-near-protocol"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "NEO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-024-neo"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "NOT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-099-notcoin"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "OCEAN",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-115-ocean-protocol"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "OKXBTC",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-055-okx-wrapped-btc"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ONDO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-048-ondo"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ONE",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-141-harmony"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "OP",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-063-optimism"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ORDI",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-161-ordi"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "OSMO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-084-osmosis"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "PAXG",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-049-pax-gold"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "POL",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-045-polygon"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "PYTH",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-122-pyth-network"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "PYUSD",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-044-paypal-usd"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "QNT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-067-quant"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "QTUM",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-157-qtum"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "QUBIC",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-179-qubic"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "RAY",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-041-raydium"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "RENDER",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-032-render",
+      "FASSET-051-render"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "RETH",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-058-rocket-pool-eth"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "REZ",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-121-renzo"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "RON",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-093-ronin"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ROSE",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-145-oasis-network"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "RPL",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-132-rocket-pool"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "RUNE",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-066-thorchain"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "RVN",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-167-ravencoin"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "S",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-078-sonic"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SAND",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-094-the-sandbox"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SATS",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-160-sats"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SC",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-089-siacoin"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SCRT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-144-secret"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SEI",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-085-sei"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SN3",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-187-emplar"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SNT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-139-status"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SOL",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-06-SOL"
+    ],
+    "srb_reference_ids": [
+      "SRB-22-SOL"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-004-solana"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SOLV",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-125-solv-protocol"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SOSO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-180-sosovalue"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SSV",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-133-ssv-network"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "STETH",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-057-staked-ether"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "STORJ",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-088-storj"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "STRK",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-130-starknet"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "STSOL",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-071-lido-staked-sol"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "STX",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-035-stacks"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SUI",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": false,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-13-SUI"
+    ],
+    "fasset_reference_ids": [],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SUSD",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-105-susd"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SUSHI",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-146-sushiswap"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "SUT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-183-supertrust"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "TAO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-043-bittensor"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "THETA",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-12-THETA"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-074-theta-network"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "TIA",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-064-celestia"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "TON",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-08-TON"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-030-toncoin",
+      "FASSET-100-toncoin"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "TRX",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-14-TRX"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-016-tron"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "TUSD",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-101-trueusd"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "TWT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-040-trust-wallet"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "UDS",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-174-undeads-games"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ULTIMA",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-178-ultima"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "UNI",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-09-UNI"
+    ],
+    "srb_reference_ids": [
+      "SRB-23-UNI"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-010-uniswap"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "USDC",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-04-USDC"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-028-usd-coin"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "USDD",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-102-usdd"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "USDP",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-103-usdp"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "USDT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-03-USDT"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-021-tether"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "USTC",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-159-terrausd-classic"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "VCNT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-184-vicicoin"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "VET",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-018-vechain"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "W",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-107-wormhole"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "WAVES",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-156-waves"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "WAXP",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-165-wax"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "WLD",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-14-WLD"
+    ],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-046-worldcoin"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "WMT",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-116-world-mobile-token"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "XEC",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-166-ecash"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "XLM",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-15-XLM"
+    ],
+    "srb_reference_ids": [
+      "SRB-27-XLM"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-012-stellar"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "XMR",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-07-XMR"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-019-monero"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "XRP",
+    "sc_malaysia_compliant": true,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [
+      "SCMY-03-XRP"
+    ],
+    "srb_reference_ids": [
+      "SRB-05-XRP"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-005-xrp"
+    ],
+    "methodologies_count": 3,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "XTZ",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": true,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [
+      "SRB-30-XTZ"
+    ],
+    "fasset_reference_ids": [
+      "FASSET-025-tezos"
+    ],
+    "methodologies_count": 2,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ZANO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-177-zano"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ZETA",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-164-zetachain"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ZIL",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-083-zilliqa"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ZK",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-038-zksync",
+      "FASSET-129-zksync"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ZRO",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-108-layerzero"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  },
+  {
+    "canonical_symbol_candidate": "ZRX",
+    "sc_malaysia_compliant": false,
+    "shariah_review_bureau_compliant": false,
+    "fasset_compliant": true,
+    "sc_reference_ids": [],
+    "srb_reference_ids": [],
+    "fasset_reference_ids": [
+      "FASSET-137-0x"
+    ],
+    "methodologies_count": 1,
+    "consensus_status": null,
+    "consensus_note": "Intentionally unset. HilalMarkets must display independent methodology results rather than inventing a combined halal score."
+  }
+]

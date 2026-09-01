@@ -11,6 +11,7 @@ from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.person_name import greeting_name
 from ai_market_monitor.db.models import (
     AccountAdminAction,
     AccountBan,
@@ -702,7 +703,9 @@ class SystemBrainUserAdminService:
             recipient=recipient,
             template_kind="access_changed",
             payload_redacted={
-                "first_name": ((user.display_name or "").split() or ["there"])[0],
+                # "there" only when there is no name at all — this sentence cannot be
+                # written without something in the gap.
+                "first_name": greeting_name(user.display_name, fallback="there"),
                 "plan_name": plan_name,
                 "duration_label": duration_label,
                 "ends_at": ends_at.isoformat() if ends_at else None,

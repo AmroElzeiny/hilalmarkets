@@ -27,9 +27,9 @@ from ai_market_monitor.services.sharia_research import (
     ShariaResearchError,
     _database_safe_text,
     _evidence_package,
-    _extract_document,
     _initial_research_run_key,
     _passport_enrichment_profile,
+    extract_document,
 )
 
 
@@ -111,7 +111,7 @@ def test_official_pdf_is_extracted_as_text_without_binary_nul_bytes() -> None:
     output = BytesIO()
     writer.write(output)
 
-    title, headings, text = _extract_document(
+    title, headings, text = extract_document(
         output.getvalue(),
         "https://example.test/whitepaper.pdf",
         content_type="application/pdf",

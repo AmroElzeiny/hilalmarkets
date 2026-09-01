@@ -8,7 +8,8 @@
     "authority",
     "type",
     "source_url",
-    "default_publication_gate"
+    "default_publication_gate",
+    "import_rules"
   ],
   "properties": {
     "methodology_id": {
@@ -48,6 +49,105 @@
     "records_count": {
       "type": "integer",
       "minimum": 0
+    },
+    "import_rules": {
+      "type": "object",
+      "description": "Where this authority's rows live and how the importer must place them. Declared here so no application code names the authority.",
+      "required": [
+        "system_code",
+        "short_label",
+        "source_adapter",
+        "source_family",
+        "dataset_file",
+        "manifest_count_key",
+        "records_count",
+        "source_reference_template",
+        "rights"
+      ],
+      "properties": {
+        "system_code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "short_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_adapter": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_family": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dataset_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "guard_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manifest_count_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manifest_guard_count_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "records_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "guard_records_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_reference_template": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rights_clearance_required": {
+          "type": "boolean"
+        },
+        "rights": {
+          "type": "object",
+          "description": "Where a row's rights answer comes from, and what it is when the row is silent. Either state_field or state_default is required.",
+          "properties": {
+            "state_field": {
+              "type": "string",
+              "minLength": 1
+            },
+            "state_default": {
+              "type": "string",
+              "minLength": 1
+            },
+            "display_field": {
+              "type": "string",
+              "minLength": 1
+            },
+            "display_default": {
+              "type": "boolean"
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "state_field"
+              ]
+            },
+            {
+              "required": [
+                "state_default"
+              ]
+            }
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": true

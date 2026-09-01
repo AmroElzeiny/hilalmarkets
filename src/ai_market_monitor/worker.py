@@ -198,6 +198,31 @@ app.conf.update(
             "task": "ai_market_monitor.monitor_published_sharia_sources",
             "schedule": settings.sharia_source_scan_interval_hours * 60 * 60,
         },
+        # Gathers the website, whitepaper and repository for coins that are tradeable
+        # but that no authority has ruled on. Writes no Shariah status of any kind.
+        # It is on this beat rather than run by hand so that a deployment picks it up
+        # by itself: the researcher starts on its own after the VPS restarts.
+        "research-unscreened-tradeable-coins": {
+            "task": "ai_market_monitor.research_unscreened_coins",
+            "schedule": settings.unscreened_research_interval_hours * 60 * 60,
+        },
+        # Reads those coins' own pages and records what the automated screen makes of
+        # them. Offset by an hour from the researcher above so it works on links that
+        # have already been gathered rather than racing it for an empty queue.
+        #
+        # It publishes nothing. Every row it writes is a proposal marked as reviewed by
+        # nobody, and only the application's own approval route can turn one into a
+        # published status.
+        "screen-researched-coins": {
+            "task": "ai_market_monitor.screen_researched_coins",
+            "schedule": settings.automated_screen_interval_hours * 60 * 60,
+        },
+        # Size, rank and how each screened coin moved over weeks — what an exchange
+        # ticker cannot say. Two provider calls for the whole list, once a day.
+        "refresh-market-numbers": {
+            "task": "ai_market_monitor.refresh_market_numbers",
+            "schedule": settings.market_numbers_interval_hours * 60 * 60,
+        },
         # The scheduler writes its own measurements down on this beat. Every other
         # process writes its own after each task it runs, or on the API's own timer —
         # a scheduled task only ever runs in one process, so it can never flush the
@@ -548,6 +573,21 @@ def retry_sharia_admin_telegram() -> dict:
 @app.task(name="ai_market_monitor.monitor_published_sharia_sources")
 def monitor_published_sharia_sources() -> dict:
     return _run_async_task(_monitor_published_sharia_sources())
+
+
+@app.task(name="ai_market_monitor.research_unscreened_coins")
+def research_unscreened_coins() -> dict:
+    return _run_async_task(_research_unscreened_coins())
+
+
+@app.task(name="ai_market_monitor.screen_researched_coins")
+def screen_researched_coins() -> dict:
+    return _run_async_task(_screen_researched_coins())
+
+
+@app.task(name="ai_market_monitor.refresh_market_numbers")
+def refresh_market_numbers() -> dict:
+    return _run_async_task(_refresh_market_numbers())
 
 
 async def _evaluate_due_trial_cycles() -> dict:
@@ -1325,6 +1365,150 @@ async def _resolve_official_sources() -> dict:
         "links_gone_quiet": sweep.quiet,
         "sent_to_a_person": sweep.escalated,
     }
+
+
+async def _research_unscreened_coins() -> dict:
+    """Gather provider facts for tradeable coins that carry no Shariah result.
+
+    Runs on its own schedule, so a deployment starts it without anybody asking: after
+    the VPS restarts, Celery beat picks this up on its next tick and the researcher
+    works through the queue on its own.
+
+    It writes **no Shariah status**. What it stores is the project's own website,
+    whitepaper, repository and logo — the factual half of a Passport, gathered in
+    advance. Deciding anything about those coins still needs an authority, an
+    assessment and a person.
+
+    A failure is reported, never raised. The provider being down leaves the queue where
+    it was for the next run.
+    """
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.market_provider import market_data_provider
+    from ai_market_monitor.services.unscreened_coin_research import (
+        UnscreenedCoinResearchService,
+    )
+
+    if not settings.unscreened_research_enabled:
+        return {"status": "disabled"}
+    if not settings.coinmarketcap_enabled:
+        return {"status": "provider_disabled"}
+
+    provider = market_data_provider(settings)
+    try:
+        async with SessionFactory() as session:
+            try:
+                service = UnscreenedCoinResearchService(
+                    session,
+                    settings,
+                    market_data_provider=provider,
+                )
+                result = await service.research()
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                logger.exception("Unscreened coin research failed")
+                return {"status": "failed"}
+        return result.as_dict()
+    finally:
+        close = getattr(provider, "close", None)
+        if close is not None:
+            await close()
+
+
+async def _screen_researched_coins() -> dict:
+    """Read the pages of researched coins and record what the automated screen makes of them.
+
+    Runs after the researcher, on its own beat, so a deployment starts it without
+    anybody asking. It reads a project's own website, documentation and whitepaper, and
+    writes an :class:`AutomatedScreenRun` saying what it found, with the sentence behind
+    every reason.
+
+    **It publishes nothing.** No ``AssetShariaAssessment`` is created, no authority's
+    data is touched, and ``published`` stays false on every row it writes. What it
+    produces is a proposal shown only where the product says a machine made it.
+
+    A failure is reported, never raised, so one unreachable site leaves the rest of the
+    queue for the next run.
+    """
+
+    from sqlalchemy import select
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import AutomatedScreenRun, ProviderCoinProfile
+    from ai_market_monitor.services.automated_screen_pipeline import (
+        AutomatedScreenPipeline,
+    )
+
+    if not settings.unscreened_research_enabled:
+        return {"status": "disabled"}
+    if not settings.coinmarketcap_enabled:
+        return {"status": "provider_disabled"}
+
+    async with SessionFactory() as session:
+        try:
+            # Coins the researcher has gathered links for, that this has not read yet.
+            # Worked in market order, so the effort lands where users actually are.
+            already = set(
+                (await session.scalars(select(AutomatedScreenRun.symbol))).all()
+            )
+            candidates = (
+                await session.scalars(
+                    select(ProviderCoinProfile.symbol)
+                    .where(
+                        ProviderCoinProfile.provider == "coinmarketcap",
+                        ProviderCoinProfile.research_state == "researched",
+                    )
+                    .order_by(ProviderCoinProfile.market_cap_usd.desc().nullslast())
+                )
+            ).all()
+            wanted = [symbol for symbol in candidates if symbol not in already]
+            if not wanted:
+                return {"status": "nothing_to_screen"}
+
+            pipeline = AutomatedScreenPipeline(session, settings)
+            result = await pipeline.run(
+                wanted, limit=settings.automated_screen_batch_limit
+            )
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.exception("Automated screen sweep failed")
+            return {"status": "failed"}
+    return result.as_dict()
+
+
+async def _refresh_market_numbers() -> dict:
+    """Read size, rank and long-range movement for every screened coin.
+
+    Once a day, two provider calls for the whole list. These are the numbers an exchange
+    ticker cannot answer, and none of them changes fast enough to be worth fetching
+    while somebody is loading a page.
+    """
+
+    from sqlalchemy import select
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.db.models import AssetShariaAssessment
+    from ai_market_monitor.services.market_numbers import MarketNumbersService
+
+    if not settings.coinmarketcap_enabled:
+        return {"status": "provider_disabled"}
+
+    async with SessionFactory() as session:
+        try:
+            symbols = (
+                await session.scalars(
+                    select(AssetShariaAssessment.canonical_asset).distinct()
+                )
+            ).all()
+            result = await MarketNumbersService(session, settings).refresh(symbols)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.exception("Market numbers refresh failed")
+            return {"status": "failed"}
+    return result.as_dict()
 
 
 async def _process_package_enrichment_queue() -> dict[str, int]:

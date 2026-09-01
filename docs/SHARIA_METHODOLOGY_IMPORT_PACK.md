@@ -15,6 +15,31 @@ references:
 The 52 Fasset non-compliant guard rows are retained inside the immutable Fasset import snapshot.
 They are not converted into eligible `ExternalAssessment` rows.
 
+## Adding an authority is a data change, not a code change
+
+Nothing in `src/` names an authority. Each one declares itself in the pack's own
+`data/methodologies.json`, in an `import_rules` block, and
+`services/sharia_methodology_registry.py` is the single owner that reads it. To add a
+fourth authority:
+
+1. add its rows as `data/<name>_compliant_assets.json`, one row per published result;
+2. add a definition with an `import_rules` block naming its `system_code`,
+   `dataset_file`, `source_adapter`, `source_family`, `manifest_count_key`,
+   `records_count`, `source_reference_template` and `rights` rule — plus `guard_file`
+   and `guard_records_count` if the source also publishes non-compliant results;
+3. add one Passport seed and one enrichment task per row;
+4. update `manifest.json` counts and `checksums.json`;
+5. run `scripts/validate_bundle.py`.
+
+Every expected count is stated **once**, by the authority's own definition. The manifest,
+the datasets and the application all have to agree with it or the pack is refused before
+a single row is written. A definition missing any field is refused too — it is never
+given a default, because a default would mean one authority silently carrying another's
+rights state, publication gate or source reference.
+
+`tests/unit/test_invariant_methodology_registry_is_open.py` proves this by importing an
+authority no module in this repository has ever heard of.
+
 ## Safety Boundaries
 
 - Each methodology keeps its own assessment, source, date, scope, review, and Passport.

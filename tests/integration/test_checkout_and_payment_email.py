@@ -25,7 +25,7 @@ from ai_market_monitor.services.entitlements import PlanCatalogService
 
 async def _signup(test_context, email: str = "checkout@example.com") -> None:
     requested = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data={
             "email": email,
             "display_name": "Amina Trader",

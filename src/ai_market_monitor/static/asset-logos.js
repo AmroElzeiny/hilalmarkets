@@ -70,13 +70,20 @@
    * replaced once a real picture has loaded, so a coin never flickers from letters to
    * emptiness — the fallback is the starting state, not a recovery step.
    */
-  async function load(container, moduleUrl, symbol, directUrl = null) {
-    const safeDirectUrl = typeof directUrl === "string" && directUrl.startsWith("https://")
-      ? directUrl
-      : null;
-    // Stored picture first: it is the coin's own, and it exists for far more coins than
-    // the shared catalog covers. The catalog is the fallback, not the other way round.
-    const sources = [safeDirectUrl, moduleUrl].filter(Boolean);
+  async function load(container, moduleUrl, symbol, directUrl = null, providerUrl = null) {
+    // Stored picture first, then the market-data provider's, then the catalog. That is
+    // the order `core/asset_logos.py` publishes and this must not invent its own: the
+    // first two are pictures of *this coin*, the catalog is addressed by ticker alone,
+    // so two coins sharing a ticker share its file.
+    //
+    // `directUrl` also accepts an array, so a caller holding the whole ordered list can
+    // hand it over rather than picking one and losing the rest.
+    const safe = (value) =>
+      typeof value === "string" && value.startsWith("https://") ? value : null;
+    const direct = Array.isArray(directUrl) ? directUrl : [directUrl];
+    const sources = [...new Set(
+      [...direct.map(safe), safe(providerUrl), moduleUrl].filter(Boolean),
+    )];
     const identity = sources.join("|");
     if (!container || !sources.length || container.dataset.assetLogoLoaded === identity) return;
     container.dataset.assetLogoLoaded = identity;
@@ -99,12 +106,15 @@
   }
 
   function hydrate(root = document) {
-    root.querySelectorAll("[data-asset-logo-module], [data-asset-logo-url]").forEach((container) => {
+    const selector =
+      "[data-asset-logo-module], [data-asset-logo-url], [data-asset-logo-provider-url]";
+    root.querySelectorAll(selector).forEach((container) => {
       load(
         container,
         container.dataset.assetLogoModule,
         container.dataset.assetLogoSymbol,
         container.dataset.assetLogoUrl,
+        container.dataset.assetLogoProviderUrl,
       );
     });
   }

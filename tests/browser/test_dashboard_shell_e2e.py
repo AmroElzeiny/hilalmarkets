@@ -19,6 +19,7 @@ from __future__ import annotations
 from playwright.sync_api import Page, expect
 
 from ai_market_monitor.core.dashboard_paths import MONITOR_PATH, MONITORS_PATH
+from ai_market_monitor.core.site_content import DASHBOARD_NAVIGATION
 from tests.browser.conftest import (
     assert_contrast,
     assert_no_horizontal_overflow,
@@ -31,17 +32,19 @@ from tests.browser.conftest import (
 #: The smallest a control anywhere in the shell may be (WCAG 2.2 AA, 2.5.8).
 MIN_TARGET = 44
 
-#: Nine destinations in three groups.
-MENU_NAMES = (
-    "Home",
-    "Halal Assets",
-    "Monitors",
-    "Create a monitor",
-    "Opportunities",
-    "Notifications",
-    "Plan and billing",
-    "Settings",
-    "Support",
+#: Every destination the product puts in the menu, in the order it puts them.
+#:
+#: Read from `DASHBOARD_NAVIGATION` rather than typed out. It was a hand-written tuple of
+#: nine names, and by 31 August 2026 the menu had eleven: "Affiliate" and "Coins we
+#: researched" had each been added to the product and to nothing else. Three tests here
+#: failed for a menu that was correct, which is the worst kind of red — it trains a
+#: reader to update the number and move on.
+#:
+#: What these tests are for is whether the **shell draws** every destination, once, in
+#: order, with a name a screen reader can announce. Which destinations exist is a product
+#: decision that belongs in `site_content.py`, and it has exactly one home.
+MENU_NAMES = tuple(
+    item.label for group in DASHBOARD_NAVIGATION for item in group.items
 )
 
 
@@ -138,14 +141,18 @@ def test_the_flyout_name_appears_for_the_keyboard_as_well_as_the_mouse(
     _open(page, base_url)
     _minimize(page)
 
-    cell = page.locator(".hm-nav-cell").nth(2)
+    # The third destination, whatever the product currently puts there. It used to be
+    # hard-coded as "Monitors"; a destination added above it made this test fail while
+    # the flyout it checks was working perfectly.
+    index = 2
+    cell = page.locator(".hm-nav-cell").nth(index)
     link = cell.locator("[data-hm-nav-link]")
     tip = cell.locator(".hm-nav-tip")
 
     link.hover()
     page.wait_for_timeout(300)
     expect(tip).to_be_visible()
-    assert "Monitors" in tip.inner_text()
+    assert MENU_NAMES[index] in tip.inner_text()
 
     page.mouse.move(0, 0)
     page.wait_for_timeout(300)

@@ -26,7 +26,7 @@ from ai_market_monitor.db.models import (
 async def _signup(test_context, email: str, name: str = "Affiliate Tester") -> None:
     client = test_context["client"]
     response = await client.post(
-        "/signup",
+        "/signup/password",
         data={
             "email": email,
             "display_name": name,

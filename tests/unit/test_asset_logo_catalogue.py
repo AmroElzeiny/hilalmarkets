@@ -18,11 +18,13 @@ Both are owned by `core/asset_logos.py` now. These tests fail if a copy comes ba
 
 from __future__ import annotations
 
+import inspect
 import re
 from pathlib import Path
 
 import pytest
 
+from ai_market_monitor.core import asset_logos
 from ai_market_monitor.core.asset_logos import (
     _MONOGRAM_LETTERS,
     LOGO_CATALOG,
@@ -215,6 +217,17 @@ def test_no_reader_digs_the_stored_picture_out_of_a_record(relative: str):
     `provider_ids` for it is the decision that was made eight different ways, and each
     hand-written version accepted a different set of values as usable."""
 
+    # Every public function the owner exposes counts as "handed to the owner". Derived
+    # rather than typed, because a hand-written exemption list drifts from the module it
+    # exempts: this one allowed `stored_logo_url(` alone, so a caller that correctly used
+    # `asset_logo(` — the owner's *main* entry point, and the one this test's own failure
+    # message recommends — was reported as an offender. The rule and its exemption
+    # disagreed, and the exemption was the narrower of the two.
+    owners = tuple(
+        f"{name}("
+        for name, value in inspect.getmembers(asset_logos, inspect.isfunction)
+        if not name.startswith("_")
+    )
     offenders = [
         line.strip()
         for line in _read(relative).splitlines()
@@ -222,11 +235,11 @@ def test_no_reader_digs_the_stored_picture_out_of_a_record(relative: str):
         and "logo_url" in line
         # Handing the record to the owner is the whole point; it is only doing the
         # reading itself that is banned.
-        and "stored_logo_url(" not in line
+        and not any(owner in line for owner in owners)
     ]
     assert offenders == [], (
         f"{relative} reads the stored picture out of a record itself: {offenders}; "
-        "call core.asset_logos.asset_logo or stored_logo_url"
+        f"call one of core.asset_logos: {', '.join(sorted(owners))}"
     )
 
 

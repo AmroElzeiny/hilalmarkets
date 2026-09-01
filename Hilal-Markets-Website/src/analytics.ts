@@ -113,6 +113,67 @@ export type ChromeRuntimeConfig = {
   primaryCtaLabel?: string
 }
 
+/**
+ * What the published screening standard is, as the server describes it.
+ *
+ * Every figure here is read from the register at render time — the number of conditions,
+ * which of them run, which are skipped, and every coin the standard has judged. Nothing
+ * is written into the bundle, because a bundle holds whatever was true on the day it was
+ * built and the website is the version a reader believes.
+ *
+ * Built by `services/hilal_methodology.page_payload`.
+ */
+export type MethodologyRuntimeConfig = {
+  code: string
+  name: string
+  version: string
+  disclosure: string
+  developmentNotice: string
+  pageBudget: number
+  counts: {
+    total: number
+    approved: number
+    proposed: number
+    applied: number
+    skipped: number
+    evidence: number
+  }
+  regulator: { code: string; name: string; url: string }
+  families: Array<{
+    key: string
+    titleAr: string
+    count: number
+    conditions: Array<{
+      code: string
+      titleAr: string
+      reason: string
+      agreement: 'unanimous' | 'majority' | 'disputed'
+      evidence: Array<{ kind: string; reference: string }>
+    }>
+  }>
+  skipped: Array<{ code: string; titleAr: string; reason: string; why: string }>
+  coins: Array<{
+    symbol: string
+    name: string
+    admission: 'regulator_floor' | 'automated_screen'
+    outcome: 'admitted' | 'refused' | 'not_enough_data'
+    decidedOn: string
+    pagesRead: number
+    primaryPagesRead: number
+    reasons: string[]
+    sources: string[]
+  }>
+  otherMethodologies: Array<{
+    code: string
+    name: string
+    authority: string
+    url: string
+    admitted: boolean
+    coins: number
+    why: string
+  }>
+}
+
 declare global {
   interface Window {
     HilalMarketsRuntimeConfig?: {
@@ -121,6 +182,8 @@ declare global {
       commerce?: CommerceRuntimeConfig
       waitlist?: WaitlistRuntimeConfig
       chrome?: ChromeRuntimeConfig
+      /** Only `/hilal-methodology` is handed this; every other page gets `null`. */
+      methodology?: MethodologyRuntimeConfig | null
     }
     HilalAnalytics?: typeof publicAnalyticsApi
     /**

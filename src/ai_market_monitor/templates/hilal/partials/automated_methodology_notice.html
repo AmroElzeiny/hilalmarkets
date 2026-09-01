@@ -1,0 +1,60 @@
+{#
+  Shown wherever the Hilal Markets Methodology is the selected standard.
+
+  One owner for this wording. It appears on the Halal Assets list, on the monitor
+  builder, on the research pages and on a Passport, and it must say the same thing in
+  all of them: a reader who sees a softer version on one screen and a firmer one on
+  another learns to trust whichever they saw first.
+
+  The three imported authorities are people's decisions, recorded. This one is not. It
+  is a rule this product wrote and published, applied by machine, and nobody has
+  reviewed its answer for the coin on the screen. That has to be legible before the
+  reader acts on it, not buried in a footnote -- so it renders as a full notice next to
+  the result, never as a small grey line underneath.
+
+  **Two ways to call it, and they must not be confused.**
+
+  Pass `methodologies` and `selected_methodology_id` on a screen where a person picks a
+  standard: the partial finds the selected one and draws nothing unless it is this one.
+
+  Pass `automated_methodology_selected = true` on a screen that is *only ever* about the
+  automated standard -- the research pages -- where there is no list to select from.
+  Without this the notice silently drew nothing on exactly the pages that need it most,
+  which is how a warning goes missing: not by being deleted, but by a caller not having
+  the shape the partial expected.
+
+  `compact` draws the short form for a dialog or a card, where the full notice would push
+  the result itself off the screen. It keeps the same first sentence and the same link;
+  what it drops is the detail, never the warning.
+#}
+{%- set _selected = (methodologies | selectattr('id', 'equalto', selected_methodology_id) | list | first) if methodologies else none -%}
+{%- set _is_automated = automated_methodology_selected or (_selected and _selected.code == automated_methodology_code) -%}
+{%- if _is_automated -%}
+{%- set _name = (_selected.name if _selected else automated_methodology_name) -%}
+<div class="notice notice-warning" data-automated-methodology-notice style="margin-top:12px">
+  <span data-icon="alert" data-icon-class="icon" aria-hidden="true"></span>
+  <div>
+    <strong>{{ _name }} is still under development. No Shariah advisor stands behind it.</strong>
+    <p>
+      It is built by Hilal Markets from a mix of published methodologies and
+      AI research, then applied by machine to every coin. It works by reading up to
+      80 pages from the project&rsquo;s own website and deciding from what it finds
+      there. It is not a fatwa, and it is not the decision of a Shariah board.
+      <a href="{{ automated_methodology_path }}" data-automated-methodology-link>Read how it works</a>.
+    </p>
+    {%- if not compact %}
+    <p>
+      <strong>Some rules it does not check at all.</strong> A few questions cannot be
+      answered by reading a website &mdash; how much interest-bearing debt a company
+      carries, or whether a swap is unequal in the way Islam forbids. Those need a
+      person and figures nobody publishes, so this screen skips them rather than
+      guessing. Skipping is not passing: it means we did not look.
+    </p>
+    <p>
+      For a result a named authority decided, choose one of the reviewed standards in
+      the list above.
+    </p>
+    {%- endif %}
+  </div>
+</div>
+{%- endif -%}

@@ -22,4 +22,4 @@ Support: {{ support_url }}
 
 Hilal Markets provides screening, research, and monitoring tools. It does not execute trades, hold funds, promise returns, or provide a universal religious ruling. Review the Terms ({{ terms_url }}) and Risk Disclosure ({{ risk_url }}).
 
-{{ legal_name }}{% if company_address %}, {{ company_address }}{% endif %}
+Hilal Markets

@@ -3,7 +3,7 @@
 {% import "hilal/dashboard_test/macros/coin.html" as coin %}
 {% set status_tone = tone.asset_tone(passport.assessment.status.value) %}
 {% set asset_symbol = passport.identity.symbol if passport.identity else passport.assessment.canonical_asset %}
-{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260825-brain-agent-dock">{% endblock %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260831-auth-one-screen">{% endblock %}
 {% block content %}
 
 <div class="hm-t" data-passport-page>
@@ -49,6 +49,14 @@
       <div class="t-banner-body"><strong>One condition applies</strong><p>{{ passport.main_qualification }}</p></div>
     </div>
     {% endif %}
+
+    {#- A Passport is the document a person reads before acting on a coin, so if the
+        answer above came from the machine standard the warning belongs on it. The
+        partial's own comment claimed for a long time that it appeared here; it did not,
+        and the Passport is the single worst place for that claim to have been wrong. -#}
+    {% with automated_methodology_selected = passport.assessment.methodology_code == automated_methodology_code %}
+      {% include "hilal/partials/automated_methodology_notice.html" %}
+    {% endwith %}
 
     <div class="t-asset-actions t-no-print" style="border-top:0;padding-top:0;">
       <a class="t-action" href="{{ market_base_path }}"><span data-icon="chevron_left" data-icon-class="icon-sm"></span>Back to the list</a>
@@ -362,4 +370,4 @@
 </div>
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20260825-brain-agent-dock"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20260831-auth-one-screen"></script>{% endblock %}

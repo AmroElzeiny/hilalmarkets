@@ -8,7 +8,7 @@ is finished. Nothing here is optional. Written **before** any code was changed.
 | # | Rule |
 |---|---|
 | A1 | Four pages named: `/signup`, `/signin`, `/signin/code`, `/reset-password`. |
-| A2 | The two pages those four hand off to are part of the same journey and are therefore in scope too: `/signup/verify` (step 2 of sign-up) and the "enter your code" state of `/signin/code` and `/reset-password`. A person cannot finish sign-up on `/signup` alone. |
+| A2 | The pages those four hand off to are part of the same journey and are therefore in scope too: `/signup/password` (step 2 of sign-up) and `/signup/verify` (step 3), plus the "enter your code" state of `/signin/code` and `/reset-password`. A person cannot finish sign-up on `/signup` alone. |
 | A3 | Score each page now — UX, UI, user-friendliness — **before** changing anything. |
 | A4 | Rebuild them. Not a patch: new structure, new sections, new interactions. |
 | A5 | Everything inside the pages is in scope: banners, dialogs, error states, the cookie window that renders on them, and the server code behind each. |

@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_market_monitor.core.asset_logos import stored_logo_url
+from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import (
     AssetShariaAssessment,
@@ -42,6 +42,10 @@ from ai_market_monitor.schemas.sharia_methodology import (
     MethodologyEvidenceRequirements,
     MethodologyRulesDefinition,
 )
+from ai_market_monitor.services.hilal_methodology import (
+    METHODOLOGY_SYSTEM_CODE as AUTOMATED_METHODOLOGY_CODE,
+)
+from ai_market_monitor.services.hilal_methodology import is_automated
 
 DEFAULT_ALLOWED_STATUSES = {
     ShariaAssetStatus.ELIGIBLE,
@@ -59,6 +63,26 @@ STATUS_LABELS = {
 
 DEVELOPMENT_METHODOLOGY_PREFIX = "TRACEDGE_DEV_TEST_"
 AGGREGATE_METHODOLOGY_CODE = "ALL_APPROVED_METHODOLOGIES"
+
+# The automated standard is **selectable but never automatic**. A person may choose it
+# deliberately and read what a machine made of a project's own website. It is excluded
+# from exactly two places, and both exclusions protect a reader who did *not* choose it:
+#
+# *The aggregate.* `ALL_APPROVED_METHODOLOGIES` picks one winner per coin across every
+# methodology. Left in, a machine reading would win outright for every coin no authority
+# has ever assessed — most of the market — and the aggregate is precisely the view where
+# a reader can no longer tell whose answer they are looking at. The methodology's own
+# documentation has said from the day it was written that it is "never merged with an
+# authority's result into one score"; `_winning_assessments` is where that becomes code.
+#
+# *The product default.* `default_methodology` orders by the newest effective date, and
+# this standard is by construction the newest row in the table. Publishing it would
+# otherwise have made it the default for every user with no saved preference, silently,
+# on the day it was published. `SHARIA_DEFAULT_METHODOLOGY_CODE` happens to be set today;
+# a rule that only holds while a setting is filled in is not a rule.
+#
+# `is_automated` is imported rather than restated. A second copy of "which code is the
+# machine one" is the duplicate-parser failure this codebase keeps paying for.
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -233,6 +257,12 @@ class ShariaScreeningService:
         )
         if configured_code:
             query = query.where(ShariaMethodology.code == configured_code)
+        else:
+            # With no code configured the newest active methodology wins — and the
+            # automated standard is by construction the newest one. Excluded here so
+            # publishing it can never make it everybody's default by accident. A person
+            # who wants it chooses it; nothing chooses it for them.
+            query = query.where(ShariaMethodology.code != AUTOMATED_METHODOLOGY_CODE)
         methodology = await self.session.scalar(
             query.order_by(
                 ShariaMethodology.effective_from.desc(),
@@ -296,6 +326,7 @@ class ShariaScreeningService:
                 for row in await self.executable_methodologies(as_of=as_of)
                 if row.code != AGGREGATE_METHODOLOGY_CODE
                 and not methodology_is_development_only(row)
+                and not is_automated(row)
             ]
             methodology_ids = [row.id for row in source_methodologies]
             if not methodology_ids:
@@ -939,14 +970,17 @@ class ShariaScreeningService:
         identity = dict(factual_profile.get("canonical_asset_identity") or {})
         # Read through the one owner. Reading the key directly here accepted a plain
         # `http` or relative value that the browser then blocks, showing a broken
-        # picture where the letter monogram would have been readable.
-        logo_url = stored_logo_url(identity.get("provider_ids"))
+        # picture where the letter monogram would have been readable. `picture_url`
+        # rather than the verified picture alone, so a coin whose identity record has no
+        # image still shows the one the market-data provider publishes for it.
+        logo_url = asset_logo(assessment.canonical_asset, identity.get("provider_ids")).picture_url
         return AssetAssessmentSummary(
             id=assessment.id,
             canonical_asset=assessment.canonical_asset,
             asset_name=assessment.asset_name,
             methodology_id=methodology.id,
             methodology_name=methodology.name,
+            methodology_code=methodology.code,
             methodology_version=methodology.version,
             status=effective_status,
             status_label=STATUS_LABELS[effective_status],

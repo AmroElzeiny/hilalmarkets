@@ -272,9 +272,10 @@ async def test_the_ai_disabled_banner_is_the_same_message_as_an_ai_outage() -> N
 async def _signup(test_context: dict, email: str) -> None:
     client: AsyncClient = test_context["client"]
     response = await client.post(
-        "/signup",
+        "/signup/password",
         data={
             "email": email,
+            "display_name": "Test Person",
             "password": "CorrectHorse123!",
             "repeat_password": "CorrectHorse123!",
         },

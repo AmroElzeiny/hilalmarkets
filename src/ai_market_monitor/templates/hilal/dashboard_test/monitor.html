@@ -10,8 +10,8 @@
     There is no assistant on this page: no chat panel, no chat popup, and no
     "Hilal Markets Assistant" box. Authoring never requires the assistant. -#}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260825-brain-agent-dock">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-monitor-test.css') }}?v=20260825-brain-agent-dock">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260831-auth-one-screen">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-monitor-test.css') }}?v=20260831-auth-one-screen">
 {% endblock %}
 {% block content %}
 
@@ -96,13 +96,26 @@
     <div class="t-banner-body">
       {% if builder_screening.configured %}
       <strong>Coins come from the Shariah review</strong>
-      <p>Standard in use: {{ builder_screening.methodology_name }}, version {{ builder_screening.methodology_version }}. If a coin's review result changes, that coin pauses.</p>
+      <p>Standard in use: {{ builder_screening.methodology_name }}, version {{ builder_screening.methodology_version }}. If a coin's review result changes, that coin pauses.
+        <a href="{{ automated_methodology_path }}" target="_blank" rel="noopener">Read about the {{ automated_methodology_name }}</a>.</p>
       {% else %}
       <strong>No screening standard is active yet</strong>
       <p>You can still draw and save a draft. A real monitor can only start once a published Shariah standard is in place.</p>
       {% endif %}
     </div>
   </div>
+
+  {#- If the standard the monitor will run on is the machine-made one, say so here.
+
+      The banner above names the standard and nothing else, which was fine while every
+      selectable standard was an authority's decision. It is not fine now: a person
+      building a monitor would read "Standard in use: Hilal Markets Methodology" and have
+      no way to know that sentence means "a machine read some websites". This is the
+      moment they are choosing which coins a running monitor will watch, so it is the
+      moment the warning is worth most. -#}
+  {% with automated_methodology_selected = builder_screening.methodology_code == automated_methodology_code %}
+    {% include "hilal/partials/automated_methodology_notice.html" %}
+  {% endwith %}
 
   <section class="m-stage" data-stage data-mode="page" aria-label="Monitor canvas"
            data-hm-part="The canvas, where the cards are">
@@ -488,4 +501,4 @@
 
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-monitor-test.js') }}?v=20260825-brain-agent-dock"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-monitor-test.js') }}?v=20260831-auth-one-screen"></script>{% endblock %}

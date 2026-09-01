@@ -32,10 +32,29 @@ from ai_market_monitor.db.models import (
 from ai_market_monitor.db.models.enums import IdentityProvider, UserRole, UserStatus
 from ai_market_monitor.services.account_admin import identifier_is_banned
 from ai_market_monitor.services.email_delivery import AuthEmailService
+from ai_market_monitor.services.google_oauth import GoogleProfile
 from ai_market_monitor.services.governance_bootstrap import ensure_configured_owner_grants
 
 SESSION_COOKIE_NAME = "amm_session"
 SESSION_DAYS = 30
+
+#: What a brand-new account's dashboard is set to.
+#:
+#: This dictionary was written out three times — once in each place that could create an
+#: account — and the three had already drifted: only one of them queued the welcome
+#: email, so an account made through the wrong door was silently never welcomed. One
+#: copy, read by the one function below that makes an account.
+NEW_ACCOUNT_PREFERENCES: dict[str, object] = {
+    "timezone": "UTC",
+    "near_miss_enabled": True,
+    "near_miss_threshold": 70,
+    "maximum_alerts_per_hour": 50,
+    "alert_channels": ["web", "telegram"],
+    "channels": ["web", "telegram"],
+    "providers": ["binance", "bybit"],
+    "alert_days": ["Every Day"],
+    "alert_hours": [],
+}
 
 
 class WebAuthError(ValueError):
@@ -48,6 +67,108 @@ class WebAuthService:
     def __init__(self, session: AsyncSession, settings: Settings):
         self.session = session
         self.settings = settings
+
+    # ------------------------------------------------------------------
+    # One place an account is made.
+    # ------------------------------------------------------------------
+
+    async def create_account(
+        self,
+        *,
+        normalized: str,
+        display_identifier: str,
+        first_name: str | None,
+        last_name: str | None,
+        password_hash: str | None,
+        now: datetime,
+        grant_reason: str,
+    ) -> User:
+        """Make one account, whichever door the person came through.
+
+        Three doors reach this: the six-digit sign-up, the Google button, and the older
+        direct email path. Each of them used to build the account itself — the user row,
+        the identity, the dashboard defaults, the welcome email and the administrator
+        grant — and the three copies had already drifted apart. Only one of them ever
+        queued the welcome email, so whether a new customer was greeted at all depended
+        on which door they happened to use.
+
+        ``password_hash`` may be ``None``. That is a Google account: it has no password,
+        and ``verify_password`` refuses a null hash, so no password can ever open it.
+        """
+
+        # An unknown name stays unknown. It is never taken from the email address.
+        #
+        # This fallback used to read `or normalized.split("@", 1)[0]`, and it almost never
+        # fired while the sign-up form still had two name boxes. Signing up with an email
+        # is three screens now — address, password, code — and not one of them asks for a
+        # name, so the fallback fired for *every* new account and wrote the local part of
+        # the address in as the person's name. Every reader then treated it as a real one:
+        # a receipt opened "Assalamu Alaikum render,", the payment form pre-filled "render"
+        # as a legal first name, and an affiliate was shown the local part of a customer's
+        # email address in place of their name — the one thing `affiliate._display_name`
+        # says must never happen, defeated because the value looked like a name to it.
+        #
+        # `display_name` is nullable, and every place that shows it already has a fallback
+        # for empty. Nothing invents a name here; the Google door supplies a real one, and
+        # anyone else stays nameless until they choose to give one.
+        display_name = " ".join(part for part in (first_name, last_name) if part) or None
+        is_configured_admin = normalized in self.settings.system_brain_authorized_emails
+        user = User(
+            display_name=display_name,
+            role=UserRole.ADMIN if is_configured_admin else UserRole.USER,
+        )
+        self.session.add(user)
+        await self.session.flush()
+        self.session.add(
+            UserIdentity(
+                user_id=user.id,
+                provider=IdentityProvider.EMAIL,
+                provider_subject=normalized,
+                normalized_identifier=normalized,
+                display_identifier=display_identifier,
+                password_hash=password_hash,
+                is_verified=True,
+                is_primary=True,
+                verified_at=now,
+                profile_data={
+                    "first_name": first_name or "",
+                    "last_name": last_name or "",
+                },
+            )
+        )
+        self.session.add(
+            DashboardPreference(
+                user_id=user.id,
+                theme="dark",
+                default_timezone=user.timezone,
+                default_dashboard_path="/dashboard",
+                notification_preferences=dict(NEW_ACCOUNT_PREFERENCES),
+            )
+        )
+        # The welcome. Queued rather than sent here, so a mail provider having a bad
+        # minute cannot fail the sign-up itself — the account is made either way and the
+        # email follows. `event_key` is the account, so it can only ever be sent once.
+        self.session.add(
+            AccountEmailDelivery(
+                user_id=user.id,
+                recipient=normalized,
+                template_kind="signup_welcome",
+                event_key=f"signup_welcome:{user.id}",
+                payload_redacted={"first_name": first_name or ""},
+                status="pending",
+                # This table has no automatic timestamp, and the outbox orders by it.
+                created_at=now,
+            )
+        )
+        await self.session.flush()
+        if is_configured_admin:
+            await ensure_configured_owner_grants(
+                self.session,
+                settings=self.settings,
+                email=normalized,
+                reason=grant_reason,
+            )
+        return user
 
     async def signup_or_signin_email(
         self,
@@ -71,44 +192,17 @@ class WebAuthService:
         )
         created = False
         if identity is None:
-            is_configured_admin = normalized in self.settings.system_brain_authorized_emails
-            user = User(
-                display_name=display_name or normalized.split("@", 1)[0],
-                role=UserRole.ADMIN if is_configured_admin else UserRole.USER,
-            )
-            self.session.add(user)
-            await self.session.flush()
-            identity = UserIdentity(
-                user_id=user.id,
-                provider=IdentityProvider.EMAIL,
-                provider_subject=normalized,
-                normalized_identifier=normalized,
+            parts = str(display_name or "").split(maxsplit=1)
+            user = await self.create_account(
+                normalized=normalized,
                 display_identifier=email.strip(),
+                first_name=parts[0] if parts else "",
+                last_name=parts[1] if len(parts) > 1 else "",
                 password_hash=hash_password(password),
-                is_verified=True,
-                is_primary=True,
-                verified_at=datetime.now(UTC),
-                profile_data={},
-            )
-            self.session.add(identity)
-            self.session.add(
-                DashboardPreference(
-                    user_id=user.id,
-                    theme="dark",
-                    default_timezone=user.timezone,
-                    default_dashboard_path="/dashboard",
-                    notification_preferences={
-                        "timezone": "UTC",
-                        "near_miss_enabled": True,
-                        "near_miss_threshold": 70,
-                        "maximum_alerts_per_hour": 50,
-                        "alert_channels": ["web", "telegram"],
-                        "channels": ["web", "telegram"],
-                        "providers": ["binance", "bybit"],
-                        "alert_days": ["Every Day"],
-                        "alert_hours": [],
-                    },
-                )
+                now=datetime.now(UTC),
+                grant_reason=(
+                    "Configured System Brain administrator completed verified signup."
+                ),
             )
             created = True
         else:
@@ -122,14 +216,42 @@ class WebAuthService:
             user = existing_user
             user.last_seen_at = datetime.now(UTC)
         await self.session.flush()
-        if created and user.role == UserRole.ADMIN:
-            await ensure_configured_owner_grants(
-                self.session,
-                settings=self.settings,
-                email=normalized,
-                reason="Configured System Brain administrator completed verified signup.",
-            )
         return user, created
+
+    async def check_signup_details(self, *, email: str, display_name: str = "") -> str:
+        """Is this somebody we can make an account for? Answered before any password.
+
+        Signing up is three screens now, and this is the whole of the first one: a name
+        and an address. It runs exactly the checks the later screens will run again — the
+        shape of the name, the shape of the address, the ban list, and whether an account
+        already exists — so a person is told "you already have an account" while they
+        have typed two things, instead of after they have chosen and re-typed a password.
+
+        The name is checked here because here is where the box is. A name refused at step
+        two would send somebody back past a password they had already chosen, to a field
+        that is hidden on that screen.
+
+        It grants nothing and stores nothing. The real work still happens at
+        :meth:`request_signup_email_code`, which repeats every check here rather than
+        trusting that this ran.
+        """
+
+        # "Name", not "Your name": the label is dropped into two different sentences and
+        # only one of them takes a possessive. "Enter a valid your name." was the other.
+        normalize_person_name(display_name, label="Name")
+        normalized = normalize_email(email)
+        if not normalized:
+            raise WebAuthError("invalid_email", "Enter a valid email address.")
+        await self._ensure_not_banned(normalized)
+        existing_identity = await self.session.scalar(
+            select(UserIdentity.id).where(
+                UserIdentity.provider == IdentityProvider.EMAIL,
+                UserIdentity.normalized_identifier == normalized,
+            )
+        )
+        if existing_identity is not None:
+            raise WebAuthError("account_exists", "This email already has an account.")
+        return normalized
 
     async def request_signup_email_code(
         self,
@@ -161,17 +283,30 @@ class WebAuthService:
         )
         if not clean_first_name and display_name:
             name_parts = str(display_name).split(maxsplit=1)
-            clean_first_name = normalize_person_name(name_parts[0], label="First name")
+            clean_first_name = normalize_person_name(
+                name_parts[0],
+                label="First name",
+                required=False,
+            )
             clean_last_name = normalize_person_name(
                 name_parts[1] if len(name_parts) > 1 else None,
                 label="Last name",
                 required=False,
             )
+        # A name is asked for on screen one and carried here in a hidden field, so an
+        # empty one means the field was stripped on the way rather than left blank by a
+        # person. It is refused rather than filled in.
+        #
+        # It used to be invented out of the part of the email address before the @, which
+        # was wrong twice over: it greeted people as "Assalamu Alaikum trader.99," in the
+        # welcome email, and for an address like `123456@example.com` the invented name
+        # had no letters in it at all, so `normalize_person_name` refused it and the whole
+        # sign-up failed with `invalid_name` — a code with no words written for it, so the
+        # page showed "Something went wrong" and nobody could ever get past it. That code
+        # is answered in plain words now, and it can only be reached by a request that
+        # went round the form.
         if not clean_first_name:
-            clean_first_name = normalize_person_name(
-                normalized.split("@", 1)[0],
-                label="First name",
-            )
+            raise WebAuthError("invalid_name", "Name is required.")
         existing_identity = await self.session.scalar(
             select(UserIdentity.id).where(
                 UserIdentity.provider == IdentityProvider.EMAIL,
@@ -338,77 +473,127 @@ class WebAuthService:
             pending.consumed_at = now
             raise WebAuthError("account_exists", "This email already has an account.")
 
-        display_name = " ".join(
-            part for part in (pending.first_name, pending.last_name) if part
-        ) or normalized.split("@", 1)[0]
-        is_configured_admin = normalized in self.settings.system_brain_authorized_emails
-        user = User(
-            display_name=display_name,
-            role=UserRole.ADMIN if is_configured_admin else UserRole.USER,
-        )
-        self.session.add(user)
-        await self.session.flush()
-        self.session.add(
-            UserIdentity(
-                user_id=user.id,
-                provider=IdentityProvider.EMAIL,
-                provider_subject=normalized,
-                normalized_identifier=normalized,
-                display_identifier=pending.display_identifier,
-                password_hash=pending.password_hash,
-                is_verified=True,
-                is_primary=True,
-                verified_at=now,
-                profile_data={
-                    "first_name": pending.first_name,
-                    "last_name": pending.last_name,
-                },
-            )
-        )
-        self.session.add(
-            DashboardPreference(
-                user_id=user.id,
-                theme="dark",
-                default_timezone=user.timezone,
-                default_dashboard_path="/dashboard",
-                notification_preferences={
-                    "timezone": "UTC",
-                    "near_miss_enabled": True,
-                    "near_miss_threshold": 70,
-                    "maximum_alerts_per_hour": 50,
-                    "alert_channels": ["web", "telegram"],
-                    "channels": ["web", "telegram"],
-                    "providers": ["binance", "bybit"],
-                    "alert_days": ["Every Day"],
-                    "alert_hours": [],
-                },
-            )
-        )
         pending.consumed_at = now
-        # The welcome. Queued rather than sent here, so a mail provider having a bad
-        # minute cannot fail the sign-up itself — the account is made either way and the
-        # email follows. `event_key` is the account, so it can only ever be sent once.
-        self.session.add(
-            AccountEmailDelivery(
-                user_id=user.id,
-                recipient=normalized,
-                template_kind="signup_welcome",
-                event_key=f"signup_welcome:{user.id}",
-                payload_redacted={"first_name": pending.first_name or ""},
-                status="pending",
-                # This table has no automatic timestamp, and the outbox orders by it.
-                created_at=now,
+        return await self.create_account(
+            normalized=normalized,
+            display_identifier=pending.display_identifier,
+            first_name=pending.first_name,
+            last_name=pending.last_name,
+            password_hash=pending.password_hash,
+            now=now,
+            grant_reason=(
+                "Configured System Brain administrator completed verified signup."
+            ),
+        )
+
+    async def signin_or_signup_with_google(
+        self, *, profile: GoogleProfile
+    ) -> tuple[User, bool]:
+        """The Google door. One trip, and either a sign-in or a brand-new account.
+
+        Google has already proved the address belongs to this person — that is what
+        ``email_verified`` on the identity token means — so there is no six-digit code
+        to send and nothing left to confirm. Asking for one anyway would be asking
+        somebody to prove twice what they have just proved once.
+
+        The address is the identity, so pressing Google with an address that already has
+        a password signs into *that* account rather than making a second one beside it.
+        An account created here has no password at all until the person sets one through
+        "I forgot my password", which is the same path anybody else uses.
+        """
+
+        normalized = normalize_email(profile.email)
+        if not normalized:
+            raise WebAuthError("google_email_missing", "Google did not share an email.")
+        await self._ensure_not_banned(normalized)
+        first_name = normalize_person_name(
+            profile.first_name, label="First name", required=False
+        )
+        last_name = normalize_person_name(
+            profile.last_name, label="Last name", required=False
+        )
+        now = datetime.now(UTC)
+        identity = await self.session.scalar(
+            select(UserIdentity).where(
+                UserIdentity.provider == IdentityProvider.EMAIL,
+                UserIdentity.normalized_identifier == normalized,
             )
         )
-        await self.session.flush()
-        if is_configured_admin:
-            await ensure_configured_owner_grants(
-                self.session,
-                settings=self.settings,
-                email=normalized,
-                reason="Configured System Brain administrator completed verified signup.",
+        if identity is None:
+            user = await self.create_account(
+                normalized=normalized,
+                display_identifier=profile.email.strip(),
+                first_name=first_name,
+                last_name=last_name,
+                password_hash=None,
+                now=now,
+                grant_reason=(
+                    "Configured System Brain administrator signed in through Google."
+                ),
             )
-        return user
+            await self._record_google_subject(normalized, profile.subject)
+            # A half-finished sign-up for the same address is now pointless: the account
+            # it was going to create exists. Left alone, its code would still be accepted
+            # later and would fail on "this email already has an account".
+            await self._retire_pending_signups(normalized, now)
+            await self.session.flush()
+            return user, True
+
+        existing_user = await self.session.get(User, identity.user_id)
+        if existing_user is None:
+            raise WebAuthError("identity_broken", "This identity is not linked correctly.")
+        if existing_user.status == UserStatus.SUSPENDED:
+            raise WebAuthError("account_banned", "Your profile is banned.")
+        existing_user.last_seen_at = now
+        # An address confirmed by Google is a confirmed address, however the account was
+        # first made. Somebody stuck on an unconfirmed sign-up gets in this way.
+        identity.is_verified = True
+        if identity.verified_at is None:
+            identity.verified_at = now
+        await self._record_google_subject(normalized, profile.subject, identity=identity)
+        await self.session.flush()
+        return existing_user, False
+
+    async def _record_google_subject(
+        self,
+        normalized: str,
+        subject: str,
+        *,
+        identity: UserIdentity | None = None,
+    ) -> None:
+        """Note that Google vouches for this address, without touching anything else.
+
+        ``profile_data`` is a free-form record, and the name already in it was typed by
+        the person themselves. Google's id is added beside it; nothing already there is
+        overwritten, because a name somebody chose beats a name a provider guessed.
+        """
+
+        if not subject:
+            return
+        if identity is None:
+            identity = await self.session.scalar(
+                select(UserIdentity).where(
+                    UserIdentity.provider == IdentityProvider.EMAIL,
+                    UserIdentity.normalized_identifier == normalized,
+                )
+            )
+        if identity is None:
+            return
+        profile_data = dict(identity.profile_data or {})
+        if profile_data.get("google_subject") == subject:
+            return
+        profile_data["google_subject"] = subject
+        identity.profile_data = profile_data
+
+    async def _retire_pending_signups(self, normalized: str, now: datetime) -> None:
+        pending_rows = await self.session.scalars(
+            select(PendingEmailSignup).where(
+                PendingEmailSignup.email == normalized,
+                PendingEmailSignup.consumed_at.is_(None),
+            )
+        )
+        for row in pending_rows:
+            row.consumed_at = now
 
     async def request_email_code(
         self,

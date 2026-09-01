@@ -19,17 +19,9 @@ from pydantic import AnyHttpUrl
 
 from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.core.dashboard_paths import (
-    AFFILIATE_PATH,
-    CONNECTIONS_PATH,
-    HOME_PATH,
-    MARKET_PATH,
     MONITOR_PATH,
-    MONITORS_PATH,
-    OPPORTUNITIES_PATH,
-    SETTINGS_PATH,
-    SUBSCRIPTION_PATH,
-    SUPPORT_PATH,
 )
+from ai_market_monitor.core.site_content import DASHBOARD_NAVIGATION
 from tests.integration.test_dashboard_web import _signup_and_verify
 
 
@@ -149,10 +141,13 @@ async def test_the_side_menu_shows_the_entries_it_is_supposed_to(test_context):
 
     # Every name is on the link itself, so it is still there when the menu is minimized
     # and the label is moved off screen.
-    # Ten entries now: the affiliate programme joined the Account group. It used to be
-    # a page called Referrals that nothing linked to, so the only way to it was typing
-    # the address.
-    assert menu.count('class="hm-nav-text"') == 10
+    #
+    # Counted against `DASHBOARD_NAVIGATION` rather than a number written here. It said
+    # ten, the product had eleven — "Coins we researched" had been added to the menu and
+    # to nothing else — and this test failed for a menu that was correct. A count in a
+    # test is a second copy of a product decision, and it is always the copy that rots.
+    expected = sum(len(group.items) for group in DASHBOARD_NAVIGATION)
+    assert menu.count('class="hm-nav-text"') == expected
 
 
 async def test_the_menu_never_points_at_an_older_copy_of_a_page(test_context):
@@ -171,24 +166,20 @@ async def test_the_menu_never_points_at_an_older_copy_of_a_page(test_context):
         for href in re.findall(r'class="nav-item hm-nav-link[^"]*"\s+href="([^"]+)"', menu)
     ]
 
-    # Read from `dashboard_paths.py`, never written out again here. Spelling the
-    # addresses a second time is what made this test wrong: `/dashboard/monitor` became
-    # `/dashboard/create-monitor` and only the copy in this file still said the old one,
-    # so the check that exists to catch a stale link had gone stale itself.
-    assert opened == [
-        HOME_PATH,
-        MARKET_PATH,
-        MONITORS_PATH,
-        MONITOR_PATH,
-        OPPORTUNITIES_PATH,
-        CONNECTIONS_PATH,
-        SUBSCRIPTION_PATH,
-        # Affiliate sits beside Plan and billing: both are about money, and Settings
-        # and Support are where a menu's utilities belong, at the end.
-        AFFILIATE_PATH,
-        SETTINGS_PATH,
-        SUPPORT_PATH,
-    ], opened
+    # Resolved from `DASHBOARD_NAVIGATION`, never written out again here. This list was
+    # spelled out twice before — once as literal addresses, which went stale when
+    # `/dashboard/monitor` became `/dashboard/create-monitor`, and then as constants in
+    # a hand-kept order, which went stale again when a destination was added above them.
+    # A check that exists to catch a stale link must not itself be a copy that can go
+    # stale. It reads the definition and asks the router for each address, so the only
+    # thing it can now disagree with is the page that renders them.
+    expected = [
+        urlsplit(str(test_context["app"].url_path_for(item.endpoint))).path
+        for group in DASHBOARD_NAVIGATION
+        for item in group.items
+    ]
+    assert opened == expected, opened
+    assert len(set(opened)) == len(opened), "a destination is in the menu twice"
 
 
 # ---------------------------------------------------------------------------

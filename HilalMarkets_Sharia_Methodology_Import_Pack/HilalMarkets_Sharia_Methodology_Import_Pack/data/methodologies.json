@@ -1,0 +1,100 @@
+[
+  {
+    "methodology_id": "SC_MALAYSIA_SAC_DIGITAL_ASSETS",
+    "display_name": "SC Malaysia SAC Digital Assets Reference",
+    "authority": "Shariah Advisory Council, Securities Commission Malaysia",
+    "type": "OFFICIAL_REGULATORY_REFERENCE",
+    "source_url": "https://www.sc.com.my/digital-assets",
+    "status_language": "Shariah-compliant",
+    "scope": "Only assets explicitly shown as Shariah-compliant with an SAC meeting and decision date.",
+    "must_not_infer": [
+      "Do not infer compliance for rows lacking an explicit compliant status.",
+      "Do not treat the result as universal or apply it to every use of the asset.",
+      "Do not invent coin-specific reasoning that the source did not publish."
+    ],
+    "default_publication_gate": "ADMIN_APPROVAL_REQUIRED",
+    "records_count": 15,
+    "import_rules": {
+      "system_code": "SC_MALAYSIA_SAC_REFERENCE",
+      "short_label": "SC Malaysia SAC",
+      "source_adapter": "sc_malaysia",
+      "source_family": "sc_malaysia_sac",
+      "dataset_file": "sc_malaysia_compliant_assets.json",
+      "manifest_count_key": "sc_malaysia_compliant",
+      "records_count": 15,
+      "source_reference_template": "{sac_meeting_number} SAC Meeting ({decision_date})",
+      "rights_clearance_required": false,
+      "rights": {
+        "state_default": "PUBLIC_SOURCE_ATTRIBUTION_REVIEWED",
+        "display_default": true
+      }
+    }
+  },
+  {
+    "methodology_id": "SHARIAH_REVIEW_BUREAU",
+    "display_name": "Shariah Review Bureau",
+    "authority": "Shariyah Review Bureau W.L.L.",
+    "type": "EXTERNAL_PRELIMINARY_RESEARCH_REFERENCE",
+    "source_url": "https://shariyah.net/cryptocurrency/",
+    "status_language": "Compliant",
+    "scope": "Current compliant assessments shown by the source's crypto assessment resource.",
+    "must_not_infer": [
+      "Do not present the research as a fatwa, certification or individualized advice.",
+      "Do not reproduce proprietary report content without written permission.",
+      "Do not infer a result for assets not explicitly assessed as compliant."
+    ],
+    "default_publication_gate": "ADMIN_APPROVAL_AND_RIGHTS_CLEARANCE_REQUIRED",
+    "records_count": 31,
+    "import_rules": {
+      "system_code": "SHARIAH_REVIEW_BUREAU",
+      "short_label": "Shariah Review Bureau",
+      "source_adapter": "srb",
+      "source_family": "shariah_review_bureau",
+      "dataset_file": "shariah_review_bureau_compliant_assets.json",
+      "manifest_count_key": "shariah_review_bureau_compliant",
+      "records_count": 31,
+      "source_reference_template": "{assessment_date_source}",
+      "rights_clearance_required": true,
+      "rights": {
+        "state_field": "rights_state",
+        "display_field": "commercial_display_allowed",
+        "display_default": false
+      }
+    }
+  },
+  {
+    "methodology_id": "FASSET_SHARIAH_REPORTS",
+    "display_name": "Fasset Shariah Reports",
+    "authority": "Fasset",
+    "type": "EXTERNAL_PLATFORM_REPORT_REFERENCE",
+    "source_url": "https://www.fasset.com/shariah-reports/",
+    "status_language": "Shariah Compliant",
+    "scope": "Assets explicitly marked Shariah Compliant on the retrieved public report page.",
+    "must_not_infer": [
+      "Do not move a status from Fasset into SC Malaysia or Shariah Review Bureau.",
+      "Do not merge duplicate or migrated symbols without canonical identity review.",
+      "Do not attribute AI-generated passport facts to Fasset."
+    ],
+    "default_publication_gate": "ADMIN_APPROVAL_AND_RIGHTS_REVIEW_REQUIRED",
+    "records_count": 188,
+    "import_rules": {
+      "system_code": "FASSET_SHARIAH_REPORTS",
+      "short_label": "Fasset",
+      "source_adapter": "fasset",
+      "source_family": "fasset_shariah_reports",
+      "dataset_file": "fasset_compliant_assets.json",
+      "guard_file": "fasset_noncompliant_guard.json",
+      "manifest_count_key": "fasset_compliant_source_rows",
+      "manifest_guard_count_key": "fasset_noncompliant_guard_rows",
+      "records_count": 188,
+      "guard_records_count": 52,
+      "source_reference_template": "{source_row_id}",
+      "rights_clearance_required": true,
+      "rights": {
+        "state_default": "RIGHTS_REVIEW_REQUIRED_BEFORE_COMMERCIAL_PUBLICATION",
+        "display_field": "commercial_display_allowed",
+        "display_default": false
+      }
+    }
+  }
+]

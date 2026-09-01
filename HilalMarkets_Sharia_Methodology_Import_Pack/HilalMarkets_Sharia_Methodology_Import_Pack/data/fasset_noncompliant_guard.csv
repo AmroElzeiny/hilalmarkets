@@ -1,0 +1,53 @@
+﻿asset_name_source,auto_publish,canonical_symbol_candidate,external_status_source,manual_verification_required,methodology_id,normalized_status,publication_state,retrieved_at,source_row_id,source_url,symbol_source
+Aave,False,AAVE,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-001-aave,https://www.fasset.com/shariah-reports/,AAVE
+Maker,False,MKR,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-002-maker,https://www.fasset.com/shariah-reports/,MKR
+Shiba Inu,False,SHIB,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-003-shiba-inu,https://www.fasset.com/shariah-reports/,SHIB
+OFFICIAL TRUMP,False,TRUMP,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-004-official-trump,https://www.fasset.com/shariah-reports/,TRUMP
+Ethena USDe,False,USDE,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-005-ethena-usde,https://www.fasset.com/shariah-reports/,USDE
+Ethena,False,ENA,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-006-ethena,https://www.fasset.com/shariah-reports/,ENA
+Injective,False,INJ,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-007-injective,https://www.fasset.com/shariah-reports/,INJ
+Compound,False,COMP,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-008-compound,https://www.fasset.com/shariah-reports/,COMP
+Synthetix,False,SNX,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-009-synthetix,https://www.fasset.com/shariah-reports/,SNX
+dYdX,False,DYDX,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-010-dydx,https://www.fasset.com/shariah-reports/,DYDX
+GMX,False,GMX,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-011-gmx,https://www.fasset.com/shariah-reports/,GMX
+Kava,False,KAVA,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-012-kava,https://www.fasset.com/shariah-reports/,KAVA
+Bonk,False,BONK,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-013-bonk,https://www.fasset.com/shariah-reports/,BONK
+dogwifhat,False,WIF,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-014-dogwifhat,https://www.fasset.com/shariah-reports/,WIF
+Floki,False,FLOKI,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-015-floki,https://www.fasset.com/shariah-reports/,FLOKI
+Brett,False,BRETT,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-016-brett,https://www.fasset.com/shariah-reports/,BRETT
+Book of Meme,False,BOME,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-017-book-of-meme,https://www.fasset.com/shariah-reports/,BOME
+Popcat,False,POPCAT,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-018-popcat,https://www.fasset.com/shariah-reports/,POPCAT
+Dai,False,DAI,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-019-dai,https://www.fasset.com/shariah-reports/,DAI
+cUSDC,False,CUSDC,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-020-cusdc,https://www.fasset.com/shariah-reports/,CUSDC
+WOO,False,WOO,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-021-woo,https://www.fasset.com/shariah-reports/,WOO
+Pendle,False,PENDLE,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-022-pendle,https://www.fasset.com/shariah-reports/,PENDLE
+Yearn Finance,False,YFI,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-023-yearn-finance,https://www.fasset.com/shariah-reports/,YFI
+Convex Finance,False,CVX,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-024-convex-finance,https://www.fasset.com/shariah-reports/,CVX
+Gains Network,False,GNS,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-025-gains-network,https://www.fasset.com/shariah-reports/,GNS
+Perpetual Protocol,False,PERP,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-026-perpetual-protocol,https://www.fasset.com/shariah-reports/,PERP
+Nexo,False,NEXO,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-027-nexo,https://www.fasset.com/shariah-reports/,NEXO
+Celsius,False,CEL,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-028-celsius,https://www.fasset.com/shariah-reports/,CEL
+Toshi,False,TOSHI,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-029-toshi,https://www.fasset.com/shariah-reports/,TOSHI
+Mog Coin,False,MOG,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-030-mog-coin,https://www.fasset.com/shariah-reports/,MOG
+Wen,False,WEN,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-031-wen,https://www.fasset.com/shariah-reports/,WEN
+Rain,False,RAIN,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-032-rain,https://www.fasset.com/shariah-reports/,RAIN
+Falcon USD,False,USDF,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-033-falcon-usd,https://www.fasset.com/shariah-reports/,USDf
+Ondo US Dollar Yield,False,USDY,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-034-ondo-us-dollar-yield,https://www.fasset.com/shariah-reports/,USDY
+Jupiter Perps LP,False,JLP,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-035-jupiter-perps-lp,https://www.fasset.com/shariah-reports/,JLP
+GHO,False,GHO,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-036-gho,https://www.fasset.com/shariah-reports/,GHO
+Usual USD,False,USD0,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-037-usual-usd,https://www.fasset.com/shariah-reports/,USD0
+USDai,False,USDAI,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-038-usdai,https://www.fasset.com/shariah-reports/,USDAI
+Fasttoken,False,FTN,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-039-fasttoken,https://www.fasset.com/shariah-reports/,FTN
+Solstice USX,False,USX,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-040-solstice-usx,https://www.fasset.com/shariah-reports/,USX
+Ducky,False,DUCKY,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-041-ducky,https://www.fasset.com/shariah-reports/,DUCKY
+Legacy Frax Dollar,False,FRAX,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-042-legacy-frax-dollar,https://www.fasset.com/shariah-reports/,FRAX
+Ape and Pepe,False,APEPE,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-043-ape-and-pepe,https://www.fasset.com/shariah-reports/,APEPE
+WeFi,False,WFI,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-044-wefi,https://www.fasset.com/shariah-reports/,WFI
+48 Club Token,False,KOGE,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-045-48-club-token,https://www.fasset.com/shariah-reports/,KOGE
+AUSD,False,AUSD,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-046-ausd,https://www.fasset.com/shariah-reports/,AUSD
+Banana For Scale,False,BANANAS31,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-047-banana-for-scale,https://www.fasset.com/shariah-reports/,BANANAS31
+Circle Internet Group Tokenized Stock (Ondo),False,CRCLON,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-048-circle-internet-group-tokenized-stock-ondo,https://www.fasset.com/shariah-reports/,CRCLon
+Aster USDF,False,USDF,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-049-aster-usdf,https://www.fasset.com/shariah-reports/,USDF
+Frax USD,False,FRXUSD,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-050-frax-usd,https://www.fasset.com/shariah-reports/,FRXUSD
+Shuffle,False,SHFL,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-051-shuffle,https://www.fasset.com/shariah-reports/,SHFL
+Rollbit Coin,False,RLB,Not Compliant,True,FASSET_SHARIAH_REPORTS,NOT_ELIGIBLE_EXTERNAL_REFERENCE,GUARD_ONLY,2026-07-24,FASSET-GUARD-052-rollbit-coin,https://www.fasset.com/shariah-reports/,RLB

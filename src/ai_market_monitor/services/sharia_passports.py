@@ -48,6 +48,7 @@ from ai_market_monitor.schemas.sharia import (
     PassportTimelineEntry,
     PassportUseCoverage,
 )
+from ai_market_monitor.services.hilal_methodology import is_automated
 from ai_market_monitor.services.sharia_screening import (
     DEFAULT_ALLOWED_STATUSES,
     STATUS_LABELS,
@@ -71,6 +72,22 @@ class ShariaPassportReadService:
         methodology_id: UUID | None = None,
         user_id: UUID | None = None,
     ) -> AssetPassportResponse:
+        """The Passport for one coin under one standard.
+
+        In a deployed environment an assessment is not enough: there has to be a
+        ``PublishedAssetAssessment``, which is the record proving a qualified reviewer
+        looked at this coin and released it.
+
+        **The automated standard is exempt, and the reason is the whole point of it.**
+        That record requires an external assessment, a research dossier and a *review
+        decision* — three things that do not exist here, because no review happened.
+        Manufacturing them to satisfy the gate would put a fabricated human decision in
+        the audit trail of a standard whose entire claim is that nobody decided. The
+        assessment itself is the released artefact for this standard: it is written only
+        by ``hilal_methodology.publish`` from a file a person committed, and every row it
+        writes carries the warning and names the machine as its reviewer.
+        """
+
         try:
             base = await self.screening.passport(asset, methodology_id=methodology_id)
         except ShariaScreeningError as exc:
@@ -96,7 +113,11 @@ class ShariaPassportReadService:
         publication = await self.session.scalar(
             publication_query.order_by(PublishedAssetAssessment.version.desc()).limit(1)
         )
-        if self.settings.is_deployed and publication is None:
+        if (
+            self.settings.is_deployed
+            and publication is None
+            and not is_automated(base.assessment.methodology_code)
+        ):
             raise ShariaScreeningError(
                 "passport_not_published",
                 "No published Passport record is available for this asset and methodology.",
@@ -849,7 +870,7 @@ class ShariaPassportReadService:
             official_documentation=asset.official_documentation,
             provider_ids=dict(asset.provider_ids or {}),
             logo_module_url=logo.module_url,
-            logo_url=logo.image_url,
+            logo_url=logo.picture_url,
             exchange_markets=[
                 PassportExchangeMarket(
                     exchange=row.exchange,

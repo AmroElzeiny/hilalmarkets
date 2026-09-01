@@ -23,6 +23,7 @@ from ai_market_monitor.core.auth_pages import (
     AUTH_PAGES,
     CODE_RESEND_SECONDS,
     PASSWORD_RULES,
+    PRODUCT_PROMISES,
     alert_for,
     browser_password_rules,
     page_copy,
@@ -45,6 +46,9 @@ AUTH_MACROS = TEMPLATES / "hilal" / "macros" / "auth_fields.html"
 AUTH_ALERT = TEMPLATES / "hilal" / "partials" / "auth_alert.html"
 AUTH_CSS = STATIC / "hilalmarkets-auth.css"
 AUTH_JS = STATIC / "hilalmarkets-auth.js"
+#: The other stylesheet these pages load. It is shared with the dashboard, and it used to
+#: carry the previous sign-in design as well.
+SHARED_CSS = STATIC / "hilalmarkets.css"
 BRAND_CSS = STATIC / "hilalmarkets-brand.css"
 COOKIE_CSS = STATIC / "hilalmarkets-cookie.css"
 WEB_AUTH = SRC / "services" / "web_auth.py"
@@ -138,11 +142,12 @@ PALETTE = {
     "on-ink-line": "#767b83",
 }
 
-#: A card on the near-black panel: white at 4.5% and 4%, flattened.
-JOURNEY_CARD = flatten("#ffffff", 0.045, PALETTE["ink"])
-TRUST_CARD = flatten("#ffffff", 0.04, PALETTE["ink"])
+#: The apple wash in the brand frame behind the card: the accent at 10%, on the canvas.
+#: Nothing readable sits on it — it is checked so that a *later* change cannot quietly
+#: put text there and be believed.
+FRAME_WASH = flatten(PALETTE["apple"], 0.10, PALETTE["canvas"])
 
-#: (what, foreground, background, minimum). Every pair the four pages paint.
+#: (what, foreground, background, minimum). Every pair the six pages paint.
 #:
 #: Normal text needs 4.5:1 (WCAG 1.4.3). A boundary a person has to see in order to use
 #: a control needs 3:1 (1.4.11). Nothing on these pages is large enough to claim the 3:1
@@ -180,24 +185,22 @@ TEXT_PAIRS = [
     ("sent-to line", PALETTE["copy"], PALETTE["surface-soft"], 4.5),
     ("resend label", PALETTE["muted"], PALETTE["surface"], 4.5),
     ("waiting resend button", PALETTE["muted"], PALETTE["neutral-bg"], 4.5),
-    ("alternative card title", PALETTE["ink"], PALETTE["surface"], 4.5),
-    ("alternative card note", PALETTE["muted"], PALETTE["surface"], 4.5),
-    ("alternative card mark", PALETTE["apple-deep"], PALETTE["apple-soft"], 4.5),
-    # On the near-black panel.
-    ("panel headline", PALETTE["surface"], PALETTE["ink"], 4.5),
-    ("panel headline accent", PALETTE["apple"], PALETTE["ink"], 4.5),
-    ("back link", PALETTE["hairline"], PALETTE["ink"], 4.5),
-    ("step title", PALETTE["surface"], JOURNEY_CARD, 4.5),
-    ("step hint", PALETTE["on-ink-soft"], JOURNEY_CARD, 4.5),
-    ("step state word", PALETTE["on-ink-soft"], JOURNEY_CARD, 4.5),
-    ("current step state word", PALETTE["ink"], PALETTE["apple"], 4.5),
-    ("done step state word", PALETTE["apple"], JOURNEY_CARD, 4.5),
-    ("step mark", PALETTE["hairline"], JOURNEY_CARD, 4.5),
-    ("current step mark", PALETTE["ink"], PALETTE["apple"], 4.5),
-    ("trust title", PALETTE["surface"], TRUST_CARD, 4.5),
-    ("trust note", PALETTE["on-ink-soft"], TRUST_CARD, 4.5),
-    ("trust mark", PALETTE["ink"], PALETTE["apple"], 4.5),
+    ("other-door button label", PALETTE["ink"], PALETTE["surface"], 4.5),
+    ("other-door button label hovered", PALETTE["ink"], PALETTE["surface-soft"], 4.5),
+    ("other-door mark", PALETTE["apple-deep"], PALETTE["apple-soft"], 4.5),
+    ("back link", PALETTE["copy"], PALETTE["surface"], 4.5),
     ("skip link", PALETTE["surface"], PALETTE["ink"], 4.5),
+    # The three promises under the button, which used to be a list on a dark panel.
+    ("promise title", PALETTE["ink"], PALETTE["surface"], 4.5),
+    ("promise sentence", PALETTE["muted"], PALETTE["surface"], 4.5),
+    ("promise tick", PALETTE["ink"], PALETTE["apple"], 4.5),
+    # The card and the legal row sit on the canvas now, not inside a white panel, so
+    # every pair on them is measured against the canvas rather than against white.
+    ("legal row", PALETTE["muted"], PALETTE["canvas"], 4.5),
+    ("legal row hovered", PALETTE["ink"], PALETTE["surface"], 4.5),
+    # Nothing is written on the brand frame. This pair exists so that if a heading is
+    # ever moved on top of it, the move fails here instead of on somebody's screen.
+    ("anything written on the brand frame", PALETTE["ink"], FRAME_WASH, 4.5),
 ]
 
 BOUNDARY_PAIRS = [
@@ -209,18 +212,13 @@ BOUNDARY_PAIRS = [
     ("code box edge", PALETTE["control-line"], PALETTE["surface-soft"], 3.0),
     ("filled code box edge", PALETTE["apple-deep"], PALETTE["surface"], 3.0),
     ("unmet rule mark edge", PALETTE["control-line"], PALETTE["surface"], 3.0),
-    ("alternative card edge", PALETTE["control-line"], PALETTE["surface"], 3.0),
+    ("other-door button edge", PALETTE["control-line"], PALETTE["surface"], 3.0),
     ("resend button edge", PALETTE["control-line"], PALETTE["surface"], 3.0),
-    ("step mark edge", PALETTE["on-ink-line"], PALETTE["ink"], 3.0),
-    ("step connector", PALETTE["on-ink-line"], PALETTE["ink"], 3.0),
-    # Not the line colour: measured on the translucent card the chip really sits on it
-    # comes out at 2.79:1, because that card is lighter than the panel behind it.
-    ("state chip edge", PALETTE["on-ink-soft"], JOURNEY_CARD, 3.0),
     # The shared focus indicator, on every surface it can land on here.
     ("focus ring on white", PALETTE["ink-strong"], PALETTE["surface"], 3.0),
     ("focus ring on the canvas", PALETTE["ink-strong"], PALETTE["canvas"], 3.0),
     ("focus ring on the apple button", PALETTE["ink-strong"], PALETTE["apple"], 3.0),
-    ("focus halo on the near-black panel", PALETTE["apple"], PALETTE["ink"], 3.0),
+    ("focus ring on the near-black skip link", PALETTE["apple"], PALETTE["ink"], 3.0),
 ]
 
 
@@ -263,6 +261,51 @@ def test_the_pages_invent_no_colour() -> None:
         }, f"rgba{triple} is not a thinned brand colour"
 
 
+def test_only_the_auth_stylesheet_lays_out_the_auth_pages() -> None:
+    """No other stylesheet may position this card, and one silently did.
+
+    `hilalmarkets.css` is loaded by these pages *before* `hilalmarkets-auth.css`, and it
+    still held the previous design: `.auth-shell{...;grid-template-columns:1fr 1fr}`, a
+    dark emerald `.auth-brand` column, two floating glass cards, a two-column name grid.
+
+    Only one of those rules had visible markup left to match, and it was the damaging
+    one. `.hilal-auth-page .auth-shell` is the more specific selector, so it wins every
+    property it *declares* — but it centres with `place-items` and never sets
+    `grid-template-columns`, so nothing overrode the two columns. The shell kept them,
+    the single card dropped into the first, and every one of these pages drew its form
+    against the left edge with half the window empty beside it. Nothing failed; it just
+    looked wrong, on all six pages, for as long as the dead rule sat there.
+
+    The whole block is gone. This asserts it stays gone, because a stylesheet that used
+    to own a design is exactly where the next stale rule comes from.
+    """
+
+    shared = _strip_comments(_text(SHARED_CSS))
+    for selector in (
+        ".auth-shell",
+        ".auth-brand",
+        ".auth-visual",
+        ".auth-card-float",
+        ".auth-form-wrap",
+        ".auth-name-grid",
+        ".auth-divider",
+        ".auth-form",
+    ):
+        assert selector not in shared, (
+            f"{selector} is styled in hilalmarkets.css again; "
+            "hilalmarkets-auth.css is the only owner of these pages"
+        )
+
+    # And the owner centres the card rather than placing it in a column of a wider grid.
+    auth = _strip_comments(_text(AUTH_CSS))
+    shell = re.search(r"\.hilal-auth-page \.auth-shell\s*\{([^}]*)\}", auth)
+    assert shell is not None, "the shell rule is gone"
+    assert "place-items: center" in shell.group(1)
+    assert "grid-template-columns" not in shell.group(1), (
+        "the shell holds one centred card, not a row of columns"
+    )
+
+
 def test_the_palette_is_declared_where_the_product_can_read_it() -> None:
     """Every colour above is a token, not a value typed into a component."""
 
@@ -292,18 +335,34 @@ def test_the_product_and_the_website_draw_the_same_control_edge() -> None:
 def test_the_server_checks_exactly_the_rules_the_page_shows() -> None:
     shown = [rule["key"] for rule in browser_password_rules()]
     assert shown == [rule.key for rule in PASSWORD_RULES]
-    assert len(shown) == 5
+    assert len(shown) == 4
+
+
+def test_a_password_no_longer_has_to_contain_a_symbol() -> None:
+    """The rule that asked for punctuation is gone, everywhere at once.
+
+    It is checked as the *absence of a behaviour*, not as a missing line in a table:
+    a perfectly ordinary letters-and-numbers password must now be accepted by the
+    server, and no rule may still be looking for a character outside letters and
+    numbers. A leftover copy of that rule anywhere would fail here.
+    """
+
+    assert password_validation_error("Halal2026") is None
+    assert not any(rule.key == "symbol" for rule in PASSWORD_RULES)
+    for rule in PASSWORD_RULES:
+        assert rule.check("Halal2026"), f"{rule.key} still refuses a plain password"
+        assert "special character" not in rule.failure.lower()
+        assert "symbol" not in rule.label.lower()
 
 
 #: For each rule: a password that breaks that one rule and no other, and the character
-#: that fixes it. Adding a sixth rule without adding a line here fails the test below,
+#: that fixes it. Adding a fifth rule without adding a line here fails the test below,
 #: which is what stops the family from being checked one member short.
 BREAKS_ONLY = {
-    "length": ("aA7!", "aaa"),
-    "lowercase": ("AAAAA7!", "a"),
-    "uppercase": ("aaaaa7!", "A"),
-    "digit": ("aaaaaA!", "7"),
-    "symbol": ("aaaaaA7", "!"),
+    "length": ("aA7", "aaa"),
+    "lowercase": ("AAAAA7", "a"),
+    "uppercase": ("aaaaa7", "A"),
+    "digit": ("aaaaaA", "7"),
 }
 
 
@@ -347,8 +406,8 @@ def test_the_browser_patterns_are_unicode_aware() -> None:
     assert patterns["lowercase"] == r"\p{Lowercase}"
     assert patterns["uppercase"] == r"\p{Uppercase}"
     assert patterns["digit"] == r"\p{Nd}"
-    assert patterns["symbol"] == r"[^\p{L}\p{N}]"
     assert patterns["length"] == r".{6,}"
+    assert set(patterns) == {"length", "lowercase", "uppercase", "digit"}
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +449,10 @@ ERROR_SOURCES = (
     SRC / "services" / "web_auth.py",
     SRC / "services" / "dashboard_links.py",
     SRC / "services" / "telegram_account_links.py",
+    # The Google door raises its own class. It was added to this list in the same change
+    # that added the door: a new way in whose failures nobody scans is exactly how a
+    # customer ends up reading "Something went wrong" and having nothing to do about it.
+    SRC / "services" / "google_oauth.py",
     SRC / "api" / "routers" / "dashboard.py",
 )
 
@@ -407,7 +470,8 @@ NOT_SHOWN_HERE = {"invalid_name"}
 #: codes that never leave the checkout — a scan that reports work nobody has to do is a
 #: scan people learn to ignore.
 _RAISED = re.compile(
-    r"(?:WebAuthError|DashboardLinkError|TelegramAccountLinkError)\(\s*\n?\s*\"([a-z_]+)\""
+    r"(?:WebAuthError|DashboardLinkError|TelegramAccountLinkError|GoogleOAuthError)"
+    r"\(\s*\n?\s*\"([a-z_]+)\""
 )
 
 
@@ -552,8 +616,11 @@ def test_every_page_knows_where_it_is_in_the_journey(page: str) -> None:
     for has_email, code_sent in ((False, False), (True, False), (False, True)):
         copy = page_copy(page, has_email=has_email, code_sent=code_sent)
         assert copy.title
-        assert copy.lede
         assert copy.submit
+        # `lede` is deliberately empty on the pages whose heading already says the whole
+        # thing, so it is not required — but when there is one it must be a real
+        # sentence rather than a stray space left behind by an edit.
+        assert copy.lede == copy.lede.strip()
         steps = copy.journey.steps
         assert 0 <= copy.journey.current < len(steps)
         assert steps[-1].destination, "a journey ends somewhere, and arriving is not a form"
@@ -564,7 +631,28 @@ def test_every_page_knows_where_it_is_in_the_journey(page: str) -> None:
 def test_a_single_step_is_not_announced_as_a_journey() -> None:
     assert page_copy("signin").journey.shows_counter is False
     assert page_copy("signup").journey.shows_counter is True
-    assert page_copy("signup_verify").journey.position == 2
+    assert page_copy("signup_verify").journey.position == 3
+
+
+def test_signing_up_is_three_steps_in_a_fixed_order() -> None:
+    """Your details, then the password, then the code. In that order, counted that way.
+
+    It used to be one screen with five boxes and a five-line checklist on it, which did
+    not fit a laptop window: the button a person came to press was under the fold on the
+    first page of the product. Splitting it also moves "you already have an account" to
+    before anybody invents a password they will never use.
+
+    Step one carries two boxes — a name and an address — rather than one. Both are things
+    we cannot go on without, and finding out about either of them after a password has
+    been chosen means sending somebody backwards past it.
+    """
+
+    steps = [page_copy(page) for page in ("signup", "signup_password", "signup_verify")]
+    assert [copy.journey.position for copy in steps] == [1, 2, 3]
+    assert all(copy.journey.total == 3 for copy in steps)
+    assert all(copy.journey.shows_counter for copy in steps)
+    keys = [copy.journey.steps[copy.journey.current].key for copy in steps]
+    assert keys == ["details", "password", "confirm"]
 
 
 @pytest.mark.parametrize("page", ("signin_code", "reset_password"))
@@ -578,6 +666,240 @@ def test_a_two_part_page_decides_its_own_state_in_one_place(page: str) -> None:
     assert page_copy(page, code_sent=True).state == "enter"
     assert page_copy(page, has_email=True).state == "enter"
     assert page_copy(page, code_sent=True).journey.position == 2
+
+
+# ---------------------------------------------------------------------------
+# The three promises under the button.
+# ---------------------------------------------------------------------------
+
+
+def test_there_are_exactly_three_promises_and_one_of_them_is_a_boundary() -> None:
+    """Two things the product does, one thing it never does.
+
+    The third is not decoration. "Watching, never trading" is the boundary this whole
+    product is built on, and the sign-up page is the one screen where every single
+    customer reads it. A fourth promise, or a set with no boundary in it, fails here.
+    """
+
+    assert len(PRODUCT_PROMISES) == 3
+    assert len({promise.key for promise in PRODUCT_PROMISES}) == 3
+    joined = " ".join(promise.title for promise in PRODUCT_PROMISES).lower()
+    # The boundary, in the title itself. It used to be carried by the explaining sentence
+    # underneath ("never places an order and never holds your money"); that sentence is
+    # gone, so the promise has to survive in the four words that are left.
+    assert "never trading" in joined
+    assert "evidence" in joined
+    for promise in PRODUCT_PROMISES:
+        assert promise.title
+        assert len(promise.title.split()) <= 5, promise.title
+
+
+def test_the_promises_are_written_once_and_only_read_by_the_page() -> None:
+    """A promise about screening and about never trading may not have two copies.
+
+    They used to be three blocks of markup inside `auth.html`, which meant no copy rule
+    and no sentence-case test could ever see them, and any second page was free to make
+    a slightly different promise.
+    """
+
+    macros = _text(AUTH_MACROS)
+    assert "auth_promises" in macros
+    body = _text(AUTH_HTML) + macros
+    for promise in PRODUCT_PROMISES:
+        assert promise.title not in body, f"{promise.key} is written out in the markup"
+
+
+def test_every_page_a_person_can_land_on_shows_the_promises() -> None:
+    """Including the ones in the middle of signing up. Especially those."""
+
+    html = _text(AUTH_HTML)
+    branches = re.findall(r"auth\.page == '([a-z_]+)'", html)
+    assert set(branches) == set(AUTH_PAGES)
+    assert html.count("{{ promises() }}") >= len(AUTH_PAGES)
+
+
+# ---------------------------------------------------------------------------
+# The Google door.
+# ---------------------------------------------------------------------------
+
+
+def _settings(**overrides):
+    from ai_market_monitor.core.config import Settings
+
+    base = {
+        "app_secret_key": "x" * 48,
+        "database_url": "sqlite+aiosqlite:///:memory:",
+        "public_base_url": "https://hilalmarkets.com",
+    }
+    base.update(overrides)
+    return Settings(**base)
+
+
+def test_the_google_button_is_never_offered_before_it_can_work() -> None:
+    """A button that opens a window and then fails is worse than no button.
+
+    One property decides it, and both the page and the two routes read that one
+    property. This is the "offered but not runnable" fault this codebase keeps finding,
+    written as a rule before it can happen again.
+    """
+
+    assert _settings().google_signin_enabled is False
+    id_only = _settings(google_oauth_client_id="abc.apps.googleusercontent.com")
+    assert id_only.google_signin_enabled is False
+    assert _settings(google_oauth_client_secret="shh").google_signin_enabled is False
+    assert (
+        _settings(
+            google_oauth_client_id="abc.apps.googleusercontent.com",
+            google_oauth_client_secret="shh",
+        ).google_signin_enabled
+        is True
+    )
+    # And the page asks that property, rather than deciding for itself.
+    assert "auth_google_enabled" in _text(AUTH_MACROS)
+    assert "google_signin_enabled" in _text(ROUTER)
+
+
+def test_the_address_google_returns_to_is_decided_in_one_place() -> None:
+    """Never assembled from the incoming request.
+
+    Google matches the redirect address character for character. Behind Cloudflare the
+    request's own scheme and host are not the public ones, so building it from the
+    request is the classic way this works in development and fails on the day it is
+    deployed.
+    """
+
+    assert (
+        _settings().google_oauth_redirect_uri
+        == "https://hilalmarkets.com/auth/google/callback"
+    )
+    assert (
+        _settings(app_base_url="https://app.hilalmarkets.com").google_oauth_redirect_uri
+        == "https://app.hilalmarkets.com/auth/google/callback"
+    )
+    router = _text(ROUTER)
+    assert "settings.google_oauth_redirect_uri" in router
+    assert "request.url_for" not in router
+
+
+def test_google_is_asked_for_the_email_and_the_name_and_nothing_else() -> None:
+    from ai_market_monitor.services import google_oauth
+
+    assert google_oauth.GOOGLE_SCOPES == ("openid", "email", "profile")
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "google_cancelled",
+        "google_unavailable",
+        "google_disabled",
+        "google_link_expired",
+        "google_email_unverified",
+        "google_email_missing",
+    ],
+)
+def test_every_google_failure_is_answered_in_plain_words(code: str) -> None:
+    """No OAuth vocabulary reaches a customer. They cannot act on any of it."""
+
+    alert = alert_for(
+        page="signin",
+        message=None,
+        error=code,
+        ttl_minutes=10,
+        links={"signup": "/signup", "support": "mailto:x@y.z"},
+    )
+    assert alert is not None
+    assert alert.title != "Something went wrong"
+    combined = f"{alert.title} {alert.body}".lower()
+    for jargon in ("oauth", "token", "redirect", "state", "scope", "client id", "http"):
+        assert jargon not in combined, f"{code} leaks {jargon!r} to a customer"
+
+
+def test_a_google_account_is_made_with_no_password_at_all() -> None:
+    """Google proved the address; there is nothing left to prove, and nothing to type.
+
+    `verify_password` refuses a null hash, so an account made this way cannot be opened
+    with any password until its owner sets one through "I forgot my password". The
+    Google door therefore cannot weaken the password door.
+    """
+
+    from ai_market_monitor.core.security import verify_password
+
+    source = _text(WEB_AUTH)
+    assert "async def signin_or_signup_with_google" in source
+    assert "password_hash=None" in source
+    assert verify_password("anything", None) is False
+    assert verify_password("anything", "") is False
+
+
+def test_the_google_door_refuses_an_address_google_has_not_confirmed() -> None:
+    """Without this, anyone who could get a token for an unconfirmed address would be
+    handed the matching Hilal Markets account."""
+
+    from ai_market_monitor.services.google_oauth import (
+        GoogleOAuthError,
+        GoogleOAuthService,
+    )
+
+    service = GoogleOAuthService(
+        _settings(
+            google_oauth_client_id="abc.apps.googleusercontent.com",
+            google_oauth_client_secret="shh",
+        )
+    )
+    claims = {
+        "sub": "1",
+        "email": "person@example.com",
+        "given_name": "Sara",
+        "family_name": "Ahmed",
+    }
+    for unconfirmed in (None, False, "false", "maybe", 0):
+        with pytest.raises(GoogleOAuthError) as raised:
+            service._profile_from({**claims, "email_verified": unconfirmed})
+        assert raised.value.code == "google_email_unverified"
+
+    for confirmed in (True, "true", "True"):
+        profile = service._profile_from({**claims, "email_verified": confirmed})
+        assert profile.email == "person@example.com"
+        assert (profile.first_name, profile.last_name) == ("Sara", "Ahmed")
+
+
+def test_a_google_account_with_one_word_name_still_has_a_name() -> None:
+    """Reading only `given_name` would have left those people greeted by nobody."""
+
+    from ai_market_monitor.services.google_oauth import GoogleOAuthService
+
+    service = GoogleOAuthService(
+        _settings(
+            google_oauth_client_id="abc.apps.googleusercontent.com",
+            google_oauth_client_secret="shh",
+        )
+    )
+    profile = service._profile_from(
+        {"sub": "1", "email": "a@b.com", "email_verified": True, "name": "Amina"}
+    )
+    assert profile.first_name == "Amina"
+    assert profile.last_name == ""
+
+
+def test_the_popup_only_ever_accepts_a_message_from_this_site() -> None:
+    """`message` is a public event. Any framed page can fire one."""
+
+    js = _text(AUTH_JS)
+    assert "event.origin !== window.location.origin" in js
+    assert 'data.source !== "hilal-markets-google"' in js
+    # And the address it is told to go to is a path here, never a full address, so the
+    # popup cannot be talked into sending somebody to another site.
+    assert 'target.startsWith("/")' in js
+
+
+def test_the_google_button_still_works_with_no_script_and_with_popups_blocked() -> None:
+    """It is a real link that script upgrades, not a button that script invents."""
+
+    macros = _text(AUTH_MACROS)
+    assert 'href="{{ auth_google_href }}"' in macros
+    js = _text(AUTH_JS)
+    assert "if (!popup) return;" in js
 
 
 # ---------------------------------------------------------------------------
@@ -623,11 +945,13 @@ def test_headings_and_buttons_are_sentence_case(page: str) -> None:
         assert _sentence_case(copy.lede), copy.lede
 
 
-def test_the_journey_and_the_trust_list_are_sentence_case() -> None:
+def test_the_journey_and_the_three_promises_are_sentence_case() -> None:
     for page in AUTH_PAGES:
         for step in page_copy(page).journey.steps:
             assert _sentence_case(step.title), step.title
             assert _sentence_case(step.hint), step.hint
+    for promise in PRODUCT_PROMISES:
+        assert _sentence_case(promise.title), promise.title
 
 
 def test_the_copy_breaks_none_of_the_brand_rules() -> None:
@@ -657,12 +981,53 @@ def test_the_copy_breaks_none_of_the_brand_rules() -> None:
 def test_the_pages_have_exactly_one_first_level_heading() -> None:
     """There were two: the panel's marketing line and the form's title.
 
-    The panel's line is a paragraph now. It was never the page's subject.
+    The panel is gone entirely now, so the form's title is the only one left.
     """
 
     body = _text(AUTH_HTML)
     assert body.count("<h1") == 1
-    assert "auth-aside-line" in body
+
+
+def test_the_second_panel_is_gone_and_has_not_come_back() -> None:
+    """One card, in the middle of one screen.
+
+    The near-black column down the left took half a laptop window and pushed the form
+    itself under the fold — so on the first page of the product, the button a person
+    came to press needed a scroll. Nothing may re-introduce it: not the markup, not the
+    stylesheet, and not a second grid column in the shell.
+    """
+
+    body = _text(AUTH_HTML)
+    for gone in ("auth-aside", "auth-journey-step", "auth-trust"):
+        assert gone not in body, f"the second panel is back: {gone}"
+
+    css = _strip_comments(_text(AUTH_CSS))
+    for gone in (".auth-aside", ".auth-journey", ".auth-trust"):
+        assert gone not in css, f"the second panel is still styled: {gone}"
+
+    shell = re.search(r"\.auth-shell\s*\{(.*?)\}", css, re.DOTALL)
+    assert shell, ".auth-shell is not declared"
+    assert "grid-template-columns" not in shell.group(1), "the shell has columns again"
+    assert "place-items: center" in shell.group(1)
+    assert "min-height: 100dvh" in shell.group(1)
+
+
+def test_the_page_is_built_to_fit_one_screen_without_clipping_anything() -> None:
+    """Fits a screen, and still reachable when it cannot.
+
+    The card is sized to fit a laptop window with no scrollbar. But at 200% text size,
+    or on a short window with a keyboard open, it will not fit — and then the page must
+    *scroll*, never clip. A fixed height with `overflow: hidden` would have put the
+    button somewhere no one could reach, which is worse than the scrollbar it removes.
+    """
+
+    css = _strip_comments(_text(AUTH_CSS))
+    shell = re.search(r"\.auth-shell\s*\{(.*?)\}", css, re.DOTALL)
+    assert shell
+    assert "height: 100dvh" not in shell.group(1).replace("min-height: 100dvh", "")
+    assert "max-height" not in shell.group(1)
+    # And the card gives up spacing before the page gives up fitting.
+    assert "@media (max-height:" in css
 
 
 def test_every_target_is_at_least_44_pixels() -> None:
@@ -675,6 +1040,7 @@ def test_every_target_is_at_least_44_pixels() -> None:
         ".auth-legal a",
         ".auth-alert-action",
         ".auth-resend-btn",
+        # The Google button and the code door share this shape.
         ".auth-alt",
     ):
         block = re.search(rf"{re.escape(selector)}\s*(?:,[^{{]*)?\{{(.*?)\}}", css, re.DOTALL)
@@ -707,9 +1073,10 @@ def test_the_page_says_its_state_in_words_as_well_as_in_colour() -> None:
     macros = _text(AUTH_MACROS)
     assert "auth-rule-state" in macros
     assert "still needed" in macros
+    # Where you are in the journey is a sentence — "Step 2 of 3 · Your password" — and
+    # not a coloured dot somebody has to interpret.
     html = _text(AUTH_HTML)
-    for word in ("Done", "You are here", "Next"):
-        assert word in html
+    assert "Step {{ auth.journey.position }} of {{ auth.journey.total }}" in html
 
 
 def test_every_change_of_state_is_announced() -> None:
@@ -729,7 +1096,7 @@ def test_every_control_is_labelled_and_described() -> None:
     assert 'aria-pressed="false"' in macros
 
 
-def test_there_is_a_way_past_the_panel_for_a_keyboard() -> None:
+def test_there_is_a_way_straight_to_the_form_for_a_keyboard() -> None:
     html = _text(AUTH_HTML)
     assert 'class="auth-skip" href="#auth-card"' in html
     assert 'id="auth-card"' in html
@@ -881,13 +1248,13 @@ def test_the_handles_the_browser_suite_signs_up_with_are_still_there() -> None:
 
     html = _text(AUTH_HTML) + _text(AUTH_MACROS)
     for handle in (
-        "auth-first-name",
-        "auth-last-name",
         "auth-email",
         "auth-password",
         "auth-repeat-password",
         "auth-submit",
+        "auth-google",
         "signup-form",
+        "signup-password-form",
         "login-form",
     ):
         # Either quote, because a macro is called with one and writes the other.
@@ -896,3 +1263,7 @@ def test_the_handles_the_browser_suite_signs_up_with_are_still_there() -> None:
     assert "Verify and create account" in json.dumps(
         [page_copy(page).submit for page in AUTH_PAGES]
     )
+    # The two name boxes are gone with the one-screen sign-up. Nothing may quietly put
+    # them back on the first step, which is the step that has to stay one question.
+    assert "auth-first-name" not in html
+    assert "auth-last-name" not in html

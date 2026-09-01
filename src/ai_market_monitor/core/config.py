@@ -384,6 +384,43 @@ class Settings(BaseSettings):
     coingecko_api_key: SecretStr | None = None
     coingecko_plan: str = "none"
     coingecko_enabled: bool = False
+    #: CoinMarketCap is a **provider record**, never a Shariah authority. It answers
+    #: "what is this coin, where does its project publish, and where does it rank" —
+    #: the same job CoinGecko already does, from a second source that carries the
+    #: whitepaper link CoinGecko often omits.
+    coinmarketcap_api_base: AnyHttpUrl = AnyHttpUrl("https://pro-api.coinmarketcap.com")
+    coinmarketcap_api_key: SecretStr | None = None
+    #: Which endpoints the account may call. The client refuses a call the plan cannot
+    #: make rather than spending a credit to be told no.
+    coinmarketcap_plan: str = "basic"
+    coinmarketcap_enabled: bool = False
+    #: Metadata changes rarely; market data changes constantly. Two lifetimes, because
+    #: one number for both either wastes credits or serves stale prices.
+    coinmarketcap_metadata_cache_hours: int = Field(default=168, ge=1, le=8760)
+    coinmarketcap_quote_cache_seconds: int = Field(default=300, ge=30, le=86400)
+    coinmarketcap_timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
+    #: One call carries many coins. Staying under the documented cap keeps a research
+    #: sweep to a handful of credits instead of one per coin.
+    coinmarketcap_batch_size: int = Field(default=100, ge=1, le=1000)
+    #: Gather provider facts for coins that are tradeable but carry no Shariah result.
+    #: On by default: it writes no status, only the website, whitepaper and repository
+    #: a reviewer would otherwise have to find by hand.
+    unscreened_research_enabled: bool = True
+    #: How many coins one scheduled run researches. A hundred coins is one provider
+    #: call, so this is a pacing control rather than a cost control.
+    unscreened_research_batch_limit: int = Field(default=300, ge=1, le=5000)
+    unscreened_research_interval_hours: int = Field(default=24, ge=1, le=720)
+    #: How many researched coins one sweep reads the pages of.
+    #:
+    #: Far smaller than the research batch above, and for a different reason: research
+    #: is one provider call per hundred coins, while this fetches up to twelve web pages
+    #: per coin. Twenty-five coins is a few hundred page reads, which is a polite amount
+    #: to ask of other people's servers in one run.
+    automated_screen_batch_limit: int = Field(default=25, ge=1, le=500)
+    automated_screen_interval_hours: int = Field(default=24, ge=1, le=720)
+    #: How often size, rank and long-range movement are re-read for screened coins.
+    #: Daily: a ninety-day price change does not move meaningfully in an hour.
+    market_numbers_interval_hours: int = Field(default=24, ge=1, le=720)
     alternative_me_api_base: AnyHttpUrl = AnyHttpUrl("https://api.alternative.me")
     alternative_me_enabled: bool = False
     fred_api_base: AnyHttpUrl = AnyHttpUrl("https://api.stlouisfed.org/fred")
@@ -726,6 +763,17 @@ class Settings(BaseSettings):
     auth_code_ttl_minutes: int = Field(default=10, ge=2, le=60)
     auth_code_max_attempts: int = Field(default=5, ge=1, le=10)
     auth_test_fixed_code: str | None = None
+    #: The Google door on the sign-up and sign-in pages.
+    #:
+    #: Both values come from one Google Cloud "OAuth client ID" of type *Web
+    #: application*. Until both are filled in, ``google_signin_enabled`` is false, the
+    #: button is not drawn at all, and the two routes answer with a plain refusal — a
+    #: button that opens a window and fails is worse than no button.
+    google_oauth_client_id: str | None = None
+    google_oauth_client_secret: SecretStr | None = None
+    #: How long the signed state that guards the round trip stays good for. It only has
+    #: to cover choosing an account in a popup window.
+    google_oauth_state_ttl_minutes: int = Field(default=10, ge=2, le=60)
     email_test_outbox: list[dict[str, Any]] = Field(default_factory=list, exclude=True)
     #: First-party visit counting on the public site: how many people, how long they
     #: stayed, and what they did next. Writes no cookie and stores no address, so it does
@@ -1445,6 +1493,39 @@ class Settings(BaseSettings):
         if len(candidate) != 6 or not candidate.isdigit():
             return None
         return candidate
+
+    @property
+    def google_oauth_redirect_uri(self) -> str:
+        """The exact address Google is told to come back to.
+
+        Google matches this string character for character against the list registered
+        on the OAuth client, so it is computed once, here, and never assembled from the
+        incoming request. Behind Cloudflare the request's own scheme and host are not
+        reliably the public ones, and a redirect address that is right in development
+        and wrong in production is the classic way this integration fails on the day it
+        is deployed.
+
+        The sign-in pages live on the application host, so ``APP_BASE_URL`` wins where
+        it is set. This is the string to paste into "Authorised redirect URIs".
+        """
+
+        base = str(self.app_base_url or self.public_base_url).rstrip("/")
+        return f"{base}/auth/google/callback"
+
+    @property
+    def google_signin_enabled(self) -> bool:
+        """Whether the Google button may be drawn at all.
+
+        One property, read by the page that draws the button and by the two routes
+        behind it. A page that decided this for itself would eventually draw a button
+        the routes refuse, which is the exact shape of the "offered but not runnable"
+        fault this codebase keeps finding.
+        """
+
+        client_id = (self.google_oauth_client_id or "").strip()
+        secret = self.google_oauth_client_secret
+        client_secret = (secret.get_secret_value() if secret else "").strip()
+        return bool(client_id and client_secret)
 
     @property
     def support_inbox_email(self) -> str:

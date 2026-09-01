@@ -367,6 +367,58 @@ def test_p6_604_a_purchasable_offer_is_published_only_where_pricing_is_advertise
     assert "advertises_pricing" in source[guard:marker]
 
 
+@pytest.mark.parametrize("stage", sorted(LaunchStage, key=lambda item: item.value))
+def test_p6_605_the_release_gate_accepts_every_stage_the_product_can_be_in(stage):
+    """The gate checks coherence, not which stage today happens to be.
+
+    It used to pin two literals — `PUBLIC_WAITLIST_MODE=true` and "pricing must not be
+    advertised". Both were true on the day they were written and false the day the
+    product launched, at which point the gate failed on every correct deployment and
+    asked an operator to un-launch a launched product. Parametrising over the whole
+    enum is what stops that returning: a rule that only holds in one stage fails here
+    the moment it is added, instead of months later during a release.
+    """
+
+    from scripts.check_release_invariants import _check_stage_coherence
+
+    failures: list[str] = []
+    _check_stage_coherence(stage, failures)
+    assert failures == [], f"{stage.value} is described incoherently: {failures}"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_phrase"),
+    [
+        ("exposes_checkout", True, "no price shown"),
+        ("advertises_pricing", True, "hides the pricing page"),
+        ("advertises_account_entry", True, "two different first steps"),
+        ("hidden_pages", frozenset(), "leaves the pricing page in the menus"),
+    ],
+)
+def test_p6_606_an_incoherent_exposure_is_still_refused(
+    field, value, expected_phrase, monkeypatch
+):
+    """A gate that accepts everything is not a gate.
+
+    Each case here is a contradiction a visitor would actually meet on the page, built
+    by breaking one field of a real stage. If any of them starts passing, the coherence
+    check has stopped checking.
+    """
+
+    import dataclasses
+
+    from ai_market_monitor.core import launch_stage as module
+    from scripts.check_release_invariants import _check_stage_coherence
+
+    stage = LaunchStage.PUBLIC_WAITLIST
+    broken = dataclasses.replace(STAGE_EXPOSURE[stage], **{field: value})
+    monkeypatch.setitem(module.STAGE_EXPOSURE, stage, broken)
+
+    failures: list[str] = []
+    _check_stage_coherence(stage, failures)
+    assert any(expected_phrase in item for item in failures), failures
+
+
 # --------------------------------------------------------------------------------
 # 1.7  A database backup is not an ordinary filename.
 # --------------------------------------------------------------------------------

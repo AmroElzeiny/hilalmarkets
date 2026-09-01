@@ -1,0 +1,698 @@
+[
+  {
+    "symbol": "BTC",
+    "name": "Bitcoin",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2020-07-20",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 234th meeting on 2020-07-20.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "ETH",
+    "name": "Ethereum",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2020-07-20",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 234th meeting on 2020-07-20.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "XRP",
+    "name": "XRP",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2020-07-20",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 234th meeting on 2020-07-20.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "LTC",
+    "name": "Litecoin",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2020-07-20",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 234th meeting on 2020-07-20.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "BCH",
+    "name": "Bitcoin Cash",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2021-08-23",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 247th meeting on 2021-08-23.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "SOL",
+    "name": "Solana",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2023-01-12",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 264th meeting on 2023-01-12.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "ADA",
+    "name": "Cardano",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2023-01-12",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 264th meeting on 2023-01-12.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "LINK",
+    "name": "Chainlink",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2023-02-09",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 265th meeting on 2023-02-09.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "UNI",
+    "name": "Uniswap",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2023-02-09",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 265th meeting on 2023-02-09.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "MATIC",
+    "name": "Polygon",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2023-08-10",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 271st meeting on 2023-08-10.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "AVAX",
+    "name": "Avalanche",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2023-08-10",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 271st meeting on 2023-08-10.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "DOT",
+    "name": "Polkadot",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2024-05-16",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 279th meeting on 2024-05-16.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "ATOM",
+    "name": "Cosmos",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2024-05-16",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 279th meeting on 2024-05-16.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "WLD",
+    "name": "Worldcoin",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2024-06-11",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 280th meeting on 2024-06-11.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "XLM",
+    "name": "Stellar",
+    "admission": "regulator_floor",
+    "outcome": "admitted",
+    "decided_on": "2024-12-10",
+    "reasons": [
+      "The Shariah Advisory Council of the Securities Commission of Malaysia published this asset as Shariah-compliant at its 286th meeting on 2024-12-10.",
+      "This standard treats a regulator's published approval as a floor it may not fall below, so the automatic reading cannot refuse it."
+    ],
+    "sources": [
+      {
+        "url": "https://www.sc.com.my/digital-assets",
+        "title": "SC Malaysia — list of Shariah-compliant digital assets",
+        "category": "official_external_reference",
+        "retrieved_at": "2026-07-24"
+      }
+    ],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": "Digital assets regulated within the Securities Commission Malaysia framework"
+  },
+  {
+    "symbol": "ZEC",
+    "name": "Zcash",
+    "admission": "automated_screen",
+    "outcome": "admitted",
+    "decided_on": "2026-08-31",
+    "reasons": [
+      "It runs its own blockchain network.",
+      "People are paid for helping run and secure the network."
+    ],
+    "sources": [
+      {
+        "url": "https://github.com/zcash/zcash",
+        "title": "GitHub - zcash/zcash: Zcash - Internet Money · GitHub",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://zips.z.cash/protocol/protocol.pdf",
+        "title": "Zcash Protocol Specification, Version v2026.7.0-115-gad30e5 [NU6.2]",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      }
+    ],
+    "pages_read": 2,
+    "primary_pages_read": 2,
+    "matched_conditions": [],
+    "note": ""
+  },
+  {
+    "symbol": "USD1",
+    "name": "World Liberty Financial USD",
+    "admission": "automated_screen",
+    "outcome": "admitted",
+    "decided_on": "2026-08-31",
+    "reasons": [
+      "Each coin stands for something real that is held and can be given back."
+    ],
+    "sources": [
+      {
+        "url": "https://docs.worldlibertyfinancial.com/agentpay-sdk/install",
+        "title": "Install | World Liberty Financial Docs",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://github.com/worldliberty/usd1-smart-contracts",
+        "title": "GitHub - worldliberty/usd1-smart-contracts: Smart contracts for the USD1 stablecoin · GitHub",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://worldlibertyfinancial.com/",
+        "title": "World Liberty Financial - Where DeFi Meets TradFi",
+        "category": "official_website",
+        "retrieved_at": "2026-08-31"
+      }
+    ],
+    "pages_read": 3,
+    "primary_pages_read": 3,
+    "matched_conditions": [],
+    "note": ""
+  },
+  {
+    "symbol": "ENSO",
+    "name": "Enso",
+    "admission": "automated_screen",
+    "outcome": "refused",
+    "decided_on": "2026-08-31",
+    "reasons": [
+      "The project's own business is lending money and charging for it."
+    ],
+    "sources": [
+      {
+        "url": "https://blog.enso.build/",
+        "title": "Enso Blog",
+        "category": "official_news",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://docs.enso.build/",
+        "title": "Enso Developer Documentation - Enso Developer Documentation",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://docs.enso.build/api-reference/integration/networks",
+        "title": "Networks - Enso Developer Documentation",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://docs.enso.build/home",
+        "title": "Enso Developer Documentation - Enso Developer Documentation",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://docs.enso.build/license",
+        "title": "Licence & Legal - Enso Developer Documentation",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://docs.enso.build/llms-full.txt",
+        "title": "https://docs.enso.build/llms-full.txt",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      }
+    ],
+    "pages_read": 23,
+    "primary_pages_read": 22,
+    "matched_conditions": [
+      "RB-01"
+    ],
+    "note": ""
+  },
+  {
+    "symbol": "PUMP",
+    "name": "Pump.fun",
+    "admission": "automated_screen",
+    "outcome": "admitted",
+    "decided_on": "2026-08-31",
+    "reasons": [
+      "It runs its own blockchain network.",
+      "The coin is used to vote or to get access inside one platform.",
+      "It lets people swap one coin for another.",
+      "People are paid for helping run and secure the network."
+    ],
+    "sources": [
+      {
+        "url": "https://github.com/pump-fun/pump-public-docs",
+        "title": "GitHub - pump-fun/pump-public-docs: Pump public docs · GitHub",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://pump.fun/",
+        "title": "Pump.fun — Launch and trade memecoins on Solana",
+        "category": "official_website",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://pump.fun/docs/charitycoins",
+        "title": "Charity Coins Disclaimer | Pump",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://pump.fun/docs/dmca-policy",
+        "title": "DMCA Guidelines | Pump",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://pump.fun/docs/fees",
+        "title": "Pump.fun fees | Pump",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://pump.fun/docs/go-fun-terms",
+        "title": "Go.fun Terms | Pump",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      }
+    ],
+    "pages_read": 11,
+    "primary_pages_read": 11,
+    "matched_conditions": [],
+    "note": ""
+  },
+  {
+    "symbol": "RLUSD",
+    "name": "Ripple USD",
+    "admission": "automated_screen",
+    "outcome": "admitted",
+    "decided_on": "2026-08-31",
+    "reasons": [
+      "Each coin stands for something real that is held and can be given back.",
+      "It runs its own blockchain network.",
+      "The coin is used to vote or to get access inside one platform.",
+      "It lets people swap one coin for another.",
+      "People are paid for helping run and secure the network."
+    ],
+    "sources": [
+      {
+        "url": "https://docs.ripple.com/",
+        "title": "Ripple documentation",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://docs.ripple.com/products/stablecoin",
+        "title": "Ripple documentation",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://github.com/ripple/RLUSD-Implementation/blob/main/doc/rlusd-xrpl-settings.md",
+        "title": "RLUSD-Implementation/doc/rlusd-xrpl-settings.md at main · ripple/RLUSD-Implementation · GitHub",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://ripple.com/faq",
+        "title": "Frequently Asked Questions (FAQs) | Ripple",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://ripple.com/insights",
+        "title": "Crypto, Blockchain and FinTech Industry Insights Blog | Ripple",
+        "category": "official_news",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://ripple.com/insights/asset-tokenization-financial-services",
+        "title": "Tokenization of Financial Assets: Transforming Financial Services | Ripple",
+        "category": "official_news",
+        "retrieved_at": "2026-08-31"
+      }
+    ],
+    "pages_read": 18,
+    "primary_pages_read": 6,
+    "matched_conditions": [],
+    "note": ""
+  },
+  {
+    "symbol": "XAUT",
+    "name": "Tether Gold",
+    "admission": "automated_screen",
+    "outcome": "not_enough_data",
+    "decided_on": "2026-08-31",
+    "reasons": [
+      "We could not read any page from this project, so we have nothing to judge."
+    ],
+    "sources": [],
+    "pages_read": 0,
+    "primary_pages_read": 0,
+    "matched_conditions": [],
+    "note": ""
+  },
+  {
+    "symbol": "PEPE",
+    "name": "Pepe",
+    "admission": "automated_screen",
+    "outcome": "not_enough_data",
+    "decided_on": "2026-08-31",
+    "reasons": [
+      "We read the project's pages, but none of them says what the project actually does, so there is nothing to judge yet."
+    ],
+    "sources": [
+      {
+        "url": "https://pepe.vip/",
+        "title": "PEPE",
+        "category": "official_website",
+        "retrieved_at": "2026-08-31"
+      }
+    ],
+    "pages_read": 1,
+    "primary_pages_read": 1,
+    "matched_conditions": [],
+    "note": ""
+  },
+  {
+    "symbol": "ZKC",
+    "name": "Boundless",
+    "admission": "automated_screen",
+    "outcome": "admitted",
+    "decided_on": "2026-08-31",
+    "reasons": [
+      "It runs its own blockchain network."
+    ],
+    "sources": [
+      {
+        "url": "https://boundless.network/",
+        "title": "Boundless — Rewriting the economics of intelligence",
+        "category": "official_website",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://boundless.network/blog",
+        "title": "Blog — Boundless",
+        "category": "official_news",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://github.com/boundless-xyz",
+        "title": "boundless_xyz · GitHub",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      }
+    ],
+    "pages_read": 3,
+    "primary_pages_read": 2,
+    "matched_conditions": [],
+    "note": ""
+  },
+  {
+    "symbol": "PROM",
+    "name": "Prom",
+    "admission": "automated_screen",
+    "outcome": "admitted",
+    "decided_on": "2026-08-31",
+    "reasons": [
+      "It runs its own blockchain network.",
+      "The coin is used to vote or to get access inside one platform.",
+      "People are paid for helping run and secure the network."
+    ],
+    "sources": [
+      {
+        "url": "https://github.com/prom-io",
+        "title": "Prom · GitHub",
+        "category": "official_documentation",
+        "retrieved_at": "2026-08-31"
+      },
+      {
+        "url": "https://prom.io/",
+        "title": "Prom | Scalability Without Borders",
+        "category": "official_website",
+        "retrieved_at": "2026-08-31"
+      }
+    ],
+    "pages_read": 2,
+    "primary_pages_read": 2,
+    "matched_conditions": [],
+    "note": ""
+  },
+  {
+    "symbol": "U",
+    "name": "United Stables",
+    "admission": "automated_screen",
+    "outcome": "not_enough_data",
+    "decided_on": "2026-08-31",
+    "reasons": [
+      "We could not read enough of what this project writes about itself. Nothing we did read worried us, but that is too little to say a project is clean, so we have not judged it yet."
+    ],
+    "sources": [
+      {
+        "url": "https://u.tech/",
+        "title": "United Stables (U) | The Stablecoin Liquidity Layer",
+        "category": "official_website",
+        "retrieved_at": "2026-08-31"
+      }
+    ],
+    "pages_read": 1,
+    "primary_pages_read": 1,
+    "matched_conditions": [],
+    "note": ""
+  }
+]

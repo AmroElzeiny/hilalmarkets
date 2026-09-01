@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import monotonic
+from typing import Any
 from uuid import UUID
 
 from ai_market_monitor.core.asset_logos import asset_logo_module_url
@@ -102,14 +104,23 @@ class LiveMarketQuoteService:
         methodology: MethodologySummary,
         assessments: list[AssetAssessmentSummary],
         warning: str | None = None,
+        market_numbers: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> LiveSpotMarketResponse:
-        """Attach live quotes only to evidence-backed assets for one methodology."""
+        """Attach live quotes only to evidence-backed assets for one methodology.
+
+        ``market_numbers`` is what the exchange ticker cannot answer — size, rank, and
+        movement over weeks — already read from the database by the caller. Passed in
+        rather than fetched here because this snapshot is cached across every reader in
+        the process and has no database session of its own: reaching for one from inside
+        a shared cache is how one page's request ends up serving another page's data.
+        """
         snapshot = await self.snapshot(
             exchange=exchange,
             quote_asset=quote_asset,
             methodology_id=methodology.id,
         )
         by_asset = {item.canonical_asset: item for item in assessments}
+        numbers = market_numbers or {}
         items = []
         for quote in snapshot.items:
             assessment = by_asset.get(quote.canonical_asset)
@@ -130,6 +141,10 @@ class LiveMarketQuoteService:
                             f"/dashboard/market/{assessment.canonical_asset}"
                             f"?methodology_id={assessment.methodology_id}"
                         ),
+                        # Only the fields actually stored. A coin the provider has never
+                        # heard of contributes nothing here and keeps the schema's
+                        # `None`, which the page draws as "not known" rather than zero.
+                        **dict(numbers.get(quote.canonical_asset, {})),
                     }
                 )
             )

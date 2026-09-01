@@ -22,6 +22,10 @@ from ai_market_monitor.db.models.affiliate import (
     AffiliateApplication,
     AffiliatePayoutRequest,
 )
+from ai_market_monitor.db.models.automated_screen import (
+    AutomatedScreenRun,
+    CoinEvidenceDocument,
+)
 from ai_market_monitor.db.models.capability_extensions import (
     CapabilityClarificationEvidence,
     CapabilityExtension,
@@ -116,6 +120,7 @@ from ai_market_monitor.db.models.operations import (
     OperationalIssueEvent,
     OperationalMetricDelta,
 )
+from ai_market_monitor.db.models.provider_profiles import ProviderCoinProfile
 from ai_market_monitor.db.models.public_chat import (
     PublicChatAnswerEvent,
     PublicChatAnswerFeedback,
@@ -256,6 +261,9 @@ __all__ = [
     "AssetShariaStatusHistory",
     "AssetEvidenceRecord",
     "AssetResearchDossier",
+    "AutomatedScreenRun",
+    "CoinEvidenceDocument",
+    "ProviderCoinProfile",
     "AuditEvent",
     "BillingCheckoutAttempt",
     "BillingEvent",

@@ -83,7 +83,7 @@ def _internal_links(markup: str) -> list[str]:
 
 async def _signup(test_context, email: str) -> None:
     response = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data={
             "email": email,
             "display_name": "Hilal Public Test",

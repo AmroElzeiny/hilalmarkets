@@ -1,0 +1,487 @@
+{
+  "_what_this_is": "The product owner's decisions about the screening conditions in sharia_conditions.py. A condition listed here as 'approved' refuses coins. A condition not listed here is 'proposed' and changes nothing. Never edit this file to add a rule - rules live in sharia_conditions.py. This file only records who decided what, and when.",
+  "_how_to_approve": "Add an entry with the condition's code, status 'approved', who decided, and the date. Then run: .venv/Scripts/python scripts/export_sharia_conditions.py --write",
+  "_statuses": [
+    "approved",
+    "rejected",
+    "proposed"
+  ],
+  "decisions": [
+    {
+      "code": "CF-01",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Cannot be checked by reading a website, so it is reported as unchecked on every verdict rather than treated as passed."
+    },
+    {
+      "code": "CF-02",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Cannot be checked by reading a website, so it is reported as unchecked on every verdict rather than treated as passed."
+    },
+    {
+      "code": "CF-03",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "CF-04",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Cannot be checked by reading a website, so it is reported as unchecked on every verdict rather than treated as passed."
+    },
+    {
+      "code": "CF-05",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Cannot be checked by reading a website, so it is reported as unchecked on every verdict rather than treated as passed."
+    },
+    {
+      "code": "DC-04",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "EX-01",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "EX-02",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "EX-03",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Cannot be checked by reading a website, so it is reported as unchecked on every verdict rather than treated as passed."
+    },
+    {
+      "code": "GH-01",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Already live before the register existed. Refuses Synthetix, Hyperliquid."
+    },
+    {
+      "code": "GH-02",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "GH-03",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "GH-04",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "GH-05",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "GH-07",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "GH-08",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "GH-09",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Already live. Out of scope rather than forbidden - a share is screened by its company."
+    },
+    {
+      "code": "GH-10",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Cannot be checked by reading a website, so it is reported as unchecked on every verdict rather than treated as passed."
+    },
+    {
+      "code": "GH-11",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "GH-13",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Scholars differ on this one; the register records the dispute."
+    },
+    {
+      "code": "HM-01",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "HM-02",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "HM-03",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "HM-04",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "MY-01",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Already live before the register existed."
+    },
+    {
+      "code": "MY-02",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "MY-03",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "MY-04",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "MY-05",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "MY-06",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "MY-07",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Scholars differ on this one; the register records the dispute."
+    },
+    {
+      "code": "MY-08",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "MY-09",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "PR-01",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "PR-02",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "PR-03",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "PR-04",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Scholars differ on this one; the register records the dispute."
+    },
+    {
+      "code": "PR-05",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "PR-06",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "PR-07",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "PR-08",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "PR-09",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "PR-10",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Scholars differ on this one; the register records the dispute."
+    },
+    {
+      "code": "PR-11",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "PR-12",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Scholars differ on this one; the register records the dispute."
+    },
+    {
+      "code": "RB-01",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Already live before the register existed. Refuses AAVE, COMP, GHO."
+    },
+    {
+      "code": "RB-02",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "RB-03",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Already live as part of the holder-return vocabulary, not as a blocking activity."
+    },
+    {
+      "code": "RB-04",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Already live as part of the holder-return vocabulary."
+    },
+    {
+      "code": "RB-05",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Already live as part of the holder-return vocabulary."
+    },
+    {
+      "code": "RB-06",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "RB-07",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "RB-08",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "RB-09",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "RB-10",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "RB-11",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "RB-12",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "RB-13",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "RB-14",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Cannot be checked by reading a website, so it is reported as unchecked on every verdict rather than treated as passed."
+    },
+    {
+      "code": "RB-15",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "RT-01",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Cannot be checked by reading a website, so it is reported as unchecked on every verdict rather than treated as passed."
+    },
+    {
+      "code": "RT-02",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Cannot be checked by reading a website, so it is reported as unchecked on every verdict rather than treated as passed."
+    },
+    {
+      "code": "RT-03",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Cannot be checked by reading a website, so it is reported as unchecked on every verdict rather than treated as passed."
+    },
+    {
+      "code": "RT-04",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Cannot be checked by reading a website, so it is reported as unchecked on every verdict rather than treated as passed."
+    },
+    {
+      "code": "WG-01",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": "Already live, and only a person can ever establish it. No phrase can find it."
+    },
+    {
+      "code": "WG-03",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "WG-05",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    },
+    {
+      "code": "WG-06",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-08-30",
+      "note": ""
+    }
+  ]
+}

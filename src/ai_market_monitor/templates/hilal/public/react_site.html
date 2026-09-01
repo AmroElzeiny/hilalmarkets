@@ -4,7 +4,7 @@
   {#- First script on the page, deliberately. It puts a time limit on every request this
       product sends to its own server, and it can only do that for a request sent after
       it has run. See `static/hm-request.js`. -#}
-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260825-brain-agent-dock"></script>
+  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260831-auth-one-screen"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
@@ -45,13 +45,25 @@
   <meta name="twitter:image:alt" content="{{ og_image_alt }}">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260825-brain-agent-dock">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260831-auth-one-screen">
   {# One owner for the cookie banner and its settings window, which this template includes below. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260825-brain-agent-dock">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260825-brain-agent-dock">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260825-brain-agent-dock">
-  <link rel="stylesheet" href="{{ url_for('static', path='/landing/assets/landing.css') }}?v=20260825-brain-agent-dock">
-  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260825-brain-agent-dock">{% endif %}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260831-auth-one-screen">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260831-auth-one-screen">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260831-auth-one-screen">
+  <link rel="stylesheet" href="{{ url_for('static', path='/landing/assets/landing.css') }}?v=20260831-auth-one-screen">
+  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260831-auth-one-screen">{% endif %}
+  {#- `methodology` below is null on every page but `/hilal-methodology`, which is handed
+      the whole published register at render time. It is passed rather than built into
+      the bundle so the page cannot quote a count that stopped being true; and it is null
+      elsewhere so the register does not travel inside every HTML document on the site.
+
+      Note for anyone editing the block below: it is one Jinja *expression* piped through
+      `tojson`, not template markup. A Jinja comment inside it is a syntax error, and the
+      error names a character offset rather than a line.
+
+      And a comment about comments must not contain the closing sequence itself. Writing
+      it out here ended the comment early and printed the rest of this paragraph above
+      the doctype of every React page. -#}
   <script>
     window.HilalMarketsConsentConfig = {{ {
       "version": cookie_consent_version,
@@ -72,6 +84,7 @@
         "reviewRequired": legal_review_required
       },
       "chrome": site_chrome_runtime_config,
+      "methodology": methodology_runtime_config,
       "waitlist": {
         "mode": waitlist_mode,
         "eyebrow": waitlist_eyebrow,
@@ -100,10 +113,10 @@
   <div id="root"></div>
   {% include "hilal/partials/cookie_banner.html" %}
   {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260825-brain-agent-dock"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260825-brain-agent-dock"></script>
-  {% if site_visit_measurement_enabled %}<script src="{{ url_for('static', path='/hm-visit-analytics.js') }}?v=20260825-brain-agent-dock" defer></script>{% endif %}
-  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260825-brain-agent-dock"></script>{% endif %}
-  <script type="module" src="{{ url_for('static', path='/landing/assets/landing.js') }}?v=20260825-brain-agent-dock"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260831-auth-one-screen"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260831-auth-one-screen"></script>
+  {% if site_visit_measurement_enabled %}<script src="{{ url_for('static', path='/hm-visit-analytics.js') }}?v=20260831-auth-one-screen" defer></script>{% endif %}
+  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260831-auth-one-screen"></script>{% endif %}
+  <script type="module" src="{{ url_for('static', path='/landing/assets/landing.js') }}?v=20260831-auth-one-screen"></script>
 </body>
 </html>

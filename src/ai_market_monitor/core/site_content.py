@@ -149,6 +149,13 @@ FOOTER_NAVIGATION = (
         (
             NavigationItem("Features", "public_features", "features"),
             NavigationItem("How it works", "public_how_it_works", "how_it_works"),
+            # The published screening standard. In the footer because it has to be
+            # reachable *before* somebody meets a result from it — the warnings inside
+            # the product link here, but a person deciding whether to trust this product
+            # at all should be able to read the whole rule without an account.
+            NavigationItem(
+                "Hilal Methodology", "public_hilal_methodology", "hilal_methodology"
+            ),
         ),
     ),
     NavigationGroup(
@@ -376,6 +383,18 @@ DASHBOARD_NAVIGATION = (
                 ("asset_passport",),
                 guide_target="nav-halal-assets",
             ),
+            #: Coins no authority has ruled on, and what a machine read about them.
+            #:
+            #: Directly below Halal Assets and never inside it. The two lists answer
+            #: different questions — "what did a scholar decide" and "what did a machine
+            #: read" — and a person who cannot tell which one they are looking at has
+            #: been misled by the menu before they reach the page.
+            NavigationItem(
+                "Coins we researched",
+                "automated_research_page",
+                "research",
+                "search",
+            ),
         ),
     ),
     NavigationGroup(
@@ -499,6 +518,21 @@ PUBLIC_PAGES = (
             "authority, and status changes."
         ),
         "hilal/public/how_we_screen.html",
+    ),
+    PublicPageMetadata(
+        # A child of the landing page, on the marketing host, because it is what the
+        # product says about itself in public — not something behind a sign-in. Every
+        # place in the dashboard that shows an automated result links here, so a person
+        # who meets the standard while building a monitor can read the whole of it.
+        "hilal_methodology",
+        "public_hilal_methodology",
+        "/hilal-methodology",
+        "Hilal Markets Methodology",
+        (
+            "Read how the Hilal Markets automated screen works: the conditions, their "
+            "evidence, what it skips, and which coins it has judged."
+        ),
+        "hilal/public/hilal_methodology.html",
     ),
     PublicPageMetadata(
         "pricing",

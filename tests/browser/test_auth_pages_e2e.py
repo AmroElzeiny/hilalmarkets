@@ -1,4 +1,4 @@
-"""The five sign-in pages, measured in a real browser.
+"""The six sign-in pages, measured in a real browser.
 
 Everything here is a claim only a browser can settle. A stylesheet can *declare* a
 3:1 edge and a later rule can quietly win; a page can *contain* the code for a countdown
@@ -31,15 +31,27 @@ PAGES = (
     "/reset-password",
 )
 
-#: The same pages plus the second half of each two-part flow, which is where the code
-#: boxes, the countdown and the "sent to" line live. A rule proved on the first half is
-#: not proved on the second until the second is measured too.
+#: Where the middle step of signing up lives. It needs an address to work on, because
+#: nobody can choose a password for an email nobody has given us.
+SIGNUP_PASSWORD = "/signup/password?email=someone%40example.com"
+
+#: The same pages plus the later step of each multi-part flow, which is where the code
+#: boxes, the countdown, the password checklist and the "sent to" line live. A rule
+#: proved on the first step is not proved on the second until the second is measured too.
 ALL_STATES = (
     *PAGES,
+    SIGNUP_PASSWORD,
     "/signup/verify?message=code_sent&email=someone%40example.com",
     "/signin/code?message=code_sent&email=someone%40example.com",
     "/reset-password?message=code_sent&email=someone%40example.com",
 )
+
+#: The laptop screens this card is promised to fit inside without a scrollbar.
+#:
+#: 1366×768 is the commonest laptop screen there is, and 1280×720 is about the smallest
+#: still sold. The two-panel layout this replaced pushed the button off the bottom of
+#: both, which is the whole reason the left panel was taken away.
+LAPTOPS = ((1366, 768), (1280, 720))
 
 
 def _open(page: Page, base_url: str, path: str) -> None:
@@ -110,6 +122,38 @@ def test_the_page_renders_and_fits_a_phone(page: Page, base_url: str, path: str)
     assert_no_horizontal_overflow(page)
     page.wait_for_timeout(400)
     assert not errors, errors
+
+
+@pytest.mark.parametrize("path", ALL_STATES)
+@pytest.mark.parametrize(("width", "height"), LAPTOPS)
+def test_the_whole_page_fits_one_laptop_screen(
+    page: Page, base_url: str, path: str, width: int, height: int
+) -> None:
+    """One screen, no scrollbar. This is the claim the redesign exists to make.
+
+    Nothing offline can settle it. A stylesheet can declare ``min-height: 100dvh`` and
+    still overflow, because what decides is the height of what is inside it — and that
+    changes per page: the password step carries a checklist, the code steps carry six
+    boxes and a countdown, and every page carries three ticks and the legal row.
+
+    The cookie banner is measured with the page rather than dismissed first, because
+    somebody signing up is meeting this page for the first time and the banner is on
+    screen while they do. It is fixed to the bottom and the card reserves exactly its
+    height, so if that sum does not fit, the person who has never been here before is the
+    one who has to scroll to reach the button.
+    """
+
+    page.set_viewport_size({"width": width, "height": height})
+    _open(page, base_url, path)
+    # The banner measures itself and publishes its height, and the card reserves that
+    # room from it. Both have to have happened before the page height means anything.
+    page.wait_for_timeout(700)
+    overflow = page.evaluate(
+        "() => document.documentElement.scrollHeight - window.innerHeight"
+    )
+    # One pixel of tolerance for sub-pixel rounding, and no more: two pixels is a
+    # scrollbar.
+    assert overflow <= 1, f"{path} at {width}x{height} scrolls by {overflow}px"
 
 
 @pytest.mark.parametrize("path", ALL_STATES)
@@ -424,8 +468,9 @@ def test_a_success_looks_like_a_success(page: Page, base_url: str) -> None:
 @pytest.mark.parametrize(
     ("path", "here", "counter"),
     [
-        ("/signup", "Your details", "Step 1 of 2"),
-        ("/signup/verify?message=code_sent&email=a%40b.com", "Confirm your email", "Step 2 of 2"),
+        ("/signup", "Your details", "Step 1 of 3"),
+        (SIGNUP_PASSWORD, "Your password", "Step 2 of 3"),
+        ("/signup/verify?message=code_sent&email=a%40b.com", "Confirm your email", "Step 3 of 3"),
         ("/signin/code", "Ask for a code", "Step 1 of 2"),
         ("/signin/code?message=code_sent&email=a%40b.com", "Enter the code", "Step 2 of 2"),
         ("/reset-password", "Ask for a code", "Step 1 of 2"),
@@ -439,27 +484,49 @@ def test_a_success_looks_like_a_success(page: Page, base_url: str) -> None:
 def test_the_page_says_where_you_are(
     page: Page, base_url: str, path: str, here: str, counter: str
 ) -> None:
-    """Signing up is two pages and nothing said so."""
+    """Signing up is three pages, and the chip above the heading says which one.
+
+    It used to be a tall list down the side of the screen. The list is gone with the
+    panel that carried it; the sentence it was really saying — "step 2 of 3, your
+    password" — is now beside the heading, where somebody reads it.
+    """
 
     _open(page, base_url, path)
-    current = page.locator('.auth-journey-step[aria-current="step"]')
-    expect(current).to_have_count(1)
-    expect(current).to_contain_text(here)
-    expect(current).to_contain_text("You are here")
-    expect(page.locator(".auth-step-chip")).to_contain_text(counter)
+    chip = page.locator(".auth-step-chip")
+    expect(chip).to_have_count(1)
+    expect(chip).to_contain_text(counter)
+    expect(chip).to_contain_text(here)
 
 
 def test_a_single_step_is_not_dressed_up_as_a_journey(page: Page, base_url: str) -> None:
     _open(page, base_url, "/signin")
     expect(page.locator(".auth-step-chip")).to_have_count(0)
-    expect(page.locator(".auth-journey-step")).to_have_count(2)
 
 
-def test_a_finished_step_says_so_in_words(page: Page, base_url: str) -> None:
-    _open(page, base_url, "/signup/verify?message=code_sent&email=a%40b.com")
-    done = page.locator('.auth-journey-step[data-state="done"]')
-    expect(done).to_have_count(1)
-    expect(done).to_contain_text("Done")
+@pytest.mark.parametrize("path", ALL_STATES)
+def test_three_ticks_sit_under_the_button_on_every_page(
+    page: Page, base_url: str, path: str
+) -> None:
+    """Two things the product does, one thing it never does.
+
+    They used to live in a dark column opposite the form, where nobody read them. Under
+    the button is where a person looks just before pressing it — so that is where the
+    "we never place an order" boundary is now, on every page and in every state.
+    """
+
+    _open(page, base_url, path)
+    promises = page.locator(".auth-promise")
+    expect(promises).to_have_count(3)
+    # The boundary is in the title now. The sentence that used to carry it — "never
+    # places an order and never holds your money" — was small print under a tick, and
+    # three of those made the card taller than a short window.
+    expect(page.locator(".auth-promises")).to_contain_text("Watching, never trading")
+
+    # And they really are below the button, not above it.
+    button = page.locator(".auth-submit").first.bounding_box()
+    ticks = page.locator(".auth-promises").bounding_box()
+    assert button is not None and ticks is not None
+    assert ticks["y"] > button["y"], "the promises are above the button"
 
 
 # ---------------------------------------------------------------------------
@@ -468,12 +535,17 @@ def test_a_finished_step_says_so_in_words(page: Page, base_url: str) -> None:
 
 
 def test_the_checklist_ticks_itself_off_as_you_type(page: Page, base_url: str) -> None:
-    """Five rules, from the same module the server checks with."""
+    """Four rules, from the same module the server checks with.
 
-    _open(page, base_url, "/signup")
+    There were five. The fifth asked for a symbol and it is gone — an ordinary
+    letters-and-numbers password finishes the list now, and the last box below proves
+    the page agrees with the server about that.
+    """
+
+    _open(page, base_url, SIGNUP_PASSWORD)
     field = page.get_by_test_id("auth-password")
     rules = page.locator(".auth-rule")
-    expect(rules).to_have_count(5)
+    expect(rules).to_have_count(4)
     assert page.locator('.auth-rule[data-met="true"]').count() == 0
 
     field.fill("a")
@@ -484,8 +556,9 @@ def test_the_checklist_ticks_itself_off_as_you_type(page: Page, base_url: str) -
     assert page.locator('.auth-rule[data-met="true"]').count() == 3
     field.fill("aaaaaA7")
     assert page.locator('.auth-rule[data-met="true"]').count() == 4
-    field.fill("aaaaaA7!")
-    assert page.locator('.auth-rule[data-met="true"]').count() == 5
+    # No punctuation anywhere, and the list is finished.
+    field.fill("Halal2026")
+    assert page.locator('.auth-rule[data-met="true"]').count() == 4
 
 
 def test_the_browser_and_the_server_agree_about_every_password(
@@ -515,7 +588,7 @@ def test_the_browser_and_the_server_agree_about_every_password(
         "١٢٣٤٥٦aA!",  # Arabic-Indic digits: `isdigit()` is true
         "",
     ]
-    _open(page, base_url, "/signup")
+    _open(page, base_url, SIGNUP_PASSWORD)
     measured = page.evaluate(
         """(samples) => {
           const rules = window.HilalMarketsAuth.passwordRules.map(
@@ -537,7 +610,7 @@ def test_the_browser_and_the_server_agree_about_every_password(
 
 
 def test_the_password_can_be_looked_at(page: Page, base_url: str) -> None:
-    _open(page, base_url, "/signup")
+    _open(page, base_url, SIGNUP_PASSWORD)
     field = page.get_by_test_id("auth-password")
     field.fill("TraceEdge1!")
     reveal = page.locator("[data-reveal]").first
@@ -555,7 +628,7 @@ def test_the_reveal_button_always_has_a_name(page: Page, base_url: str) -> None:
     """On a phone the word is clipped, never removed — `display: none` erases the name."""
 
     page.set_viewport_size({"width": 360, "height": 780})
-    _open(page, base_url, "/signup")
+    _open(page, base_url, SIGNUP_PASSWORD)
     name = page.locator("[data-reveal]").first.evaluate(
         "node => node.innerText || node.textContent"
     )
@@ -563,7 +636,7 @@ def test_the_reveal_button_always_has_a_name(page: Page, base_url: str) -> None:
 
 
 def test_the_two_passwords_are_compared_while_you_type(page: Page, base_url: str) -> None:
-    _open(page, base_url, "/signup")
+    _open(page, base_url, SIGNUP_PASSWORD)
     page.get_by_test_id("auth-password").fill("TraceEdge1!")
     page.get_by_test_id("auth-repeat-password").fill("TraceEdge1")
     note = page.locator("[data-password-match]")
@@ -579,9 +652,18 @@ def test_an_empty_form_says_which_box_and_puts_the_cursor_in_it(
     _open(page, base_url, "/signup")
     page.get_by_test_id("auth-submit").click()
     expect(page.locator("[data-field-error]:not([hidden])").first).to_be_visible()
+    # The *first* empty box, which is the name — the cursor goes to the top of the form
+    # rather than to whichever field the script happened to check last.
     focused = page.evaluate("document.activeElement?.name")
-    assert focused == "first_name"
+    assert focused == "display_name"
     assert page.url.endswith("/signup"), "the form was sent with nothing in it"
+
+    # And once the name is filled in, the same press moves to the next empty box rather
+    # than sending a form that is still incomplete.
+    page.get_by_test_id("auth-name").fill("Amina Yusuf")
+    page.get_by_test_id("auth-submit").click()
+    assert page.evaluate("document.activeElement?.name") == "email"
+    assert page.url.endswith("/signup"), "the form was sent with no address in it"
 
 
 def test_a_typo_in_an_email_is_caught_beside_the_box(page: Page, base_url: str) -> None:
@@ -790,7 +872,6 @@ def test_the_page_really_animates(page: Page, base_url: str) -> None:
         ("/signin", ".auth-alt"),
         ("/signin", ".auth-forgot"),
         ("/signin", ".auth-back"),
-        ("/signin", ".auth-trust-item"),
         ("/signin", ".auth-input"),
         ("/signin/code?message=code_sent&email=a%40b.com", ".auth-switch a"),
         ("/signin?error=invalid_login", ".auth-alert-action"),
@@ -855,7 +936,7 @@ def test_asking_for_less_motion_stops_all_of_it(page: Page, base_url: str) -> No
     # And the page is still complete: nothing was left invisible by an animation that
     # never ran.
     assert reduced.locator("h1").is_visible()
-    assert reduced.locator(".auth-journey-step").first.is_visible()
+    assert reduced.locator(".auth-promise").first.is_visible()
     reduced.close()
 
 
@@ -864,19 +945,58 @@ def test_asking_for_less_motion_stops_all_of_it(page: Page, base_url: str) -> No
 # ---------------------------------------------------------------------------
 
 
+def _sign_up_through_three_steps(
+    page: Page, base_url: str, email: str, name: str = "Amina Yusuf"
+) -> None:
+    """Name and email, then password, then the code. Written once, walked by two tests."""
+
+    page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
+    page.get_by_test_id("auth-name").fill(name)
+    page.get_by_test_id("auth-email").fill(email)
+    page.get_by_test_id("auth-submit").click()
+
+    page.wait_for_url(re.compile(r".*/signup/password\?.*"), timeout=20_000)
+    expect(page.locator(".auth-sentto")).to_contain_text(email)
+    # No punctuation. The symbol rule is gone, and this is the proof it is gone on the
+    # real server as well as in the checklist.
+    page.get_by_test_id("auth-password").fill("Halal2026")
+    page.get_by_test_id("auth-repeat-password").fill("Halal2026")
+    page.get_by_test_id("auth-submit").click()
+
+    page.wait_for_url(re.compile(r".*/signup/verify(\?.*)?$"), timeout=20_000)
+
+
+def test_an_email_already_in_use_is_caught_before_a_password_is_chosen(
+    page: Page, base_url: str
+) -> None:
+    """The whole reason the first step asks one question.
+
+    On the old single screen a person invented a password, typed it twice, waited for
+    the round trip and only then learned the address was taken — and the password they
+    had just chosen was thrown away with the page.
+    """
+
+    email = unique_email("auth-taken")
+    _sign_up_through_three_steps(page, base_url, email)
+    page.locator("input[name='code']").fill("123456")
+    page.get_by_role("button", name=re.compile("Verify and create account", re.I)).click()
+    page.wait_for_url(re.compile(r".*/(dashboard|home)(\?.*)?$"), timeout=20_000)
+
+    page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
+    page.get_by_test_id("auth-name").fill("Amina Yusuf")
+    page.get_by_test_id("auth-email").fill(email)
+    page.get_by_test_id("auth-submit").click()
+    page.wait_for_url(re.compile(r".*/signup\?.*"), timeout=20_000)
+    expect(page.locator("[data-auth-alert]")).to_contain_text("already have an account")
+    # Still on step one, and no password box was ever shown.
+    expect(page.get_by_test_id("auth-password")).to_have_count(0)
+
+
 def test_a_person_can_sign_up_sign_out_and_sign_back_in(page: Page, base_url: str) -> None:
     """The journey the redesign is for, walked once in full."""
 
     email = unique_email("auth-e2e")
-    page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
-    page.get_by_test_id("auth-first-name").fill("Aisha")
-    page.get_by_test_id("auth-last-name").fill("Trader")
-    page.get_by_test_id("auth-email").fill(email)
-    page.get_by_test_id("auth-password").fill("TraceEdge1!")
-    page.get_by_test_id("auth-repeat-password").fill("TraceEdge1!")
-    page.get_by_test_id("auth-submit").click()
-
-    page.wait_for_url(re.compile(r".*/signup/verify(\?.*)?$"), timeout=20_000)
+    _sign_up_through_three_steps(page, base_url, email)
     expect(page.locator(".auth-sentto")).to_contain_text(email)
     page.locator("input[name='code']").fill("123456")
     page.get_by_role("button", name=re.compile("Verify and create account", re.I)).click()
@@ -884,28 +1004,21 @@ def test_a_person_can_sign_up_sign_out_and_sign_back_in(page: Page, base_url: st
 
     page.goto(f"{base_url}/signin", wait_until="domcontentloaded")
     page.get_by_test_id("auth-email").fill(email)
-    page.get_by_test_id("auth-password").fill("WrongOne1!")
+    page.get_by_test_id("auth-password").fill("WrongOne1")
     page.get_by_test_id("auth-submit").click()
     page.wait_for_url(re.compile(r".*/signin\?.*"), timeout=20_000)
     # The address survives the refusal instead of having to be typed again.
     assert page.get_by_test_id("auth-email").input_value() == email
     expect(page.locator("[data-auth-alert]")).to_contain_text("do not match")
 
-    page.get_by_test_id("auth-password").fill("TraceEdge1!")
+    page.get_by_test_id("auth-password").fill("Halal2026")
     page.get_by_test_id("auth-submit").click()
     page.wait_for_url(re.compile(r".*/(dashboard|home)(\?.*)?$"), timeout=20_000)
 
 
 def test_the_one_time_code_door_works_from_end_to_end(page: Page, base_url: str) -> None:
     email = unique_email("auth-code")
-    page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
-    page.get_by_test_id("auth-first-name").fill("Omar")
-    page.get_by_test_id("auth-last-name").fill("Trader")
-    page.get_by_test_id("auth-email").fill(email)
-    page.get_by_test_id("auth-password").fill("TraceEdge1!")
-    page.get_by_test_id("auth-repeat-password").fill("TraceEdge1!")
-    page.get_by_test_id("auth-submit").click()
-    page.wait_for_url(re.compile(r".*/signup/verify(\?.*)?$"), timeout=20_000)
+    _sign_up_through_three_steps(page, base_url, email)
     page.locator("input[name='code']").fill("123456")
     page.get_by_role("button", name=re.compile("Verify and create account", re.I)).click()
     page.wait_for_url(re.compile(r".*/(dashboard|home)(\?.*)?$"), timeout=20_000)
@@ -920,3 +1033,45 @@ def test_the_one_time_code_door_works_from_end_to_end(page: Page, base_url: str)
     page.locator("input[name='code']").fill("123456")
     page.get_by_test_id("auth-submit").click()
     page.wait_for_url(re.compile(r".*/(dashboard|home)(\?.*)?$"), timeout=20_000)
+
+
+# ---------------------------------------------------------------------------
+# The Google door.
+# ---------------------------------------------------------------------------
+
+
+def test_the_google_button_is_not_drawn_when_it_could_not_work(
+    page: Page, base_url: str
+) -> None:
+    """The test server has no Google keys, so the button must not be on the page.
+
+    A button that opens a window and then fails is worse than no button. This is the
+    "offered but not runnable" fault written as a browser measurement, because whether
+    a control is *drawn* is a question only the rendered page can answer.
+    """
+
+    _open(page, base_url, "/signup")
+    expect(page.get_by_test_id("auth-google")).to_have_count(0)
+    _open(page, base_url, "/signin")
+    expect(page.get_by_test_id("auth-google")).to_have_count(0)
+    # The other door on the sign-in page is still there, so this is not "nothing renders".
+    expect(page.get_by_test_id("auth-code-door")).to_have_count(1)
+
+
+def test_the_google_route_refuses_in_plain_words_when_it_is_not_configured(
+    page: Page, base_url: str
+) -> None:
+    """Somebody with an old link, or a kept bookmark, still gets a sentence.
+
+    It used to be possible for a route like this to answer with a stack trace or a bare
+    code. It lands back on the sign-up page with an alert that names no OAuth vocabulary.
+    """
+
+    page.goto(f"{base_url}/auth/google/start?mode=signup", wait_until="domcontentloaded")
+    page.wait_for_url(re.compile(r".*/signup\?.*error=google_disabled.*"), timeout=20_000)
+    alert = page.locator("[data-auth-alert]")
+    expect(alert).to_be_visible()
+    words = alert.inner_text().lower()
+    assert "switched off" in words
+    for jargon in ("oauth", "client", "token", "redirect"):
+        assert jargon not in words, f"the refusal leaks {jargon!r}"

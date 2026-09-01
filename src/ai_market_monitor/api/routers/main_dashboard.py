@@ -493,9 +493,14 @@ async def main_dashboard_page(
             else "warning",
             "standard_id": str(row.methodology_id),
             "logo_module_url": asset_logo(row.canonical_asset).module_url,
-            # The picture stored on the assessment wins over the shared catalogue when
-            # it exists, because a newly listed coin has no catalogue entry at all.
-            "logo_url": row.logo_url or asset_logo(row.canonical_asset).image_url,
+            # The picture on the assessment wins over the shared catalogue when it
+            # exists, because a newly listed coin has no catalogue entry at all. The
+            # fallback here used to read `or asset_logo(row.canonical_asset).image_url`,
+            # which could only ever be `None`: with no asset record passed there is no
+            # stored picture to find. It read as a second chance and was not one. The
+            # real second chance is inside `row.logo_url`, which the screening service
+            # now fills from the provider when the verified picture is missing.
+            "logo_url": row.logo_url,
         }
         for row in screened.items
     ]

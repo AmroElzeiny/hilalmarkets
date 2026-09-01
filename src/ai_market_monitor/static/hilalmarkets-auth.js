@@ -1,8 +1,8 @@
-/* The behaviour of the five sign-in pages.
+/* The behaviour of the six sign-in pages.
  *
  * Everything here exists to remove one round trip to the server. The old pages could
  * only tell you what was wrong *after* you pressed the button and the page reloaded:
- * which of the five password rules you had missed, that your two passwords differed,
+ * which password rule you had missed, that your two passwords differed,
  * that your email had a typo, that you had to wait before asking for another code. Each
  * of those is knowable in the browser, and each one is answered here while you type.
  *
@@ -78,8 +78,7 @@ const LOOKS_LIKE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 /** What to say when a box is empty. One sentence per box, written out rather than built
  *  from the label — "Please fill in choose a password" is what building it produced. */
 const MISSING = {
-  first_name: "Please add your first name.",
-  last_name: "Please add your last name.",
+  display_name: "Please add your name.",
   email: "Please add your email address.",
   password: "Please type a password.",
   repeat_password: "Please type the password a second time.",
@@ -105,7 +104,7 @@ function problemWith(control) {
 
 /* ── The password rules, ticking themselves off ────────────────────────────── */
 
-/** The five rules as the browser can test them, compiled once. */
+/** The password rules as the browser can test them, compiled once. */
 const rules = (config.passwordRules || [])
   .map((rule) => {
     try {
@@ -348,10 +347,59 @@ function wireResend(form) {
   });
 }
 
+/* ── The Google door ───────────────────────────────────────────────────────── */
+
+/* The button is an ordinary link to `/auth/google/start`, and this only upgrades it to a
+ * popup. That order matters: with scripting off, and when a browser blocks the popup, the
+ * link still works and Google simply opens in this tab. A button that only works with
+ * script is a button that silently does nothing for the people it fails.
+ *
+ * The popup finishes on our own callback address, which posts a message back here saying
+ * where to go, and closes itself. The message is checked twice — it must come from this
+ * exact origin, and it must carry our own marker — because `message` is a public event
+ * that any framed page could fire.
+ */
+function wireGoogle(link) {
+  const live = one("[data-google-live]");
+  const width = 480;
+  const height = 640;
+
+  window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin) return;
+    const data = event.data;
+    if (!data || data.source !== "hilal-markets-google") return;
+    const target = String(data.target || "");
+    // Only ever a path on this site. A full address here would be an open redirect.
+    if (!target.startsWith("/")) return;
+    announce(live, "Signing you in.");
+    window.location.assign(target);
+  });
+
+  link.addEventListener("click", (event) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    const href = link.getAttribute("href");
+    if (!href) return;
+    const separator = href.includes("?") ? "&" : "?";
+    const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2));
+    const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 3));
+    const popup = window.open(
+      `${href}${separator}popup=1`,
+      "hilal-markets-google",
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`,
+    );
+    // Blocked, or refused. Let the browser follow the link the ordinary way instead of
+    // leaving somebody looking at a button that did nothing.
+    if (!popup) return;
+    event.preventDefault();
+    popup.focus();
+    announce(live, "A Google window is open. Choose the account you want to use.");
+  });
+}
+
 /* ── Sending the form ──────────────────────────────────────────────────────── */
 
 function wireForm(form) {
-  // Our own messages replace the browser's, which cannot say which of five password
+  // Our own messages replace the browser's, which cannot say which password
   // rules is missing and cannot put the reason beside the box it belongs to. Set from
   // script, so a person with scripting off keeps the browser's checks.
   form.noValidate = true;
@@ -438,6 +486,7 @@ function start() {
   all("input[type=password]").forEach(wireCapsLock);
   all("[data-code]").forEach(wireCodeField);
   all("form.auth-form").forEach(wireForm);
+  all("[data-google-signin]").forEach(wireGoogle);
   const resendForm = one("#auth-resend-form");
   if (resendForm) wireResend(resendForm);
 
@@ -448,10 +497,12 @@ function start() {
   const alertBox = one("[data-auth-alert]");
   if (alertBox && alertBox.dataset.tone === "error") alertBox.focus({ preventScroll: false });
 
-  // The journey arrives one step after another, which is what the panel is saying.
-  settleIn(all(".auth-journey-step"));
-  settleIn(all(".auth-card > *:not(.auth-form)"), { from: 8 });
+  // The card arrives top to bottom: heading, then the form, then the three promises.
+  // A calm sequential reveal, which is the one kind of movement `brand guide.md`
+  // section 15 asks for — it says "read this in this order", and then it stops.
+  settleIn(all(".auth-card > *:not(.auth-form)"), { from: 10 });
   settleIn(all(".auth-form > *"), { from: 8 });
+  settleIn(all(".auth-promise"), { from: 6 });
 
   /* Nothing sensitive survives the back button. A browser restoring a page from its
      cache restores what was typed into it, including a password on a shared machine. */

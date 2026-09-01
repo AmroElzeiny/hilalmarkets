@@ -553,19 +553,7 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .plan-current p{color:#bed0ca}
 .usage-row{display:grid;grid-template-columns:170px 1fr 80px;align-items:center;gap:14px;padding:11px 0}
 .ticket{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:13px;padding:15px;border:1px solid var(--line);border-radius:14px;background:#fff}
-.auth-shell{min-height:100vh;display:grid;grid-template-columns:1fr 1fr}
-.auth-brand{padding:55px;background:var(--emerald-950);color:#fff;position:relative;overflow:hidden;display:flex;flex-direction:column}
-.auth-brand p{color:#b8d0c8}
-.auth-visual{margin-top:auto;min-height:350px;position:relative}
-.auth-card-float{position:absolute;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.08);backdrop-filter:blur(10px);border-radius:20px;padding:19px}
-.auth-card-float.one{left:0;top:30px;width:70%}
-.auth-card-float.two{right:0;bottom:20px;width:62%}
-.auth-form-wrap{display:grid;place-items:center;padding:50px;background:var(--ivory-2)}
-.auth-form{width:min(440px,100%)}
-.auth-form h1{font-size:2.7rem}
-.auth-name-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
-.auth-divider{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:.76rem;margin:20px 0}
-.auth-divider:before,.auth-divider:after{content:"";height:1px;flex:1;background:var(--line)}
+
 .onboarding-shell{min-height:100vh;display:grid;grid-template-columns:340px 1fr;background:var(--ivory-2)}
 .onboarding-side{background:var(--emerald-950);padding:35px;color:#fff}
 .onboarding-side p{color:#afc7c0}
@@ -615,7 +603,7 @@ html[dir="rtl"] .investigation-timeline>div:not(:last-child)::before{left:auto;r
 @media(max-width:900px){
   .public-links{display:none}.public-links.is-open{position:absolute;display:grid;top:calc(100% + 10px);left:12px;right:12px;padding:10px;border:1px solid var(--line);border-radius:16px;background:var(--white);box-shadow:var(--shadow-lg)}.public-links.is-open a{padding:12px 14px}.mobile-menu{display:inline-flex}
   .app-content{padding:24px 18px}
-  .auth-shell{grid-template-columns:1fr}.auth-brand{display:none}
+  
   .onboarding-shell{grid-template-columns:1fr}.onboarding-side{padding:22px}.step-list{grid-template-columns:repeat(4,1fr);margin-top:20px}.step-item{justify-content:center}.step-item span:last-child{display:none}
   .checkout-layout{grid-template-columns:1fr}.checkout-action-card{position:static}
   .settings-layout{grid-template-columns:1fr}
@@ -657,8 +645,7 @@ html[dir="rtl"] .investigation-timeline>div:not(:last-child)::before{left:auto;r
   .usage-row{grid-template-columns:1fr}.usage-row .progress{order:3}
   .choice-grid{grid-template-columns:1fr}
   .onboarding-main{padding:24px 14px}.onboarding-card{padding:24px}
-  .auth-form-wrap{padding:35px 20px}
-  .auth-name-grid{grid-template-columns:1fr}
+
   .whatsapp-category-grid{grid-template-columns:1fr}
   .whatsapp-actions .btn{flex:1 1 145px}
   .settings-field-grid{grid-template-columns:1fr}.schedule-choice-grid.days{grid-template-columns:repeat(2,minmax(0,1fr))}.schedule-choice-grid.hours{grid-template-columns:repeat(4,minmax(0,1fr))}.schedule-heading{align-items:flex-start;flex-direction:column}

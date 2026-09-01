@@ -106,13 +106,53 @@ def cached(
 
 
 class FrozenClock:
-    """Stands in for ``datetime`` inside the module so a window can be stepped over."""
+    """Stands in for ``datetime`` inside the module so a window can be stepped over.
+
+    Only ``now`` is answered from the frozen instant. Everything else — ``fromtimestamp``
+    above all, which the decoder uses to turn a stored candle back into a time — is the
+    real :class:`datetime`'s. Without that forwarding this class is not a stand-in for
+    ``datetime`` at all, it is an object with one method, and every code path that
+    touched any other attribute raised ``AttributeError``. That went unnoticed while the
+    only test using it never reached the decoder.
+    """
 
     def __init__(self, at: datetime) -> None:
         self.at = at
 
     def now(self, tz: Any = None) -> datetime:
         return self.at
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(datetime, name)
+
+
+@pytest.fixture(autouse=True)
+def _hold_the_clock_still(monkeypatch):
+    """Every test in this file runs at one instant, so no window can turn over inside it.
+
+    The cache key is the wall-clock window a reading falls in, and most tests here assert
+    that two calls *share* one reading. Nothing was stopping the clock, so those tests
+    were really asserting "these two calls happened in the same 60 seconds" — true almost
+    always, and false when the calls happened to straddle the boundary.
+
+    That is not theoretical. ``test_many_callers_in_one_window_cost_exactly_one_request``
+    failed on ``[50-3m]`` while a second test suite was running beside it: the machine was
+    busy enough to stall the fifty calls across a window edge, so the fiftieth caller
+    looked up a new bucket and paid the exchange again. The test's own name says "in one
+    window" — nothing made that true until now.
+
+    ``test_a_new_window_pays_again`` sets its own clock and steps it forward on purpose;
+    it patches the same name afterwards, so it still wins and still measures a real
+    rollover.
+    """
+
+    # Frozen at the real instant the test starts, not at a date written down here: every
+    # test in this file builds candle times relative to now, and pinning the cache to a
+    # different day than the data would be a second, quieter kind of wrong.
+    monkeypatch.setattr(
+        "ai_market_monitor.services.market_cache.datetime",
+        FrozenClock(datetime.now(UTC)),
+    )
 
 
 # --------------------------------------------------------------- the window is honest

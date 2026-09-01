@@ -63,6 +63,7 @@ from ai_market_monitor.core.dashboard_paths import (
     MONITOR_PATH,
     MONITORS_PATH,
     OPPORTUNITIES_PATH,
+    RESEARCH_PATH,
     SETTINGS_PATH,
     SUBSCRIPTION_PATH,
     SUPPORT_PATH,
@@ -109,6 +110,7 @@ from ai_market_monitor.services.account_settings import (
     clean_muted_symbols,
 )
 from ai_market_monitor.services.alert_emails import alert_email_address
+from ai_market_monitor.services.automated_research_reader import AutomatedResearchReader
 from ai_market_monitor.services.billing import BillingService
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
 from ai_market_monitor.services.interfaces import MarketDataProvider
@@ -214,6 +216,75 @@ async def screened_market_page(
     )
     context.update(_PATH_CHROME)
     return templates.TemplateResponse(request, "hilal/dashboard_test/market.html", context)
+
+
+@router.get(RESEARCH_PATH, response_class=HTMLResponse, include_in_schema=False)
+async def automated_research_page(
+    request: Request,
+    verdict: str = Query(default="all", pattern="^(all|eligible|not_eligible|not_enough_data)$"),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    """What the machine read about coins no authority has ruled on.
+
+    A separate page from Market on purpose. Market lists coins an authority assessed;
+    this lists proposals a machine made from a project's own pages. Mixing them would
+    put two different kinds of claim in one list with no way for a reader to tell which
+    is which — and the whole product is the difference between those two claims.
+    """
+
+    context = await _context(
+        request=request,
+        session=session,
+        settings=settings,
+        user=user,
+        page="research",
+        title="Coins we researched",
+    )
+    context.update(await AutomatedResearchReader(session).page(verdict=verdict))
+    context.update(_PATH_CHROME)
+    return templates.TemplateResponse(
+        request, "hilal/dashboard_test/research.html", context
+    )
+
+
+@router.get(
+    f"{RESEARCH_PATH}/{{symbol}}", response_class=HTMLResponse, include_in_schema=False
+)
+async def automated_research_detail_page(
+    request: Request,
+    symbol: str,
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    """One coin's reading, with the sentence behind every reason.
+
+    This page is why the reading is worth storing at all. A verdict a reader cannot check
+    is an assertion; a verdict with the line it rests on, and a link to the page that
+    line came from, is something a person can disagree with. The heavy columns are loaded
+    here and only here — one coin at a time.
+    """
+
+    detail = await AutomatedResearchReader(session).detail(symbol)
+    if detail is None:
+        raise HTTPException(
+            status_code=404, detail="We have not researched this coin yet."
+        )
+    context = await _context(
+        request=request,
+        session=session,
+        settings=settings,
+        user=user,
+        page="research",
+        title=f"{detail['symbol']} — what we read",
+    )
+    context.update(detail)
+    context.update(_PATH_CHROME)
+    return templates.TemplateResponse(
+        request, "hilal/dashboard_test/research_detail.html", context
+    )
 
 
 @router.get(
@@ -1033,10 +1104,11 @@ def _opportunity_from_readiness(
         "coin": coin,
         # A coin the recorded history has never seen still gets its own logo, and it
         # gets *every* source for it — the picture stored on its own record first, then
-        # the shared catalogue. Both are built in one place for the whole product, so
-        # this cannot know a different set of sources from the card beside it.
+        # the market-data provider's, then the shared catalogue. All three are built in
+        # one place for the whole product, so this cannot know a different set of
+        # sources from the card beside it.
         "logo_module_url": logo.module_url,
-        "logo_url": logo.image_url,
+        "logo_url": logo.picture_url,
         "watchlist_name": str(row.get("monitor_name") or ""),
         "watchlist_id": str(row.get("monitor_id") or ""),
         "how_often": how_often(row.get("timeframe")),

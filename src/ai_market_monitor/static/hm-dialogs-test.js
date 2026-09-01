@@ -207,6 +207,16 @@ function setUpQuickView() {
     find("[data-pq-methodology]").textContent = assessment.methodology_name
       ? `${assessment.methodology_name}${assessment.methodology_version ? ` v${assessment.methodology_version}` : ""}`
       : "Not recorded";
+
+    // Show the machine-standard warning when this answer came from that standard. The
+    // notice itself is server-rendered from the shared partial and only revealed here,
+    // so the popup can never word it differently from the Passport page. The code to
+    // compare against is read off the dialog, never written into this file.
+    const automated = find("[data-pq-automated]");
+    if (automated) {
+      const machineCode = dialog.dataset.automatedCode || "";
+      automated.hidden = !machineCode || assessment.methodology_code !== machineCode;
+    }
     find("[data-pq-decision]").textContent = formatDate(data.decision_date);
     find("[data-pq-published]").textContent = formatDate(data.publication_date);
     find("[data-pq-next-scan]").textContent = data.next_source_scan_at

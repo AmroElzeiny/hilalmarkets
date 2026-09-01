@@ -27,6 +27,18 @@ from fastapi.templating import Jinja2Templates
 
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.dashboard_paths import MONITOR_PATH, monitor_edit_path
+from ai_market_monitor.services.hilal_methodology import (
+    METHODOLOGY_PUBLIC_PATH as AUTOMATED_METHODOLOGY_PATH,
+)
+from ai_market_monitor.services.sharia_automated_screen import (
+    AUTOMATED_DISCLOSURE,
+)
+from ai_market_monitor.services.sharia_automated_screen import (
+    METHODOLOGY_DISPLAY_NAME as AUTOMATED_METHODOLOGY_NAME,
+)
+from ai_market_monitor.services.sharia_automated_screen import (
+    METHODOLOGY_SYSTEM_CODE as AUTOMATED_METHODOLOGY_CODE,
+)
 from ai_market_monitor.services.sharia_source_catalog import category_label, state_label
 
 
@@ -74,4 +86,16 @@ def register(templates: Jinja2Templates) -> Jinja2Templates:
     # assistant page's address by hand, and each had to be found again when it moved.
     templates.env.globals["monitor_path"] = MONITOR_PATH
     templates.env.globals["monitor_edit_path"] = monitor_edit_path
+    # Which standard is the machine-made one, and the one sentence that has to travel
+    # with its results. A template that showed an automated verdict without the warning
+    # would be presenting a rule's output as a reviewed religious decision, so neither
+    # value is retyped in a page: both come from the screen module that owns them.
+    templates.env.globals["automated_methodology_code"] = AUTOMATED_METHODOLOGY_CODE
+    templates.env.globals["automated_methodology_disclosure"] = AUTOMATED_DISCLOSURE
+    templates.env.globals["automated_methodology_name"] = AUTOMATED_METHODOLOGY_NAME
+    # Where the whole standard is explained, in public. Every notice links here, so the
+    # address is a global rather than a string typed into each of the five templates
+    # that draw the notice — the failure this product has repeated most often is a page
+    # holding its own copy of an address that later moved.
+    templates.env.globals["automated_methodology_path"] = AUTOMATED_METHODOLOGY_PATH
     return templates

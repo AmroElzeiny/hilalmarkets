@@ -1,0 +1,125 @@
+{% extends "hilal/base_dashboard.html" %}
+{% from "hilal/macros/coin_logo.html" import coin_logo %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260831-auth-one-screen">{% endblock %}
+{% block content %}
+
+{#- One coin's reading, and the words it rests on.
+
+    This page is the reason the reading is worth storing. A verdict a reader cannot check
+    is an assertion. A verdict with the sentence behind it, and a link to the page that
+    sentence came from, is something a person can open and disagree with — which is the
+    only honest way to publish a machine's opinion about somebody's money. -#}
+
+<div class="hm-t">
+
+  <header class="t-head" data-hm-part="The coin and what we found">
+    <div class="t-head-copy">
+      <p class="t-eyebrow">
+        <a href="/dashboard/research"><span data-icon="arrow_left" data-icon-class="icon-sm"></span>Coins we researched</a>
+      </p>
+      <h1>
+        {{ coin_logo(symbol, class='t-logo', decorative=true) }}
+        {{ symbol }} — {{ name }}
+      </h1>
+    </div>
+    <span class="t-pill" data-tone="{{ presentation.tone }}">{{ presentation.label }}</span>
+  </header>
+
+  <div class="t-banner" data-tone="info" role="status">
+    <span data-icon="info" data-icon-class="icon"></span>
+    <div class="t-banner-body">
+      <strong>A machine read this, not a scholar</strong>
+      <p>{{ disclosure }} {{ presentation.meaning }}</p>
+    </div>
+  </div>
+
+  {#- The full notice, on the one page that shows a single coin's machine verdict in
+      detail. Compact would be wrong here: this is where somebody decides what to do
+      about this coin, so the sentence about skipped rules belongs on the screen. -#}
+  {% with automated_methodology_selected = true %}
+    {% include "hilal/partials/automated_methodology_notice.html" %}
+  {% endwith %}
+
+  {% if reasons %}
+  <section data-hm-part="Why we said this">
+    <h2>Why we said this</h2>
+    {% for reason in reasons %}
+    <div class="t-banner" data-tone="{{ 'warning' if verdict == 'not_eligible' else 'neutral' }}">
+      <span data-icon="{{ 'alert' if verdict == 'not_eligible' else 'check' }}" data-icon-class="icon"></span>
+      <div class="t-banner-body">
+        <strong>{{ reason.text }}</strong>
+        {#- The quotation is the whole point. Shown as the project's own words, with the
+            page it came from, so a reader can check it rather than trust us. -#}
+        {% if reason.quote %}<p><em>“{{ reason.quote }}”</em></p>{% endif %}
+        {% if reason.url %}
+        <p><a href="{{ reason.url }}" rel="noopener noreferrer" target="_blank">
+          Open the page this came from<span data-icon="external" data-icon-class="icon-sm"></span>
+        </a></p>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if open_questions %}
+  <section data-hm-part="What the pages never answered">
+    <h2>What the project's pages never answer</h2>
+    <ul>
+      {% for question in open_questions %}<li>{{ question }}</li>{% endfor %}
+    </ul>
+    {% if holder_return_basis %}<p>{{ holder_return_basis|capitalize }}.</p>{% endif %}
+  </section>
+  {% endif %}
+
+  <section data-hm-part="Every page we read">
+    <h2>Every page we read</h2>
+    {% if documents %}
+    <div class="t-table-wrap">
+      <table class="t-table">
+        <caption class="sr-only">Pages read for {{ symbol }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Page</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Describes the project</th>
+            <th scope="col">Words read</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for document in documents %}
+          <tr>
+            <td>
+              {% if document.failure_code %}
+                {{ document.url }}
+              {% else %}
+                <a href="{{ document.url }}" rel="noopener noreferrer" target="_blank">{{ document.title or document.url }}</a>
+              {% endif %}
+            </td>
+            <td>
+              {% if document.failure_code %}
+                {#- Said plainly. "Could not read" and "the site does not allow us" are
+                    different jobs for whoever looks next. -#}
+                <span class="t-pill" data-tone="neutral">
+                  {% if document.failure_code == 'robots_disallowed' %}The site does not allow us to read it
+                  {% elif document.failure_code == 'too_short' %}Almost no words on the page
+                  {% else %}We could not read it{% endif %}
+                </span>
+              {% else %}
+                {{ document.category|replace('official_', '')|replace('_', ' ')|capitalize }}
+              {% endif %}
+            </td>
+            <td>{{ 'Yes' if document.is_primary else 'No' }}</td>
+            <td class="t-num">{{ '{:,}'.format(document.characters) if document.characters else '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p>We could not read any page for this coin.</p>
+    {% endif %}
+  </section>
+
+</div>
+{% endblock %}

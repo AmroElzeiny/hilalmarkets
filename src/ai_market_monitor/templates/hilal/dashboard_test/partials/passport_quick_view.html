@@ -2,7 +2,12 @@
     It answers three questions in order — what is the result, why, and what it does
     not cover — and keeps every long explanation behind a disclosure so the popup is
     never a wall of text. The create-a-watchlist action is deliberately absent. -#}
-<dialog class="t-dialog t-passport-dialog" data-passport-dialog aria-labelledby="t-pq-title">
+{#- `data-automated-code` carries which standard is the machine one, so the script can
+    ask without holding a copy of the code. A literal string in the JavaScript would be a
+    second owner of a governed identifier, and the two would agree only until one of them
+    changed. -#}
+<dialog class="t-dialog t-passport-dialog" data-passport-dialog aria-labelledby="t-pq-title"
+        data-automated-code="{{ automated_methodology_code }}">
   <div class="t-dialog-shell">
     <header class="t-dialog-head">
       <div class="t-pq-hero">
@@ -60,6 +65,20 @@
         <div class="t-banner" data-pq-qualification hidden>
           <span data-icon="alert" data-icon-class="icon"></span>
           <div class="t-banner-body"><strong>One condition applies</strong><p data-pq-qualification-text></p></div>
+        </div>
+
+        {#- The machine-standard warning, drawn once here and shown by the script when the
+            answer in the dialog came from that standard.
+
+            Rendered by the shared partial rather than written into the JavaScript: the
+            popup and the full Passport must not be able to word this differently, and a
+            warning built by string concatenation in a script is exactly how they would.
+            The compact form, because a dialog that pushed the answer off the screen to
+            make room for the warning would be read by nobody. -#}
+        <div data-pq-automated hidden>
+          {% with automated_methodology_selected = true, compact = true %}
+            {% include "hilal/partials/automated_methodology_notice.html" %}
+          {% endwith %}
         </div>
 
         <section>

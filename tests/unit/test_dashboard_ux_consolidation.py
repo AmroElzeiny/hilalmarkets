@@ -317,17 +317,20 @@ def test_auth_pages_use_the_official_logo_and_brand_styles():
     auth = _read("templates/auth.html")
     styles = _read("static/hilalmarkets-auth.css")
 
-    # Every mark on the page is the official asset. There are two references now: the
-    # near-black panel carries one, and the form card carries a smaller one that only
-    # appears on a phone, where the panel sits below the form. What the rule is really
-    # about is that neither of them hand-typesets the wordmark (brand guide, section 5).
-    assert auth.count("hilal-markets-logo.svg") == 2
+    # Every mark on the page is the official asset. There is one reference now: the
+    # near-black panel that carried the second one is gone, and the card's own logo is
+    # the only mark left. What the rule is really about is that nothing on this page
+    # hand-typesets the wordmark (brand guide, section 5).
+    assert auth.count("hilal-markets-logo.svg") == 1
     assert "hilal markets" not in auth.replace("Hilal Markets", "")
     assert "auth-form-logo" not in auth
     assert "Create your account, review screened assets" not in auth
     assert "Return to your screened market" not in auth
     assert "hilalmarkets-auth.css" in auth
-    assert "auth-trust" in auth
+    # The three promises the panel used to carry are still on the page — as a row of
+    # ticks under the button, drawn from `core/auth_pages.py`.
+    assert "auth-promises" in _read("templates/hilal/macros/auth_fields.html")
+    assert "{{ promises() }}" in auth
     assert "SOL/USDT" not in auth
     assert "var(--hm-apple)" in styles
     assert "prefers-reduced-motion" in styles

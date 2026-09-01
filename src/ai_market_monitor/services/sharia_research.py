@@ -664,7 +664,7 @@ class ShariaResearchPipeline:
         )
         try:
             body, headers, status = await self.fetcher.fetch(source)
-            title, headings, clean_text = _extract_document(
+            title, headings, clean_text = extract_document(
                 body,
                 source.source_url,
                 content_type=headers.get("content-type"),
@@ -918,7 +918,7 @@ class ShariaResearchPipeline:
         )
 
 
-def _extract_document(
+def extract_document(
     body: str | bytes,
     url: str,
     *,
@@ -968,9 +968,9 @@ def _extract_document(
 def extract_links(body: str | bytes, url: str) -> tuple[str, ...]:
     """Every address a fetched page points at, made absolute and de-duplicated.
 
-    This lives beside ``_extract_document`` because both answer "what is in this body",
+    This lives beside ``extract_document`` because both answer "what is in this body",
     and keeping them together is what stops a second HTML parser appearing with its own
-    idea of what a page contains. ``_extract_document`` reads the words; this reads the
+    idea of what a page contains. ``extract_document`` reads the words; this reads the
     addresses, which is what finds a project's Telegram channel and its X account
     without anybody guessing at either.
 
@@ -1019,7 +1019,7 @@ _DATE_META_NAMES = (
 def extract_dates(body: str | bytes, url: str) -> tuple[str, ...]:
     """Every date a page states in markup rather than in words.
 
-    ``_extract_document`` strips the tags, which throws these away — and on a growing
+    ``extract_document`` strips the tags, which throws these away — and on a growing
     number of real pages they are the *only* dates there are. A Telegram channel's
     public web view prints "August 20" with no year and carries the real timestamp in a
     ``<time datetime="…">`` attribute; the same is true of most modern blogs. Reading

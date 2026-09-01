@@ -47,6 +47,11 @@ class AssetAssessmentSummary(BaseModel):
     asset_name: str | None
     methodology_id: UUID
     methodology_name: str
+    #: The stable identifier, beside the display name. A surface that has to know
+    #: *which* standard decided this — the Passport, which must warn when the answer is
+    #: a machine's — cannot ask a display name, because a display name is allowed to
+    #: change and a code is not.
+    methodology_code: str = ""
     methodology_version: str
     status: ShariaAssetStatus
     status_label: str
@@ -373,6 +378,31 @@ class LiveSpotMarketQuote(BaseModel):
     logo_module_url: str | None = None
     data_available: bool
     updated_at: datetime
+
+    # --- What the exchange cannot say -----------------------------------------
+    #
+    # Everything above comes from the exchange's own ticker, which knows today and
+    # nothing else. These come from the market-data provider, which knows the coin
+    # across every market it trades on: how big it is, where it ranks, and how it has
+    # moved over weeks rather than hours.
+    #
+    # They are refreshed on a schedule and read from the database, never fetched while
+    # a page is loading. At two provider calls for the whole screened list, a daily
+    # refresh costs about sixty credits a month; fetching them per page view at the
+    # price cadence would cost seventeen thousand.
+    #
+    # Every one is optional and every one may be ``None``. A coin the provider has never
+    # heard of still shows its price, its status and its Passport — the long-range
+    # numbers are simply absent, which the page says rather than showing a zero.
+    market_cap_usd: float | None = None
+    fully_diluted_usd: float | None = None
+    market_rank: int | None = None
+    percentage_7d: float | None = None
+    percentage_30d: float | None = None
+    percentage_90d: float | None = None
+    circulating_supply: float | None = None
+    max_supply: float | None = None
+    market_numbers_at: datetime | None = None
 
 
 class LiveSpotMarketResponse(BaseModel):

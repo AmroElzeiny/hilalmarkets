@@ -40,19 +40,27 @@ async def _signup_and_verify(
     test_context,
     *,
     email: str,
+    display_name: str = "Test Person",
     password: str = "CorrectHorse123!",
     repeat_password: str | None = None,
     telegram_link: str | None = None,
 ):
     data = {
         "email": email,
+        # The name is asked for on step one and carried into step two in a hidden field.
+        # Posting straight to step two has to carry it too, because the server refuses a
+        # sign-up with no name rather than making a nameless account.
+        "display_name": display_name,
         "password": password,
         "repeat_password": repeat_password or password,
     }
     if telegram_link:
         data["telegram_link"] = telegram_link
+    # Step one only checks the name and the address and writes nothing, so a test that is
+    # not about the sign-up flow itself goes straight to the step that creates the
+    # waiting sign-up.
     requested = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data=data,
         follow_redirects=False,
     )
@@ -71,14 +79,39 @@ async def _signup_and_verify(
 
 
 async def test_signup_creates_user_session_and_dashboard_access(test_context):
-    requested = await test_context["client"].post(
+    """The whole way in, one step at a time.
+
+    Signing up is three screens now: the name and the address, then the password, then
+    the code. The name is one box rather than two, it is carried between the screens, and
+    it is what every greeting in the product uses — so it is asserted on the account at
+    the end. A password with no punctuation in it also has to be accepted, because the
+    rule that asked for a symbol has been removed.
+    """
+
+    step_one = await test_context["client"].post(
         "/signup",
+        data={"display_name": "Amina Yusuf", "email": "Trader@example.com"},
+        follow_redirects=False,
+    )
+    assert step_one.status_code == 303
+    # Both boxes come back in the address, so step two can carry them on without asking
+    # for either of them a second time.
+    assert step_one.headers["location"] == (
+        "/signup/password?email=Trader%40example.com&name=Amina+Yusuf"
+    )
+    # Nothing is written and no code is sent by step one, so somebody who stops here has
+    # left nothing behind.
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(select(PendingEmailSignup)) is None
+    assert test_context["settings"].email_test_outbox == []
+
+    requested = await test_context["client"].post(
+        "/signup/password",
         data={
             "email": "Trader@example.com",
-            "first_name": "Amal",
-            "last_name": "Trader",
-            "password": "CorrectHorse123!",
-            "repeat_password": "CorrectHorse123!",
+            "display_name": "Amina Yusuf",
+            "password": "HalalMarkets2026",
+            "repeat_password": "HalalMarkets2026",
         },
         follow_redirects=False,
     )
@@ -120,11 +153,17 @@ async def test_signup_creates_user_session_and_dashboard_access(test_context):
     async with test_context["session_factory"]() as session:
         user = await session.scalar(select(User))
         assert user is not None
-        assert user.display_name == "Amal Trader"
+        # The name typed on screen one, kept whole and split for the greeting. Nothing is
+        # ever built out of the part of the address before the @: that used to be the
+        # fallback, and it greeted people as "Assalamu Alaikum trader," in an affiliate
+        # receipt, pre-filled "trader" as a legal first name on the payment form, and
+        # showed the local part of a customer's address to an affiliate in place of their
+        # name.
+        assert user.display_name == "Amina Yusuf"
         identity = await session.scalar(select(UserIdentity))
         assert identity.password_hash
-        assert identity.profile_data["first_name"] == "Amal"
-        assert identity.profile_data["last_name"] == "Trader"
+        assert identity.profile_data["first_name"] == "Amina"
+        assert identity.profile_data["last_name"] == "Yusuf"
         assert await session.scalar(select(WebSession)) is not None
         assert await session.scalar(select(DisclaimerAcceptance)) is None
 
@@ -210,12 +249,13 @@ async def test_repeated_signup_submit_does_not_send_second_code(test_context):
     test_context["settings"].email_test_outbox.clear()
     payload = {
         "email": "double-submit@example.com",
+        "display_name": "Double Submit",
         "password": "CorrectHorse123!",
         "repeat_password": "CorrectHorse123!",
     }
 
     first = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data=payload,
         follow_redirects=False,
     )
@@ -225,7 +265,7 @@ async def test_repeated_signup_submit_does_not_send_second_code(test_context):
     first_code = test_context["settings"].email_test_outbox[0]["code"]
 
     second = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data=payload,
         follow_redirects=False,
     )
@@ -252,7 +292,14 @@ async def test_consolidated_market_and_notification_pages_use_only_persisted_use
     _, verified = await _signup_and_verify(test_context, email=email)
     assert verified.status_code == 303
     async with test_context["session_factory"]() as session:
-        user = await session.scalar(select(User).where(User.display_name == "hilal-pages"))
+        # Found by the address it signed up with, which is the account's real identity.
+        # This used to look for a display name of "hilal-pages" — the part of the address
+        # before the @ — which only ever existed because the sign-up invented it.
+        user = await session.scalar(
+            select(User)
+            .join(UserIdentity, UserIdentity.user_id == User.id)
+            .where(UserIdentity.normalized_identifier == email)
+        )
         assert user is not None
         watchlist = ApprovedWatchlist(
             user_id=user.id,
@@ -402,8 +449,17 @@ async def test_signup_with_telegram_link_connects_dashboard_account(test_context
     assert response.headers["location"] == "/dashboard?message=telegram_connected"
 
     async with test_context["session_factory"]() as session:
-        users = (await session.scalars(select(User))).all()
-        dashboard_user = next(user for user in users if user.display_name == "linked")
+        # By the address, not by a name. This used to be `next(... display_name ==
+        # "linked")`, which found the account only because signing up wrote the part of
+        # the address before the @ in as a name — and a `next()` with no match raises
+        # StopIteration inside the coroutine, so the day that stopped being true the test
+        # failed with "coroutine raised StopIteration" instead of naming what was wrong.
+        dashboard_user = await session.scalar(
+            select(User)
+            .join(UserIdentity, UserIdentity.user_id == User.id)
+            .where(UserIdentity.normalized_identifier == "linked@example.com")
+        )
+        assert dashboard_user is not None
         connection = await session.scalar(select(TelegramConnection))
         conversation = await session.scalar(select(TelegramConversationState))
         assert connection.user_id == dashboard_user.id
@@ -591,29 +647,33 @@ async def test_dashboard_settings_timezone_dropdown_persists(test_context):
 
 async def test_signup_password_confirmation_and_complexity_are_enforced(test_context):
     mismatch = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data={
             "email": "mismatch@example.com",
+            "display_name": "Test Person",
             "password": "CorrectHorse123!",
             "repeat_password": "DifferentHorse123!",
         },
         follow_redirects=False,
     )
+    # Back to the password step, not to the email step: a person sent back to fix an
+    # email address they cannot see is a dead end they give up at.
     assert mismatch.headers["location"] == (
-        "/signup?error=password_mismatch&email=mismatch%40example.com"
+        "/signup/password?error=password_mismatch&email=mismatch%40example.com"
     )
 
     weak = await test_context["client"].post(
-        "/signup",
+        "/signup/password",
         data={
             "email": "weak@example.com",
+            "display_name": "Test Person",
             "password": "lowercase",
             "repeat_password": "lowercase",
         },
         follow_redirects=False,
     )
     assert weak.headers["location"] == (
-        "/signup?error=invalid_password&email=weak%40example.com"
+        "/signup/password?error=invalid_password&email=weak%40example.com"
     )
 
 

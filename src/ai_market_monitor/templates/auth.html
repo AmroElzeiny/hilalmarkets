@@ -4,7 +4,7 @@
   {#- First script on the page, deliberately. It puts a time limit on every request this
       product sends to its own server, and it can only do that for a request sent after
       it has run. See `static/hm-request.js`. -#}
-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260825-brain-agent-dock"></script>
+  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260831-auth-one-screen"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
@@ -33,85 +33,55 @@
   <meta name="description" content="Secure access to Hilal Markets Halal Assets intelligence and guided monitoring.">
   <title>{{ auth.title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260825-brain-agent-dock">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260825-brain-agent-dock">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260825-brain-agent-dock">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260831-auth-one-screen">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260831-auth-one-screen">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260831-auth-one-screen">
   {# The cookie banner and its window are drawn by a shared partial and were styled in
      the public stylesheet and the dashboard stylesheet — neither of which this page
      loads. Both of them rendered here as raw unstyled blocks under the form, including
      a dialog marked `aria-hidden` that was nonetheless on screen and reachable by Tab.
      One stylesheet owns them now, and every page that includes the partial loads it. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260825-brain-agent-dock">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-auth.css') }}?v=20260825-brain-agent-dock">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260831-auth-one-screen">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-auth.css') }}?v=20260831-auth-one-screen">
 </head>
-{% from "hilal/macros/auth_fields.html" import field, password_field, code_field, submit, sent_to, resend with context %}
+{% from "hilal/macros/auth_fields.html" import field, password_field, code_field, submit, sent_to, resend, google_button, promises with context %}
 {% set suffix = auth_link_suffix %}
 {% set email_value = auth_email %}
+{% set name_value = auth_name %}
 <body class="hilal-auth-page" data-auth-page="{{ auth.page }}" data-auth-state="{{ auth.state }}">
   <a class="auth-skip" href="#auth-card">Skip to the form</a>
 
+  {#  One card, in the middle of one screen.
+
+      There used to be a second panel down the left of every one of these pages: a tall
+      near-black column carrying a marketing line, the journey and the same three
+      promises. It took half the window and it pushed the form itself off the bottom of a
+      laptop screen, so the thing a person came to do needed a scroll to reach.
+
+      The journey is a chip above the heading now, and the three promises are a row of
+      ticks under the button — both of them small, both of them beside the form instead
+      of opposite it. The frame behind the card is the brand's own device, used the way
+      `brand guide.md` section 7 asks: large, low contrast, behind the content, once.  #}
   <div class="auth-shell">
+    <div class="auth-frame" aria-hidden="true"></div>
 
-    {#  The left panel. It used to be the same three sentences on all five pages. It is
-        the journey now: which step you are on, what is behind you, what is left. Signing
-        up is two pages and nothing said so.  #}
-    <aside class="auth-aside">
-      <div class="auth-aside-head">
-        <a class="auth-logo" href="/" aria-label="Hilal Markets home">
-          <img src="{{ url_for('static', path='/hilal-markets-logo.svg') }}" alt="Hilal Markets" width="197" height="31">
-        </a>
-        <a class="auth-back" href="/"><span data-icon="arrow_left" data-icon-class="icon" aria-hidden="true"></span>Back to the website</a>
-      </div>
-
-      <p class="auth-aside-line">Screened first.<br><span>Watched continuously.</span></p>
-
-      <ol class="auth-journey" aria-label="Where you are">
-        {% for step in auth.journey.steps %}
-          {% set position = loop.index0 %}
-          {% if position < auth.journey.current %}{% set state = 'done' %}
-          {% elif position == auth.journey.current %}{% set state = 'current' %}
-          {% else %}{% set state = 'todo' %}{% endif %}
-          <li class="auth-journey-step" data-state="{{ state }}"{% if state == 'current' %} aria-current="step"{% endif %}>
-            <span class="auth-journey-mark" aria-hidden="true"><span data-icon="{{ 'check' if state == 'done' else step.icon }}" data-icon-class="icon"></span></span>
-            <span class="auth-journey-text">
-              <strong>{{ step.title }}</strong>
-              <small>{{ step.hint }}</small>
-            </span>
-            {# Never colour alone: every step says its state in words as well.
-               brand guide.md section 10 and WCAG 1.4.1. #}
-            <span class="auth-journey-state">{% if state == 'done' %}Done{% elif state == 'current' %}You are here{% else %}Next{% endif %}</span>
-          </li>
-        {% endfor %}
-      </ol>
-
-      <ul class="auth-trust" aria-label="What Hilal Markets does and does not do">
-        <li class="auth-trust-item">
-          <span class="auth-trust-mark" aria-hidden="true"><span data-icon="passport" data-icon-class="icon"></span></span>
-          <span><strong>Evidence stays visible</strong><small>Methodology, source and review history stay open to you.</small></span>
-        </li>
-        <li class="auth-trust-item">
-          <span class="auth-trust-mark" aria-hidden="true"><span data-icon="workflow" data-icon-class="icon"></span></span>
-          <span><strong>You approve every rule</strong><small>The assistant helps you shape an idea. Only you switch it on.</small></span>
-        </li>
-        <li class="auth-trust-item">
-          <span class="auth-trust-mark" aria-hidden="true"><span data-icon="radar" data-icon-class="icon"></span></span>
-          <span><strong>Watching, never trading</strong><small>Hilal Markets watches crypto spot setups. It never places an order.</small></span>
-        </li>
-      </ul>
-    </aside>
-
-    {# ── The form ─────────────────────────────────────────────────────────── #}
     <main class="auth-main">
       <div class="auth-card" id="auth-card">
-        <a class="auth-logo auth-logo-small" href="/" aria-label="Hilal Markets home">
-          <img src="{{ url_for('static', path='/hilal-markets-logo.svg') }}" alt="Hilal Markets" width="160" height="25">
-        </a>
+
+        <header class="auth-head">
+          <a class="auth-logo" href="/" aria-label="Hilal Markets home">
+            <img src="{{ url_for('static', path='/hilal-markets-logo.svg') }}" alt="Hilal Markets" width="160" height="25">
+          </a>
+          <a class="auth-back" href="/"><span data-icon="arrow_left" data-icon-class="icon" aria-hidden="true"></span>Back to the website</a>
+        </header>
 
         {% if auth.journey.shows_counter %}
-          <p class="auth-step-chip"><span data-icon="workflow" data-icon-class="icon" aria-hidden="true"></span>Step {{ auth.journey.position }} of {{ auth.journey.total }} &middot; {{ auth.journey.steps[auth.journey.current].title }}</p>
+          <p class="auth-step-chip"><span data-icon="{{ auth.journey.steps[auth.journey.current].icon }}" data-icon-class="icon" aria-hidden="true"></span>Step {{ auth.journey.position }} of {{ auth.journey.total }} &middot; {{ auth.journey.steps[auth.journey.current].title }}</p>
         {% endif %}
         <h1>{{ auth.title }}</h1>
-        <p class="auth-lede">{{ auth.lede }}</p>
+        {# Only when there is one. An empty paragraph still takes its margin, which is a
+           gap under the heading with nothing in it. #}
+        {% if auth.lede %}<p class="auth-lede">{{ auth.lede }}</p>{% endif %}
 
         {% if auth_alert %}
           {% include "hilal/partials/auth_alert.html" %}
@@ -124,20 +94,39 @@
           <p class="auth-note"><span data-icon="telegram" data-icon-class="icon" aria-hidden="true"></span>Your Telegram will be connected as soon as you are in.</p>
         {% endif %}
 
-        {# ── Sign up: name, email, password ─────────────────────────────── #}
+        {# ── Sign up, step 1 of 3: who you are, and where to reach you ──── #}
         {% if auth.page == 'signup' %}
-          <form method="post" action="/signup" class="auth-form" data-password-form="signup" data-testid="signup-form">
+          <form method="post" action="/signup" class="auth-form" data-testid="signup-form">
             {% include "hilal/partials/auth_carried_fields.html" %}
-            <div class="auth-row">
-              {{ field('first_name', 'First name', 'text', icon='user', testid='auth-first-name', autocomplete='given-name', maxlength=60, required=True) }}
-              {{ field('last_name', 'Last name', 'text', icon='user', testid='auth-last-name', autocomplete='family-name', maxlength=60, required=True) }}
-            </div>
-            {{ field('email', 'Email', 'email', icon='mail', testid='auth-email', autocomplete='email', required=True, value=email_value, hint='This is where your six-digit code goes.') }}
+            {# One box, not two. "First name" and "Last name" side by side is a Western
+               shape that asks people with one name, or with four, to decide which half
+               of themselves to leave out. One box takes whatever somebody is called, and
+               the greeting uses the first word of it. #}
+            {{ field('display_name', 'Your name', 'text', icon='user', testid='auth-name', autocomplete='name', maxlength=60, required=True, value=name_value) }}
+            {{ field('email', 'Email', 'email', icon='mail', testid='auth-email', autocomplete='email', required=True, value=email_value) }}
+            {{ submit(auth.submit, 'arrow') }}
+          </form>
+          {{ google_button() }}
+          {{ promises() }}
+          <p class="auth-switch">Already have an account? <a href="/signin{{ suffix }}">Sign in</a></p>
+
+        {# ── Sign up, step 2 of 3: the password ─────────────────────────── #}
+        {% elif auth.page == 'signup_password' %}
+          {{ sent_to(email_value, verb='Creating the account for') }}
+          <form method="post" action="/signup/password" class="auth-form" data-password-form="signup" data-testid="signup-password-form">
+            {% include "hilal/partials/auth_carried_fields.html" %}
+            <input type="hidden" name="email" value="{{ email_value }}">
+            {# The name from step one, riding through rather than being asked for twice.
+               If it is missing the server refuses instead of making a nameless account. #}
+            <input type="hidden" name="display_name" value="{{ name_value }}">
             {{ password_field('password', 'Choose a password', 'auth-password', 'new-password', rules=True) }}
             {{ password_field('repeat_password', 'Type it once more', 'auth-repeat-password', 'new-password', confirm=True) }}
             {{ submit(auth.submit, 'send') }}
           </form>
-          <p class="auth-switch">Already have an account? <a href="/signin{{ suffix }}">Sign in</a></p>
+          {{ promises() }}
+          {# Back to step one with both boxes still filled in. A "go back" that empties
+             the form is the reason people abandon a sign-up on the second screen. #}
+          <p class="auth-switch">Wrong email? <a href="/signup{{ suffix }}{{ '&' if suffix else '?' }}name={{ name_value|urlencode }}&amp;email={{ email_value|urlencode }}">Go back one step</a></p>
 
         {# ── Sign in: email and password ────────────────────────────────── #}
         {% elif auth.page == 'signin' %}
@@ -147,15 +136,11 @@
             {{ password_field('password', 'Password', 'auth-password', 'current-password', forgot=True) }}
             {{ submit(auth.submit, 'lock') }}
           </form>
-          <div class="auth-or"><span>or</span></div>
-          <a class="auth-alt" href="/signin/code{{ suffix }}">
-            <span class="auth-alt-mark" aria-hidden="true"><span data-icon="mail" data-icon-class="icon"></span></span>
-            <span class="auth-alt-text"><strong>Email me a code instead</strong><small>Nothing to remember. Six digits, straight to your inbox.</small></span>
-            <span class="auth-alt-go" aria-hidden="true"><span data-icon="arrow" data-icon-class="icon"></span></span>
-          </a>
+          {{ google_button(extra_href='/signin/code' ~ suffix, extra_label='Email me a code', extra_icon='mail') }}
+          {{ promises() }}
           <p class="auth-switch">New here? <a href="/signup{{ suffix }}">Create an account</a></p>
 
-        {# ── Confirm your email, after signing up ───────────────────────── #}
+        {# ── Sign up, step 3 of 3: the six-digit code ───────────────────── #}
         {% elif auth.page == 'signup_verify' %}
           {{ sent_to(email_value) }}
           <form method="post" action="/signup/verify" class="auth-form" data-testid="verify-form">
@@ -165,7 +150,8 @@
             {{ submit(auth.submit, 'shield_check') }}
           </form>
           {{ resend() }}
-          <p class="auth-switch">Wrong email? <a href="/signup{{ suffix }}">Start again</a></p>
+          {{ promises() }}
+          <p class="auth-switch">Wrong email? <a href="/signup{{ suffix }}{{ '&' if suffix else '?' }}name={{ name_value|urlencode }}&amp;email={{ email_value|urlencode }}">Start again</a></p>
 
         {# ── Sign in with a one-time code ───────────────────────────────── #}
         {% elif auth.page == 'signin_code' %}
@@ -178,6 +164,7 @@
               {{ submit(auth.submit, 'shield_check') }}
             </form>
             {{ resend() }}
+            {{ promises() }}
             <p class="auth-switch">Wrong email? <a href="/signin/code{{ suffix }}">Use another one</a></p>
           {% else %}
             <form method="post" action="/signin/code/request" class="auth-form" data-testid="code-request-form">
@@ -185,6 +172,7 @@
               {{ field('email', 'Email', 'email', icon='mail', testid='auth-email', autocomplete='email', required=True, hint='Use the email you signed up with.') }}
               {{ submit(auth.submit, 'send') }}
             </form>
+            {{ promises() }}
             <p class="auth-switch">Prefer your password? <a href="/signin{{ suffix }}">Sign in with it</a></p>
           {% endif %}
 
@@ -206,6 +194,7 @@
               {{ submit(auth.submit, 'send') }}
             </form>
           {% endif %}
+          {{ promises() }}
           <p class="auth-switch">Remembered it? <a href="/signin{{ suffix }}">Back to sign in</a></p>
         {% endif %}
       </div>
@@ -233,12 +222,13 @@
       "codeTtlMinutes": auth_code_ttl_minutes,
       "codeAttempts": auth_code_max_attempts,
       "codeJustSent": (request.query_params.get("message") == "code_sent"),
-      "email": auth_email
+      "email": auth_email,
+      "googleEnabled": auth_google_enabled
     } | tojson }};
   </script>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260825-brain-agent-dock"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260825-brain-agent-dock"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260825-brain-agent-dock"></script>
-  <script type="module" src="{{ url_for('static', path='/hilalmarkets-auth.js') }}?v=20260825-brain-agent-dock"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260831-auth-one-screen"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260831-auth-one-screen"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260831-auth-one-screen"></script>
+  <script type="module" src="{{ url_for('static', path='/hilalmarkets-auth.js') }}?v=20260831-auth-one-screen"></script>
 </body>
 </html>
