@@ -68,6 +68,17 @@ CELERY_PARENT_PROCESS_MB = 200
 #: the parent process.
 WORKER_MEASURED_PEAK_MB = 700
 
+#: A headless Chromium reading one page at a time, with images, GPU and extensions
+#: switched off. The Shariah source resolver starts one per sweep to read project blogs
+#: that only exist after their JavaScript has run, and it runs **in the worker
+#: container** — so it is the worker's ceiling that has to hold it.
+#:
+#: Deliberately generous, and deliberately not the same event as the scan peak above: a
+#: scan and a source sweep are two different tasks, and `celery_worker_concurrency` is 1,
+#: so the worker never runs both at once. What must fit at the same time is the Celery
+#: parent, the one child running the sweep, and the browser it started.
+BROWSER_PROCESS_MB = 300
+
 COMPOSE: dict[str, Any] = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
 SERVICES: dict[str, Any] = COMPOSE["services"]
 SERVICE_NAMES = sorted(SERVICES)
@@ -147,6 +158,53 @@ def test_the_worker_container_holds_what_one_task_has_been_seen_to_use() -> None
         "the task that is growing it, so Docker kills the container first and the scan is "
         "retried into the same wall. Raise the ceiling or lower what one scan holds."
     )
+
+
+def test_the_worker_container_holds_a_browser_as_well_as_its_children() -> None:
+    """Turning page rendering on puts a whole browser inside the worker's ceiling.
+
+    `sharia_source_browser_render_enabled` was switched on on 1 September 2026 so the
+    resolver can read a project's blog when the page only exists after its JavaScript has
+    run. That browser is a separate process tree, it lives in the worker container, and
+    the container's limit is what stops it taking the machine down — the same rule as
+    every other service here.
+
+    So the sum that has to fit is the Celery parent, one child running the sweep, and one
+    Chromium. If it does not, the honest answers are a smaller page budget, a lower
+    per-child limit, or a bigger server — never leaving the browser unbounded and hoping.
+    """
+
+    from ai_market_monitor.core.config import get_settings
+    from ai_market_monitor.worker import app
+
+    if not get_settings().sharia_source_browser_render_enabled:
+        pytest.skip("page rendering is switched off, so no browser ever starts")
+
+    children = int(app.conf.worker_concurrency)
+    per_child_mb = int(app.conf.worker_max_memory_per_child) / 1024
+    needed = CELERY_PARENT_PROCESS_MB + children * per_child_mb + BROWSER_PROCESS_MB
+    ceiling = memory_limit_mb(SERVICES["worker"]) or 0
+    assert needed <= ceiling, (
+        f"the worker needs {needed:.0f} MB — {CELERY_PARENT_PROCESS_MB} MB parent, "
+        f"{children} child(ren) at {per_child_mb:.0f} MB, and a {BROWSER_PROCESS_MB} MB "
+        f"browser — but the container is capped at {ceiling} MB. Docker would kill the "
+        "container part way through a source sweep, and the sweep would be retried into "
+        "the same wall."
+    )
+
+
+def test_the_browser_page_budget_is_bounded() -> None:
+    """A browser with no page limit is an unbounded amount of somebody else's HTML.
+
+    One browser per sweep is only safe while the number of pages it draws is finite. The
+    limit is what turns "a batch of unreadable addresses" into a run that stops and says
+    so, instead of one that keeps starting renderers on a machine with no swap.
+    """
+
+    from ai_market_monitor.core.config import get_settings
+
+    budget = get_settings().sharia_source_browser_render_max_pages
+    assert budget > 0, "SHARIA_SOURCE_BROWSER_RENDER_MAX_PAGES must bound the run"
 
 
 def test_redis_does_not_evict_queued_jobs() -> None:

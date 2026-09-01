@@ -111,7 +111,9 @@ Do not commit real values. Generate secrets with a password manager or cloud sec
 | `SHARIA_REVIEW_SLA_HOURS` | Initial due-date window for review cases. Default: `48`. |
 | `REQUIRE_SECOND_REVIEWER` | When true, approving does not publish: a different reviewer must publish. Default: `false`, so approving publishes in the same step. |
 | `SHARIA_PACK_EVIDENCE_MAX_AGE_DAYS` | How old retained evidence may be, in days, when deciding an import-pack case. Default: `90`. A Shariah-governance number — change it with the governance owner. |
-| `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` | Authority import and approved-source monitoring interval. Default: `24` hours. Sets each case's re-check reminder; it never refuses a decision. |
+| `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` | How often one coin's Shariah evidence is looked at again. Default: `168` hours — one week, set by the product owner on 1 September 2026 (it was `24`). One number, read by the authority importers, the research pipeline, the published-source monitor and the governance record alike. It sets each case's re-check reminder; it never refuses a decision. It is **not** how often the tasks run: beat ticks daily and this decides what is due, so a new coin does not wait for a weekly firing. |
+| `SHARIA_SOURCE_BROWSER_RENDER_ENABLED` | Whether a page a plain request could not read may be tried again with a real browser. Default: `true` since 1 September 2026; the Docker image installs Chromium. Most project blogs only exist after JavaScript runs, and with this off they were reported to reviewers as having no news page. Measured effect: 9/20 coins readable without it, 17/20 with it. |
+| `SHARIA_SOURCE_BROWSER_RENDER_MAX_PAGES` | How many pages one sweep may draw with a browser before it stops and says so. Default: `40`. A stop for when something has gone wrong — the server has no swap. |
 | `SHARIA_SCRAPER_CONCURRENCY` | Must be `1`; official sources are fetched sequentially. |
 | `SHARIA_SCRAPER_OBEY_ROBOTS` | Must remain `true` in staging and production. |
 | `SHARIA_SCRAPER_DOWNLOAD_DELAY_SECONDS` | Delay between official-source requests; deployed minimum is one second. |
@@ -383,10 +385,14 @@ Scheduled tasks currently wired:
 - Dormant WhatsApp webhook/retry tasks only when the separately disabled WhatsApp feature is enabled.
 - Certified capability creation and five-scan repair reviews every 30 seconds.
 - Database connectivity metric.
-- Idempotent methodology-pack, SC Malaysia, and Fasset authority imports every
-  `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` (24 hours by default).
+- Idempotent methodology-pack, SC Malaysia, and Fasset authority imports. The task ticks
+  daily; each import is due every `SHARIA_SOURCE_SCAN_INTERVAL_HOURS` (one week by
+  default) and returns its existing run in between. The daily tick is deliberate — the
+  same task is where a newly listed coin gets its identity discovered and its first
+  research run, and tying that to the weekly cadence would make a new coin wait.
 - Hourly open-review reminders and minute-level Telegram retry processing.
-- Published-asset source monitoring at `SHARIA_SOURCE_SCAN_INTERVAL_HOURS`.
+- Published-asset source monitoring: ticks daily, each coin due every
+  `SHARIA_SOURCE_SCAN_INTERVAL_HOURS`.
 
 The live scanner currently uses shared CCXT REST clients. Jobs are claimed atomically from
 `queued` to `running`, store worker id/claim/heartbeat timestamps, and are not rerun after terminal
@@ -394,6 +400,31 @@ states. WebSocket ingestion and a durable candle store remain future production-
 Capability extension jobs additionally require a configured server-side OpenAI key. The generated
 artifact remains a bounded deterministic expression and must pass normal user approval. See
 `docs/CAPABILITY_EXTENSION_PIPELINE.md` for the escalation and failure behavior.
+
+### Clearing "Pages not found" by hand
+
+The scheduled sweep works through 25 coins a day and carries on where it left off, so a
+backlog clears on its own but slowly. After a change that makes the machine better at
+finding pages — switching the browser on, adding a search key — run it at once:
+
+```bash
+bash deploy/fix-missing-source-pages.sh              # every pending coin
+bash deploy/fix-missing-source-pages.sh --limit 25   # a slice, to see what happens first
+bash deploy/fix-missing-source-pages.sh --dry-run    # fetch, change nothing
+```
+
+It takes only the coins the System Brain is currently asking a person about under **Pages
+not found**, looks for their news page through every layer, and closes the task of each
+coin it settles. A coin it cannot settle keeps its task, rewritten with the addresses
+tried this time and, for each one, the plain reason it did not work.
+
+It runs in a container of its own rather than inside the worker, so a browser it starts
+cannot compete with a running scan for the worker's memory ceiling. It decides no Shariah
+status and publishes nothing.
+
+Start it inside `tmux` — every fetch is a request to somebody else's server with a
+one-second delay between them, so a few hundred coins is hours. The report lands in
+`reports/fix-missing-source-pages-<timestamp>.md`.
 
 ## Public Landing, Contact, and Analytics
 

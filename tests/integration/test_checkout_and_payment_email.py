@@ -9,7 +9,13 @@ from pydantic import SecretStr
 from sqlalchemy import func, select
 
 from ai_market_monitor.core.config import get_settings
-from ai_market_monitor.core.plans import effective_monthly_price
+from ai_market_monitor.core.plans import (
+    PURCHASABLE_PLAN_CODES,
+    effective_monthly_price,
+    original_monthly_price,
+    plan_offer,
+    promotion_is_active,
+)
 from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
     PaymentEmailDelivery,
@@ -110,6 +116,48 @@ async def test_checkout_uses_server_price_and_deduplicates_attempt(test_context)
         assert plan is not None
         assert attempts[0].amount == effective_monthly_price("trader")
         assert attempts[0].currency == plan.currency
+
+
+@pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+async def test_the_review_page_quotes_the_price_it_will_charge(test_context, plan_code):
+    """The last screen before payment must say the number the payment will ask for.
+
+    It used to print the plan catalogue's ``price_monthly``, which is the *normal*
+    price. While a launch offer ran, the page said $20 and the payment asked for $7.
+    Asserted for every purchasable plan, not only the one on offer, because the same
+    page draws them all.
+    """
+
+    await _signup(test_context, f"review-price-{plan_code}@example.com")
+    enabled = test_context["settings"].model_copy(update={"billing_enabled": True})
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+    response = await test_context["client"].get(
+        f"/dashboard/billing/checkout?plan_code={plan_code}"
+    )
+    if not plan_offer(plan_code).monthly_available:
+        # A plan the site says is "Soon" never reaches this page, and never leaks its
+        # price into the page source. Typing the address by hand goes back to billing.
+        assert response.status_code in {302, 303}
+        assert "plan_not_available" in response.headers["location"]
+        pytest.skip(f"{plan_code} is not on sale, so there is no review page")
+    assert response.status_code == 200, response.text
+
+    body = response.text
+    charged = effective_monthly_price(plan_code)
+    assert f"<strong>{charged} USD</strong>" in body
+    # A page that quotes a price is a page for something on sale.
+    assert plan_offer(plan_code).monthly_available is True
+
+    was = original_monthly_price(plan_code)
+    on_offer = plan_offer(plan_code).promotional_monthly_price is not None
+    if on_offer and promotion_is_active():
+        # The normal price is shown as the old one, never as the price being charged.
+        assert was is not None and was > charged
+        assert '<s class="price-original"' in body
+        assert f"The normal price is {was} USD per month." in body
+    else:
+        assert 'class="price-original"' not in body
+        assert "The normal price is" not in body
 
 
 async def test_verified_static_payment_activates_once_and_emails_once(test_context):
@@ -360,10 +408,15 @@ async def test_checkout_json_error_stays_in_the_billing_dialog(test_context):
         headers={"accept": "application/json", "x-requested-with": "XMLHttpRequest"},
     )
     assert checkout.status_code == 400
+    # A refusal, in a sentence a beginner can act on. It used to answer "Creem API access
+    # is not configured" — the name of a setting, shown to somebody buying a plan.
     assert checkout.json() == {
         "error": {
-            "code": "creem_api_key_missing",
-            "message": "Creem API access is not configured.",
+            "code": "payment_method_unavailable",
+            "message": (
+                "This plan cannot be paid for by card yet. "
+                "There is no other way to pay for this plan yet."
+            ),
         }
     }
     assert "location" not in checkout.headers

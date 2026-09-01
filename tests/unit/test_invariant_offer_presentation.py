@@ -31,6 +31,7 @@ OFFER_SCRIPT = STATIC / "hilalmarkets-offer.js"
 SHARED_CSS = STATIC / "hilalmarkets.css"
 LANDING_CSS = LANDING / "index.css"
 LANDING_PRICING = LANDING / "components" / "Pricing.tsx"
+BUILT_LANDING = STATIC / "landing" / "assets" / "landing.js"
 
 #: Families that need no `@font-face`: the browser always has one.
 GENERIC_FAMILIES = frozenset(
@@ -175,6 +176,32 @@ def test_both_countdowns_step_once_a_second() -> None:
     landing = LANDING_PRICING.read_text(encoding="utf-8")
     assert "const SECOND = 1_000" in landing
     assert "setInterval(() => setNow(Date.now()), everyMs)" in landing
+
+
+def test_every_countdown_says_it_is_live_the_same_way() -> None:
+    """One stylesheet decides whether a countdown is shown, so both must speak to it.
+
+    `hilalmarkets.css` hides any `.offer-countdown` that does not carry
+    `data-offer-live`, so a box with no numbers in it never flashes on screen. The
+    server-rendered pages get the attribute from `hilalmarkets-offer.js`. The landing
+    page draws its own countdown in React and did **not** set it — so the timer was
+    inside the card, in the page, and hidden by the shared rule on every visit for as
+    long as the offer ran. The mark is the contract; every implementation sets it.
+    """
+
+    shared = SHARED_CSS.read_text(encoding="utf-8")
+    assert ".offer-countdown:not([data-offer-live])" in shared, (
+        "the rule that makes this a contract is gone"
+    )
+
+    for name, source in (
+        (OFFER_SCRIPT.name, OFFER_SCRIPT.read_text(encoding="utf-8")),
+        (LANDING_PRICING.name, LANDING_PRICING.read_text(encoding="utf-8")),
+        # What visitors are actually served, not only what the source says: the copy into
+        # `static/landing/assets/` is done by hand.
+        ("landing.js", BUILT_LANDING.read_text(encoding="utf-8")),
+    ):
+        assert "data-offer-live" in source, f"{name} draws a countdown nothing will show"
 
 
 def test_the_countdown_has_no_per_card_colour_variant() -> None:

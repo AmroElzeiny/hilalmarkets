@@ -117,6 +117,36 @@ function start(scope) {
     refreshPay();
   }
 
+  /** Draw the ways of paying that really work for the plan being bought.
+   *
+   * The server decided this, per plan, and sent the answer with the plan. Nothing here
+   * works out availability: a second copy of that rule living in the browser is how the
+   * popup came to offer Card while checkout refused it.
+   */
+  function fillMethods() {
+    const decided = (plan && plan.pay_methods) || {};
+    for (const input of methods) {
+      const choice = decided[input.value] || null;
+      // No answer for this method means we were not told it works. Refusing to offer it
+      // is the safe reading; offering it is the one that ends in a dead end.
+      const available = Boolean(choice && choice.available);
+      input.disabled = !available;
+      if (!available) input.checked = false;
+      const label = input.closest("[data-s-method]");
+      if (label) {
+        label.dataset.available = available ? "true" : "false";
+        label.setAttribute("aria-disabled", String(!available));
+        const note = label.querySelector("[data-s-method-note]");
+        if (note && choice && typeof choice.note === "string") note.textContent = choice.note;
+      }
+    }
+    // One way left is not a choice. Ticking it saves a step, and the Pay button still
+    // waits for the agreement box below it.
+    const usable = methods.filter((input) => !input.disabled);
+    if (usable.length === 1) usable[0].checked = true;
+    refreshPay();
+  }
+
   /** Whether the last button may be pressed, and what it says while it cannot. */
   function refreshPay() {
     if (!pay) return;
@@ -161,6 +191,7 @@ function start(scope) {
       refund.textContent =
         plan.money_back || "You can stop this at any time from this page.";
     }
+    fillMethods();
     return true;
   }
 

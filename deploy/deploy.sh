@@ -19,11 +19,36 @@ fi
 export TRACEDGE_ENV_FILE="$ENV_FILE"
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
+# Resolved once, and never typed as a bare `python`. See python_bin in resource_guard.sh:
+# a default Ubuntu has `python3` only, and the missing command shows up two lines later as
+# an unrelated "unbound variable".
+if ! PYTHON_BIN="$(python_bin)"; then
+  cat <<'HINT' >&2
+
+No Python on this server, so the Compose project and its database volume cannot be read.
+Nothing was changed.
+
+Install it:
+
+  apt-get update && apt-get install -y python3
+
+HINT
+  exit 1
+fi
+
 echo "Compose project and persistent volumes:"
 mapfile -t COMPOSE_IDENTITY < <(
-  "${COMPOSE[@]}" config --format json | python -c \
+  "${COMPOSE[@]}" config --format json | "$PYTHON_BIN" -c \
     'import json,sys; data=json.load(sys.stdin); print(data["name"]); print(data["volumes"]["postgres_data"]["name"])'
 )
+# Checked before it is used. Without this the failure arrives as "COMPOSE_IDENTITY[0]:
+# unbound variable", which names the array rather than the thing that actually went
+# wrong — a Compose file that would not parse, or a volume this project does not declare.
+if (( ${#COMPOSE_IDENTITY[@]} < 2 )); then
+  echo "Could not read the Compose project name and the postgres_data volume name." >&2
+  echo "Check that $COMPOSE_FILE parses: ${COMPOSE[*]} config" >&2
+  exit 1
+fi
 PROJECT_NAME="${COMPOSE_IDENTITY[0]}"
 POSTGRES_VOLUME="${COMPOSE_IDENTITY[1]}"
 echo "project=$PROJECT_NAME"

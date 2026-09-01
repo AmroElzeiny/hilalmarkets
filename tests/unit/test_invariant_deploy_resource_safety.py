@@ -54,7 +54,16 @@ GUARD_FUNCTIONS = (
     "disk_require_free",
     "disk_prune_backups",
     "memory_report_swap",
+    "python_bin",
 )
+
+#: How a script is allowed to reach the interpreter that runs on the server itself.
+HOST_PYTHON_FORMS = ("python_bin", "$PYTHON_BIN", "${PYTHON_BIN}")
+
+#: A `python` that runs *inside* the application container, which is a different machine
+#: with a different set of commands. The image is built on `python:3.12-slim`, where plain
+#: `python` is the real name, so these are correct and must not be flagged.
+IN_CONTAINER = re.compile(r"\b(exec|run)\b[^\n]*\bpython\b")
 
 HEREDOC_START = re.compile(r"<<-?\s*[\"']?([A-Za-z_][A-Za-z0-9_]*)[\"']?")
 
@@ -87,6 +96,28 @@ def executable_lines(script: Path) -> list[str]:
 
 def executable_text(script: Path) -> str:
     return "\n".join(executable_lines(script))
+
+
+def executable_commands(script: Path) -> list[str]:
+    """The lines of ``script``, with backslash continuations joined into one command.
+
+    A rule about *what a script runs* has to read commands, not lines. A `docker compose
+    run ... \\` whose payload sits on the next line is one command, and a line-by-line
+    scan sees the payload on its own with no idea what is about to execute it — which
+    reads as a command on the host when it is a command inside a container.
+    """
+    joined: list[str] = []
+    pending = ""
+    for line in executable_lines(script):
+        stripped = line.rstrip()
+        if stripped.endswith("\\"):
+            pending = f"{pending} {stripped[:-1].strip()}".strip()
+            continue
+        joined.append(f"{pending} {line.strip()}".strip())
+        pending = ""
+    if pending:
+        joined.append(pending)
+    return joined
 
 
 @pytest.mark.parametrize("script", DEPLOY_SCRIPTS, ids=SCRIPT_IDS)
@@ -181,6 +212,43 @@ def test_a_script_that_touches_the_live_server_reports_the_swap(script: Path) ->
         f"{script.name} runs on the live server but never calls memory_report_swap. "
         "Missing swap is invisible until the machine dies, and these scripts are the only "
         "place that can point it out."
+    )
+
+
+@pytest.mark.parametrize("script", DEPLOY_SCRIPTS, ids=SCRIPT_IDS)
+def test_no_script_calls_a_bare_python_on_the_server(script: Path) -> None:
+    """`python` is not a command on a default Debian or Ubuntu server.
+
+    It has not been one since 2020 — those systems ship `python3` and nothing named
+    `python` at all. On 2 September 2026 `deploy.sh` died on a clean server for exactly
+    this, and the message was worse than useless:
+
+        deploy.sh: line 23: python: command not found
+        deploy.sh: line 27: COMPOSE_IDENTITY[0]: unbound variable
+
+    The second line is what an operator reads first, and it names an array rather than the
+    missing interpreter. Under `set -u` a command that produces no output always fails one
+    line *after* the real fault.
+
+    So a script that needs Python on the host resolves it through `python_bin`, which is
+    the one place that knows what the interpreter might be called. A `python` inside the
+    application container is a different machine and is left alone: that image is built on
+    `python:3.12-slim`, where the bare name is correct.
+    """
+    if script == RESOURCE_GUARD:
+        return
+    offenders = [
+        command
+        for command in executable_commands(script)
+        if re.search(r"(?<![\w/$])python\b", command)
+        and not IN_CONTAINER.search(command)
+        and not any(form in command for form in HOST_PYTHON_FORMS)
+    ]
+    assert not offenders, (
+        f"{script.name} runs a bare `python` on the server:\n  "
+        + "\n  ".join(offenders)
+        + "\nA default Ubuntu has no such command. Use \"$(python_bin)\" from "
+        "deploy/resource_guard.sh, which finds python3 first."
     )
 
 

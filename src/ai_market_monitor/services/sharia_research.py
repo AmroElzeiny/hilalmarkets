@@ -174,7 +174,14 @@ class OfficialEvidenceFetcher:
     ) -> None:
         self.settings = settings
         self.transport = transport
+        #: One origin's rules: a parser, or ``None`` meaning "no rules, everything is
+        #: allowed". Asked once per sweep.
         self._robots: dict[str, RobotFileParser | None] = {}
+        #: Origins whose rules could not be read at all this run — the site was down or
+        #: rate-limiting. Kept apart from ``_robots`` on purpose: "there are no rules" and
+        #: "we could not find out what the rules are" are opposite answers, and storing
+        #: them in one place is how the second quietly became the first.
+        self._unreadable_robots: set[str] = set()
         self._response_cache: dict[
             str,
             tuple[str | bytes, dict[str, str], int],
@@ -239,31 +246,86 @@ class OfficialEvidenceFetcher:
         return result
 
     async def _assert_robots(self, url: str) -> None:
+        """Refuse an address the site's own rules say we may not read.
+
+        **What each answer from ``robots.txt`` means** is the robots standard's own
+        rule (RFC 9309, section 2.3.1), not this product's invention, and it is written
+        out here because getting it wrong silently removes a whole website:
+
+        =====================  ====================================================
+        ``robots.txt`` answers  What it means
+        =====================  ====================================================
+        200                    Read the rules and obey them.
+        any other 4xx          There are no rules. Everything on the site is allowed.
+        429 or 5xx             We could not find out. Do not read anything this run.
+        could not be reached   The same: we could not find out.
+        =====================  ====================================================
+
+        The middle row is the one that was wrong until 1 September 2026. Every 4xx
+        except 404 was treated as "we could not verify the policy", which refused every
+        address on that origin. A site behind a bot filter — which answers **403** to a
+        plain ``robots.txt`` request from a datacentre address, and Cloudflare does this
+        by default — therefore had every one of its pages refused, for ever, while the
+        pages themselves were perfectly readable. The review case then said the project
+        had no news page, and a person was asked to find one that already existed.
+
+        Refusing on a 403 is not the cautious reading of the standard; it is a different
+        rule. A 403 on ``robots.txt`` says nothing whatever about what a site permits.
+
+        **A temporary failure is cached for this run only.** Both the answer and the
+        "could not find out" are remembered per origin, so a sweep asks a site for its
+        rules once instead of once per address. The cache lives as long as the fetcher,
+        which is one sweep, so a site having a bad hour is retried on the next one.
+        """
+
         if not self.settings.sharia_scraper_obey_robots:
             return
         parsed = urlparse(url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
+        if origin in self._unreadable_robots:
+            raise ShariaResearchError(
+                "robots_unavailable",
+                "The official source robots policy could not be read.",
+                retryable=True,
+            )
         if origin not in self._robots:
             robots_url = f"{origin}/robots.txt"
-            response = await provider_request(
-                self.settings,
-                "GET",
-                robots_url,
-                provider="official_source",
-                operation="robots",
-                timeout=20,
-                mutation_committed=False,
-                transport=self.transport,
-                follow_redirects=True,
-                headers={"User-Agent": "HilalMarketsEvidenceBot/1.0 (+compliance research)"},
-            )
-            if response.status_code == 404:
-                self._robots[origin] = None
-            elif response.status_code >= 400:
+            try:
+                response = await provider_request(
+                    self.settings,
+                    "GET",
+                    robots_url,
+                    provider="official_source",
+                    operation="robots",
+                    timeout=20,
+                    mutation_committed=False,
+                    transport=self.transport,
+                    follow_redirects=True,
+                    headers={
+                        "User-Agent": "HilalMarketsEvidenceBot/1.0 (+compliance research)"
+                    },
+                )
+            except (httpx.HTTPError, ProviderCallError) as exc:
+                # Could not ask. That is not permission, so nothing on this origin is
+                # read this run — but it is remembered so the whole sweep asks once.
+                self._unreadable_robots.add(origin)
                 raise ShariaResearchError(
                     "robots_unavailable",
-                    "The official source robots policy could not be verified.",
+                    "The official source robots policy could not be read.",
+                    retryable=True,
+                ) from exc
+            status = response.status_code
+            if status == 429 or status >= 500:
+                self._unreadable_robots.add(origin)
+                raise ShariaResearchError(
+                    "robots_unavailable",
+                    "The official source robots policy could not be read.",
+                    retryable=True,
                 )
+            if status >= 400:
+                # No rules published, or none this client is allowed to see. Either way
+                # the standard says the site is open. See the table above.
+                self._robots[origin] = None
             else:
                 parser = RobotFileParser(robots_url)
                 parser.parse(response.text.splitlines())

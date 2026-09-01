@@ -657,9 +657,12 @@ async def test_signup_password_confirmation_and_complexity_are_enforced(test_con
         follow_redirects=False,
     )
     # Back to the password step, not to the email step: a person sent back to fix an
-    # email address they cannot see is a dead end they give up at.
+    # email address they cannot see is a dead end they give up at. The name comes back
+    # with them, because it is a hidden field on that screen and losing it would make the
+    # next attempt fail for a reason they cannot see either.
     assert mismatch.headers["location"] == (
-        "/signup/password?error=password_mismatch&email=mismatch%40example.com"
+        "/signup/password?error=password_mismatch"
+        "&email=mismatch%40example.com&name=Test+Person"
     )
 
     weak = await test_context["client"].post(
@@ -673,7 +676,7 @@ async def test_signup_password_confirmation_and_complexity_are_enforced(test_con
         follow_redirects=False,
     )
     assert weak.headers["location"] == (
-        "/signup/password?error=invalid_password&email=weak%40example.com"
+        "/signup/password?error=invalid_password&email=weak%40example.com&name=Test+Person"
     )
 
 

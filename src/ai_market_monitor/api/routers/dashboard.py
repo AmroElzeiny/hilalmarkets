@@ -126,10 +126,17 @@ from ai_market_monitor.services.affiliate_payout_options import (
     payout_options_payload,
 )
 from ai_market_monitor.services.billing import (
+    PAYMENT_METHODS,
     BillingError,
     BillingService,
+    billing_method_provider,
     billing_provider_capabilities,
     configured_billing_provider,
+    payment_method_available,
+    payment_method_offers,
+    payment_method_offers_by_method,
+    payment_method_payload,
+    payment_method_refusal,
 )
 from ai_market_monitor.services.capability_extensions import CapabilityExtensionService
 from ai_market_monitor.services.coverage import market_coverage_for_user
@@ -303,9 +310,9 @@ def _subscription_destination(
     if (
         selected_plan == "trader"
         and selected_interval == "monthly"
-        and _billing_selection_available(
+        and payment_method_available(
             settings,
-            provider=_billing_method_provider(settings, "card"),
+            method="card",
             plan_code="trader",
             billing_cycle="trial_7_day",
         )
@@ -326,61 +333,6 @@ def _optional_uuid(value: str | None, *, label: str) -> UUID | None:
         return UUID(normalized)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"Choose a valid {label}.") from exc
-
-
-def _billing_method_provider(settings: Settings, payment_method: str) -> str | None:
-    try:
-        return configured_billing_provider(settings, payment_method)
-    except BillingError:
-        return None
-
-
-def _billing_selection_available(
-    settings: Settings,
-    *,
-    provider: str | None,
-    plan_code: str,
-    billing_cycle: str,
-) -> bool:
-    if not settings.billing_enabled or provider is None:
-        return False
-    offer = plan_offer(plan_code)
-    if billing_cycle == "trial_7_day":
-        return False
-    if billing_cycle == "monthly" and not offer.monthly_available:
-        return False
-    if billing_cycle == "annual" and not offer.annual_available:
-        return False
-    if provider == "creem":
-        if settings.creem_api_key is None or settings.creem_webhook_secret is None:
-            return False
-        if (
-            not settings.creem_api_key.get_secret_value().strip()
-            or not settings.creem_webhook_secret.get_secret_value().strip()
-        ):
-            return False
-        key = (
-            f"{plan_code}_trial"
-            if billing_cycle == "trial_7_day"
-            else f"{plan_code}_{billing_cycle}"
-        )
-        return key in settings.creem_product_ids
-    if provider == "stripe":
-        if settings.stripe_secret_key is None:
-            return False
-        return (
-            f"{plan_code}_{billing_cycle}" in settings.stripe_price_ids
-            or plan_code in settings.stripe_price_ids
-        )
-    if provider == "nowpayments":
-        return (
-            billing_cycle == "monthly"
-            and settings.nowpayments_api_key is not None
-            and settings.nowpayments_ipn_secret is not None
-            and bool(settings.nowpayments_api_key.get_secret_value().strip())
-            and bool(settings.nowpayments_ipn_secret.get_secret_value().strip())
-        )
-    return provider == "static" and not settings.is_deployed
 
 
 async def _active_paid_plan_codes(
@@ -3300,8 +3252,8 @@ async def billing_page(
         .limit(1)
     )
     billing = BillingService(session, settings)
-    card_provider = _billing_method_provider(settings, "card")
-    crypto_provider = _billing_method_provider(settings, "crypto")
+    card_provider = billing_method_provider(settings, "card")
+    crypto_provider = billing_method_provider(settings, "crypto")
     active_paid_plan_codes = await _active_paid_plan_codes(session, user_id=user.id)
     display_name_parts = (user.display_name or "").strip().split(maxsplit=1)
     billing_selection_availability = {
@@ -3310,23 +3262,14 @@ async def billing_page(
                 plan_code=code,
                 active_paid_plan_codes=active_paid_plan_codes,
             ),
-            "card_monthly": _billing_selection_available(
-                settings,
-                provider=card_provider,
-                plan_code=code,
-                billing_cycle="monthly",
+            "card_monthly": payment_method_available(
+                settings, method="card", plan_code=code, billing_cycle="monthly"
             ),
-            "card_annual": _billing_selection_available(
-                settings,
-                provider=card_provider,
-                plan_code=code,
-                billing_cycle="annual",
+            "card_annual": payment_method_available(
+                settings, method="card", plan_code=code, billing_cycle="annual"
             ),
-            "crypto_monthly": _billing_selection_available(
-                settings,
-                provider=crypto_provider,
-                plan_code=code,
-                billing_cycle="monthly",
+            "crypto_monthly": payment_method_available(
+                settings, method="crypto", plan_code=code, billing_cycle="monthly"
             ),
             "trial": False,
         }
@@ -3426,6 +3369,23 @@ async def billing_page(
                 "card": card_provider,
                 "crypto": crypto_provider,
             },
+            billing_method_offers=payment_method_offers_by_method(
+                settings,
+                plan_codes=PURCHASABLE_PLAN_CODES,
+                billing_cycle="monthly",
+            ),
+            # Whether a year at a time can be bought for *any* plan. The page used to work
+            # this out from `annualAvailable` alone, which says a plan offers a yearly
+            # price — not that the payment company holds a yearly product to charge for
+            # it. Annual stayed pressable and then failed at the payment step.
+            annual_purchasable=any(
+                offer.available
+                for offer in payment_method_offers(
+                    settings,
+                    plan_codes=PURCHASABLE_PLAN_CODES,
+                    billing_cycle="annual",
+                )
+            ),
             billing_selection_availability=billing_selection_availability,
             billing_plan_data={
                 "plans": {
@@ -3434,6 +3394,9 @@ async def billing_page(
                         "monthly": str(PLAN_DEFINITIONS[code].monthly_price),
                         "annual": str(PUBLIC_PLAN_PRESENTATIONS[code].annual_price),
                         "availability": billing_selection_availability[code],
+                        # Decided here, per period, so the script draws an answer rather
+                        # than working one out from flags a second time.
+                        "methods": payment_method_payload(settings, plan_code=code),
                     }
                     for code in PURCHASABLE_PLAN_CODES
                 },
@@ -3623,6 +3586,12 @@ async def billing_checkout_review(
         return _redirect("/dashboard/billing?error=billing_disabled")
     if plan_code not in PURCHASABLE_PLAN_CODES:
         return _redirect("/dashboard/billing?error=plan_not_available")
+    # A plan the site says is "Soon" is not for sale on this page either. The checkout
+    # service already refuses it, so the form here could only ever fail — and rendering
+    # it put that plan's price into the page source, which is the one thing the "Soon"
+    # card exists to avoid. `plan_offer` is the single owner of "is this for sale".
+    if not plan_offer(plan_code).monthly_available:
+        return _redirect("/dashboard/billing?error=plan_not_available")
     await PlanCatalogService(session).sync_defaults()
     plan = await session.scalar(
         select(Plan).where(Plan.code == plan_code, Plan.is_active.is_(True))
@@ -3651,6 +3620,21 @@ async def billing_checkout_review(
     display_name_parts = (user.display_name or "").strip().split(maxsplit=1)
     await session.commit()
     features = dict(plan.features or {})
+    # What the payment will ask for, from the same function that sets the amount on the
+    # checkout attempt. The page used to print the plan catalogue's normal price, so a
+    # running launch offer made the last screen before payment disagree with the charge.
+    checkout_price = billing.checkout_amount(
+        plan.code, plan.price_monthly, billing.billing_cycle_code
+    )
+    # A price to cross out only when this checkout really costs less than the normal
+    # monthly price — never for a free trial or a yearly total, which are different
+    # things being bought, not a discount on this one.
+    checkout_price_was = (
+        plan.price_monthly
+        if billing.billing_cycle_code not in {"trial_7_day", "annual_auto_renewal"}
+        and checkout_price < plan.price_monthly
+        else None
+    )
     response = templates.TemplateResponse(
         request,
         "hilal/dashboard/checkout.html",
@@ -3664,6 +3648,9 @@ async def billing_checkout_review(
             plan=plan,
             plan_limits=dict(features.get("limits") or {}),
             plan_features=dict(features.get("features") or {}),
+            checkout_price=checkout_price,
+            checkout_price_was=checkout_price_was,
+            promotion_ends_at=PROMOTION_ENDS_AT.isoformat(),
             billing_cycle=billing.billing_cycle_code,
             billing_provider=billing.provider.provider_name,
             billing_capabilities=billing.provider_capabilities,
@@ -3676,6 +3663,15 @@ async def billing_checkout_review(
                 "last_name": display_name_parts[1] if len(display_name_parts) > 1 else "",
                 "email": primary_email or "",
             },
+            # This page used to post "card" whatever was switched on. It asks now, and it
+            # can only ask about ways of paying that really work for this plan.
+            billing_method_offers=payment_method_offers_by_method(
+                settings,
+                plan_codes=(plan.code,),
+                billing_cycle=(
+                    "annual" if "annual" in billing.billing_cycle_code else "monthly"
+                ),
+            ),
         ),
     )
     return _no_store(response)
@@ -3739,6 +3735,24 @@ async def billing_checkout(
             raise BillingError(
                 "billing_terms_required",
                 "Accept the billing terms before continuing.",
+            )
+        # A refusal that only says "not available" leaves a beginner with nothing to try.
+        # The page should never have offered this way of paying; if it did, say which one
+        # does work, in a sentence, before the provider is even looked up.
+        if payment_method in PAYMENT_METHODS and not payment_method_available(
+            settings,
+            method=payment_method,
+            plan_code=plan_code,
+            billing_cycle="annual" if "annual" in billing_cycle else "monthly",
+        ):
+            raise BillingError(
+                "payment_method_unavailable",
+                payment_method_refusal(
+                    settings,
+                    method=payment_method,
+                    plan_code=plan_code,
+                    billing_cycle="annual" if "annual" in billing_cycle else "monthly",
+                ),
             )
         provider_name = configured_billing_provider(settings, payment_method)
         service = BillingService(session, settings, provider_name=provider_name)

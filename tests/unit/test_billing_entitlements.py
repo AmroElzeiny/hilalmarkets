@@ -1303,3 +1303,104 @@ async def test_usage_tracking_referrals_and_admin_overrides(test_context):
         assert await session.scalar(select(func.count(AdminOverride.id))) == 1
         assert await session.scalar(select(func.count(AuditEvent.id))) >= 1
         assert await session.scalar(select(func.count(ReferralRelationship.id))) == 1
+
+
+async def test_a_referral_records_what_was_charged_not_the_list_price(test_context):
+    """An affiliate's share is a share of money that really moved.
+
+    While a launch offer runs, the plan's catalogue price and the price the customer
+    paid are two different numbers. This used to write the catalogue price, so an
+    affiliate would have been credited a share of $20 for somebody who paid the launch
+    price. The completed checkout is the only row that knows what was actually charged.
+    """
+
+    async with test_context["session_factory"]() as session:
+        await PlanCatalogService(session).sync_defaults()
+        buyer = await create_user(session, "Referred Buyer")
+        referrer = await create_user(session, "Referrer")
+        plan = await session.scalar(select(Plan).where(Plan.code == "trader"))
+        assert plan is not None
+
+        session.add(ReferralCode(owner_user_id=referrer.id, code="LAUNCH10", is_active=True))
+        await session.flush()
+        await ReferralService(session).record_trial_referral(
+            referred_user_id=buyer.id,
+            referral_code="LAUNCH10",
+        )
+
+        charged = effective_monthly_price("trader")
+        now = datetime.now(UTC)
+        session.add(
+            BillingCheckoutAttempt(
+                user_id=buyer.id,
+                plan_id=plan.id,
+                billing_cycle="monthly",
+                provider="static",
+                status="completed",
+                idempotency_key=uuid4().hex,
+                terms_version="v1",
+                amount=charged,
+                currency="USD",
+                terms_accepted_at=now,
+                expires_at=now + timedelta(hours=1),
+                completed_at=now,
+            )
+        )
+        session.add(
+            Subscription(
+                user_id=buyer.id,
+                plan_id=plan.id,
+                status=SubscriptionStatus.ACTIVE,
+                provider="static",
+            )
+        )
+        await session.flush()
+
+        relationship = await ReferralService(session).grant_conversion_rewards(
+            referred_user_id=buyer.id
+        )
+        assert relationship is not None
+        assert relationship.metadata_json["paid_amount_usd"] == str(charged)
+        assert relationship.metadata_json["paid_amount_source"] == "checkout"
+        # And it is the charged number, not the one printed in the plan catalogue.
+        assert relationship.metadata_json["paid_amount_usd"] != str(plan.price_monthly) or (
+            charged == plan.price_monthly
+        )
+
+
+async def test_a_referral_with_no_payment_row_says_where_its_number_came_from(test_context):
+    """A subscription granted by hand has no payment behind it, and says so.
+
+    Falling back silently to the plan's price is how a balance comes to show money that
+    was never received. The row records which of the two numbers it used.
+    """
+
+    async with test_context["session_factory"]() as session:
+        await PlanCatalogService(session).sync_defaults()
+        buyer = await create_user(session, "Granted Buyer")
+        referrer = await create_user(session, "Granting Referrer")
+        plan = await session.scalar(select(Plan).where(Plan.code == "trader"))
+        assert plan is not None
+
+        session.add(ReferralCode(owner_user_id=referrer.id, code="GRANTED10", is_active=True))
+        await session.flush()
+        await ReferralService(session).record_trial_referral(
+            referred_user_id=buyer.id,
+            referral_code="GRANTED10",
+        )
+        session.add(
+            Subscription(
+                user_id=buyer.id,
+                plan_id=plan.id,
+                status=SubscriptionStatus.ACTIVE,
+                provider=None,
+            )
+        )
+        await session.flush()
+
+        relationship = await ReferralService(session).grant_conversion_rewards(
+            referred_user_id=buyer.id
+        )
+        assert relationship is not None
+        assert relationship.metadata_json["paid_amount_source"] == "plan_price"
+        assert relationship.metadata_json["paid_amount_usd"] == str(plan.price_monthly)

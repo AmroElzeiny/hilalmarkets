@@ -23,10 +23,10 @@
       <h2>Choose the level of monitoring you need</h2>
     </div>
   </div>
-  {# Annual is selectable only while some plan can actually be bought annually. Today no
-     plan can, so the control is switched off from that same fact rather than from a
-     hardcoded flag: the day annual opens, it turns itself back on. #}
-  {%- set annual_purchasable = plan_offer_values.values() | selectattr('annualAvailable') | list | length > 0 -%}
+  {# Annual is selectable only while some plan can actually be bought annually. That
+     answer is `annual_purchasable`, decided on the server by the one owner of "can this
+     be paid for" — it used to be worked out here from `annualAvailable`, which only says
+     a plan offers a yearly price, not that the payment company can charge for it. #}
   <fieldset class="billing-toggle dashboard-billing-toggle" aria-label="Billing interval" data-billing-page-interval>
     <legend class="sr-only">Choose monthly or annual billing</legend>
     <label>
@@ -195,15 +195,19 @@
         <label><span>Country</span><input type="text" name="country" maxlength="80" autocomplete="country-name" required></label>
       </div>
 
+      {# A way of paying that is switched off is drawn switched off, and says so. The
+         sentence under each name is written by the billing service, because which one is
+         true depends on *why* the method cannot be used, and a template cannot be tested
+         on that. The script narrows both again for the plan and period actually chosen. #}
       <fieldset class="billing-method-options">
         <legend>Payment method</legend>
-        <label data-billing-method-card>
-          <input type="radio" name="payment_method" value="card">
-          <span class="billing-method-card"><span data-icon="billing" data-icon-class="icon"></span><strong>Card</strong><small>Secure checkout with {{ 'Creem' if billing_method_providers.card == 'creem' else (billing_method_providers.card|title if billing_method_providers.card else 'the card provider') }}</small></span>
+        <label data-billing-method-card class="{{ '' if billing_method_offers.card.available else 'is-unavailable' }}" aria-disabled="{{ 'false' if billing_method_offers.card.available else 'true' }}">
+          <input type="radio" name="payment_method" value="card" {{ '' if billing_method_offers.card.available else 'disabled' }}>
+          <span class="billing-method-card"><span data-icon="billing" data-icon-class="icon"></span><strong>Card</strong><small data-billing-method-note>{{ billing_method_offers.card.note }}</small></span>
         </label>
-        <label data-billing-method-crypto>
-          <input type="radio" name="payment_method" value="crypto">
-          <span class="billing-method-card"><span data-icon="wallet" data-icon-class="icon"></span><strong>Crypto</strong><small>Invoice with {{ 'NOWPayments' if billing_method_providers.crypto == 'nowpayments' else (billing_method_providers.crypto|title if billing_method_providers.crypto else 'the crypto provider') }}</small></span>
+        <label data-billing-method-crypto class="{{ '' if billing_method_offers.crypto.available else 'is-unavailable' }}" aria-disabled="{{ 'false' if billing_method_offers.crypto.available else 'true' }}">
+          <input type="radio" name="payment_method" value="crypto" {{ '' if billing_method_offers.crypto.available else 'disabled' }}>
+          <span class="billing-method-card"><span data-icon="wallet" data-icon-class="icon"></span><strong>Crypto</strong><small data-billing-method-note>{{ billing_method_offers.crypto.note }}</small></span>
         </label>
       </fieldset>
 
@@ -270,5 +274,5 @@
 </section>
 {% endblock %}
 {% block page_scripts %}
-<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260831-auth-one-screen"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260901-pay-methods"></script>
 {% endblock %}

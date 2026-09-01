@@ -203,7 +203,21 @@ class Settings(BaseSettings):
     sharia_review_reminder_hours: int = Field(default=6, ge=1, le=168)
     sharia_review_sla_hours: int = Field(default=48, ge=1, le=720)
     require_second_reviewer: bool = False
-    sharia_source_scan_interval_hours: int = Field(default=24, ge=1, le=720)
+    #: How often one coin's Shariah evidence is looked at again — its authority page
+    #: re-imported, its published official pages re-fetched, and its case's next check
+    #: due date set. It is the product's single re-check cadence, read by the importers,
+    #: the research pipeline, the source monitor and the governance record alike.
+    #:
+    #: **One week since 1 September 2026**, on the product owner's instruction. It was 24
+    #: hours, which is more often than any of these sources changes: an authority updates
+    #: its report a few times a year, and a project's blog is watched for events, not for
+    #: posts. Daily re-fetching spent the server, the provider quota and the review
+    #: reminders on finding nothing new six days out of seven.
+    #:
+    #: This is **not** the schedule the tasks run on. Beat ticks daily and this number
+    #: decides what is due, so a coin added on Tuesday is not made to wait until the next
+    #: weekly tick. See the beat schedule in `worker.py`.
+    sharia_source_scan_interval_hours: int = Field(default=168, ge=1, le=720)
     sharia_scraper_concurrency: int = Field(default=1, ge=1, le=4)
     sharia_scraper_obey_robots: bool = True
     sharia_scraper_download_delay_seconds: float = Field(default=1, ge=0.2, le=60)
@@ -229,9 +243,10 @@ class Settings(BaseSettings):
     #: owner, not to make a stuck queue move.
     sharia_pack_evidence_max_age_days: int = Field(default=90, ge=1, le=3650)
     sharia_identity_discovery_batch_size: int = Field(default=250, ge=1, le=500)
-    #: Whether the layered resolver may look for an asset's news and community pages.
-    #: Turning it off stops new links being proposed; it withdraws nothing already
-    #: proved, and the human tasks it raised stay open.
+    #: Whether the layered resolver may look for an asset's own pages. It hunts for the
+    #: news page, which is the only required one, and keeps a community page when a layer
+    #: happens to offer one. Turning it off stops new links being proposed; it withdraws
+    #: nothing already proved, and the human tasks it raised stay open.
     sharia_source_resolution_enabled: bool = True
     #: How many assets one resolver sweep may work through. Each asset costs a handful
     #: of fetches against somebody else's site, so this is kept small on purpose and
@@ -261,18 +276,28 @@ class Settings(BaseSettings):
     #: real browser. More and more project blogs and forums only exist after JavaScript
     #: has run, and a plain fetch sees an empty shell and calls the page unreadable.
     #:
-    #: **Off by default, and deliberately.** The production image ships no browser, and
-    #: the server it runs on has 3.9 GB of memory and no swap — Chromium is the largest
-    #: thing that would ever run there. Switching it on means installing the browser too
-    #: (`python -m playwright install chromium`); until then the resolver says so in the
-    #: case rather than pretending it looked.
-    sharia_source_browser_render_enabled: bool = False
+    #: **On since 1 September 2026, and the image now ships Chromium** (see the runtime
+    #: stage of the Dockerfile). It was off before that, and the price was paid every
+    #: sweep: a coin whose blog is an ordinary JavaScript site — most of them — was
+    #: reported to a reviewer as having no news page at all.
+    #:
+    #: The server has 3.9 GB of memory and no swap, so what a browser may spend is bounded
+    #: rather than trusted: one browser per sweep, one page open at a time, images and GPU
+    #: off, and a hard page budget below. See `services/sharia_page_render.py`.
+    sharia_source_browser_render_enabled: bool = True
     sharia_source_browser_render_timeout_seconds: float = Field(default=25, ge=5, le=120)
     #: How much rendered HTML is kept. A rendered page is read for its text and its
     #: dates; an unbounded document would be a memory limit waiting to be hit.
     sharia_source_browser_render_max_characters: int = Field(
         default=2_000_000, ge=50_000, le=20_000_000
     )
+    #: How many pages one sweep may draw with a browser before it stops and says so.
+    #:
+    #: A sweep is 25 coins and only the addresses a plain fetch could not read reach the
+    #: browser at all, so 40 is generous for normal running. It is a stop for the case
+    #: where something has gone wrong — a whole batch of unreadable addresses — because
+    #: on a machine with no swap "keep trying" is how a container gets killed.
+    sharia_source_browser_render_max_pages: int = Field(default=40, ge=1, le=500)
     #: Whether a model may be asked where a coin publishes, **after** every free layer has
     #: come back with nothing for a required category. It is the last layer and the only
     #: paid one; what it returns is filtered and proved exactly like a search result, so

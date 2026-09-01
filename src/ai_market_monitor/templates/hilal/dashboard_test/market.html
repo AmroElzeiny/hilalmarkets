@@ -1,5 +1,5 @@
 {% extends "hilal/base_dashboard.html" %}
-{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260831-auth-one-screen">{% endblock %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260901-pay-methods">{% endblock %}
 {% block content %}
 
 <div
@@ -270,4 +270,4 @@
 {% include "hilal/dashboard_test/partials/favorites_dialog.html" %}
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20260831-auth-one-screen"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20260901-pay-methods"></script>{% endblock %}

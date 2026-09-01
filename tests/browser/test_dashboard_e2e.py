@@ -1202,3 +1202,34 @@ def _first_condition_board_node(page: Page):
 # ---------------------------------------------------------------------------
 
 
+
+
+def test_the_billing_page_carries_the_live_countdown_on_the_plan_card(
+    page: Page,
+    base_url: str,
+) -> None:
+    """The third surface that shows a price shows the same timer, counting.
+
+    Signed in or signed out, the offer is one fact. The dashboard draws its cards from
+    the same offer the public pages use, so if the timer stops here it has stopped for a
+    paying customer looking at the plan they are about to buy.
+    """
+
+    from ai_market_monitor.core.plans import original_monthly_price, promotion_is_active
+
+    signup(page, base_url, unique_email("billing-countdown"))
+    page.goto(f"{base_url}/dashboard/billing")
+    expect(page.locator(".dashboard-price-card").first).to_be_visible()
+
+    if not promotion_is_active():
+        assert original_monthly_price("trader") is None
+        expect(page.locator(".offer-countdown[data-offer-live]")).to_have_count(0)
+        return
+
+    countdown = page.locator(".dashboard-price-card .offer-countdown[data-offer-live]").first
+    expect(countdown).to_be_visible(timeout=5_000)
+    expect(countdown).to_contain_text("Launch price ends in")
+    seconds = countdown.locator(".offer-countdown-part").last
+    first_reading = seconds.inner_text()
+    page.wait_for_timeout(1600)
+    assert seconds.inner_text() != first_reading, "the billing countdown is not counting"

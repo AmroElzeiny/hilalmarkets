@@ -31,7 +31,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_PRESENTATIONS
+from ai_market_monitor.core.plans import (
+    PLAN_DEFINITIONS,
+    PROMOTION_ENDS_AT,
+    PUBLIC_PLAN_PRESENTATIONS,
+    effective_monthly_price,
+    original_monthly_price,
+)
 from ai_market_monitor.db.models import (
     AssetShariaAssessment,
     AssetShariaStatusHistory,
@@ -581,19 +587,32 @@ class HilalChatKnowledge:
         Only the plans the site actually presents. ``PLAN_DEFINITIONS`` also holds
         internal ones — partner and lifetime arrangements — and quoting those to a
         customer would offer something that is not for sale.
+
+        The price is today's price, read from the same offer the pricing page reads.
+        Quoting ``monthly_price`` straight from the catalogue said $20 while every
+        pricing surface said the launch price, which is the one disagreement this
+        whole module exists to prevent. The normal price and the deadline travel with
+        it, so Hilal can say what the offer is instead of only what it costs now.
         """
 
-        return [
-            {
+        rows: list[dict[str, Any]] = []
+        for code, definition in PLAN_DEFINITIONS.items():
+            if code not in PUBLIC_PLAN_PRESENTATIONS:
+                continue
+            today = effective_monthly_price(code)
+            before = original_monthly_price(code)
+            row: dict[str, Any] = {
                 "id": f"plan:{code}",
                 "kind": "plan",
                 "name": definition.name,
-                "price_per_month": f"{definition.monthly_price} {definition.currency}",
+                "price_per_month": f"{today} {definition.currency}",
                 "what_it_is_for": definition.description,
             }
-            for code, definition in PLAN_DEFINITIONS.items()
-            if code in PUBLIC_PLAN_PRESENTATIONS
-        ][:8]
+            if before is not None:
+                row["normal_price_per_month"] = f"{before} {definition.currency}"
+                row["launch_price_ends_at"] = PROMOTION_ENDS_AT.isoformat()
+            rows.append(row)
+        return rows[:8]
 
     @staticmethod
     def _on_screen(view: HilalChatView | None) -> dict[str, Any]:

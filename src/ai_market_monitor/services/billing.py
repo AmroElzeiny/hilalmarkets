@@ -1,14 +1,15 @@
 import hmac
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256, sha512
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 from uuid import UUID, uuid4
 
 import httpx
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -136,6 +137,24 @@ def billing_provider_capabilities(provider: str) -> BillingProviderCapabilities:
         ) from exc
 
 
+#: Every way of paying this product offers. Written once. "card" and "crypto" used to be
+#: typed separately into two routers, three templates and two scripts, and a page could
+#: offer one of them while the server refused it.
+PAYMENT_METHODS: Final[tuple[str, ...]] = ("card", "crypto")
+
+#: What each payment company is called in front of a person. Its internal name is a word
+#: from the code, and this product is written for beginners.
+_PROVIDER_WORDS: Final[dict[str, str]] = {
+    "creem": "Creem",
+    "stripe": "Stripe",
+    "nowpayments": "NOWPayments",
+    "static": "a test payment page",
+}
+
+#: How each way of paying is named inside a sentence.
+_METHOD_WORDS: Final[dict[str, str]] = {"card": "card", "crypto": "crypto"}
+
+
 def configured_billing_provider(settings: Settings, payment_method: str) -> str:
     if payment_method == "card":
         provider: str = settings.billing_card_provider
@@ -150,9 +169,296 @@ def configured_billing_provider(settings: Settings, payment_method: str) -> str:
     if provider == "disabled":
         raise BillingError(
             "payment_method_unavailable",
-            "That payment method is not currently available.",
+            f"Paying by {_METHOD_WORDS.get(payment_method, payment_method)} "
+            "is switched off just now.",
         )
     return provider
+
+
+# ── Which ways of paying really work ─────────────────────────────────────────────
+#
+# One question, one answer, one owner: *can this person pay for this plan, this way,
+# right now?* Every page that draws a payment choice and every route that accepts one
+# asks the functions below, so a page can never offer a button the server refuses.
+#
+# That had already happened. The plan page drew "Card" and "Crypto" side by side
+# whatever the settings said, and pressing Pay with card switched off answered
+# "That payment method is not currently available" — a dead end with no way out of it.
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentMethodOffer:
+    """One way of paying, and whether it can really be used for a plan right now.
+
+    ``note`` is the sentence shown under the name. It is written here rather than in a
+    template because which sentence is true depends on *why* a method cannot be used,
+    and a template cannot be tested on that.
+    """
+
+    method: str
+    provider: str | None
+    available: bool
+    note: str
+
+
+def billing_method_provider(settings: Settings, payment_method: str) -> str | None:
+    """The payment company behind one method, or ``None`` when it is switched off."""
+
+    try:
+        return configured_billing_provider(settings, payment_method)
+    except BillingError:
+        return None
+
+
+def webhook_secret_for(settings: Settings, provider: str) -> SecretStr | None:
+    """The secret that proves a message really came from one payment company.
+
+    One owner. This choice — and in particular that NOWPayments falls back to the shared
+    ``BILLING_WEBHOOK_SECRET`` when it has no IPN secret of its own — was written inside
+    the webhook verifier, while the rule deciding whether crypto could be *offered* had
+    its own narrower copy. So a server holding only the shared secret could confirm a
+    crypto payment perfectly well, and the plan page hid crypto anyway.
+    """
+
+    if provider == "creem":
+        return settings.creem_webhook_secret
+    if provider == "nowpayments":
+        return settings.nowpayments_ipn_secret or settings.billing_webhook_secret
+    return settings.billing_webhook_secret
+
+
+def payment_can_be_confirmed(settings: Settings, provider: str) -> bool:
+    """Whether a payment taken through this company could afterwards be proven.
+
+    Selling without this is the worst outcome the billing code has: the customer really
+    pays, the confirmation arrives unsigned or never arrives, and the plan never starts.
+    A refusal before the money moves is always better.
+
+    ``static`` is the local adapter, which confirms itself through a signed return address
+    rather than a callback, so it needs no secret.
+    """
+
+    if provider == "static":
+        return True
+    secret = webhook_secret_for(settings, provider)
+    return secret is not None and bool(secret.get_secret_value().strip())
+
+
+def _provider_can_sell(
+    settings: Settings,
+    *,
+    provider: str | None,
+    plan_code: str,
+    billing_cycle: str,
+) -> bool:
+    """Whether one payment company can really take money for this plan and period."""
+
+    if not settings.billing_enabled or provider is None:
+        return False
+    # A plan that is not for sale cannot be paid for by any means. The free plan reads as
+    # "available monthly" in the offer table — it is, at no charge — and that made every
+    # way of paying look open for a plan `prepare_checkout` refuses outright.
+    if plan_code not in PURCHASABLE_PLAN_CODES:
+        return False
+    if not payment_can_be_confirmed(settings, provider):
+        return False
+    offer = plan_offer(plan_code)
+    if billing_cycle == "trial_7_day":
+        return False
+    if billing_cycle == "monthly" and not offer.monthly_available:
+        return False
+    if billing_cycle == "annual" and not offer.annual_available:
+        return False
+    if provider == "creem":
+        # The webhook secret is checked above, for every company at once.
+        if settings.creem_api_key is None or not settings.creem_api_key.get_secret_value().strip():
+            return False
+        key = (
+            f"{plan_code}_trial"
+            if billing_cycle == "trial_7_day"
+            else f"{plan_code}_{billing_cycle}"
+        )
+        return key in settings.creem_product_ids
+    if provider == "stripe":
+        if settings.stripe_secret_key is None:
+            return False
+        return (
+            f"{plan_code}_{billing_cycle}" in settings.stripe_price_ids
+            or plan_code in settings.stripe_price_ids
+        )
+    if provider == "nowpayments":
+        return (
+            billing_cycle == "monthly"
+            and settings.nowpayments_api_key is not None
+            and bool(settings.nowpayments_api_key.get_secret_value().strip())
+        )
+    return provider == "static" and not settings.is_deployed
+
+
+def payment_method_available(
+    settings: Settings,
+    *,
+    method: str,
+    plan_code: str,
+    billing_cycle: str = "monthly",
+) -> bool:
+    """Whether one way of paying really works for one plan and one period."""
+
+    return _provider_can_sell(
+        settings,
+        provider=billing_method_provider(settings, method),
+        plan_code=plan_code,
+        billing_cycle=billing_cycle,
+    )
+
+
+def _method_note(
+    *,
+    method: str,
+    provider: str | None,
+    available: bool,
+) -> str:
+    word = _METHOD_WORDS.get(method, method)
+    if available:
+        company = _PROVIDER_WORDS.get(provider or "", "our payment company")
+        return f"Handled by {company}."
+    if provider is None:
+        return f"Paying by {word} is switched off just now."
+    return f"This plan cannot be paid for by {word} yet."
+
+
+def payment_method_offers(
+    settings: Settings,
+    *,
+    plan_codes: Sequence[str],
+    billing_cycle: str = "monthly",
+) -> tuple[PaymentMethodOffer, ...]:
+    """Every way of paying, in order, with the truth about each one.
+
+    ``plan_codes`` is one plan when a page is drawing a choice for that plan, and every
+    plan on sale when it is drawing the choice before a plan has been picked. A method
+    is offered when it can sell at least one of them.
+    """
+
+    offers = []
+    for method in PAYMENT_METHODS:
+        provider = billing_method_provider(settings, method)
+        available = any(
+            _provider_can_sell(
+                settings,
+                provider=provider,
+                plan_code=code,
+                billing_cycle=billing_cycle,
+            )
+            for code in plan_codes
+        )
+        offers.append(
+            PaymentMethodOffer(
+                method=method,
+                provider=provider,
+                available=available,
+                note=_method_note(method=method, provider=provider, available=available),
+            )
+        )
+    return tuple(offers)
+
+
+def payment_method_offers_by_method(
+    settings: Settings,
+    *,
+    plan_codes: Sequence[str],
+    billing_cycle: str = "monthly",
+) -> dict[str, PaymentMethodOffer]:
+    """The same answer as :func:`payment_method_offers`, keyed by method for templates."""
+
+    return {
+        offer.method: offer
+        for offer in payment_method_offers(
+            settings, plan_codes=plan_codes, billing_cycle=billing_cycle
+        )
+    }
+
+
+#: Every billing period a checkout popup can ask about.
+BILLING_CYCLES: Final[tuple[str, ...]] = ("monthly", "annual", "trial_7_day")
+
+
+def payment_method_payload(
+    settings: Settings,
+    *,
+    plan_code: str,
+    billing_cycles: Sequence[str] = BILLING_CYCLES,
+) -> dict[str, dict[str, dict[str, object]]]:
+    """One plan's payment choices, decided on the server, ready for a script to draw.
+
+    The browser is handed the **answer**, never the ingredients. Both checkout popups used
+    to receive raw flags and work out for themselves which methods to offer, which is a
+    second copy of this rule written in JavaScript — and a copy that can disagree.
+    """
+
+    return {
+        cycle: {
+            offer.method: {"available": offer.available, "note": offer.note}
+            for offer in payment_method_offers(
+                settings, plan_codes=(plan_code,), billing_cycle=cycle
+            )
+        }
+        for cycle in billing_cycles
+    }
+
+
+def payment_method_refusal(
+    settings: Settings,
+    *,
+    method: str,
+    plan_code: str,
+    billing_cycle: str = "monthly",
+) -> str:
+    """Why this way of paying cannot be used, and what to do instead.
+
+    A refusal that only says "not available" leaves a beginner with nothing to try. This
+    names the other way of paying when there is one, and says plainly that there is none
+    when there is not.
+    """
+
+    offers = payment_method_offers(
+        settings, plan_codes=(plan_code,), billing_cycle=billing_cycle
+    )
+    refused = next((offer for offer in offers if offer.method == method), None)
+    lead = (
+        refused.note
+        if refused is not None
+        else f"Paying by {_METHOD_WORDS.get(method, method)} is switched off just now."
+    )
+    others = [offer for offer in offers if offer.available and offer.method != method]
+    if others:
+        instead = " or ".join(_METHOD_WORDS.get(offer.method, offer.method) for offer in others)
+        return f"{lead} You can pay with {instead} instead."
+    return f"{lead} There is no other way to pay for this plan yet."
+
+
+def annual_billing_available(
+    settings: Settings,
+    *,
+    plan_codes: Sequence[str] = PURCHASABLE_PLAN_CODES,
+) -> bool:
+    """Whether a year at a time can really be bought for every plan named.
+
+    The landing page, the older billing page and the checkout popup each used to decide
+    this for themselves, and one of them only looked at whether a plan *offers* a yearly
+    price — not at whether the payment company holds a yearly product to charge for it.
+    That is how "Annual" stayed pressable and then failed at the payment step.
+    """
+
+    return all(
+        any(
+            payment_method_available(
+                settings, method=method, plan_code=code, billing_cycle="annual"
+            )
+            for method in PAYMENT_METHODS
+        )
+        for code in plan_codes
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -617,15 +923,7 @@ class BillingWebhookVerifier:
         provider: str = "generic",
         now: datetime | None = None,
     ) -> None:
-        secret = (
-            self.settings.creem_webhook_secret
-            if provider == "creem"
-            else (
-                self.settings.nowpayments_ipn_secret
-                if provider == "nowpayments" and self.settings.nowpayments_ipn_secret
-                else self.settings.billing_webhook_secret
-            )
-        )
+        secret = webhook_secret_for(self.settings, provider)
         if secret is None:
             if self.settings.is_production:
                 raise BillingError("webhook_secret_missing", "Billing webhook secret is missing.")
@@ -757,6 +1055,22 @@ class BillingService:
     def provider_capabilities(self) -> BillingProviderCapabilities:
         return self.provider.capabilities
 
+    def ensure_payment_can_be_confirmed(self) -> None:
+        """Refuse the sale when a payment through this company could never be proven.
+
+        The pages ask :func:`payment_can_be_confirmed` before drawing a way of paying;
+        this asks the same question on the way in, so a request that skipped the page —
+        an old browser tab, a saved form, a direct post — is refused too rather than
+        creating a payment nobody can confirm afterwards.
+        """
+
+        if not payment_can_be_confirmed(self.settings, self.provider.provider_name):
+            raise BillingError(
+                "billing_webhook_secret_missing",
+                "This way of paying is not finished being set up, "
+                "so nothing was charged.",
+            )
+
     @property
     def billing_cycle_code(self) -> str:
         return (
@@ -887,7 +1201,7 @@ class BillingService:
             status="creating",
             idempotency_key=idempotency_key,
             terms_version=self.settings.billing_terms_version,
-            amount=self._checkout_amount(plan.code, plan.price_monthly, billing_cycle),
+            amount=self.checkout_amount(plan.code, plan.price_monthly, billing_cycle),
             currency=plan.currency.upper(),
             terms_accepted_at=now,
             expires_at=now + timedelta(minutes=self.settings.billing_checkout_ttl_minutes),
@@ -951,11 +1265,20 @@ class BillingService:
             ) from exc
 
     @staticmethod
-    def _checkout_amount(
+    def checkout_amount(
         plan_code: str,
         monthly_amount: Decimal,
         billing_cycle: str,
     ) -> Decimal:
+        """What this checkout will actually charge.
+
+        Public because the review page must quote it. The page used to print the plan
+        catalogue's ``price_monthly`` instead, which is the *normal* price: while a
+        launch offer was running, the last screen before payment said $20 and the
+        payment asked for $7. One function now answers "what does this cost", and the
+        page and the charge cannot say different numbers.
+        """
+
         if billing_cycle == "trial_7_day":
             return Decimal("0.00")
         if billing_cycle == "annual_auto_renewal":
@@ -971,6 +1294,9 @@ class BillingService:
         success_url: str,
         cancel_url: str,
     ) -> CheckoutSession:
+        # The last moment before a real payment page exists, and so the last moment a sale
+        # that could never be confirmed can still be refused for free.
+        self.ensure_payment_can_be_confirmed()
         attempt = await self.session.get(BillingCheckoutAttempt, attempt_id)
         if attempt is None or attempt.user_id != user_id:
             raise BillingError("checkout_not_found", "The checkout request was not found.")

@@ -1,7 +1,7 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260831-auth-one-screen">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260831-auth-one-screen">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260901-pay-methods">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260901-pay-methods">
 {% endblock %}
 {% block content %}
 
@@ -379,20 +379,28 @@
         </section>
 
         <section class="s-panel" data-s-panel="3" hidden>
+          {#- A way of paying that is switched off is drawn switched off, and says why in
+              a sentence a beginner can act on. It used to be drawn as a normal choice
+              whatever the settings said: somebody could pick Card, press Pay, and be told
+              "That payment method is not currently available" with nothing to try next.
+
+              The sentence comes from the billing service, not from here — which one is
+              true depends on *why* the method cannot be used, and a template cannot be
+              tested on that. The script narrows both again for the plan actually chosen. -#}
           <fieldset class="s-methods" data-s-methods>
             <legend class="sr-only">Choose how to pay</legend>
-            <label class="s-method" data-s-method="card">
-              <input type="radio" name="payment_method" value="card">
+            <label class="s-method" data-s-method="card" data-available="{{ 'true' if pay_methods.card.available else 'false' }}" aria-disabled="{{ 'false' if pay_methods.card.available else 'true' }}">
+              <input type="radio" name="payment_method" value="card" {{ '' if pay_methods.card.available else 'disabled' }}>
               <span class="s-method-copy">
                 <strong><span data-icon="billing" data-icon-class="icon-sm"></span>Card</strong>
-                <small>Handled by {{ 'Creem' if pay_methods.card == 'creem' else (pay_methods.card|title if pay_methods.card else 'our card company') }}.</small>
+                <small data-s-method-note>{{ pay_methods.card.note }}</small>
               </span>
             </label>
-            <label class="s-method" data-s-method="crypto">
-              <input type="radio" name="payment_method" value="crypto">
+            <label class="s-method" data-s-method="crypto" data-available="{{ 'true' if pay_methods.crypto.available else 'false' }}" aria-disabled="{{ 'false' if pay_methods.crypto.available else 'true' }}">
+              <input type="radio" name="payment_method" value="crypto" {{ '' if pay_methods.crypto.available else 'disabled' }}>
               <span class="s-method-copy">
                 <strong><span data-icon="wallet" data-icon-class="icon-sm"></span>Crypto</strong>
-                <small>Handled by {{ 'NOWPayments' if pay_methods.crypto == 'nowpayments' else (pay_methods.crypto|title if pay_methods.crypto else 'our crypto company') }}.</small>
+                <small data-s-method-note>{{ pay_methods.crypto.note }}</small>
               </span>
             </label>
           </fieldset>
@@ -426,5 +434,5 @@
 <script id="s-plan-facts" type="application/json">{{ plan_cards|tojson }}</script>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260831-auth-one-screen"></script>
+<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260901-pay-methods"></script>
 {% endblock %}

@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 
 from ai_market_monitor.core.config import WHATSAPP_TEMPLATE_EVENTS, Settings
 from ai_market_monitor.core.logging import redact_sensitive_values
+from ai_market_monitor.core.plans import PURCHASABLE_PLAN_CODES, plan_offer
 from ai_market_monitor.core.startup import (
     RuntimeConfigurationError,
     validate_runtime_configuration,
@@ -360,8 +361,18 @@ def test_enabled_production_integrations_require_real_adapters_and_secrets():
     assert "StaticBillingProvider" in message
 
 
-def test_enabled_production_creem_requires_the_complete_product_catalog():
-    settings = Settings(
+def _configuration_complaints(settings: Settings) -> list[str]:
+    """Every line the startup check objects to, or an empty list when it is happy."""
+
+    try:
+        validate_runtime_configuration(settings)
+    except RuntimeConfigurationError as error:
+        return [line.strip("- ").strip() for line in str(error).splitlines()[1:]]
+    return []
+
+
+def _creem_production_settings(product_ids: dict[str, str]) -> Settings:
+    return Settings(
         _env_file=None,
         app_env="production",
         app_secret_key="production-secret-key-with-at-least-thirty-two-characters",
@@ -376,17 +387,67 @@ def test_enabled_production_creem_requires_the_complete_product_catalog():
         billing_card_provider="creem",
         creem_api_key="creem-production-key",
         creem_webhook_secret="creem-webhook-secret",
-        creem_product_ids={"trader_monthly": "prod_monitor_monthly"},
+        creem_product_ids=product_ids,
         creem_api_base="https://api.creem.io",
     )
 
-    with pytest.raises(RuntimeConfigurationError) as error:
-        validate_runtime_configuration(settings)
 
-    message = str(error.value)
-    assert "trader_annual" in message
-    assert "pro_monthly" in message
-    assert "pro_annual" in message
+#: Everything the product could sell, and whether it is really on sale today. Read from
+#: `core/plans.py`, so this test says what the rule *is* rather than what today's answer
+#: happens to be.
+CREEM_PRODUCT_KEYS = [
+    pytest.param(
+        f"{plan_code}_{cycle}",
+        (
+            plan_offer(plan_code).monthly_available
+            if cycle == "monthly"
+            else plan_offer(plan_code).annual_available
+        ),
+        id=f"{plan_code}_{cycle}",
+    )
+    for plan_code in PURCHASABLE_PLAN_CODES
+    for cycle in ("monthly", "annual")
+]
+
+
+@pytest.mark.parametrize(("product_key", "on_sale"), CREEM_PRODUCT_KEYS)
+def test_creem_needs_a_product_for_everything_on_sale_and_nothing_else(
+    product_key: str, on_sale: bool
+):
+    """The gate asks what is on sale; it does not hold its own copy of the answer.
+
+    It used to demand four named products — Monitor and Pro, monthly and yearly. Three of
+    those are not on sale, so a server correctly configured for the one plan that *is* on
+    sale refused to start, and card payments could not be switched on at all.
+    """
+
+    every_key = {key for key, _ in ((p.values[0], p.values[1]) for p in CREEM_PRODUCT_KEYS)}
+    without_this_one = {
+        key: f"prod_{key}" for key in sorted(every_key) if key != product_key
+    }
+    complaints = _configuration_complaints(_creem_production_settings(without_this_one))
+    # Only what this rule says. These settings trip other production rules that have
+    # nothing to do with Creem products, and those are other tests' business.
+    about_products = [line for line in complaints if "CREEM_PRODUCT_IDS is missing" in line]
+
+    if on_sale:
+        assert about_products, f"{product_key} is on sale and was not required"
+        assert product_key in about_products[0]
+    else:
+        # Nothing may be demanded for a plan or a period nobody can buy.
+        assert not about_products, f"{product_key} is not on sale and was required anyway"
+
+
+def test_creem_products_must_be_real_creem_identifiers():
+    on_sale = {
+        key
+        for key, available in ((p.values[0], p.values[1]) for p in CREEM_PRODUCT_KEYS)
+        if available
+    }
+    broken = {key: "monitor-monthly" for key in sorted(on_sale)}
+    complaints = _configuration_complaints(_creem_production_settings(broken))
+
+    assert any("invalid product IDs" in line for line in complaints)
 
 
 def test_enabled_production_whatsapp_requires_complete_cloud_api_configuration():

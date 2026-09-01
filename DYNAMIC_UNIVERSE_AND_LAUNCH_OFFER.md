@@ -128,18 +128,24 @@ changes is the **button**, not the price.
 | Plan | Monthly | Annual |
 |---|---|---|
 | Explore | $0, free forever | Soon |
-| Monitor | ~~$20~~ **$7** with a countdown | Soon |
+| Monitor | normal price struck through, launch price beside it, with a countdown | Soon |
 | Pro | Soon, no price shown | Soon |
+
+**The two numbers and the deadline are not written here.** They live in `core/plans.py`
+(`PROMOTION_ENDS_AT`, and `promotional_monthly_price` on the Monitor offer), and a number
+copied into a document is a number that goes stale the next time the offer changes. As
+this was written the launch offer ran to **15 September 2026, 00:00 UTC**; read the file
+for what it is today.
 
 - The three annual plans say **Soon**, with no price and no button.
 - Pro's monthly plan says **Soon**, with no price and no button.
-- Monitor shows its usual $20 crossed out beside the launch price of $7.
-- A countdown shows **days, hours, minutes and seconds** until **1 September 2026,
-  00:00 UTC**. It counts live: the seconds fall while the visitor is on the page.
+- Monitor shows its usual price crossed out beside the launch price.
+- A countdown shows **days, hours, minutes and seconds** until the deadline. It counts
+  live: the seconds fall while the visitor is on the page.
 - After that instant the discount, the crossed-out price and the countdown all disappear
   by themselves. The price and the deadline come from one rule, so they cannot disagree.
-  On the landing page the price also goes back to $20 in the same moment, without a
-  reload.
+  On the landing page the price also goes back to the normal one in the same moment,
+  without a reload.
 
 A price is not just hidden for a plan that is not for sale — it is **not sent to the page
 at all**, so it is not in the page source either.
@@ -299,7 +305,8 @@ and the same refused claim in English, Arabic, Arabizi and Chinese — so a fix 
 helps one example fails.
 
 The pricing pages were also rendered and read directly, not only asserted. Public page
-and dashboard, side by side:
+and dashboard, side by side — the numbers below are the reading taken **on the day this
+was written**, not a promise about today's offer:
 
 ```
 Explore   $0 free forever          | Start free

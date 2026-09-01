@@ -42,12 +42,14 @@ from ai_market_monitor.services.sharia_source_catalog import (
     NEWS_MAXIMUM_AGE_DAYS,
     REQUIRED_CATEGORIES,
     SOURCE_CATEGORIES,
+    TRACKED_CATEGORIES,
     candidates_for,
     convention_candidates,
     curated_candidates,
     is_official_url,
     missing_categories,
     normalized_url,
+    page_category,
 )
 from ai_market_monitor.services.sharia_source_resolution import (
     SourceProof,
@@ -230,12 +232,55 @@ def test_the_guessing_layer_says_nothing_without_an_official_website() -> None:
     assert convention_candidates(asset_name="Example", official_website=None) == ()
 
 
+def test_every_guessed_address_is_read_back_as_the_category_it_was_guessed_for() -> None:
+    """One vocabulary, both ways round.
+
+    The guessing layer picks a path because it believes a project publishes news there.
+    :func:`page_category` is what every other reader — the crawler, the provider filter,
+    a reviewer's paste — uses to decide what that same address is. If the two ever hold
+    different word lists, an address is fetched as news and then filed as something else
+    by the next thing that touches it.
+
+    Asserted over every guess the layer can make, not over one example.
+    """
+
+    produced = convention_candidates(
+        asset_name="Example", official_website="https://example.org/"
+    )
+    assert produced, "the guessing layer offered nothing at all"
+    for candidate in produced:
+        assert page_category(candidate.url) == candidate.category, (
+            f"{candidate.url} is guessed as {candidate.category} but reads back as "
+            f"{page_category(candidate.url)}"
+        )
+
+
+def test_the_guessing_layer_does_not_spend_requests_on_optional_pages() -> None:
+    """Every guess is a request to somebody else's server.
+
+    Guessing ``/community`` and ``/forum`` for a project that runs neither cost four
+    fetches per coin to prove nothing, and the community page is not required — so it is
+    not guessed at. A forum the project actually links to is still found, by the layer
+    that reads the project's own homepage.
+    """
+
+    produced = convention_candidates(
+        asset_name="Example", official_website="https://example.org/"
+    )
+    assert {item.category for item in produced} == set(REQUIRED_CATEGORIES)
+
+
 def test_a_curated_coin_may_carry_more_than_one_link() -> None:
     """The product asked for this: more than one source per coin is fine."""
 
     produced = curated_candidates("BTC", "Bitcoin")
     assert len(produced) >= 2
-    assert {item.category for item in produced} == set(REQUIRED_CATEGORIES)
+    categories = {item.category for item in produced}
+    # A curated entry may name a community page and usually does. What it must always
+    # name is the required one — the news page — because that is the only category a
+    # coin can be short of.
+    assert categories <= set(TRACKED_CATEGORIES)
+    assert set(REQUIRED_CATEGORIES) <= categories
 
 
 # --------------------------------------------------------------------------
@@ -385,6 +430,25 @@ def _page(*, days_old: int = 3, now: datetime | None = None) -> tuple[str, dict,
     return (body, {"content-type": "text/html"}, 200)
 
 
+def _undated_page() -> tuple[str, dict, int]:
+    """A real, readable newsroom that states no date this reader can find.
+
+    This is not a rare shape. A blog that prints "3 days ago", or draws its dates with
+    JavaScript, or sets them as an image, looks exactly like this to the fetcher — and
+    until 1 September 2026 every one of them was scored as though it had stopped
+    publishing years ago and refused.
+    """
+
+    body = (
+        "<html><head><title>Newsroom</title></head><body>"
+        "<h1>Announcements</h1>"
+        "<p>" + ("The foundation published an update about network fees and staking "
+                 "rewards, and the governance vote on the new proposal. ") * 6 + "</p>"
+        "</body></html>"
+    )
+    return (body, {"content-type": "text/html"}, 200)
+
+
 class _StubFetcher:
     """Answers whatever the test says the internet contains."""
 
@@ -518,6 +582,47 @@ async def test_a_page_that_stopped_publishing_does_not_count_as_coverage(
 
         assert NEWS in outcome.missing
         assert outcome.escalated is True
+
+
+async def test_a_news_page_with_no_readable_date_is_kept_and_never_asked_about(
+    test_context,
+) -> None:
+    """"I could not find a date" is not "the page is stale". They were the same thing.
+
+    A readable news page whose dates this reader cannot parse used to fail its freshness
+    proof, which halved its confidence, which put every layer under the floor, which
+    refused the page — and the coin was then reported to a person as having no news page
+    at all, while the page sat there working in anybody's browser. That was the single
+    biggest producer of "Pages not found" rows in the System Brain.
+
+    Three things have to be true together, and they are the whole design:
+
+    * the page counts as coverage, so **nobody is asked** to go and find it;
+    * it is scored as quiet, because a page whose dates cannot be read genuinely is a
+      poor window onto the project;
+    * being quiet makes the machine keep looking for livelier company for it.
+    """
+
+    async with test_context["session_factory"]() as session:
+        asset = await _asset(session)
+        pages = {url: _undated_page() for url in _curated_urls("BTC", "Bitcoin")}
+        service = SourceResolutionService(
+            session, test_context["settings"], fetcher=_StubFetcher(pages)
+        )
+        outcome = await service.resolve_asset(asset)
+        await session.commit()
+
+        assert outcome.missing == (), (
+            "a readable news page was refused for not printing a date this reader "
+            "understands, and the coin was reported as having none"
+        )
+        assert outcome.escalated is False
+        assert outcome.coverage.get(NEWS, 0) >= 1
+        assert outcome.quiet, (
+            "the page counts, but it must still be marked quiet — otherwise the layers "
+            "stop looking for a page whose dates can actually be read"
+        )
+        assert NEWS in outcome.short
 
 
 async def test_an_old_link_proved_gone_is_withdrawn(test_context) -> None:

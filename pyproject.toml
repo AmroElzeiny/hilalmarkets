@@ -23,6 +23,16 @@ dependencies = [
   "jsonschema==4.26.0",
   "markupsafe==3.0.2",
   "orjson==3.11.9",
+  # A real browser, for the one job a plain HTTP request cannot do: reading a project's
+  # blog or forum that only exists after its JavaScript has run. It is a runtime
+  # dependency, not a development one, because `services/sharia_page_render.py` is part
+  # of the Shariah source pipeline that runs on the server. It was listed under `dev`
+  # alone until 1 September 2026, so the switch that turns rendering on had nothing to
+  # turn on in production and every such page was reported as unreadable.
+  #
+  # Installing this package does **not** install Chromium — that is a separate download,
+  # done in the runtime stage of the Dockerfile.
+  "playwright==1.60.0",
   "psycopg[binary]==3.3.4",
   "pydantic-settings==2.14.1",
   "pypdf==6.14.2",
@@ -43,15 +53,18 @@ dev = [
   "pytest-asyncio==0.26.0",
   "pytest-cov==6.3.0",
   "hypothesis==6.163.0",
-  "playwright==1.60.0",
   "ruff==0.15.17",
   "typer==0.16.0",
 ]
 evaluator = [
-  "playwright==1.60.0",
   "rich==14.0.0",
   "typer==0.16.0",
 ]
+
+# `playwright` is deliberately not repeated in either extra above. It moved into
+# `dependencies` on 1 September 2026, and an extra always installs `dependencies` too, so
+# a line here would be a second copy of the same pin — two places to edit for one version
+# bump, and one of them eventually forgotten.
 
 [project.scripts]
 hm-chatbot-eval = "hm_chatbot_eval.cli:app"

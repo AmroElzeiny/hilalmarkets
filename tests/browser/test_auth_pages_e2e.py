@@ -21,7 +21,11 @@ import re
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.browser.conftest import assert_no_horizontal_overflow, unique_email
+from tests.browser.conftest import (
+    assert_no_horizontal_overflow,
+    signup_to_verify,
+    unique_email,
+)
 
 #: Every address the redesign covers, in the state a visitor first meets it.
 PAGES = (
@@ -340,6 +344,11 @@ def test_every_target_is_big_enough_to_press(page: Page, base_url: str, path: st
     """
 
     _open(page, base_url, path)
+    # The card animates in, and a box measured while it is still moving is smaller than
+    # the one anybody ever presses: a 44px link reads as 43.5px mid-flight. That made
+    # this test fail on a different page on each run. Measure the page at rest, which is
+    # the page a person actually meets.
+    page.wait_for_timeout(700)
     small = page.evaluate(
         """() => {
           const out = [];
@@ -771,15 +780,13 @@ def test_the_resend_button_counts_the_real_wait_down(
 def test_a_new_code_really_arrives(page: Page, base_url: str) -> None:
     """The confirm step used to offer only "Start again" and an empty form."""
 
-    email = unique_email("auth-resend")
-    page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
-    page.get_by_test_id("auth-first-name").fill("Resend")
-    page.get_by_test_id("auth-last-name").fill("Tester")
-    page.get_by_test_id("auth-email").fill(email)
-    page.get_by_test_id("auth-password").fill("TraceEdge1!")
-    page.get_by_test_id("auth-repeat-password").fill("TraceEdge1!")
-    page.get_by_test_id("auth-submit").click()
-    page.wait_for_url(re.compile(r".*/signup/verify(\?.*)?$"), timeout=20_000)
+    signup_to_verify(
+        page,
+        base_url,
+        email=unique_email("auth-resend"),
+        name="Resend Tester",
+        password="TraceEdge1!",
+    )
 
     # The wait is real, so the button is refused until it has passed. Sending the form
     # directly is what a person does a minute later.
@@ -948,22 +955,17 @@ def test_asking_for_less_motion_stops_all_of_it(page: Page, base_url: str) -> No
 def _sign_up_through_three_steps(
     page: Page, base_url: str, email: str, name: str = "Amina Yusuf"
 ) -> None:
-    """Name and email, then password, then the code. Written once, walked by two tests."""
+    """Name and email, then password, then the code.
 
-    page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
-    page.get_by_test_id("auth-name").fill(name)
-    page.get_by_test_id("auth-email").fill(email)
-    page.get_by_test_id("auth-submit").click()
+    The walk itself lives in `conftest.signup_to_verify`, which every browser file uses.
+    Three copies of it existed and only this one was updated when the pages became three
+    screens, so the whole browser suite sat waiting for a box that no page had.
 
-    page.wait_for_url(re.compile(r".*/signup/password\?.*"), timeout=20_000)
-    expect(page.locator(".auth-sentto")).to_contain_text(email)
-    # No punctuation. The symbol rule is gone, and this is the proof it is gone on the
-    # real server as well as in the checklist.
-    page.get_by_test_id("auth-password").fill("Halal2026")
-    page.get_by_test_id("auth-repeat-password").fill("Halal2026")
-    page.get_by_test_id("auth-submit").click()
+    The password here has no punctuation on purpose: the symbol rule is gone, and this
+    is the proof it is gone on the real server and not only in the checklist.
+    """
 
-    page.wait_for_url(re.compile(r".*/signup/verify(\?.*)?$"), timeout=20_000)
+    signup_to_verify(page, base_url, email=email, name=name, password="Halal2026")
 
 
 def test_an_email_already_in_use_is_caught_before_a_password_is_chosen(

@@ -150,9 +150,21 @@ app.conf.update(
             "task": "ai_market_monitor.send_compliance_digests",
             "schedule": 60 * 60,
         },
+        # Ticks daily; what is actually *due* is decided inside, against
+        # `sharia_source_scan_interval_hours` (a week). The tick and the cadence are
+        # deliberately different numbers.
+        #
+        # They used to be the same one, and that made the cadence mean two things at
+        # once. Raising the re-check cadence to a week would then also have made this
+        # task run weekly — and this task is not only the authority import: it is where a
+        # newly listed coin gets its identity discovered and its first research run. A
+        # coin added on Tuesday would have waited until the next weekly tick before the
+        # product looked at it at all. The importers already refuse to re-fetch inside
+        # the cadence (see `fasset_import.import_latest`), so a daily tick costs nothing
+        # and keeps new coins moving.
         "process-sharia-authority-imports": {
             "task": "ai_market_monitor.process_sharia_authority_imports",
-            "schedule": settings.sharia_source_scan_interval_hours * 60 * 60,
+            "schedule": 24 * 60 * 60,
         },
         "resolve-official-sources-daily": {
             "task": "ai_market_monitor.resolve_official_sources",
@@ -194,9 +206,17 @@ app.conf.update(
             "task": "ai_market_monitor.expire_ended_paid_access",
             "schedule": 5 * 60,
         },
+        # The re-review of every coin that already carries a published Shariah status:
+        # its official pages are fetched again and a reviewer is asked to look only when
+        # one of them changed in a way the research marks as possibly material.
+        #
+        # Ticks daily, and each coin is due once a week — `sharia_source_scan_interval_hours`.
+        # A daily tick over coins that are not due is a handful of cheap queries, and it
+        # is what stops a coin published just after a weekly tick waiting nearly two weeks
+        # for its first look.
         "monitor-published-sharia-sources": {
             "task": "ai_market_monitor.monitor_published_sharia_sources",
-            "schedule": settings.sharia_source_scan_interval_hours * 60 * 60,
+            "schedule": 24 * 60 * 60,
         },
         # Gathers the website, whitepaper and repository for coins that are tradeable
         # but that no authority has ruled on. Writes no Shariah status of any kind.
@@ -1294,7 +1314,7 @@ async def _process_sharia_authority_imports() -> dict:
 
         # Prove each verified asset's official links before research reads them.
         # ``research_initial_asset`` selects *only* sources marked verified, so an asset
-        # whose news and community pages have never been proved is researched from its
+        # whose own pages have never been proved is researched from its
         # authority snapshot and nothing else. Running the resolver first is what gives
         # that research something to read.
         source_resolution = await _resolve_official_sources()
@@ -1330,7 +1350,7 @@ async def _process_sharia_authority_imports() -> dict:
 
 
 async def _resolve_official_sources() -> dict:
-    """Find and prove every asset's official news and community pages.
+    """Find and prove every asset's official news page, and any community page it finds.
 
     Runs on its own daily, and again inside the authority import sweep so that newly
     approved identities get their links proved before anything researches them.

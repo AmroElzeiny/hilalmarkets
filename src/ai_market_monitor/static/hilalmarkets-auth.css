@@ -153,7 +153,16 @@ body.hilal-auth-page {
   margin-bottom: clamp(12px, 1.8vh, 22px);
 }
 
-.hilal-auth-page .auth-logo { display: inline-flex; align-items: center; }
+/* The logo is a link home, so it is a target like every other one: 44px tall, the same
+   rule the back link and the legal row already follow. It was 23px — the height of the
+   picture — which is a link a thumb misses. The picture is unchanged; only the box a
+   finger has to hit grew, and the short-window block below gives the height back. */
+.hilal-auth-page .auth-logo {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
 .hilal-auth-page .auth-logo img { display: block; width: 148px; max-width: 100%; height: auto; }
 
 /* #50555e on white measures 7.50:1. */
@@ -1013,11 +1022,14 @@ body.hilal-auth-page {
    says it will and will not do. */
 @media (max-height: 780px) {
   .hilal-auth-page .auth-card h1 { font-size: clamp(1.45rem, 2.4vw, 1.8rem); }
-  .hilal-auth-page .auth-card { padding-top: 18px; padding-bottom: 18px; }
-  .hilal-auth-page .auth-head { margin-bottom: 12px; }
-  .hilal-auth-page .auth-form { gap: 11px; margin-top: 14px; }
-  .hilal-auth-page .auth-promises { margin-top: 12px; padding-top: 11px; gap: 6px; }
-  .hilal-auth-page .auth-or { margin: 12px 0 10px; }
+  .hilal-auth-page .auth-card { padding-top: 14px; padding-bottom: 14px; }
+  /* The shell's own margin is space around the card, not inside it, so it is the first
+     thing to give: at 768px tall its `2.4vh` was 18px above and below. */
+  .hilal-auth-page .auth-shell { padding-top: 10px; padding-bottom: 10px; }
+  .hilal-auth-page .auth-head { margin-bottom: 8px; }
+  .hilal-auth-page .auth-form { gap: 10px; margin-top: 12px; }
+  .hilal-auth-page .auth-promises { margin-top: 10px; padding-top: 10px; gap: 5px; }
+  .hilal-auth-page .auth-or { margin: 10px 0 9px; }
   .hilal-auth-page .auth-legal a,
   .hilal-auth-page .auth-legal button { min-height: 44px; padding: 0 5px; }
 }

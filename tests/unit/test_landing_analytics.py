@@ -612,6 +612,30 @@ def test_pricing_uses_approved_plans_accessibility_and_real_handoff():
     assert ".plan-cta:focus-visible" in styles
 
 
+def test_the_shipped_bundle_carries_the_current_offer_not_the_last_one():
+    """The built file is what a visitor downloads; the source is only what we meant.
+
+    `Pricing.tsx` carries a fallback price and a fallback deadline for the case where
+    the page opens with no runtime config. Compiling into `static/landing/assets/` is a
+    manual copy, so an edited price that was never rebuilt leaves the old offer in the
+    file the server actually sends — and every source-reading test above still passes.
+    This is the only check that fails when the rebuild is forgotten.
+    """
+
+    bundle = (
+        ROOT / "src/ai_market_monitor/static/landing/assets/landing.js"
+    ).read_text(encoding="utf-8")
+    inside_promotion = PROMOTION_ENDS_AT - timedelta(days=1)
+    trader = plan_offer_payload("trader", now=inside_promotion)
+
+    assert PROMOTION_ENDS_AT.isoformat() in bundle, "the shipped deadline is stale"
+    assert f"monthlyPrice:{int(trader['monthlyPrice'])}" in bundle
+    assert f"originalMonthlyPrice:{int(trader['originalMonthlyPrice'])}" in bundle
+    # And no other deadline is left in the file to be read instead.
+    deadlines = set(re.findall(r"\d{4}-\d{2}-\d{2}T00:00:00\+00:00", bundle))
+    assert deadlines == {PROMOTION_ENDS_AT.isoformat()}, sorted(deadlines)
+
+
 def test_checkout_outcome_tracking_is_consent_aware_and_contains_no_payment_data():
     script = (
         ROOT / "src/ai_market_monitor/static/hilalmarkets-commerce-analytics.js"

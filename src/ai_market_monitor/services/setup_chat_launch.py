@@ -3702,7 +3702,7 @@ return tostring(next_value)
         # The measurement belongs to this exact idempotency record. Keep the session's
         # latest-turn compatibility view in sync, but never rely on that overwriteable
         # view as the durable history.
-        _set_runtime(
+        measured = _set_runtime(
             chat,
             started,
             model_calls=telemetry.model_calls,
@@ -3710,7 +3710,7 @@ return tostring(next_value)
             telemetry=telemetry,
         )
         if turn is not None:
-            turn.telemetry_json = telemetry.to_payload()
+            turn.telemetry_json = measured
         await session.flush()
         await session.commit()
 
@@ -4125,7 +4125,7 @@ return tostring(next_value)
                 },
                 assistant_message_id=assistant.id,
             )
-        _set_runtime(
+        measured = _set_runtime(
             chat,
             started,
             model_calls=model_calls,
@@ -4133,7 +4133,7 @@ return tostring(next_value)
             telemetry=telemetry,
         )
         if turn_record is not None:
-            turn_record.telemetry_json = telemetry.to_payload()
+            turn_record.telemetry_json = measured
         await session.flush()
         await session.commit()
         return chat
@@ -4493,7 +4493,7 @@ return tostring(next_value)
                     reply={"message": outcome.message, "execution_result": None},
                     assistant_message_id=assistant.id,
                 )
-            _set_runtime(
+            measured = _set_runtime(
                 chat,
                 started,
                 model_calls=outcome.trace.model_calls,
@@ -4501,7 +4501,7 @@ return tostring(next_value)
                 telemetry=telemetry,
             )
             if turn_record is not None:
-                turn_record.telemetry_json = telemetry.to_payload()
+                turn_record.telemetry_json = measured
             await session.flush()
             await session.commit()
             return chat
@@ -4612,7 +4612,7 @@ return tostring(next_value)
                 },
                 assistant_message_id=assistant.id,
             )
-        _set_runtime(
+        measured = _set_runtime(
             chat,
             started,
             model_calls=outcome.trace.model_calls,
@@ -4620,7 +4620,7 @@ return tostring(next_value)
             telemetry=telemetry,
         )
         if turn_record is not None:
-            turn_record.telemetry_json = telemetry.to_payload()
+            turn_record.telemetry_json = measured
         await session.flush()
         await session.commit()
         return chat
@@ -6226,13 +6226,20 @@ def _set_runtime(
     model_calls: int,
     cache_hits: int,
     telemetry: TurnTelemetry | None = None,
-) -> None:
+) -> dict[str, Any]:
     """Record what this turn actually spent, stage by stage.
 
     The measured breakdown is the point. A single total tells you a turn was slow; it
     never tells you which stage to fix, which is how a slow path acquires a larger
     timeout instead of less work. When no telemetry was collected the total is still
     written, so the shape of the record never changes.
+
+    **Returns the measurement it wrote**, and callers store *that* on the turn row.
+    ``to_payload()`` reads a running clock, so calling it a second time for the turn row
+    produced a second, later measurement: one turn with two different durations recorded
+    against it, and whichever row you happened to read decided what you believed. The
+    difference was small — 16 ms in the case that found it — which is exactly why it
+    could sit there. There is one measurement per turn now.
     """
 
     context = dict(chat.context_json or {})
@@ -6255,3 +6262,4 @@ def _set_runtime(
         **({"measured": measured} if measured else {}),
     }
     chat.context_json = context
+    return measured

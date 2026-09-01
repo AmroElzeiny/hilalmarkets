@@ -128,7 +128,8 @@ status and never becomes invented Passport data.
 
 The package does not add a second scheduler or notification system. Open-case reminders are checked
 hourly and become due at `SHARIA_REVIEW_REMINDER_HOURS`, which defaults to six hours. Authority and
-approved-source checks use `SHARIA_SOURCE_SCAN_INTERVAL_HOURS`, which defaults to 24 hours.
+approved-source checks use `SHARIA_SOURCE_SCAN_INTERVAL_HOURS`, which defaults to 168 hours —
+one week. The task itself ticks daily; that setting decides which coins are due.
 
 ## Review and Publication
 

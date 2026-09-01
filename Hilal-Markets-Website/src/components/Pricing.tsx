@@ -45,7 +45,7 @@ type Plan = {
 }
 
 /** Server default, used only when the page is opened without runtime config. */
-const DEFAULT_PROMOTION_ENDS_AT = '2026-09-01T00:00:00+00:00'
+const DEFAULT_PROMOTION_ENDS_AT = '2026-09-15T00:00:00+00:00'
 const DEFAULT_COMING_SOON_LABEL = 'Soon'
 
 const PLANS: Plan[] = [
@@ -81,7 +81,7 @@ const PLANS: Plan[] = [
   {
     code: 'trader',
     name: 'Monitor',
-    monthlyPrice: 7,
+    monthlyPrice: 15,
     originalMonthlyPrice: 20,
     annualPrice: 120,
     monthlyAvailable: true,
@@ -255,7 +255,20 @@ function OfferCountdown({ endsAt, now }: { endsAt: string; now: number }) {
     [left.seconds, left.seconds === 1 ? 'second' : 'seconds'],
   ]
   return (
-    <div className="offer-countdown" role="group" aria-label="Time left at this price">
+    // `data-offer-live` is not decoration: the shared stylesheet hides every countdown
+    // that does not carry it (`.offer-countdown:not([data-offer-live]){display:none}`),
+    // because a box with no numbers in it yet must never flash on screen. The
+    // server-rendered pages get the attribute from `hilalmarkets-offer.js` once their
+    // first count is in. This one is built from a real count or not at all — the guard
+    // above returns null when the deadline has passed — so it says so on render. Without
+    // it the landing page drew the timer inside the card and the stylesheet hid it, on
+    // every visit, for as long as the offer ran.
+    <div
+      className="offer-countdown"
+      data-offer-live=""
+      role="group"
+      aria-label="Time left at this price"
+    >
       <span className="offer-countdown-label">Launch price ends in</span>
       <span className="offer-countdown-parts tnum">
         {parts.map(([value, unit]) => (

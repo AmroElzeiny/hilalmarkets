@@ -23,6 +23,7 @@ from ai_market_monitor.core.plans import (
     maximum_annual_saving,
     original_monthly_price,
     plan_offer,
+    promotion_is_active,
 )
 
 
@@ -38,6 +39,21 @@ def _open_for_business(test_context: dict) -> None:
     """
 
     test_context["settings"].public_waitlist_mode = False
+
+
+def _struck_price_marks(body: str) -> tuple[bool, bool]:
+    """Whether the page drew a crossed-out price and a countdown.
+
+    The pages render against the real clock, so these tests must describe both states:
+    while an offer runs, and after it has ended. They used to describe only the first,
+    which made the day an offer expired the day three tests broke — and a test that
+    breaks on a date says nothing about whether the page is right.
+    """
+
+    return (
+        '<s class="price-original"' in body or 'class="price-original"' in body,
+        "data-offer-countdown=" in body,
+    )
 
 
 def _runtime_commerce(html: str) -> dict:
@@ -71,10 +87,16 @@ async def test_the_landing_page_carries_the_offer_and_its_deadline(
     commerce = _runtime_commerce(response.text)
     assert commerce["promotionEndsAt"] == PROMOTION_ENDS_AT.isoformat()
 
+    assert commerce["promotionActive"] is promotion_is_active()
+
     by_code = {plan["code"]: plan for plan in commerce["plans"]}
     monitor = by_code["trader"]
     assert monitor["monthlyPrice"] == float(effective_monthly_price("trader"))
-    assert monitor["originalMonthlyPrice"] == float(original_monthly_price("trader"))
+    was = original_monthly_price("trader")
+    # While the offer runs there is a price to cross out; once it ends there is not,
+    # and the page must carry nothing rather than an old number.
+    assert monitor["originalMonthlyPrice"] == (float(was) if was is not None else None)
+    assert (was is not None) is promotion_is_active()
     assert monitor["monthlyAvailable"] is True
 
     assert by_code["pro"]["monthlyAvailable"] is False
@@ -91,12 +113,19 @@ async def test_the_public_pricing_page_shows_the_struck_price_and_the_timer(
     response = await test_context["client"].get("/pricing")
     assert response.status_code == 200
     body = response.text
-    # The old price is crossed out and the new one stands next to it.
-    assert '<s class="price-original"' in body
-    assert f"${int(original_monthly_price('trader'))}" in body
+    # Today's price always stands on the card.
     assert f"<strong>${int(effective_monthly_price('trader'))}</strong>" in body
-    # The countdown is rendered with the server's own deadline.
-    assert f'data-offer-countdown="{PROMOTION_ENDS_AT.isoformat()}"' in body
+    struck, countdown = _struck_price_marks(body)
+    was = original_monthly_price("trader")
+    if promotion_is_active():
+        # The old price is crossed out and the new one stands next to it.
+        assert struck and was is not None
+        assert f"${int(was)}" in body
+        # The countdown is rendered with the server's own deadline.
+        assert f'data-offer-countdown="{PROMOTION_ENDS_AT.isoformat()}"' in body
+    else:
+        # An offer that ended leaves no trace: no crossed-out price, no timer.
+        assert not struck and not countdown and was is None
 
 
 @pytest.mark.anyio
@@ -154,10 +183,15 @@ async def test_the_dashboard_shows_the_same_offer_as_the_public_page(
     response = await test_context["client"].get("/dashboard/billing")
     assert response.status_code == 200
     body = response.text
-    assert f"${int(original_monthly_price('trader'))}" in body
     assert f"${int(effective_monthly_price('trader'))}" in body
-    assert 'class="price-original"' in body
-    assert f'data-offer-countdown="{PROMOTION_ENDS_AT.isoformat()}"' in body
+    struck, countdown = _struck_price_marks(body)
+    was = original_monthly_price("trader")
+    if promotion_is_active():
+        assert struck and was is not None
+        assert f"${int(was)}" in body
+        assert f'data-offer-countdown="{PROMOTION_ENDS_AT.isoformat()}"' in body
+    else:
+        assert not struck and not countdown and was is None
     # No price anywhere for a plan nobody can buy yet.
     from ai_market_monitor.core.plans import PLAN_DEFINITIONS
 

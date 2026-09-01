@@ -90,7 +90,7 @@ def visible_public_plan_codes(*, billing_enabled: bool) -> tuple[str, ...]:
 
 #: When the launch price stops. After this instant the plan costs its normal price again,
 #: and the countdown disappears. Both facts come from this one value.
-PROMOTION_ENDS_AT = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)
+PROMOTION_ENDS_AT = datetime(2026, 9, 15, 0, 0, tzinfo=UTC)
 
 #: What a card says instead of a price when the plan cannot be bought yet.
 COMING_SOON_LABEL = "Soon"
@@ -114,7 +114,7 @@ PLAN_OFFERS: dict[str, PlanOffer] = {
     "trader": PlanOffer(
         monthly_available=True,
         annual_available=False,
-        promotional_monthly_price=Decimal("7.00"),
+        promotional_monthly_price=Decimal("15.00"),
     ),
     # Not open yet, on either interval.
     "pro": PlanOffer(monthly_available=False, annual_available=False),

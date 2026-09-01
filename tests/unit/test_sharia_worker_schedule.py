@@ -1,14 +1,16 @@
-from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.worker import _fetch_exchange_symbols, app
 
 
 def test_sharia_governance_worker_tasks_and_cadences_are_registered():
     schedule = app.conf.beat_schedule
-    settings = get_settings()
 
+    # The tick is daily and the cadence is a week. They are deliberately different
+    # numbers: this task is also where a newly listed coin gets discovered and first
+    # researched, so tying its tick to the re-check cadence would have made a coin added
+    # on Tuesday wait for the next weekly firing before anything looked at it.
     assert schedule["process-sharia-authority-imports"] == {
         "task": "ai_market_monitor.process_sharia_authority_imports",
-        "schedule": settings.sharia_source_scan_interval_hours * 60 * 60,
+        "schedule": 24 * 60 * 60,
     }
     assert schedule["send-sharia-review-reminders-hourly"] == {
         "task": "ai_market_monitor.send_sharia_review_reminders",
@@ -24,8 +26,28 @@ def test_sharia_governance_worker_tasks_and_cadences_are_registered():
     }
     assert schedule["monitor-published-sharia-sources"] == {
         "task": "ai_market_monitor.monitor_published_sharia_sources",
-        "schedule": settings.sharia_source_scan_interval_hours * 60 * 60,
+        "schedule": 24 * 60 * 60,
     }
+
+
+def test_the_shariah_recheck_cadence_ships_as_one_week():
+    """Every published coin's evidence is looked at again once a week.
+
+    The product owner set this on 1 September 2026; it was 24 hours, which re-fetched
+    every authority page and every project blog six times more often than any of them
+    changes. The **default** is asserted, not the running value: an operator may still
+    set SHARIA_SOURCE_SCAN_INTERVAL_HOURS for a particular deployment, and that is not a
+    regression. What must not happen quietly is the shipped default going back to daily.
+    """
+
+    from ai_market_monitor.core.config import Settings
+
+    assert Settings.model_fields["sharia_source_scan_interval_hours"].default == 168, (
+        "the shipped Shariah re-check cadence is meant to be one week (168 hours). It is "
+        "read by the importers, the research pipeline, the source monitor and the "
+        "governance record at once, so it changes all of them together — which is why "
+        "there is one number and not four."
+    )
 
     for task_name in (
         "ai_market_monitor.process_sharia_authority_imports",

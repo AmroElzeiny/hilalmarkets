@@ -9,11 +9,14 @@ The rules this page is held to are in `docs/dashboard-test-account-rules.md`.
 
 from __future__ import annotations
 
+import json
 import re
 
 import lxml.html
 import pytest
+from pydantic import SecretStr
 
+from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PLAN_OFFERS,
@@ -300,3 +303,145 @@ async def test_the_live_page_still_works(test_context):
     await _signup_and_verify(test_context, email="sub-live@example.com")
     response = await test_context["client"].get("/dashboard/subscription")
     assert response.status_code == 200
+
+
+# ── Ways of paying ───────────────────────────────────────────────────────────────
+#
+# The popup drew "Card" and "Crypto" side by side whatever the settings said. Card was
+# switched off on the live site, so anybody who chose it filled in three steps of a form,
+# pressed pay, and read "That payment method is not currently available. Nothing was
+# charged." — a dead end with nothing to try next.
+
+
+def _crypto_only(test_context):
+    """The live shape on 1 September 2026: crypto open, card switched off."""
+
+    settings = test_context["settings"].model_copy(
+        update={
+            "billing_enabled": True,
+            "billing_provider": "nowpayments",
+            "billing_card_provider": "disabled",
+            "billing_crypto_provider": "nowpayments",
+            "nowpayments_api_key": SecretStr("nowpayments-key"),
+            "nowpayments_ipn_secret": SecretStr("nowpayments-ipn-secret"),
+        }
+    )
+    test_context["app"].dependency_overrides[get_settings] = lambda: settings
+    return settings
+
+
+async def test_a_way_of_paying_that_is_switched_off_is_drawn_switched_off(test_context):
+    await _signup_and_verify(test_context, email="sub-methods-off@example.com")
+    _crypto_only(test_context)
+
+    response = await test_context["client"].get(SUBSCRIPTION)
+    assert response.status_code == 200
+    document = lxml.html.fromstring(response.text)
+
+    (card,) = document.xpath('//label[@data-s-method="card"]//input')
+    (crypto,) = document.xpath('//label[@data-s-method="crypto"]//input')
+    assert card.get("disabled") is not None, "card was offered while it was switched off"
+    assert crypto.get("disabled") is None, "crypto was refused while it was open"
+
+    (card_note,) = document.xpath('//label[@data-s-method="card"]//small')
+    (crypto_note,) = document.xpath('//label[@data-s-method="crypto"]//small')
+    assert card_note.text_content().strip() == "Paying by card is switched off just now."
+    assert crypto_note.text_content().strip() == "Handled by NOWPayments."
+
+
+async def test_each_plan_carries_the_ways_of_paying_that_really_work_for_it(test_context):
+    """The popup is one popup for every plan, so the answer travels with the plan."""
+
+    await _signup_and_verify(test_context, email="sub-methods-facts@example.com")
+    _crypto_only(test_context)
+
+    response = await test_context["client"].get(SUBSCRIPTION)
+    document = lxml.html.fromstring(response.text)
+    (facts_node,) = document.xpath('//script[@id="s-plan-facts"]')
+    cards = json.loads(facts_node.text_content())
+
+    for card in cards:
+        methods = card["pay_methods"]
+        assert methods["card"]["available"] is False
+        # Only a plan that is really on sale can be paid for at all.
+        assert methods["crypto"]["available"] is (card["code"] == "trader")
+        # A plan that offers a Pay button must have some way of paying behind it.
+        if card["buyable"]:
+            assert any(choice["available"] for choice in methods.values()), card["code"]
+
+
+async def test_choosing_a_switched_off_way_of_paying_says_what_to_use_instead(test_context):
+    """The reported failure, end to end.
+
+    A form posted with `payment_method=card` — an old tab, a saved page, or the popup
+    before this fix — is refused with a sentence that names the way of paying that works.
+    """
+
+    await _signup_and_verify(test_context, email="sub-methods-post@example.com")
+    _crypto_only(test_context)
+
+    page = await test_context["client"].get(SUBSCRIPTION)
+    csrf = re.search(r'name="csrf_token" value="([a-f0-9]+)"', page.text)
+    request_id = re.search(r'name="checkout_request_id" value="([a-f0-9]+)"', page.text)
+    assert csrf is not None and request_id is not None
+
+    refused = await test_context["client"].post(
+        "/dashboard/billing/checkout",
+        data={
+            "plan_code": "trader",
+            "billing_cycle": "monthly",
+            "payment_method": "card",
+            "checkout_request_id": request_id.group(1),
+            "terms_accepted": "true",
+            "first_name": "Card",
+            "last_name": "Buyer",
+            "address_line1": "1 Market Street",
+            "city": "Cairo",
+            "country": "Egypt",
+            "csrf_token": csrf.group(1),
+        },
+        headers={"accept": "application/json", "x-requested-with": "XMLHttpRequest"},
+    )
+
+    assert refused.status_code == 400
+    body = refused.json()
+    assert body["error"]["code"] == "payment_method_unavailable"
+    assert body["error"]["message"] == (
+        "Paying by card is switched off just now. You can pay with crypto instead."
+    )
+
+
+async def test_the_way_of_paying_that_is_open_can_still_be_chosen(test_context):
+    """The fix must not close the door that works."""
+
+    await _signup_and_verify(test_context, email="sub-methods-crypto@example.com")
+    _crypto_only(test_context)
+
+    page = await test_context["client"].get(SUBSCRIPTION)
+    csrf = re.search(r'name="csrf_token" value="([a-f0-9]+)"', page.text)
+    request_id = re.search(r'name="checkout_request_id" value="([a-f0-9]+)"', page.text)
+    assert csrf is not None and request_id is not None
+
+    accepted = await test_context["client"].post(
+        "/dashboard/billing/checkout",
+        data={
+            "plan_code": "trader",
+            "billing_cycle": "monthly",
+            "payment_method": "crypto",
+            "checkout_request_id": request_id.group(1),
+            "terms_accepted": "true",
+            "first_name": "Crypto",
+            "last_name": "Buyer",
+            "address_line1": "1 Market Street",
+            "city": "Cairo",
+            "country": "Egypt",
+            "csrf_token": csrf.group(1),
+        },
+        headers={"accept": "application/json", "x-requested-with": "XMLHttpRequest"},
+    )
+
+    # The payment company itself is not reachable from a test, so the only thing proved
+    # here is that this way of paying was never refused as unavailable.
+    assert accepted.status_code in {200, 400}
+    if accepted.status_code == 400:
+        assert accepted.json()["error"]["code"] != "payment_method_unavailable"

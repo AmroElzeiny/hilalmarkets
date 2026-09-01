@@ -91,8 +91,9 @@ class ReviewCaseType(StrEnum):
     SOURCE_IDENTITY_CONFLICT = "source_identity_conflict"
     #: A reader told us a published fact looks wrong.
     USER_FACTUAL_REPORT = "user_factual_report"
-    #: The machine could not find an asset's official news or community page, or found
-    #: that one it used to rely on has gone.
+    #: The machine could not find an asset's official news page, or found that a link it
+    #: used to rely on has gone. A missing community page is deliberately **not** this:
+    #: plenty of projects run no forum, and a page that does not exist cannot be found.
     OFFICIAL_SOURCE_GAP = "official_source_gap"
 
 

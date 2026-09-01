@@ -259,11 +259,32 @@ def test_coverage_is_counted_from_plain_rows_without_loading_the_table():
     )
 
     assert coverage[asset].tried == 4
-    assert coverage[asset].proved == {"official_news": 1}
     # A verified-but-switched-off row is not coverage, and the website is not one of the
-    # two categories a person is ever asked about.
-    assert coverage[asset].missing_categories == ("official_community",)
+    # categories counted here at all.
+    assert coverage[asset].proved == {"official_news": 1}
+    # Nothing is missing: the news page works, and the community page is optional. This
+    # asserted ("official_community",) until 1 September 2026, which is exactly the row
+    # that filled the queue for every project that runs no forum.
+    assert coverage[asset].missing_categories == ()
     assert coverage[other].proved == {"official_news": 1}
+
+
+def test_a_coin_with_a_forum_and_no_news_page_is_still_a_gap():
+    """The rule cuts one way only. Dropping the community requirement must not make a
+    community page stand in for the missing news page — the news page is what a reviewer
+    reads to learn the project changed, and a forum is not a substitute for it."""
+
+    asset = uuid4()
+    coverage = coverage_from_rows(
+        [
+            (asset, "official_community", "verified", True),
+            (asset, "official_community", "verified", True),
+            (asset, "official_news", "unreachable", True),
+        ]
+    )
+
+    assert coverage[asset].proved == {"official_community": 2}
+    assert coverage[asset].missing_categories == ("official_news",)
 
 
 # --------------------------------------------------------------------------------

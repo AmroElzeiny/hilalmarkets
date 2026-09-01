@@ -27,7 +27,10 @@
     </div>
     <dl class="checkout-facts">
       <div><dt>Access type</dt><dd>{{ 'Monthly subscription' if billing_capabilities.supports_recurring_billing else 'One-time 30-day access' }}</dd></div>
-      <div><dt>Price</dt><dd>{{ plan.price_monthly }} {{ plan.currency }}</dd></div>
+      {# The number the payment will ask for, not the catalogue's normal price. While a
+         launch offer runs those are two different numbers, and this is the last screen
+         before the visitor pays. #}
+      <div><dt>Price</dt><dd>{% if checkout_price_was %}<s class="price-original" aria-label="Was {{ checkout_price_was }} {{ plan.currency }} per month">{{ checkout_price_was }}</s> {% endif %}{{ checkout_price }} {{ plan.currency }}</dd></div>
       <div><dt>Tax</dt><dd>Shown by the payment provider where applicable</dd></div>
       <div><dt>Renewal</dt><dd>{{ 'Renews monthly until cancelled' if billing_capabilities.supports_recurring_billing else 'Manual renewal; no automatic charge' }}</dd></div>
       <div><dt>Cancellation</dt><dd>{{ 'Manage through the provider portal' if billing_capabilities.supports_customer_portal else 'No subscription cancellation is needed' }}</dd></div>
@@ -42,7 +45,11 @@
 
   <aside class="panel checkout-action-card">
     <span class="kicker">Order summary</span>
-    <div class="checkout-total"><span>{{ plan.name }}</span><strong>{{ plan.price_monthly }} {{ plan.currency }}</strong></div>
+    <div class="checkout-total"><span>{{ plan.name }}</span><strong>{{ checkout_price }} {{ plan.currency }}</strong></div>
+    {% if checkout_price_was %}
+      <p class="checkout-small">Launch price. The normal price is {{ checkout_price_was }} {{ plan.currency }} per month.</p>
+      <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" role="group" aria-label="Time left at this price" hidden></div>
+    {% endif %}
     <p class="muted">Payment details are entered only on the configured payment provider's secure page.</p>
     {% if already_subscribed %}
       <div class="notice notice-success"><span data-icon="check" data-icon-class="icon"></span><div><strong>Already subscribed</strong><p>Your {{ plan.name }} plan is active.</p></div></div>
@@ -50,13 +57,36 @@
     {% elif checkout_attempt and checkout_attempt.checkout_url and checkout_attempt.status in ['pending','creating'] %}
       <a class="btn btn-primary" href="/dashboard/billing/checkout/{{ checkout_attempt.id }}/resume">Continue secure payment</a>
       <p class="checkout-small">This existing checkout expires {{ checkout_attempt.expires_at|short_dt(user.timezone) }}.</p>
+    {% elif not billing_method_offers.values()|selectattr('available')|list %}
+      {# No way of paying works for this plan right now. A form that cannot succeed is
+         worse than none: it asks somebody for their address and then refuses them. #}
+      <div class="notice notice-error" role="status">
+        <span data-icon="alert" data-icon-class="icon"></span>
+        <div>
+          <strong>There is no way to pay for this plan yet</strong>
+          <p>{{ billing_method_offers.card.note }} {{ billing_method_offers.crypto.note }} Nothing was charged.</p>
+        </div>
+      </div>
+      <a class="btn btn-secondary" href="/dashboard/billing">Back to plans</a>
     {% else %}
       <form class="checkout-confirm-form" method="post" action="/dashboard/billing/checkout">
         <input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}">
         <input type="hidden" name="plan_code" value="{{ plan.code }}">
         <input type="hidden" name="billing_cycle" value="{{ billing_cycle }}">
-        <input type="hidden" name="payment_method" value="card">
         <input type="hidden" name="checkout_request_id" value="{{ checkout_request_id }}">
+        {# How to pay is asked, never assumed. This page used to post `card` whichever
+           payment companies were switched on, so with card off every visitor reached the
+           last step and was refused. #}
+        <fieldset class="billing-method-options">
+          <legend>Payment method</legend>
+          {% set first_available = (billing_method_offers.values()|selectattr('available')|list|first).method %}
+          {% for method, offer in billing_method_offers.items() %}
+            <label class="{{ '' if offer.available else 'is-unavailable' }}" aria-disabled="{{ 'false' if offer.available else 'true' }}">
+              <input type="radio" name="payment_method" value="{{ method }}" {{ 'checked' if method == first_available else '' }} {{ '' if offer.available else 'disabled' }} required>
+              <span class="billing-method-card"><span data-icon="{{ 'billing' if method == 'card' else 'wallet' }}" data-icon-class="icon"></span><strong>{{ 'Card' if method == 'card' else 'Crypto' }}</strong><small>{{ offer.note }}</small></span>
+            </label>
+          {% endfor %}
+        </fieldset>
         <div class="billing-profile-grid">
           <label><span>First name</span><input type="text" name="first_name" value="{{ billing_profile_defaults.first_name }}" maxlength="60" autocomplete="given-name" required></label>
           <label><span>Last name</span><input type="text" name="last_name" value="{{ billing_profile_defaults.last_name }}" maxlength="60" autocomplete="family-name" required></label>
@@ -81,5 +111,5 @@
   data-event-scope="{{ checkout_attempt.id if checkout_attempt else checkout_request_id }}"
   hidden
 ></div>
-<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260831-auth-one-screen"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260901-pay-methods"></script>
 {% endblock %}

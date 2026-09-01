@@ -826,3 +826,86 @@ def test_the_footer_is_the_same_on_every_page(page: Page, base_url: str, path: s
         "Hilal Markets on X",
         "Hilal Markets on Threads",
     ], channels
+
+# ---------------------------------------------------------------------------
+# The launch offer, on the page a visitor decides on.
+# ---------------------------------------------------------------------------
+
+
+def test_the_launch_price_and_its_timer_are_really_on_the_pricing_page(
+    page: Page, base_url: str
+) -> None:
+    """A countdown can be rendered and never move. Only a browser settles that.
+
+    The price, the crossed-out price and the deadline all come from `core/plans.py`, so
+    this reads them from there rather than typing numbers that go stale the next time
+    the offer changes.
+    """
+
+    from ai_market_monitor.core.plans import (
+        effective_monthly_price,
+        original_monthly_price,
+        promotion_is_active,
+    )
+
+    page.goto(f"{base_url}/pricing", wait_until="domcontentloaded")
+    assert_no_raw_traceback(page)
+
+    was = original_monthly_price("trader")
+    if not promotion_is_active():
+        # No offer running: no old price, no timer. The card is a plain price.
+        assert was is None
+        expect(page.locator(".offer-countdown")).to_have_count(0)
+        expect(page.locator(".price-original")).to_have_count(0)
+        return
+
+    assert was is not None
+    struck = page.locator(".price-original").first
+    expect(struck).to_have_text(f"${int(was)}")
+    assert f"${int(effective_monthly_price('trader'))}" in page.locator(
+        ".price-card.is-featured .price"
+    ).inner_text()
+
+    # The timer is built by the script, shown only once it holds a real count, and steps
+    # once a second. A stopped clock beside a price is worse than no clock.
+    countdown = page.locator(".offer-countdown[data-offer-live]").first
+    expect(countdown).to_be_visible(timeout=5_000)
+    expect(countdown).to_contain_text("Launch price ends in")
+    seconds = countdown.locator(".offer-countdown-part").last
+    first_reading = seconds.inner_text()
+    page.wait_for_timeout(1600)
+    assert seconds.inner_text() != first_reading, "the countdown is not counting"
+
+
+def test_the_landing_pricing_card_carries_the_live_countdown(
+    page: Page, base_url: str
+) -> None:
+    """The same timer, on the card, on the page most visitors actually meet.
+
+    The landing page draws its own countdown in React while `/pricing` is drawn by the
+    server and stepped by a script. Two implementations is two chances for one of them
+    to sit still, so each is measured on its own page.
+    """
+
+    from ai_market_monitor.core.plans import original_monthly_price, promotion_is_active
+
+    page.goto(f"{base_url}/", wait_until="domcontentloaded")
+    page.locator("#pricing").scroll_into_view_if_needed()
+
+    if not promotion_is_active():
+        assert original_monthly_price("trader") is None
+        expect(page.locator("#pricing .offer-countdown")).to_have_count(0)
+        return
+
+    # Inside the card, not somewhere else on the page.
+    countdown = page.locator("#pricing .pricing-card .offer-countdown").first
+    expect(countdown).to_be_visible(timeout=5_000)
+    expect(countdown).to_contain_text("Launch price ends in")
+    # Only the card whose price is discounted carries one.
+    assert page.locator("#pricing .offer-countdown").count() == 1
+    expect(page.locator("#pricing .pricing-card .plan-price-original").first).to_be_visible()
+
+    seconds = countdown.locator(".offer-countdown-part").last
+    first_reading = seconds.inner_text()
+    page.wait_for_timeout(1600)
+    assert seconds.inner_text() != first_reading, "the landing countdown is not counting"

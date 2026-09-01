@@ -25,12 +25,18 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 from sqlalchemy import select
 
 from ai_market_monitor.core.config import Settings, _is_optional_secret
 from ai_market_monitor.db.models import CanonicalAsset, OfficialSource, ReviewCase
-from ai_market_monitor.services.sharia_research import ShariaResearchError, extract_links
+from ai_market_monitor.services.sharia_research import (
+    FetchTarget,
+    OfficialEvidenceFetcher,
+    ShariaResearchError,
+    extract_links,
+)
 from ai_market_monitor.services.sharia_source_activity import (
     ACTIVITY_FLOOR,
     CADENCE_TARGET_ITEMS,
@@ -53,6 +59,7 @@ from ai_market_monitor.services.sharia_source_catalog import (
     SEARCH_QUERIES,
     SHARED_PUBLISHING_HOSTS,
     SOURCE_CATEGORIES,
+    TRACKED_CATEGORIES,
     VERIFICATION_STATES,
     DiscoveryLayer,
     SearchResult,
@@ -331,7 +338,10 @@ def test_the_projects_own_pages_survive_the_same_search() -> None:
     assert "https://t.me/s/aptos_network" in found
     for candidate in produced:
         assert candidate.layer is DiscoveryLayer.SEARCH
-        assert candidate.category in REQUIRED_CATEGORIES
+        # Tracked, not required. A forum that turns up in the answers to the news
+        # questions is still kept and proved — the community page is optional, which
+        # means "never demanded", not "thrown away when it is there".
+        assert candidate.category in TRACKED_CATEGORIES
         assert is_official_url(candidate.url)
 
 
@@ -465,9 +475,14 @@ def test_the_single_entry_point_routes_both_new_layers() -> None:
     ("counts", "wanted", "expected"),
     [
         ({}, 1, REQUIRED_CATEGORIES),
+        ({NEWS: 1}, 1, ()),
         ({NEWS: 1, COMMUNITY: 1}, 1, ()),
-        ({NEWS: 1, COMMUNITY: 1}, 3, REQUIRED_CATEGORIES),
-        ({NEWS: 3, COMMUNITY: 1}, 3, (COMMUNITY,)),
+        ({NEWS: 1, COMMUNITY: 1}, 3, (NEWS,)),
+        # The community count moves nothing, at either number. A coin with three news
+        # pages and no forum is not short and is not missing anything.
+        ({NEWS: 3, COMMUNITY: 1}, 3, ()),
+        ({NEWS: 3}, 3, ()),
+        ({COMMUNITY: 9}, 1, (NEWS,)),
         ({NEWS: 9, COMMUNITY: 9}, 3, ()),
     ],
 )
@@ -475,6 +490,31 @@ def test_short_is_one_question_asked_with_two_numbers(counts, wanted, expected) 
     """Wanted and required are different numbers read by the same rule."""
 
     assert categories_below(counts, wanted) == expected
+
+
+@pytest.mark.parametrize("wanted", [1, 2, 3, 9])
+@pytest.mark.parametrize("held", [0, 1, 5])
+def test_a_missing_community_page_is_never_a_gap(wanted, held) -> None:
+    """The whole rule, across every number either side of it.
+
+    A project that runs no forum, no subreddit and no public Discord is an ordinary
+    project, and a page that does not exist can never be found however many layers look
+    for it. Until 1 September 2026 every one of those coins opened a task saying "no
+    working official community page" that nobody could ever clear.
+
+    Asserted over the family rather than one case: whatever the wanted number is, and
+    however many news pages a coin holds, the community count must not be able to put a
+    category into the answer.
+    """
+
+    with_forum = categories_below({NEWS: held, COMMUNITY: 4}, wanted)
+    without_forum = categories_below({NEWS: held}, wanted)
+    assert with_forum == without_forum, (
+        "whether a coin has a community page changed the answer, so a project that runs "
+        "no forum is still being reported as having a gap"
+    )
+    assert COMMUNITY not in with_forum
+    assert COMMUNITY not in categories_below({}, wanted)
 
 
 # ---------------------------------------------------------------------------
@@ -646,6 +686,128 @@ def test_a_gone_page_is_not_called_forbidden(status) -> None:
     )
     assert proof.forbidden is False
     assert proof.definitively_dead is True
+
+
+# ---------------------------------------------------------------------------
+# What a site's robots.txt answer means
+# ---------------------------------------------------------------------------
+#
+# One wrong reading here removes a whole website silently. Until 1 September 2026 every
+# 4xx except 404 was read as "we could not verify the policy" and refused every address
+# on the origin — so a site behind an ordinary bot filter, which answers 403 to a plain
+# robots.txt request from a datacentre address, had all of its pages refused for ever
+# while they were perfectly readable in a browser. The case then told a reviewer the
+# project had no news page.
+#
+# The rule is the robots standard's own (RFC 9309, section 2.3.1), and it is asserted
+# across every status a site can answer with rather than on the one that was reported.
+
+
+def _robots_internet(status: int, *, body: str = "", page_status: int = 200):
+    """An internet where robots.txt answers `status` and the page itself is fine."""
+
+    def handler(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(status, text=body)
+        return httpx.Response(
+            page_status,
+            text=(
+                "<html><body><h1>Newsroom</h1><p>"
+                + ("A post about fees. " * 40)
+                + "</p></body></html>"
+            ),
+            headers={"content-type": "text/html"},
+        )
+
+    return httpx.MockTransport(handler)
+
+
+async def _try_to_fetch(settings, transport) -> str:
+    """Fetch one page through the real fetcher. Returns "" on success, else the code."""
+
+    fetcher = OfficialEvidenceFetcher(settings, transport=transport)
+    try:
+        await fetcher.fetch(FetchTarget("https://project.example/blog"))
+    except ShariaResearchError as exc:
+        return exc.code
+    return ""
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 405, 410, 418, 451])
+async def test_a_site_that_publishes_no_rules_is_open(test_context, status) -> None:
+    """Any 4xx on robots.txt means there are no rules, so everything is allowed.
+
+    404 always meant this. 403 is the one that matters in practice — it is what a bot
+    filter answers — and it used to refuse the whole site.
+    """
+
+    code = await _try_to_fetch(test_context["settings"], _robots_internet(status))
+    assert code == "", (
+        f"robots.txt answering HTTP {status} refused the page. A 4xx says the site "
+        "publishes no rules for us; it says nothing about what the site permits."
+    )
+
+
+@pytest.mark.parametrize("status", [429, 500, 502, 503, 504])
+async def test_a_site_that_could_not_say_is_not_read(test_context, status) -> None:
+    """The opposite half of the rule, and it must stay.
+
+    "There are no rules" and "we could not find out what the rules are" are opposite
+    answers. A 429 or a 5xx is the second one, and reading the site anyway would be
+    helping ourselves to a permission nobody gave.
+    """
+
+    code = await _try_to_fetch(test_context["settings"], _robots_internet(status))
+    assert code == "robots_unavailable", (
+        f"robots.txt answering HTTP {status} did not stop the fetch. That is the "
+        "product deciding a site's rules for it."
+    )
+
+
+async def test_a_site_that_forbids_us_is_still_refused(test_context) -> None:
+    """The rule cuts both ways: a real Disallow is obeyed exactly as before."""
+
+    transport = _robots_internet(200, body="User-agent: *\nDisallow: /\n")
+    code = await _try_to_fetch(test_context["settings"], transport)
+    assert code == "robots_disallowed"
+
+
+async def test_one_sweep_asks_a_site_for_its_rules_once(test_context) -> None:
+    """Both the answer and the failure are remembered for the run.
+
+    Without this a sweep re-fetches robots.txt once per address, which is a dozen extra
+    requests to a site that has already said it cannot answer — the exact behaviour a
+    rate-limited site was rate-limiting.
+    """
+
+    asked: list[str] = []
+
+    def handler(request):
+        asked.append(request.url.path)
+        if request.url.path == "/robots.txt":
+            return httpx.Response(503)
+        return httpx.Response(200, text="<html><body>page</body></html>")
+
+    fetcher = OfficialEvidenceFetcher(
+        test_context["settings"], transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(ShariaResearchError):
+        await fetcher.fetch(FetchTarget("https://project.example/blog"))
+    # Whatever the retry layer spent on that first attempt is its business. What matters
+    # is that asking again costs nothing at all.
+    after_first = asked.count("/robots.txt")
+    assert after_first >= 1
+
+    for path in ("/news", "/announcements", "/press"):
+        with pytest.raises(ShariaResearchError):
+            await fetcher.fetch(FetchTarget(f"https://project.example{path}"))
+
+    assert asked.count("/robots.txt") == after_first, (
+        f"robots.txt was fetched {asked.count('/robots.txt') - after_first} more time(s) "
+        "for an origin that had already said it could not answer. A sweep tries a dozen "
+        "addresses per coin, so that is a dozen extra requests to a site that is already "
+        "rate-limiting us."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1138,7 +1300,7 @@ async def test_a_link_is_never_counted_twice_towards_coverage(test_context) -> N
                 ).all()
                 if row.is_active
             )
-            for category in REQUIRED_CATEGORIES
+            for category in TRACKED_CATEGORIES
         }
         assert second.coverage == working, "the second run counted links it already had"
         assert first.coverage == working
@@ -1278,7 +1440,9 @@ async def test_the_recheck_report_is_written_in_words_a_person_can_act_on(
             "links_added": len(report["newly_proved"]),
             "links_withdrawn": len(report["withdrawn"]),
             "people_asked": int(report["person_asked"]),
+            "tasks_closed": 0,
             "search": "off",
+            "browser": "on, using playwright, up to 40 page(s) per run",
             "assets": [report],
         },
     )
@@ -1287,3 +1451,6 @@ async def test_the_recheck_report_is_written_in_words_a_person_can_act_on(
     assert "APT" in written
     assert "not_permitted" not in written, "an internal word reached the report"
     assert "Shariah status" in written, "the report must say what the score is not"
+    # Whether a browser was available decides whether the run could help most of the
+    # coins it was pointed at, so it is reported rather than left to be guessed at.
+    assert "browser" in written.casefold()

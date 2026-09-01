@@ -48,12 +48,20 @@
     return selected ? selected.value : "monthly";
   }
 
-  function setMethodState(input, wrapper, available) {
+  function setMethodState(input, wrapper, decision) {
     if (!input || !wrapper) return;
+    const available = Boolean(decision && decision.available);
     input.disabled = !available;
     wrapper.classList.toggle("is-unavailable", !available);
     wrapper.setAttribute("aria-disabled", String(!available));
     if (!available) input.checked = false;
+    // Why this way of paying cannot be used, in the server's words. A method that is
+    // switched off and one this plan simply is not sold through are different facts, and
+    // "unavailable" answers neither of them.
+    const note = wrapper.querySelector("[data-billing-method-note]");
+    if (note && decision && typeof decision.note === "string") {
+      note.textContent = decision.note;
+    }
   }
 
   function refreshPagePricing() {
@@ -149,17 +157,24 @@
     const period = selectedPeriod();
     const availability = plan.availability || {};
     const cycle = trialSelected ? "trial_7_day" : period;
-    const cardAvailable = Boolean(availability.purchasable) && (trialSelected
-      ? Boolean(availability.trial)
-      : Boolean(availability[`card_${period}`]));
-    const cryptoAvailable =
-      Boolean(availability.purchasable) &&
-      !trialSelected &&
-      period === "monthly" &&
-      Boolean(availability.crypto_monthly);
+    // Which ways of paying work for this plan and this period was decided on the server.
+    // This file used to rebuild that answer out of separate flags, which is the same rule
+    // written twice — and the copy in the browser is the one nothing tests.
+    const decided = (plan.methods || {})[cycle] || {};
+    const cardDecision = decided.card || { available: false, note: "" };
+    const cryptoDecision = decided.crypto || { available: false, note: "" };
+    const purchasable = Boolean(availability.purchasable);
+    const cardAvailable = purchasable && Boolean(cardDecision.available);
+    const cryptoAvailable = purchasable && Boolean(cryptoDecision.available);
 
-    setMethodState(cardInput, cardOption, cardAvailable);
-    setMethodState(cryptoInput, cryptoOption, cryptoAvailable);
+    setMethodState(cardInput, cardOption, {
+      available: cardAvailable,
+      note: cardDecision.note,
+    });
+    setMethodState(cryptoInput, cryptoOption, {
+      available: cryptoAvailable,
+      note: cryptoDecision.note,
+    });
     if (!cardInput?.checked && !cryptoInput?.checked) {
       if (cardAvailable && cardInput) cardInput.checked = true;
       else if (cryptoAvailable && cryptoInput) cryptoInput.checked = true;

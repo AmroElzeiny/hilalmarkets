@@ -535,7 +535,17 @@ body.hilal-dashboard .s-method {
 body.hilal-dashboard .s-method:hover { border-color: var(--hm-ink); background: var(--hm-surface-soft); }
 body.hilal-dashboard .s-method:has(input:checked) { border-color: var(--hm-apple-deep); background: var(--hm-apple-soft); }
 body.hilal-dashboard .s-method:has(input:focus-visible) { outline: 3px solid var(--hm-ink-strong); box-shadow: 0 0 0 6px var(--hm-apple); outline-offset: 3px; }
-body.hilal-dashboard .s-method:has(input:disabled) { cursor: not-allowed; background: var(--hm-surface-soft); opacity: .6; }
+/* A way of paying that cannot be used is marked, never faded out of reach of reading.
+   The sentence under its name is the only place that says *why* it cannot be used, so
+   the whole label used to drop to 60% opacity and take that sentence with it. The dashed
+   edge and the dimmed button carry the state; the words stay at full contrast. */
+body.hilal-dashboard .s-method:has(input:disabled) {
+  cursor: not-allowed;
+  background: var(--hm-surface-soft);
+  border-style: dashed;
+}
+body.hilal-dashboard .s-method:has(input:disabled):hover { border-color: var(--hm-hairline-strong); }
+body.hilal-dashboard .s-method:has(input:disabled) input { opacity: .45; }
 body.hilal-dashboard .s-method input { width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--hm-apple-deep); }
 body.hilal-dashboard .s-method-copy { display: flex; flex-direction: column; gap: 2px; }
 body.hilal-dashboard .s-method-copy strong { display: flex; align-items: center; gap: 6px; font-family: var(--hm-font-display); font-size: .92rem; font-weight: 500; }

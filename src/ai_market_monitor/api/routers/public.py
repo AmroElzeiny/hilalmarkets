@@ -18,6 +18,7 @@ from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_PRESENTATIONS,
+    PURCHASABLE_PLAN_CODES,
     plan_offer,
     plan_offer_payload,
     promotion_is_active,
@@ -54,9 +55,10 @@ from ai_market_monitor.services.ai_setup_evaluator_control import (
     evaluator_fault_control_available,
 )
 from ai_market_monitor.services.billing import (
-    BillingError,
+    annual_billing_available,
+    billing_method_provider,
     billing_provider_capabilities,
-    configured_billing_provider,
+    payment_method_offers,
 )
 from ai_market_monitor.services.hilal_methodology import (
     page_payload as hilal_page_payload,
@@ -238,14 +240,8 @@ def _public_context(
             },
             }
         )
-    try:
-        card_provider = configured_billing_provider(settings, "card")
-    except BillingError:
-        card_provider = None
-    try:
-        crypto_provider = configured_billing_provider(settings, "crypto")
-    except BillingError:
-        crypto_provider = None
+    card_provider = billing_method_provider(settings, "card")
+    crypto_provider = billing_method_provider(settings, "crypto")
     primary_billing_provider = card_provider or crypto_provider or settings.billing_provider
     plan_codes = visible_public_plan_codes(billing_enabled=settings.billing_enabled)
     # In waitlist mode the landing page shows no prices, so it is not handed any. A price
@@ -271,21 +267,14 @@ def _public_context(
         }
         for code in plan_codes
     ]
-    annual_billing_supported = settings.billing_enabled and (
-        (
-            card_provider == "creem"
-            and all(
-                f"{plan_code}_annual" in settings.creem_product_ids
-                for plan_code in ("trader", "pro")
-            )
-        )
-        or (
-            card_provider == "stripe"
-            and all(
-                f"{plan_code}_annual" in settings.stripe_price_ids
-                for plan_code in ("trader", "pro")
-            )
-        )
+    # Whether a year at a time can really be bought for every paid plan. This used to be
+    # worked out here, from the Creem and Stripe product maps directly — a second copy of
+    # a rule the dashboard also holds, and the two could disagree about the same day.
+    annual_billing_supported = annual_billing_available(settings)
+    public_payment_offers = payment_method_offers(
+        settings,
+        plan_codes=PURCHASABLE_PLAN_CODES,
+        billing_cycle="monthly",
     )
     return {
         "request": request,
@@ -400,9 +389,14 @@ def _public_context(
         "billing_enabled": settings.billing_enabled,
         "billing_provider": primary_billing_provider,
         "billing_capabilities": billing_provider_capabilities(primary_billing_provider),
-        "card_checkout_available": settings.billing_enabled and card_provider is not None,
-        "crypto_checkout_available": settings.billing_enabled
-        and crypto_provider is not None,
+        # "Available" means a visitor can really buy something this way, not merely that a
+        # payment company is named in the settings. Those are different facts, and the
+        # second one told the public site card checkout was open while every card checkout
+        # was refused.
+        **{
+            f"{offer.method}_checkout_available": offer.available
+            for offer in public_payment_offers
+        },
         "whatsapp_operational": settings.whatsapp_enabled,
         "annual_billing_supported": annual_billing_supported,
         "purchase_faqs": PURCHASE_FAQS,

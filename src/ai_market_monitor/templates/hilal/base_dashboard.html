@@ -5,7 +5,7 @@
   {#- First script on the page, deliberately. It puts a time limit on every request this
       product sends to its own server, and it can only do that for a request sent after
       it has run. See `static/hm-request.js`. -#}
-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260831-auth-one-screen"></script>
+  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260901-pay-methods"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
@@ -33,22 +33,22 @@
   <meta name="description" content="Hilal Markets - Shariah-screened crypto spot intelligence and guided monitoring.">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260831-auth-one-screen">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260901-pay-methods">
   {# One owner for the cookie banner and its settings window, which this template includes below. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260831-auth-one-screen">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260831-auth-one-screen">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260901-pay-methods">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260901-pay-methods">
   {% block page_styles %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260831-auth-one-screen">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260831-auth-one-screen">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260901-pay-methods">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260901-pay-methods">
   {#- The shell — the side menu and the topbar — after the sheet it replaces, because it
       is the one owner of both and nothing above may still be describing them. -#}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260831-auth-one-screen">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260831-auth-one-screen">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260901-pay-methods">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260901-pay-methods">
   {#- A page whose styles must win over the shared dashboard sheets loads them here.
       `page_styles` above is deliberately kept before them for pages that only add. -#}
   {% block page_styles_late %}{% endblock %}
   {% if hilal_chat|default(false) and settings.hilal_chat_enabled %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260831-auth-one-screen">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260901-pay-methods">
   {% endif %}
 </head>
 {#- The page guide's identity is decided on the server, not parsed from the URL. -#}
@@ -84,6 +84,15 @@
           'billing_portal_unavailable': 'Your payment provider does not offer an online subscription portal.',
           'creem_api_key_missing': 'Secure card checkout is not configured yet. No payment was created.',
           'creem_product_missing': 'That card plan and billing period are not configured yet. No payment was created.',
+          'payment_method_unavailable': 'That way of paying is switched off just now. Nothing was charged. Go back to your plan and pick the other one.',
+          'payment_method_invalid': 'Choose card or crypto before paying. Nothing was charged.',
+          'billing_terms_required': 'Tick the agreement box before paying. Nothing was charged.',
+          'already_subscribed': 'You are already on this plan. Nothing was charged.',
+          'checkout_expired': 'That payment page timed out. Nothing was charged. Start again from your plan.',
+          'checkout_not_resumable': 'That payment page cannot be opened again. Nothing was charged. Start again from your plan.',
+          'checkout_request_invalid': 'That payment page timed out. Nothing was charged. Start again from your plan.',
+          'checkout_not_found': 'We could not find that payment. Nothing was charged.',
+          'provider_unavailable': 'The payment company did not answer. Nothing was charged. Please try again in a few minutes.',
           'name_missing': 'Tell us the name to pay this out to.',
           'name_too_long': 'That name is too long for the form.',
           'links_missing': 'Add at least one link to where you will share Hilal Markets.',
@@ -151,19 +160,19 @@
   {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
   {% include "hilal/partials/cookie_banner.html" %}
   <div class="dash-toast" id="dash-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260831-auth-one-screen"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260831-auth-one-screen"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260901-pay-methods"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260901-pay-methods"></script>
   {#- The side menu and the topbar. One owner for their state: `hilalmarkets.js` and
       `dashboard.js` each used to run their own copy of the minimize logic against the
       same class, from two different stored values. -#}
-  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260831-auth-one-screen"></script>
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260831-auth-one-screen"></script>
-  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260831-auth-one-screen"></script>
-  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260831-auth-one-screen"></script>{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260831-auth-one-screen"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260831-auth-one-screen" defer></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260831-auth-one-screen" defer></script>
-  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260831-auth-one-screen"></script>{% endif %}
+  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260901-pay-methods"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260901-pay-methods"></script>
+  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260901-pay-methods"></script>
+  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260901-pay-methods"></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260901-pay-methods"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260901-pay-methods" defer></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260901-pay-methods" defer></script>
+  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260901-pay-methods"></script>{% endif %}
   <script>
     (() => {
       const pageStatus = document.querySelector("[data-page-status]");

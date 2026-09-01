@@ -173,14 +173,25 @@ never draws one.
 
 ### Browser rendering matters more than it looks
 
-`SHARIA_SOURCE_BROWSER_RENDER_ENABLED` is **off** by default. With it off, every project
-whose site needs JavaScript is unreadable and lands in *Not enough data* for a reason
-that is ours rather than theirs. Measured on the same 20 coins on 30 August 2026, with
-the rules of that day: **9/20 without it, 17/20 with it**. Three of the eight coins it
-recovered had been filed as unreadable purely because their site needs JavaScript.
+`SHARIA_SOURCE_BROWSER_RENDER_ENABLED` is **on** since 1 September 2026, and the Docker
+image installs Chromium in its runtime stage. With it off, every project whose site needs
+JavaScript is unreadable and lands in *Not enough data* for a reason that is ours rather
+than theirs. Measured on the same 20 coins on 30 August 2026, with the rules of that day:
+**9/20 without it, 17/20 with it**. Three of the eight coins it recovered had been filed
+as unreadable purely because their site needs JavaScript.
 
-It is off because Chromium costs about 300 MB while it runs, and the production server is
-a 3.9 GB machine with no swap. Turning it on is a real memory decision, not a formality.
+That measurement is why it is on. It was off because Chromium costs about 300 MB while it
+runs and the production server is a 3.9 GB machine with no swap — a real memory decision,
+not a formality. What changed is not the memory but what bounds it: one browser per sweep,
+started only when a page needs it and closed in a `finally`; one page open at a time;
+images, GPU and extensions off; and a hard page budget,
+`SHARIA_SOURCE_BROWSER_RENDER_MAX_PAGES` (40). The worker container's 1024 MB ceiling is
+sized to hold the Celery parent, one child and one browser at once, and
+`test_invariant_container_memory_limits.py` asserts that sum.
+
+If the server ever runs short, `SHARIA_SOURCE_BROWSER_RENDER_ENABLED=false` turns it off
+again without a deploy, and the review cases say plainly that it is off rather than
+reporting the coins as having no pages.
 
 ## What it costs
 

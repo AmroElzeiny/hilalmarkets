@@ -35,6 +35,7 @@ from ai_market_monitor.services.provider_reliability import (
     CircuitBreaker,
     RedisCircuitStateStore,
 )
+from ai_market_monitor.services.setup_chat_launch import _set_runtime
 
 
 def _settings(**overrides: object) -> Settings:
@@ -308,3 +309,53 @@ async def test_a_shared_store_that_cannot_answer_never_refuses_the_call() -> Non
 
     partial = CircuitBreaker(failure_threshold=5, store=_Missing())
     assert await partial.allow("openai") is True
+
+
+# ── One turn, one measurement ────────────────────────────────────────────────────
+
+
+def test_a_turn_is_measured_once_and_both_records_agree() -> None:
+    """The session's view and the durable turn row hold the same numbers.
+
+    ``TurnTelemetry.to_payload`` reads a running clock, so it answers differently every
+    time it is called. The launch pipeline called it twice for one turn — once for the
+    chat session, once for the turn row — and stored two different durations against the
+    same turn. The gap was 16 milliseconds, small enough to sit there unnoticed and large
+    enough to make the two records disagree for ever.
+    """
+
+    class _Chat:
+        context_json: dict[str, object] | None = None
+
+    telemetry = TurnTelemetry(deadline=TurnDeadline.start(45.0))
+    with telemetry.stage("context_selection"):
+        pass
+
+    chat = _Chat()
+    written = _set_runtime(chat, time.monotonic(), model_calls=0, cache_hits=0, telemetry=telemetry)
+
+    runtime = (chat.context_json or {})["turn_runtime"]
+    assert isinstance(runtime, dict)
+    # What the caller stores on the turn row is exactly what the session already holds.
+    assert written == runtime["measured"]
+    # And it is a real measurement, not an empty stand-in.
+    assert written["stage_counts"]["total_turn"] == 1
+
+    # Proof that a second reading would have disagreed, which is what made this a defect
+    # rather than a tidiness point.
+    assert telemetry.to_payload()["total_ms"] >= written["total_ms"]
+
+
+def test_a_turn_with_nothing_measured_still_writes_a_record() -> None:
+    """The shape of the record never depends on whether telemetry was collected."""
+
+    class _Chat:
+        context_json: dict[str, object] | None = None
+
+    chat = _Chat()
+    written = _set_runtime(chat, time.monotonic(), model_calls=0, cache_hits=0)
+
+    runtime = (chat.context_json or {})["turn_runtime"]
+    assert isinstance(runtime, dict)
+    assert written == {}
+    assert runtime["stages"], "the total is written even with no telemetry"

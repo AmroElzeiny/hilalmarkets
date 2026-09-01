@@ -971,16 +971,49 @@ def unique_email(prefix: str) -> str:
     return f"{prefix}+{uuid4().hex[:10]}@example.com"
 
 
-def signup(page: Page, base_url: str, email: str | None = None) -> str:
+def signup_to_verify(
+    page: Page,
+    base_url: str,
+    *,
+    email: str | None = None,
+    name: str = "Browser Trader",
+    password: str | None = None,
+) -> str:
+    """Walk the first two sign-up screens and stop on the code screen.
+
+    Split out because two files walked these steps and only one of them was updated
+    when the pages changed. One implementation, so a fourth step tomorrow is one edit.
+    """
+
     email = email or unique_email("browser-e2e")
     page.goto(f"{base_url}/signup", wait_until="domcontentloaded")
-    page.get_by_test_id("auth-first-name").fill("Browser")
-    page.get_by_test_id("auth-last-name").fill("Trader")
+    # Step 1 of 3 — one name box, which takes whatever somebody is called.
+    page.get_by_test_id("auth-name").fill(name)
     page.get_by_test_id("auth-email").fill(email)
-    page.get_by_test_id("auth-password").fill(TEST_PASSWORD)
-    page.get_by_test_id("auth-repeat-password").fill(TEST_PASSWORD)
     page.get_by_test_id("auth-submit").click()
+    # Step 2 of 3 — the password. The name and email ride through as hidden fields, and
+    # the screen says which address the account is being made for.
+    page.wait_for_url(re.compile(r".*/signup/password(\?.*)?$"), timeout=20_000)
+    expect(page.locator(".auth-sentto")).to_contain_text(email)
+    page.get_by_test_id("auth-password").fill(password or TEST_PASSWORD)
+    page.get_by_test_id("auth-repeat-password").fill(password or TEST_PASSWORD)
+    page.get_by_test_id("auth-submit").click()
+    # Step 3 of 3 — the code.
     page.wait_for_url(re.compile(r".*/signup/verify(\?.*)?$"), timeout=20_000)
+    return email
+
+
+def signup(page: Page, base_url: str, email: str | None = None) -> str:
+    """Create an account through the pages, the way a person does.
+
+    Sign-up is **three screens**, not one: name and email, then the password, then the
+    six-digit code. It used to be a single form with "First name" and "Last name", and
+    this helper still filled those two boxes — which no page has any more, so every
+    browser test that signs somebody up sat waiting for a field that would never appear
+    and failed on a timeout thirty seconds later. One helper, walked step by step.
+    """
+
+    email = signup_to_verify(page, base_url, email=email)
     page.locator("input[name='code']").fill("123456")
     page.get_by_role("button", name=re.compile("Verify and create account", re.I)).click()
     # Signing up lands on `/dashboard`, which is the old front page's address and sends a

@@ -39,6 +39,7 @@ from typing import Literal
 from ai_market_monitor.db.models.enums import ReviewCaseType
 from ai_market_monitor.services.sharia_source_catalog import (
     REQUIRED_CATEGORIES,
+    TRACKED_CATEGORIES,
     VERIFIED,
     category_label,
 )
@@ -80,8 +81,8 @@ TAG_DEFINITIONS: dict[str, CaseTagDefinition] = {
         label="Pages not found",
         tone="attention",
         meaning=(
-            "The system has no working official news or community page for this coin "
-            "yet. It keeps looking on every sweep."
+            "The system has no working official news page for this coin yet. It keeps "
+            "looking on every sweep."
         ),
     ),
     ACTIVITY_TO_CHECK: CaseTagDefinition(
@@ -174,6 +175,14 @@ class SourceCoverage:
 
     @property
     def missing_categories(self) -> tuple[str, ...]:
+        """Which **required** categories this asset cannot show one working link for.
+
+        ``proved`` counts every tracked category, community included, so a page can show
+        how many of each a coin holds. Only the required ones can be *missing*: a project
+        that runs no forum has nothing anybody can go and find, and reporting that as a
+        gap filled the queue with rows no reviewer could ever clear.
+        """
+
         return tuple(
             category for category in REQUIRED_CATEGORIES if self.proved.get(category, 0) < 1
         )
@@ -196,7 +205,7 @@ def coverage_from_rows(rows) -> dict:
         tried[asset_id] = tried.get(asset_id, 0) + 1
         if verification_state != VERIFIED or not is_active:
             continue
-        if category not in REQUIRED_CATEGORIES:
+        if category not in TRACKED_CATEGORIES:
             continue
         bucket = proved.setdefault(asset_id, {})
         bucket[category] = bucket.get(category, 0) + 1
@@ -332,9 +341,7 @@ def classify(
 def _source_gap_reason(name: str, coverage: SourceCoverage) -> str:
     missing = coverage.missing_categories
     what = (
-        " or ".join(category_label(item) for item in missing)
-        if missing
-        else "official news or community"
+        " or ".join(category_label(item) for item in missing) if missing else "official news"
     )
     tried = (
         f"{coverage.tried} address(es) have been tried and none worked yet"

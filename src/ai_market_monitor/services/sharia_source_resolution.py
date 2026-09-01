@@ -35,6 +35,14 @@ asked when it holds fewer than :data:`~sharia_source_catalog.LINKS_REQUIRED_PER_
 Without that separation the review queue fills with "this coin has two news pages
 instead of three", which nobody would ever work through.
 
+**Required and tracked are two different lists**, and that is the same idea one level up.
+:data:`~sharia_source_catalog.REQUIRED_CATEGORIES` is news alone: it decides whether a
+person is asked and whether the layers keep hunting.
+:data:`~sharia_source_catalog.TRACKED_CATEGORIES` adds the community page: it decides
+what is counted and capped. So a forum found on the way is kept and shown, and a project
+that runs no forum at all is never reported as having a gap — which it was, for every
+such coin, until 1 September 2026.
+
 **Working is not the same as useful.** A newsroom can answer HTTP 200 for years after
 the last post was written. ``sharia_source_activity`` scores how alive and how relevant
 a fetched page is, and a source below that floor stops counting as coverage — so the
@@ -102,7 +110,7 @@ from ai_market_monitor.services.sharia_source_catalog import (
     NOT_PERMITTED,
     PAID_LAYERS,
     PROOF_BONUS,
-    REQUIRED_CATEGORIES,
+    TRACKED_CATEGORIES,
     UNREACHABLE,
     VERIFIED,
     WEBSITE,
@@ -306,7 +314,7 @@ class ResolutionSweep:
         done = sum(item.complete for item in self.assets)
         return (
             f"{len(self.assets)} asset(s) checked. {self.proved} link(s) proved. "
-            f"{done} now have both a news page and a community page. "
+            f"{done} now have a working official news page. "
             f"{self.escalated} sent to a person."
         )
 
@@ -533,7 +541,7 @@ class SourceResolutionService:
             # Read the coverage again rather than adding to it as we go. See _coverage.
             coverage = self._coverage(rows)
         outcome.coverage = {
-            category: coverage.counts.get(category, 0) for category in REQUIRED_CATEGORIES
+            category: coverage.counts.get(category, 0) for category in TRACKED_CATEGORIES
         }
         outcome.quiet = coverage.quiet
         outcome.short = categories_below(coverage.lively, self.wanted_per_category)
@@ -734,7 +742,11 @@ class SourceResolutionService:
         lively: Counter[str] = Counter()
         quiet: list[str] = []
         for row in rows.values():
-            if row.category not in REQUIRED_CATEGORIES:
+            # Counted over every **tracked** category, required or not. A community page
+            # is still counted so a layer that offers twenty of them stops at the wanted
+            # number; whether one is *missing* is a separate question, answered only by
+            # `categories_below`, which reads the required list alone.
+            if row.category not in TRACKED_CATEGORIES:
                 continue
             if not self._counts_towards_coverage(row):
                 continue
@@ -936,7 +948,12 @@ class SourceResolutionService:
             self._record(row, proof, confidence, layer=str(layer))
             label = f"{category_label(candidate.category)}: {candidate.url}"
             if row.verification_state != VERIFIED:
-                outcome.rejected.append(label)
+                # Say *why* it did not work. "The system tried these and none of them
+                # proved usable" told a reviewer nothing they could act on: a page that
+                # does not exist needs a different address, a page that forbids us needs
+                # none, and a page the browser could not read is the machine's problem
+                # and not theirs.
+                outcome.rejected.append(f"{label} — {_why_not_usable(proof)}")
                 continue
             outcome.proved.append(label)
             if proof.activity_score >= self.activity_floor:
@@ -1112,13 +1129,30 @@ class SourceResolutionService:
         page = "\n".join([*headings, text, *extract_dates(body, row.source_url)])
         activity = measure(page, category=category, now=now)
         published = activity.newest_published_at
-        if category == NEWS:
-            fresh = published is not None and (
-                now - published <= timedelta(days=NEWS_MAXIMUM_AGE_DAYS)
-            )
+        if category == NEWS and published is not None:
+            fresh = now - published <= timedelta(days=NEWS_MAXIMUM_AGE_DAYS)
         else:
+            # Two cases, and neither is a failure.
+            #
             # A forum or a subreddit has no publication date of its own, and demanding
             # one would reject every community page there is.
+            #
+            # A news page that shows **no date this reader could find** is the case that
+            # made this rule wrong until 1 September 2026. "I could not find a date" was
+            # being treated as "the page is stale": `fresh` went false, `score_candidate`
+            # halved the confidence, every layer fell under `CONFIDENCE_FLOOR`, and the
+            # page was refused. A real, live project blog whose dates are drawn by
+            # JavaScript, or written as "3 days ago", or printed as an image, was thrown
+            # away exactly like a newsroom that stopped publishing in 2019 — and the coin
+            # was then reported to a person as having no news page at all.
+            #
+            # Not knowing is not evidence of staleness. The page is accepted, and the
+            # thing that actually knows how alive it is — the activity score, which gets
+            # nothing for recency when there is no date — puts it below the activity
+            # floor. That is the designed answer: the link counts as coverage so nobody
+            # is asked to find a page that already exists, and the layers keep looking
+            # for livelier company for it. Only a date we *did* read, and that really is
+            # too old, still refuses a page.
             fresh = True
         return SourceProof(
             reachable=True,
@@ -1173,7 +1207,7 @@ class SourceResolutionService:
             state="needs_evidence",
             publication_state="unpublished",
             canonical_asset_id=asset.id,
-            title=f"Find the official news and community pages for {asset.name}",
+            title=f"Find an official news page for {asset.name}",
             priority="normal",
             risk_severity="low",
             human_review_reason=reason,
@@ -1275,6 +1309,42 @@ class SourceResolutionService:
             return
         case.state = "resolved"
         case.done_at = self._clock()
+
+
+#: Why a fetched page did not become a usable source, in words a non-engineer can act on.
+#: Keyed by the error code the fetcher and the document reader produce. One owner, so the
+#: case a reviewer reads and the row a report prints cannot describe the same failure two
+#: different ways.
+_FAILURE_WORDS: dict[str, str] = {
+    "robots_disallowed": "the site's own rules say we may not read it",
+    "robots_unavailable": "the site would not say what it allows, so nothing on it was read",
+    "too_short": "the page loaded but showed no readable text",
+    "unreadable_document": "the page could not be read as text",
+    "official_source_unavailable": "nothing answered at that address",
+    "official_source_fetch_failed": "the address could not be reached",
+}
+
+
+def _why_not_usable(proof: SourceProof) -> str:
+    """One short phrase saying what stopped this address counting.
+
+    A diagnostic must never become the failure: every branch returns a string, and an
+    error code nobody has words for falls back to the code itself rather than raising.
+    """
+
+    if proof.forbidden:
+        return "the site does not allow us to read it"
+    if proof.status in DEFINITIVE_FAILURE_STATUSES:
+        return f"the address is gone (HTTP {proof.status})"
+    if proof.reachable and proof.readable and not proof.fresh:
+        newest = proof.published_at.date().isoformat() if proof.published_at else "long ago"
+        return f"it works, but its newest item is from {newest}"
+    code = proof.error_code or ""
+    if code in _FAILURE_WORDS:
+        return _FAILURE_WORDS[code]
+    if proof.status is not None:
+        return f"it answered HTTP {proof.status}"
+    return _capped(code or "it could not be checked", 80)
 
 
 def _layer_of(row: OfficialSource) -> DiscoveryLayer:

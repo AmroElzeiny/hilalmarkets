@@ -79,10 +79,32 @@ SOURCE_CATEGORIES: dict[str, str] = {
     COMMUNITY: "official community",
 }
 
-#: What every asset is required to be able to show. The website and the
-#: documentation say what a project *is*; these two say what it has been *doing*,
-#: which is the half a Sharia review has to keep watching after publication.
-REQUIRED_CATEGORIES: tuple[str, ...] = (NEWS, COMMUNITY)
+#: What every asset is required to be able to show. The website and the documentation
+#: say what a project *is*; this one says what it has been *doing*, which is the half a
+#: Sharia review has to keep watching after publication.
+#:
+#: **Only the news page is required, and that changed on 1 September 2026.** The
+#: community page used to be required too, and it was the wrong bar: plenty of real
+#: projects run no forum, no subreddit and no public Discord at all, and a page that does
+#: not exist can never be found however many layers look for it. Every one of those coins
+#: opened a task saying "no working official community page", a person could do nothing
+#: about it, and the queue filled with rows nobody could ever clear.
+#:
+#: A Shariah reviewer needs to hear when a project changes what it does. The news page is
+#: what carries that. A forum is a nice second window onto the same events and it is
+#: never the only one.
+REQUIRED_CATEGORIES: tuple[str, ...] = (NEWS,)
+
+#: Kept when a layer happens to offer one, never hunted for, and never a reason to ask a
+#: person. A community page is real evidence and is registered, proved and shown exactly
+#: like a news page — the single difference is that its absence is not a gap.
+OPTIONAL_CATEGORIES: tuple[str, ...] = (COMMUNITY,)
+
+#: Every category the resolver counts per asset. Coverage is counted over all of these so
+#: a layer cannot register twenty community links; only :data:`REQUIRED_CATEGORIES`
+#: decides whether anything is *missing*. Keeping "what we count" and "what we demand"
+#: apart is the whole of this change.
+TRACKED_CATEGORIES: tuple[str, ...] = (*REQUIRED_CATEGORIES, *OPTIONAL_CATEGORIES)
 
 #: Everything a source row's ``verification_state`` may say, and the plain words for it.
 #:
@@ -775,6 +797,10 @@ def categories_below(counts: Mapping[str, int], wanted: int) -> tuple[str, ...]:
     looking, and with :data:`LINKS_REQUIRED_PER_CATEGORY` to decide whether to ask a
     person. Two copies of this arithmetic would eventually disagree about which of
     those two questions a caller was asking.
+
+    It reads :data:`REQUIRED_CATEGORIES` and never :data:`TRACKED_CATEGORIES`, so a
+    missing community page can never make an asset look short or open a task. ``counts``
+    may carry optional categories — they are simply not asked about.
     """
 
     return tuple(
@@ -1060,13 +1086,19 @@ def provider_candidates(
 
 #: The paths a project is most likely to publish under, in the order they are worth
 #: trying. Every one of these is a guess and is scored as one.
+#:
+#: Every word here is also a word in :data:`NEWS_PATH_WORDS` or
+#: :data:`COMMUNITY_PATH_WORDS`, and that is not a coincidence to be maintained by hand —
+#: ``test_invariant_official_links_in_layers`` asserts it. A guessed path whose own word
+#: the classifier does not recognise would be fetched, proved, and then filed under the
+#: wrong category by the very next reader.
 _CONVENTION_PATHS: dict[str, tuple[str, ...]] = {
-    NEWS: ("blog", "news", "blog/", "announcements"),
+    NEWS: ("blog", "news", "announcements", "updates", "newsroom", "press"),
     COMMUNITY: ("community", "forum"),
 }
 #: Subdomains projects conventionally publish under.
 _CONVENTION_HOSTS: dict[str, tuple[str, ...]] = {
-    NEWS: ("blog",),
+    NEWS: ("blog", "news"),
     COMMUNITY: ("forum", "gov"),
 }
 
@@ -1081,6 +1113,11 @@ def convention_candidates(
     Pure guesswork, priced accordingly. A guess is only ever worth proposing because
     nothing downstream trusts it: it has to be fetched, allowed by robots, readable
     and recent before it counts, and the same proof would reject a wrong guess.
+
+    Guesses are made for :data:`REQUIRED_CATEGORIES` only. Every guess is a request to
+    somebody else's server, and guessing ``/community`` and ``/forum`` for a project that
+    runs neither spent four fetches per coin to prove nothing — the community page is not
+    required, so it is not worth guessing at.
     """
 
     website = (official_website or "").strip()
@@ -1093,7 +1130,7 @@ def convention_candidates(
     candidates: list[SourceCandidate] = []
     seen: set[str] = set()
     for category in REQUIRED_CATEGORIES:
-        for path in _CONVENTION_PATHS[category]:
+        for path in _CONVENTION_PATHS.get(category, ()):
             url = f"https://{host}/{path.strip('/')}"
             if url in seen:
                 continue
@@ -1107,7 +1144,7 @@ def convention_candidates(
                     confidence=confidence,
                 )
             )
-        for subdomain in _CONVENTION_HOSTS[category]:
+        for subdomain in _CONVENTION_HOSTS.get(category, ()):
             url = f"https://{subdomain}.{root}/"
             if url in seen:
                 continue
@@ -1584,12 +1621,18 @@ def channel_candidates(
 #: What the search layer asks for. One coin, several questions, because a project's
 #: announcements do not all live in one place: the blog, the Telegram channel and the
 #: X account are three different answers to "where does this project say things".
+#:
+#: Every question is about **news**, because news is the only required category. The
+#: fifth question used to ask for a community forum; it is gone. Each question is one
+#: paid search call per coin, so a question asked for something the product does not
+#: require was a bill for nothing. Community pages still arrive — the answers to these
+#: four questions are classified by :func:`classify_channel`, and a subreddit or a forum
+#: that turns up among them is registered like any other link.
 SEARCH_QUERIES: tuple[str, ...] = (
     '"{name}" {symbol} crypto official news',
     '"{name}" {symbol} official blog announcements',
     '"{name}" crypto official Telegram announcement channel',
     '"{name}" {symbol} official X account',
-    '"{name}" crypto official community forum',
 )
 
 

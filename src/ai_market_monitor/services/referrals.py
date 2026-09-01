@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.db.models import (
     AuditEvent,
+    BillingCheckoutAttempt,
     Plan,
     ReferralCode,
     ReferralRelationship,
@@ -79,7 +80,7 @@ class ReferralService:
             return relationship
         paid = (
             await self.session.execute(
-                select(Subscription.id, Plan.price_monthly, Plan.code)
+                select(Subscription.id, Plan.price_monthly, Plan.code, Plan.id)
                 .join(Plan, Plan.id == Subscription.plan_id)
                 .where(
                     Subscription.user_id == referred_user_id,
@@ -89,18 +90,36 @@ class ReferralService:
         ).first()
         if paid is None:
             return relationship
-        subscription_id, price_monthly, plan_code = paid
+        subscription_id, price_monthly, plan_code, plan_id = paid
+        # What the customer actually paid, written down at the moment it became true.
+        # An affiliate's commission is a share of this, and nothing else: without it the
+        # share would have to be taken of an assumed plan price, which is how a balance
+        # comes to show money that was never received.
+        #
+        # The number therefore comes from the completed checkout — the row the payment
+        # itself wrote — and not from the plan's list price. Those are two different
+        # numbers whenever a launch offer is running: this used to credit an affiliate
+        # $20 for somebody who paid $7.
+        charged = await self.session.scalar(
+            select(BillingCheckoutAttempt.amount)
+            .where(
+                BillingCheckoutAttempt.user_id == referred_user_id,
+                BillingCheckoutAttempt.plan_id == plan_id,
+                BillingCheckoutAttempt.status == "completed",
+            )
+            .order_by(BillingCheckoutAttempt.completed_at.desc())
+            .limit(1)
+        )
         relationship.status = "paid_converted"
         relationship.reward_status = "eligible_after_first_paid_month"
         relationship.metadata_json = {
             **relationship.metadata_json,
             "paid_subscription_id": str(subscription_id),
-            # What the customer actually paid, written down at the moment it became true.
-            # An affiliate's commission is a share of this, and nothing else: without it
-            # the share would have to be taken of an assumed plan price, which is how a
-            # balance comes to show money that was never received. The plan's price can
-            # change tomorrow; this row is what happened today.
-            "paid_amount_usd": str(price_monthly),
+            "paid_amount_usd": str(charged if charged is not None else price_monthly),
+            # Which of the two the number came from, so a payout can never be argued
+            # about later. "checkout" is money that really moved; "plan_price" is a
+            # subscription granted by hand, with no payment row behind it.
+            "paid_amount_source": "checkout" if charged is not None else "plan_price",
             "paid_plan_code": plan_code,
         }
         self._audit(

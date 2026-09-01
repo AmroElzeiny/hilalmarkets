@@ -145,6 +145,19 @@ services:
     # *between* tasks, so one scan that allocates a lot in a single run walks straight
     # past it. A scan holds the exchange's whole market list — measured at 139 MB — for
     # the length of the run, on top of the 350 MB recycle threshold and a 200 MB parent.
+    #
+    # Since 1 September 2026 this container also starts a headless Chromium, for the
+    # Shariah source resolver: a project's blog usually only exists after its JavaScript
+    # has run, and a plain HTTP request sees an empty shell. That browser is a separate
+    # process tree inside this ceiling, so the sum that has to fit is
+    #
+    #   200m parent + 1 child x 350m + about 300m of browser = 850m of the 1024m
+    #
+    # and it is asserted by `test_invariant_container_memory_limits.py`. A scan and a
+    # source sweep are different tasks and Celery runs one child, so the two peaks never
+    # happen together. What keeps the browser's share honest is in
+    # `services/sharia_page_render.py`: one browser per sweep, one page open at a time,
+    # images and GPU off, and a hard page budget.
     mem_limit: 1024m
     build: .
     restart: unless-stopped

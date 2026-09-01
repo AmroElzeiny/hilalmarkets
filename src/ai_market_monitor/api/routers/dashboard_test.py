@@ -37,8 +37,6 @@ from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.api.routers.dashboard import (
     _active_paid_plan_codes,
     _billing_history_rows,
-    _billing_method_provider,
-    _billing_selection_available,
     _builder_screening_context,
     _context,
     _monitor_cards_context,
@@ -111,7 +109,12 @@ from ai_market_monitor.services.account_settings import (
 )
 from ai_market_monitor.services.alert_emails import alert_email_address
 from ai_market_monitor.services.automated_research_reader import AutomatedResearchReader
-from ai_market_monitor.services.billing import BillingService
+from ai_market_monitor.services.billing import (
+    BillingService,
+    payment_method_available,
+    payment_method_offers_by_method,
+    payment_method_payload,
+)
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
 from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.lifecycle_dashboard import lifecycle_cards
@@ -1590,6 +1593,7 @@ def _plan_card(
     entitlement: Any,
     active_paid_plan_codes: Collection[str],
     availability: dict[str, Any],
+    pay_methods: dict[str, dict[str, dict[str, object]]],
 ) -> dict[str, Any]:
     """One plan, as a card. Every number comes from `core/plans.py`.
 
@@ -1640,6 +1644,9 @@ def _plan_card(
         "features": list(presentation.visible_features),
         "more_features": list(presentation.additional_features),
         "money_back": presentation.trial_note,
+        # Which ways of paying really work for *this* plan, decided on the server. The
+        # popup draws these; it never offers a way of paying that checkout would refuse.
+        "pay_methods": pay_methods.get("monthly", {}),
     }
 
 
@@ -1676,19 +1683,17 @@ async def subscription_page(
         or 0
     )
 
-    card_provider = _billing_method_provider(settings, "card")
-    crypto_provider = _billing_method_provider(settings, "crypto")
     availability = {
         code: {
             "purchasable": _plan_checkout_allowed(
                 plan_code=code,
                 active_paid_plan_codes=active_paid_plan_codes,
             ),
-            "card_monthly": _billing_selection_available(
-                settings, provider=card_provider, plan_code=code, billing_cycle="monthly"
+            "card_monthly": payment_method_available(
+                settings, method="card", plan_code=code, billing_cycle="monthly"
             ),
-            "crypto_monthly": _billing_selection_available(
-                settings, provider=crypto_provider, plan_code=code, billing_cycle="monthly"
+            "crypto_monthly": payment_method_available(
+                settings, method="crypto", plan_code=code, billing_cycle="monthly"
             ),
         }
         for code in PURCHASABLE_PLAN_CODES
@@ -1755,6 +1760,9 @@ async def subscription_page(
             entitlement=entitlement,
             active_paid_plan_codes=active_paid_plan_codes,
             availability=availability.get(code, {}),
+            pay_methods=payment_method_payload(
+                settings, plan_code=code, billing_cycles=("monthly",)
+            ),
         )
         for code in visible_public_plan_codes(billing_enabled=settings.billing_enabled)
     ]
@@ -1792,7 +1800,13 @@ async def subscription_page(
             "last_name": name_parts[1] if len(name_parts) > 1 else "",
             "email": primary_email or "",
         },
-        pay_methods={"card": card_provider, "crypto": crypto_provider},
+        # The state the popup opens in, before a plan is picked: a way of paying that
+        # cannot sell any plan is drawn switched off from the first frame.
+        pay_methods=payment_method_offers_by_method(
+            settings,
+            plan_codes=PURCHASABLE_PLAN_CODES,
+            billing_cycle="monthly",
+        ),
         open_for_plan=open_for_plan,
         settings_path=SETTINGS_PATH,
         support_path=SUPPORT_PATH,

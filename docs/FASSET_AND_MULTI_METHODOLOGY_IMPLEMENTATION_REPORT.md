@@ -79,7 +79,9 @@ spot pair. Provider outages fail closed and cannot produce guessed listings.
 
 ## Scheduling
 
-`SHARIA_SOURCE_SCAN_INTERVAL_HOURS` controls authority and approved-source monitoring.
+`SHARIA_SOURCE_SCAN_INTERVAL_HOURS` controls authority and approved-source monitoring —
+one week since 1 September 2026. The Celery beats tick daily; this setting decides what
+is due on each tick.
 Each completed run stores its exact `next_due_at`; the Passport displays persisted
 scheduler evidence where available. Monitoring and AI may create review evidence but
 cannot directly change external status.

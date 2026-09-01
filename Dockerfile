@@ -66,6 +66,27 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 FROM base AS runtime
 
+# Chromium, for the Shariah source pipeline. `services/sharia_page_render.py` reads a
+# project's blog or forum when the page only exists after its JavaScript has run, which is
+# now most of them. Without this the setting that turns rendering on has nothing to turn
+# on, and the resolver reports a live page as unreadable.
+#
+# `--with-deps` installs the system libraries Chromium needs on Debian slim. It is one
+# command rather than a hand-written apt list on purpose: the list belongs to Playwright's
+# own release and changes with it.
+#
+# `PLAYWRIGHT_BROWSERS_PATH` puts the browser somewhere every user can read. The default
+# is `/root/.cache/ms-playwright`, which a container that drops to a non-root user cannot
+# open — and the failure is silent, arriving as "the browser would not start".
+#
+# The image grows by roughly 400 MB. Disk is not what is short on this server; memory is,
+# and what a running browser may spend is bounded in `sharia_page_render.py` — one browser
+# per sweep, one page at a time, no images, and a hard page budget.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN python -m playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/ms-playwright \
+    && rm -rf /var/lib/apt/lists/*
+
 # The same way docker-compose.prod.yml starts it: several workers, each retired after a
 # bounded number of requests. This is the image's own default, so running it without a
 # compose file cannot quietly give a single process — which is the shape that went down

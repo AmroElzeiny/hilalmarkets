@@ -3,6 +3,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from ai_market_monitor.core.config import WHATSAPP_TEMPLATE_EVENTS, Settings
+from ai_market_monitor.core.plans import PURCHASABLE_PLAN_CODES, plan_offer
 from ai_market_monitor.engine.provider_families import (
     availability_from_settings,
     set_runtime_availability,
@@ -510,11 +511,23 @@ def validate_runtime_configuration(settings: Settings) -> None:
             if "creem" in configured_providers and not settings.creem_product_ids:
                 errors.append("CREEM_PRODUCT_IDS must map plans and billing periods")
             if "creem" in configured_providers and settings.creem_product_ids:
+                # A Creem product is needed for everything the product actually sells —
+                # read from `core/plans.py`, which owns that decision, never copied here.
+                #
+                # This list was four names typed out: trader and pro, monthly and annual.
+                # Three of those four are not on sale, so a correct configuration for the
+                # one plan that *is* on sale failed this check and the app refused to
+                # start. Card payments could not be switched on at all, which is a gate
+                # holding a stale copy of a decision that lives somewhere else.
                 required_creem_products = {
-                    "trader_monthly",
-                    "trader_annual",
-                    "pro_monthly",
-                    "pro_annual",
+                    f"{plan_code}_{cycle}"
+                    for plan_code in PURCHASABLE_PLAN_CODES
+                    for cycle in ("monthly", "annual")
+                    if (
+                        plan_offer(plan_code).monthly_available
+                        if cycle == "monthly"
+                        else plan_offer(plan_code).annual_available
+                    )
                 }
                 missing_products = sorted(
                     required_creem_products - settings.creem_product_ids.keys()

@@ -20,6 +20,14 @@ simply looks for company for it.
     .venv/Scripts/python scripts/recheck_official_sources.py
     .venv/Scripts/python scripts/recheck_official_sources.py --symbol BTC --symbol ETH
     .venv/Scripts/python scripts/recheck_official_sources.py --limit 25 --dry-run
+    .venv/Scripts/python scripts/recheck_official_sources.py --pending-only
+
+``--pending-only`` is the one to reach for after a change like switching the browser on:
+it works through **just** the coins the System Brain is currently asking a person about
+under "Pages not found", instead of all several hundred. Each coin it settles closes its
+own task; each one it cannot settle has its task rewritten with what was tried this time
+and why each address failed. On the server, ``deploy/fix-missing-source-pages.sh`` is a
+wrapper that runs exactly this inside the worker container.
 
 Every fetch is a request to somebody else's server and the scraper waits between them,
 so a full pass over every coin takes a long time. ``--limit`` and ``--symbol`` exist so
@@ -40,7 +48,9 @@ from sqlalchemy import select
 
 from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.core.database import SessionFactory
-from ai_market_monitor.db.models import CanonicalAsset, OfficialSource
+from ai_market_monitor.db.models import CanonicalAsset, OfficialSource, ReviewCase
+from ai_market_monitor.db.models.enums import ReviewCaseType
+from ai_market_monitor.services.sharia_page_render import render_engine_available
 from ai_market_monitor.services.sharia_source_activity import ACTIVITY_FLOOR
 from ai_market_monitor.services.sharia_source_catalog import (
     REQUIRED_CATEGORIES,
@@ -80,12 +90,52 @@ def _note_of(row: OfficialSource) -> str:
     return ""
 
 
+def _browser_state(settings) -> str:
+    """Whether a real browser can be used here, in one plain sentence.
+
+    Three different "no"s, and they need three different actions from whoever is reading
+    the output: switch the setting on, install the browser, or nothing — it works.
+    """
+
+    if not settings.sharia_source_browser_render_enabled:
+        return "off (SHARIA_SOURCE_BROWSER_RENDER_ENABLED=false). JavaScript pages cannot be read."
+    engine = render_engine_available()
+    if not engine:
+        return (
+            "switched on, but no browser is installed here. Run "
+            "`python -m playwright install chromium`."
+        )
+    return (
+        f"on, using {engine}, up to "
+        f"{settings.sharia_source_browser_render_max_pages} page(s) per run"
+    )
+
+
+async def _pending_asset_ids(session) -> set:
+    """The coins the System Brain is currently asking a person about, under "Pages not found".
+
+    Read from the open review cases rather than recomputed, so this script works through
+    exactly the rows a person is looking at on the page — not a second, slightly
+    different idea of what "pending" means.
+    """
+
+    rows = await session.scalars(
+        select(ReviewCase.canonical_asset_id).where(
+            ReviewCase.case_type == ReviewCaseType.OFFICIAL_SOURCE_GAP,
+            ReviewCase.done_at.is_(None),
+            ReviewCase.canonical_asset_id.is_not(None),
+        )
+    )
+    return {row for row in rows.all() if row is not None}
+
+
 def _asset_report(
     asset: CanonicalAsset,
     rows: Sequence[OfficialSource],
     outcome: AssetSourceOutcome,
     *,
     activity_floor: float,
+    was_pending: bool = False,
 ) -> dict[str, Any]:
     links = [
         {
@@ -117,6 +167,8 @@ def _asset_report(
         "newly_proved": outcome.proved,
         "withdrawn": outcome.withdrawn,
         "person_asked": outcome.escalated,
+        #: Whether the System Brain was asking a person about this coin before this run.
+        "was_pending": was_pending,
     }
 
 
@@ -158,14 +210,21 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
         f"- New links added and proved: {payload['links_added']}",
         f"- Links withdrawn because they are gone: {payload['links_withdrawn']}",
         f"- Coins sent to a person: {payload['people_asked']}",
+        f"- Tasks this run closed: {payload['tasks_closed']}",
         "",
         f"Web search: {payload['search']}",
+        f"Reading pages with a browser: {payload['browser']}",
         "",
         "A link's **activity** score says how alive and how relevant that page is: how",
         "recently it published, how many dated items it shows, and whether it talks about",
         "the project's money and its rules. It is not a Shariah status and is never shown",
         "as one. A page below the floor keeps working — the product just looks for more",
         "links to go with it.",
+        "",
+        "A **community page is never listed as missing**. Plenty of real projects run no",
+        "forum, no subreddit and no public chat, and a page that does not exist can never",
+        "be found. Only the news page is required; a community page is kept when one turns",
+        "up and is never asked for.",
         "",
         "## Coins with no working link in a category",
         "",
@@ -179,7 +238,7 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
             for item in gaps
         )
     else:
-        lines.append("None. Every coin has at least one working news page and one community page.")
+        lines.append("None. Every coin looked at has at least one working news page.")
     lines.extend(["", "## Coins whose links have gone quiet", ""])
     quiet = [item for item in assets if item["quiet_links"]]
     if quiet:
@@ -226,9 +285,17 @@ async def _run(args: argparse.Namespace) -> int:
         if probe.search_configured
         else f"off. {probe.search_requirement()}"
     )
+    # Said out loud before anything runs. Most of the coins this script is pointed at are
+    # stuck because their news page only exists after JavaScript has run, so "is there a
+    # browser" is the single fact that decides whether this run can help them.
+    browser_state = _browser_state(settings)
     print(f"Activity floor: {settings.sharia_source_activity_floor} (default {ACTIVITY_FLOOR})")
     print(f"Links wanted per category: {settings.sharia_source_links_per_category}")
+    print(f"Required: {', '.join(category_label(item) for item in REQUIRED_CATEGORIES)}")
+    print("A community page is kept when one is found and is never asked for.")
+    print(f"Looked at again every: {settings.sharia_source_scan_interval_hours} hour(s)")
     print(f"Web search: {search_state}")
+    print(f"Reading pages with a browser: {browser_state}")
     if args.dry_run:
         print("Dry run: pages are fetched, nothing is saved.")
 
@@ -242,6 +309,15 @@ async def _run(args: argparse.Namespace) -> int:
             )
             if wanted:
                 query = query.where(CanonicalAsset.symbol.in_(sorted(wanted)))
+            # Read every time, not only for --pending-only: it is one cheap query, and it
+            # is what lets any run report how many open tasks it actually closed.
+            pending = await _pending_asset_ids(session)
+            print(f"Coins the System Brain is asking about: {len(pending)}")
+            if args.pending_only:
+                if not pending:
+                    print("Nothing is pending. There is nothing for this run to fix.")
+                    return 0
+                query = query.where(CanonicalAsset.id.in_(pending))
             if args.limit:
                 query = query.limit(args.limit)
             assets = list((await session.scalars(query)).all())
@@ -270,6 +346,10 @@ async def _run(args: argparse.Namespace) -> int:
         "links_added": 0,
         "links_withdrawn": 0,
         "people_asked": 0,
+        # A coin that had an open task and comes out of this run not needing one has had
+        # that task closed by the resolver. Counted here because it is the number the
+        # person running this actually wants: how much shorter the queue got.
+        "tasks_closed": 0,
     }
     for index, asset in enumerate(assets, start=1):
         async with SessionFactory() as session:
@@ -293,7 +373,11 @@ async def _run(args: argparse.Namespace) -> int:
                 ).all()
             )
             report = _asset_report(
-                fresh, rows, outcome, activity_floor=settings.sharia_source_activity_floor
+                fresh,
+                rows,
+                outcome,
+                activity_floor=settings.sharia_source_activity_floor,
+                was_pending=fresh.id in pending,
             )
             if args.dry_run:
                 await session.rollback()
@@ -308,6 +392,9 @@ async def _run(args: argparse.Namespace) -> int:
         totals["links_added"] += len(report["newly_proved"])
         totals["links_withdrawn"] += len(report["withdrawn"])
         totals["people_asked"] += int(report["person_asked"])
+        if report["was_pending"] and not report["person_asked"]:
+            totals["tasks_closed"] += 1
+            print("   ** this coin's task is now closed")
         _print_asset(report)
         print(f"   ({index}/{len(assets)})")
 
@@ -315,6 +402,7 @@ async def _run(args: argparse.Namespace) -> int:
         "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "assets_checked": len(reports),
         "search": search_state,
+        "browser": browser_state,
         "dry_run": bool(args.dry_run),
         **totals,
         "assets": reports,
@@ -327,6 +415,9 @@ async def _run(args: argparse.Namespace) -> int:
     print(f"New links added:          {payload['links_added']}")
     print(f"Links withdrawn:          {payload['links_withdrawn']}")
     print(f"Coins sent to a person:   {payload['people_asked']}")
+    print(f"Tasks now closed:         {payload['tasks_closed']}")
+    if args.dry_run:
+        print("\nThis was a dry run. Nothing was saved and no task was closed.")
     if args.json:
         Path(args.json).write_text(
             json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
@@ -347,6 +438,14 @@ def main() -> int:
         help="Only this coin. Repeatable. Default: every approved coin.",
     )
     parser.add_argument("--limit", type=int, default=0, help="Stop after this many coins.")
+    parser.add_argument(
+        "--pending-only",
+        action="store_true",
+        help=(
+            "Only the coins the System Brain is asking a person about under "
+            "'Pages not found'. Each one it settles closes its own task."
+        ),
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",

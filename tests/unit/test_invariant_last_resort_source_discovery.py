@@ -171,20 +171,26 @@ async def test_a_model_is_never_asked_when_a_free_layer_already_found_the_pages(
 
 
 async def test_a_model_is_asked_only_after_every_free_layer_has_failed(test_context) -> None:
-    """And what it offers is proved like anything else before it counts."""
+    """And what it offers is proved like anything else before it counts.
+
+    The only page that exists here is one no free layer ever proposes: ``/insights`` is a
+    word the classifier knows but not one the guessing layer tries, so every free layer
+    genuinely comes back with nothing for the required category. That is the exact
+    condition the paid layer is for, and it is the only condition it may run in.
+    """
 
     settings = test_context["settings"]
     async with test_context["session_factory"]() as session:
         asset = await _asset(session, symbol="ZZZ", name="Zeta", website="https://zeta.example/")
         model = _Model(
             results=(
-                SearchResult(url="https://zeta.example/blog", title="Zeta newsroom"),
+                SearchResult(url="https://zeta.example/insights", title="Zeta newsroom"),
                 SearchResult(url="https://www.reddit.com/r/zeta/", title="Zeta community"),
             )
         )
         pages = {
             "https://zeta.example/": _live_page(),
-            "https://zeta.example/blog": _live_page(),
+            "https://zeta.example/insights": _live_page(),
             "https://www.reddit.com/r/zeta/": _live_page(),
         }
         service = SourceResolutionService(
@@ -209,7 +215,9 @@ async def test_a_model_is_asked_only_after_every_free_layer_has_failed(test_cont
     # answer is not spent offering them back.
     assert model.last_already_tried
     proved = {row.source_url for row in rows if row.verification_state == VERIFIED}
-    assert "https://zeta.example/blog" in proved
+    assert "https://zeta.example/insights" in proved
+    # The community page it offered is kept too. Optional means "never demanded", not
+    # "thrown away when a layer finds one".
     assert "https://www.reddit.com/r/zeta/" in proved
     assert outcome.missing == ()
 
@@ -501,18 +509,62 @@ async def test_a_browser_that_cannot_run_is_reported_and_never_raises(test_conte
     assert "add the correct address" not in case.human_review_reason
 
 
-def test_the_browser_is_off_until_it_is_switched_on() -> None:
-    renderer = BrowserPageRenderer(Settings(_env_file=None))
+def test_the_browser_is_on_by_default() -> None:
+    """It was off until 1 September 2026, and that was the wrong default.
+
+    Most project blogs only exist after their JavaScript has run. With rendering off, a
+    plain fetch sees an empty shell, the page is scored unreadable, and the coin is
+    reported to a reviewer as having no news page — a fault that is ours, described as a
+    fault of the project's. Measured on 20 coins: 9 readable without it, 17 with it.
+    """
+
+    assert BrowserPageRenderer(Settings(_env_file=None)).enabled is True
+
+
+def test_a_browser_that_is_switched_off_says_so_in_words() -> None:
+    """Switching it off stays possible, and must never look like "the page is broken"."""
+
+    settings = Settings(_env_file=None, sharia_source_browser_render_enabled=False)
+    renderer = BrowserPageRenderer(settings)
     assert renderer.enabled is False
     assert "switched off" in renderer.why_unavailable()
 
 
 async def test_a_disabled_browser_answers_with_a_reason_rather_than_rendering() -> None:
-    renderer = BrowserPageRenderer(Settings(_env_file=None))
+    settings = Settings(_env_file=None, sharia_source_browser_render_enabled=False)
+    renderer = BrowserPageRenderer(settings)
     page = await renderer.render("https://example.com/blog")
     assert page.ok is False
     assert page.unavailable_reason
     # Closing one that never started is safe.
+    await renderer.aclose()
+
+
+async def test_a_browser_stops_at_its_page_budget_and_says_why() -> None:
+    """One browser per sweep is only safe while the pages it draws are finite.
+
+    The server has 3.9 GB and no swap. A run that met a whole batch of unreadable
+    addresses would otherwise keep starting renderers until Docker killed the container,
+    and the run would then be retried into the same wall.
+    """
+
+    settings = Settings(
+        _env_file=None,
+        sharia_source_browser_render_enabled=True,
+        sharia_source_browser_render_max_pages=2,
+    )
+    renderer = BrowserPageRenderer(settings)
+    assert renderer.budget_spent is False
+
+    # Spend the budget without starting a real browser: the counter is what the guard
+    # reads, and a real Chromium is not what this rule is about.
+    renderer._rendered = 2
+
+    assert renderer.budget_spent is True
+    page = await renderer.render("https://example.com/blog")
+    assert page.ok is False
+    assert "limit" in page.unavailable_reason
+    assert "SHARIA_SOURCE_BROWSER_RENDER_MAX_PAGES" in page.unavailable_reason
     await renderer.aclose()
 
 

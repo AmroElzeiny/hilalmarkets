@@ -14,6 +14,37 @@
 # `df` cannot answer, these functions print nothing and the caller treats the answer as
 # unknown. They never answer zero: zero would refuse a deploy that was perfectly fine.
 
+# python_bin
+#
+# The Python interpreter to run **on this server**. Prints its path and returns 0, or
+# prints nothing and returns 1 when the server has none.
+#
+# Debian and Ubuntu ship `python3` and **no `python` at all** — the bare name has not been
+# a command on a default install since 2020. A deploy script that types `python` therefore
+# dies on a clean server, and under `set -u` the real message is buried: the next line
+# fails with an unrelated "unbound variable" because the array the command should have
+# filled is empty. That is exactly how `deploy/deploy.sh` failed on 2 September 2026:
+#
+#     deploy.sh: line 23: python: command not found
+#     deploy.sh: line 27: COMPOSE_IDENTITY[0]: unbound variable
+#
+# `python3` is tried first on purpose. Where both exist they are usually the same binary,
+# and where they differ `python` is the one more likely to be an old Python 2.
+#
+# This is only for Python that runs on the **host**. Python *inside* the application
+# container is always plain `python`: the image is built on `python:3.12-slim`, where that
+# is the real name.
+python_bin() {
+  local candidate
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      command -v "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Free space in gigabytes, one decimal place, on the filesystem holding $1.
 # Prints nothing when the path cannot be read.
 disk_free_gb() {
