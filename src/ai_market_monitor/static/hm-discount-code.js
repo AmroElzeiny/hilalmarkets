@@ -18,11 +18,28 @@
 
 const ENDPOINT = "/dashboard/billing/discount";
 
-/** The shape a code may take. The same rule the server applies, so an obvious non-code
- *  is answered here instead of after a trip to the payment company. Never looser than
- *  the server's rule: a browser that says yes where the server says no is the failure
- *  this whole file exists to avoid. */
-const CODE_SHAPE = /^[A-Z0-9][A-Z0-9_-]{1,39}$/;
+/** The shape a code may take, **sent by the server** on the box itself.
+ *
+ * It was written out here as well, which made this the fourth copy of one rule: the
+ * settings loader, the code reader, and this line. A browser copy that is looser sends
+ * rubbish to the payment company; one that is stricter refuses a code the server would
+ * have accepted, and the person is told their real code is wrong. Neither shows up in
+ * any test that only exercises one side.
+ *
+ * The fallback is used only if a page somehow renders the box without the attribute, and
+ * is deliberately the strictest reading — refusing nothing but the empty string, so an
+ * old page can still reach the server, which is the side that really decides. */
+const FALLBACK_SHAPE = /^\S+$/;
+
+function codeShape(box) {
+  const written = box.dataset.discountPattern || "";
+  if (!written) return FALLBACK_SHAPE;
+  try {
+    return new RegExp(written);
+  } catch {
+    return FALLBACK_SHAPE;
+  }
+}
 
 for (const box of document.querySelectorAll("[data-discount]")) attach(box);
 
@@ -176,7 +193,7 @@ export function attach(box) {
       input.focus();
       return;
     }
-    if (!CODE_SHAPE.test(typed)) {
+    if (!codeShape(box).test(typed)) {
       say("That does not look like a code. A code is letters and numbers, like HILAL25.", "danger");
       input.focus();
       return;

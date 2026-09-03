@@ -73,15 +73,30 @@ So **the same code must exist in Creem, at the same percentage**, or a card buye
 an offer they cannot get. Create it in the Creem dashboard as a *percentage* discount named
 exactly as `LAUNCH_DISCOUNT_CODE`, applying to the product in `CREEM_PRODUCT_IDS`.
 
-Extra codes that only apply to crypto can be listed per deployment instead:
+Codes that only apply to crypto are listed per deployment instead:
 
 ```env
-BILLING_DISCOUNT_CODES=WELCOME10=10,SUMMER20=20
+BILLING_DISCOUNT_CODES=HILAL25=25,TINYTALES=30
 ```
 
 Codes are looked up in Creem first and in that list second. A code Creem *refuses* —
 expired, switched off, used up, fixed-amount, or for another product — is refused here too
 and never falls through to the list.
+
+Two rules govern that line:
+
+- **The launch code may be listed, but only at the number it already has.** `core/plans.py`
+  owns what `LAUNCH_DISCOUNT_CODE` is worth, because the pricing cards derive the lower
+  price from it. A different number here refuses to start, naming the code and both
+  figures — a page promising one discount while checkout applies another is the exact
+  fault this list is fenced against.
+- **Listing it also outlives the launch window.** `core/plans.py` stops offering the launch
+  code at `PROMOTION_ENDS_AT`; this list has no end date, so a code written here keeps
+  working after the pricing cards stop advertising it. Leave it out of the list if it
+  should stop on that date instead.
+
+The two example files ship this blank on purpose. A real code belongs in `.env` and
+`.env.production`, which are not in git.
 
 Check both sides agree before enabling or changing anything:
 

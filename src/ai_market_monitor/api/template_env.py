@@ -27,6 +27,7 @@ from fastapi.templating import Jinja2Templates
 
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.dashboard_paths import MONITOR_PATH, monitor_edit_path
+from ai_market_monitor.core.plans import DISCOUNT_CODE_PATTERN
 from ai_market_monitor.services.billing import method_word, provider_method, provider_word
 from ai_market_monitor.services.hilal_methodology import (
     METHODOLOGY_PUBLIC_PATH as AUTOMATED_METHODOLOGY_PATH,
@@ -137,4 +138,9 @@ def register(templates: Jinja2Templates) -> Jinja2Templates:
     # that draw the notice — the failure this product has repeated most often is a page
     # holding its own copy of an address that later moved.
     templates.env.globals["automated_methodology_path"] = AUTOMATED_METHODOLOGY_PATH
+    # What a discount code may look like, handed to the page so the browser refuses the
+    # same shapes the server refuses. The Apply button used to carry its own copy of this
+    # rule, written out by hand — a browser rule that is merely *similar* either sends
+    # rubbish to the payment company or refuses a code the server would have taken.
+    templates.env.globals["discount_code_pattern"] = DISCOUNT_CODE_PATTERN
     return templates

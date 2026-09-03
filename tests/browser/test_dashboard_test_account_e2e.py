@@ -943,6 +943,37 @@ def test_a_wrong_code_says_so_and_changes_no_price(
     assert page.locator('input[name="discount_code"]').input_value() == ""
 
 
+def test_the_browser_refuses_the_same_shapes_the_server_refuses(
+    page: Page, live_shape_base_url: str
+) -> None:
+    """The shape rule is sent by the server, not written out again in the script.
+
+    A browser copy that drifts fails in one of two invisible ways: looser, and rubbish
+    reaches the payment company; stricter, and somebody with a real code is told it is
+    wrong. Neither shows up in a test that only exercises one side, so this reads the rule
+    off the page and checks it is the server's own.
+    """
+
+    from ai_market_monitor.core.plans import DISCOUNT_CODE_PATTERN
+
+    _reach_the_paying_step(page, live_shape_base_url)
+    page.locator('[data-s-method="crypto"] input').check()
+    box = page.locator("[data-discount]")
+    expect(box).to_be_visible()
+    assert box.get_attribute("data-discount-pattern") == DISCOUNT_CODE_PATTERN
+
+    total = page.locator("[data-s-order-total]")
+    before = total.inner_text()
+    # One character. The server's rule needs at least two, so this must never be sent.
+    page.locator("[data-discount-input]").fill("A")
+    page.locator("[data-discount-apply]").click()
+
+    said = page.locator("[data-discount-said]")
+    expect(said).to_have_attribute("data-tone", "danger", timeout=10_000)
+    expect(total).to_have_text(before)
+    assert page.locator('input[name="discount_code"]').input_value() == ""
+
+
 def test_switching_back_to_card_drops_a_code_that_cannot_be_used(
     page: Page, live_shape_base_url: str
 ) -> None:

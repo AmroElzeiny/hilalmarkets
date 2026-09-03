@@ -19,6 +19,9 @@
   data-discount-methods="{{ methods|join(',') }}"
   data-discount-full="{{ full_amount }}"
   data-discount-currency="{{ currency }}"
+  {# The shape rule, from the server, so the Apply button refuses exactly what the server
+     refuses. It used to be written out again inside the script. #}
+  data-discount-pattern="{{ discount_code_pattern }}"
   data-discount-state="empty"
   hidden
 >

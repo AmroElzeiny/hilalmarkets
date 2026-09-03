@@ -24,9 +24,11 @@ from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.plans import (
     LAUNCH_DISCOUNT_CODE,
     PLAN_DEFINITIONS,
+    PLAN_OFFERS,
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
     PURCHASABLE_PLAN_CODES,
+    PlanOffer,
     coded_monthly_price,
     effective_monthly_price,
     launch_discount_percent,
@@ -264,15 +266,68 @@ async def test_the_launch_code_stops_working_when_the_offer_ends() -> None:
     )
 
 
-@pytest.mark.anyio
-async def test_an_env_file_cannot_change_what_the_launch_code_is_worth() -> None:
-    """Two owners for one number is how a card comes to advertise a discount the
-    checkout does not give."""
+@pytest.mark.parametrize("wrong", ["1", "10", "24", "26", "30", "50", "90", "100"])
+def test_an_env_file_cannot_give_the_launch_code_a_different_number(wrong: str) -> None:
+    """Two owners for one number is how a card advertises a discount checkout refuses.
 
-    settings = _settings(
-        creem_api_key=None,
-        billing_discount_codes={LAUNCH_DISCOUNT_CODE: Decimal("90")},
-    )
+    The launch code *may* be written in the env list, so one line can name every code a
+    deployment honours. It may not be written there at a different percentage: the pricing
+    pages quote `core/plans.py` and the checkout would charge this list. Refused at
+    startup, across every wrong number rather than the one somebody happened to type.
+    """
+
+    with pytest.raises(Exception) as raised:  # noqa: PT011 - pydantic wraps the message
+        _settings(billing_discount_codes=f"{LAUNCH_DISCOUNT_CODE}={wrong}")
+    assert LAUNCH_DISCOUNT_CODE in str(raised.value)
+
+
+def test_retiring_the_launch_offer_hands_the_code_to_the_env_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The agreement check must not block the way the offer is meant to be retired.
+
+    Retiring means `core/plans.py` stops advertising the code and the env list keeps it
+    working, at whatever number is wanted. A check that refused any number once there was
+    no launch offer left would make the last step impossible — a guard that fires when
+    there is nothing left to disagree with.
+    """
+
+    import ai_market_monitor.core.config as config_module
+
+    retired = {
+        name: PlanOffer(
+            monthly_available=offer.monthly_available,
+            annual_available=offer.annual_available,
+            launch_discount_percent=None,
+        )
+        for name, offer in PLAN_OFFERS.items()
+    }
+    monkeypatch.setattr(config_module, "PLAN_OFFERS", retired)
+    settings = _settings(billing_discount_codes=f"{LAUNCH_DISCOUNT_CODE}=40")
+    assert settings.billing_discount_codes[LAUNCH_DISCOUNT_CODE] == Decimal("40")
+
+
+def test_the_launch_code_may_be_written_down_at_the_number_it_already_has() -> None:
+    """Restating it is allowed, so the env file can list every code in one place."""
+
+    percent = plan_offer("trader").launch_discount_percent
+    assert percent is not None
+    settings = _settings(billing_discount_codes=f"{LAUNCH_DISCOUNT_CODE}={percent}")
+    assert settings.billing_discount_codes[LAUNCH_DISCOUNT_CODE] == percent
+
+
+@pytest.mark.anyio
+async def test_the_launch_offer_still_wins_if_a_wrong_number_ever_reached_the_list() -> (
+    None
+):
+    """Defence in depth: the resolver prefers the launch offer on its own.
+
+    The check above stops a wrong number being written. This proves the reader does not
+    depend on that check having run — the two guards fail in the same direction.
+    """
+
+    settings = _settings(creem_api_key=None, billing_discount_codes={})
+    settings.billing_discount_codes[LAUNCH_DISCOUNT_CODE] = Decimal("90")
     service = DiscountCodeService(settings)
     offer = service.local_offer(
         LAUNCH_DISCOUNT_CODE, plan_code="trader", now=BEFORE_THE_END
@@ -280,6 +335,121 @@ async def test_an_env_file_cannot_change_what_the_launch_code_is_worth() -> None
     assert offer is not None
     assert offer.percent == launch_discount_percent("trader", now=BEFORE_THE_END)
     assert offer.source == "launch"
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        "HILAL25=25,TINYTALES=30",
+        "hilal25=25, tinytales=30",
+        "HILAL25=25%,TINYTALES=30%",
+        "HILAL25:25;TINYTALES:30",
+        '{"HILAL25": 25, "TINYTALES": 30}',
+        "HILAL25=25\nTINYTALES=30",
+    ],
+)
+def test_every_way_of_writing_the_deployed_list_reads_the_same(written: str) -> None:
+    """The line an operator types by hand, in each form the loader promises to accept.
+
+    A deployment that writes it one way and a test that only ever checks another is how a
+    live env file turns out to hold a value nothing has read.
+    """
+
+    settings = _settings(billing_discount_codes=written)
+    assert settings.billing_discount_codes == {
+        "HILAL25": Decimal("25"),
+        "TINYTALES": Decimal("30"),
+    }
+
+
+@pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+@pytest.mark.parametrize("when", [BEFORE_THE_END, AFTER_THE_END])
+@pytest.mark.anyio
+async def test_a_code_from_the_deployment_list_prices_every_plan(
+    plan_code: str, when: datetime
+) -> None:
+    """A listed code works on any plan and does not stop with the launch window.
+
+    `core/plans.py` stops offering the launch code at ``PROMOTION_ENDS_AT``; this list has
+    no end date, which is the whole reason a code is put in it.
+    """
+
+    settings = _settings(creem_api_key=None, billing_discount_codes="TINYTALES=30")
+    service = DiscountCodeService(settings)
+    full = PLAN_DEFINITIONS[plan_code].monthly_price
+    priced = await service.price_for(
+        "tinytales", plan_code=plan_code, full_amount=full, currency="USD", now=when
+    )
+    assert priced.code == "TINYTALES"
+    assert priced.percent == Decimal("30")
+    assert priced.source == "settings"
+    assert priced.final == price_after_percent(full, Decimal("30"))
+    assert priced.saving == full - priced.final
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["A=10", "-START=10", "_UNDER=10", "=10", "TOO" + "X" * 40 + "=10", "WITH.DOT=10"],
+)
+def test_a_code_nobody_could_type_cannot_be_configured(written: str) -> None:
+    """Every layer applies the same shape rule, so none can offer what another refuses.
+
+    The settings loader used to have no shape rule at all. A one-letter code loaded
+    happily and was then refused on every single attempt, because the reader wants at
+    least two characters — a discount that existed in the configuration and could never
+    be used. Both now ask `core/plans.py`.
+    """
+
+    with pytest.raises(Exception) as raised:  # noqa: PT011 - pydantic wraps the message
+        _settings(billing_discount_codes=written)
+    assert "BILLING_DISCOUNT_CODES" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "code", ["HILAL25", "TINYTALES", "AB", "A1", "WELCOME-10", "NEW_YEAR", "X" * 40]
+)
+def test_a_configured_code_can_always_be_typed(code: str) -> None:
+    """The other direction of the same rule: anything the settings accept, the box takes.
+
+    Asserted across the family rather than for one code, because a shape rule that is
+    merely *similar* in two places is the drift this pairing exists to remove.
+    """
+
+    # The launch code is the one entry whose number is not free, so it is written at the
+    # number it already has. Shape is what is being tested here, not the percentage.
+    launch = plan_offer("trader").launch_discount_percent
+    percent = launch if code == LAUNCH_DISCOUNT_CODE else Decimal("10")
+    settings = _settings(billing_discount_codes=f"{code}={percent}")
+    assert code in settings.billing_discount_codes
+    assert normalize_discount_code(code.lower()) == code
+
+
+@pytest.mark.parametrize("typed", ["TINY TALES", " tinytales ", "Tiny Tales", "tinyTALES"])
+def test_spaces_and_case_are_dropped_the_same_way_in_both_layers(typed: str) -> None:
+    """People paste ``HILAL 25``. Both layers have to read that as one code.
+
+    If only the reader dropped inner spaces, a deployment could configure ``TINY TALES``
+    and every person typing it would be refused. If only the loader did, the opposite.
+    """
+
+    settings = _settings(billing_discount_codes=f"{typed}=30")
+    assert settings.billing_discount_codes == {"TINYTALES": Decimal("30")}
+    assert normalize_discount_code(typed) == "TINYTALES"
+
+
+@pytest.mark.anyio
+async def test_a_code_that_is_on_no_list_is_refused() -> None:
+    settings = _settings(creem_api_key=None, billing_discount_codes="TINYTALES=30")
+    service = DiscountCodeService(settings)
+    with pytest.raises(DiscountCodeError) as raised:
+        await service.price_for(
+            "TINYTAILS",  # one letter out
+            plan_code="trader",
+            full_amount=Decimal("20.00"),
+            currency="USD",
+            now=BEFORE_THE_END,
+        )
+    assert raised.value.code == "discount_code_unknown"
 
 
 @pytest.mark.anyio

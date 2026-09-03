@@ -30,7 +30,6 @@ first one.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -40,7 +39,11 @@ import httpx
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.plans import (
+    DISCOUNT_CODE_PATTERN as _DISCOUNT_CODE_PATTERN,
+)
+from ai_market_monitor.core.plans import (
     LAUNCH_DISCOUNT_CODE,
+    is_discount_code_shaped,
     launch_discount_percent,
     price_after_percent,
 )
@@ -59,9 +62,10 @@ __all__ = [
 #: What a code may be made of. Letters, digits, dash and underscore, two to forty
 #: characters. Shared with the browser so the Apply button refuses the same shapes the
 #: server refuses, rather than sending an obvious non-code all the way to Creem.
-DISCOUNT_CODE_PATTERN: Final[str] = r"^[A-Z0-9][A-Z0-9_-]{1,39}$"
-
-_CODE_RE: Final[re.Pattern[str]] = re.compile(DISCOUNT_CODE_PATTERN)
+#:
+#: Re-exported rather than written again: `core/plans.py` owns it, because the settings
+#: loader has to apply the same rule and cannot import this module without a cycle.
+DISCOUNT_CODE_PATTERN: Final[str] = _DISCOUNT_CODE_PATTERN
 
 #: Where a code was found. Kept on the offer so an audit record can say which list
 #: granted a discount, months later, when the lists have both changed.
@@ -124,7 +128,7 @@ def normalize_discount_code(raw: str | None) -> str:
     cleaned = "".join(str(raw or "").split()).upper()
     if not cleaned:
         raise DiscountCodeError("discount_code_empty", "Write your code in the box first.")
-    if not _CODE_RE.match(cleaned):
+    if not is_discount_code_shaped(cleaned):
         raise DiscountCodeError(
             "discount_code_shape",
             "That does not look like a code. A code is letters and numbers, like HILAL25.",

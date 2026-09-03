@@ -117,7 +117,9 @@ async def main() -> int:
                 print(f"{product_key}: this product is not active in Creem.")
                 problems += 1
 
-        problems += await check_launch_code(client, base, key.get_secret_value())
+        problems += await check_discount_codes(
+            client, base, key.get_secret_value(), settings
+        )
 
     if problems:
         print(
@@ -125,59 +127,107 @@ async def main() -> int:
             "did not show, and the payment could not be confirmed afterwards."
         )
         return 1
-    print("\nCreem agrees with the website about every price and about the launch code.")
+    print("\nCreem agrees with the website about every price and about every code.")
     return 0
 
 
-async def check_launch_code(client: httpx.AsyncClient, base: str, key: str) -> int:
-    """Does Creem hold the launch code, at the percentage the website advertises?
+def codes_this_deployment_honours(settings: Settings) -> list[tuple[str, Decimal, bool]]:
+    """Every code a buyer could type, what it is worth here, and whether Creem needs it.
 
-    Only the card route needs this: crypto buyers type the code here and this application
-    applies it. But both routes advertise the same offer on the same pricing card, so a
-    code that exists on one side and not the other means a card buyer is told about a
-    discount that does nothing when they reach the payment page.
+    Two lists feed one answer, and the script has to check both or it checks nothing: the
+    launch code that `core/plans.py` owns, and ``BILLING_DISCOUNT_CODES``. Checking only
+    the first is how adding a second code silently escapes every check there is.
+
+    The flag says whether Creem *must* hold the code. The launch code must: it is printed
+    on the public pricing cards, which card buyers read too. A code that only lives in the
+    env list is never advertised on a card and is only accepted on the crypto route, so
+    Creem not having it is a fact worth printing, not a fault.
     """
 
+    wanted: list[tuple[str, Decimal, bool]] = []
     plans_with_a_code = [
         code for code in PUBLIC_PLAN_PRESENTATIONS if launch_discount_percent(code) is not None
     ]
-    if not plans_with_a_code:
-        print("\nNo launch code is running. Nothing to check in Creem's discounts.")
+    if plans_with_a_code:
+        launch = launch_discount_percent(plans_with_a_code[0])
+        if launch is not None:
+            wanted.append((LAUNCH_DISCOUNT_CODE, launch, True))
+    for code, percent in sorted(settings.billing_discount_codes.items()):
+        if code == LAUNCH_DISCOUNT_CODE:
+            # Already listed above, and the settings loader refuses a different number for
+            # it, so the two entries can only ever be the same one.
+            continue
+        wanted.append((code, percent, False))
+    return wanted
+
+
+async def check_discount_codes(
+    client: httpx.AsyncClient, base: str, key: str, settings: Settings
+) -> int:
+    """Does Creem agree with this deployment about every code, and its percentage?
+
+    Only the card route reads Creem: crypto buyers type the code here and this application
+    applies it. But both routes can advertise the same offer, and a code that exists on
+    both sides at *different* percentages charges two customers two different prices for
+    the same thing — so a disagreement is a fault whichever list the code came from.
+    """
+
+    wanted = codes_this_deployment_honours(settings)
+    if not wanted:
+        print("\nNo discount codes are running. Nothing to check in Creem's discounts.")
         return 0
-    wanted = launch_discount_percent(plans_with_a_code[0])
-    response = await client.get(
-        f"{base}/v1/discounts",
-        params={"discount_code": LAUNCH_DISCOUNT_CODE},
-        headers={"x-api-key": key, "User-Agent": "HilalMarkets/1.0"},
-    )
-    if response.status_code == 404:
-        example = coded_monthly_price(plans_with_a_code[0])
-        print(
-            f"\n{LAUNCH_DISCOUNT_CODE}: Creem has never heard of this code. Crypto buyers "
-            f"get {example} USD; card buyers cannot get the offer at all. "
-            f"Create a {wanted}% percentage discount named {LAUNCH_DISCOUNT_CODE} in Creem."
-        )
-        return 1
-    if response.status_code != 200:
-        print(f"\n{LAUNCH_DISCOUNT_CODE}: Creem answered {response.status_code}. Cannot check.")
-        return 1
-    body = response.json()
-    kind = str(body.get("type") or "")
-    state = str(body.get("status") or "")
-    percent = body.get("percentage")
-    if percent is None:
-        percent = body.get("amount")
-    same = kind == "percentage" and Decimal(str(percent or 0)) == wanted
-    print(
-        f"\n{LAUNCH_DISCOUNT_CODE}: Creem takes off {percent}{'%' if kind == 'percentage' else ''}"
-        f", the website says {wanted}% ({state}) -> {'same' if same else 'DIFFERENT'}"
-    )
+
     problems = 0
-    if not same:
-        problems += 1
-    if state != "active":
-        print(f"{LAUNCH_DISCOUNT_CODE}: this discount is not active in Creem.")
-        problems += 1
+    print("\ndiscount codes:")
+    for code, percent, must_exist in wanted:
+        response = await client.get(
+            f"{base}/v1/discounts",
+            params={"discount_code": code},
+            headers={"x-api-key": key, "User-Agent": "HilalMarkets/1.0"},
+        )
+        if response.status_code == 404:
+            if must_exist:
+                example = coded_monthly_price(
+                    next(
+                        plan
+                        for plan in PUBLIC_PLAN_PRESENTATIONS
+                        if launch_discount_percent(plan) is not None
+                    )
+                )
+                print(
+                    f"  {code}: Creem has never heard of this code. Crypto buyers get "
+                    f"{example} USD; card buyers cannot get the offer at all. Create a "
+                    f"{percent}% percentage discount named {code} in Creem."
+                )
+                problems += 1
+            else:
+                print(
+                    f"  {code}: {percent}% off, crypto only. Creem does not have it, so a "
+                    f"card buyer cannot use it. Add it to Creem if they should."
+                )
+            continue
+        if response.status_code != 200:
+            print(f"  {code}: Creem answered {response.status_code}. Cannot check.")
+            problems += 1
+            continue
+        body = response.json()
+        kind = str(body.get("type") or "")
+        state = str(body.get("status") or "")
+        creem_percent = body.get("percentage")
+        if creem_percent is None:
+            creem_percent = body.get("amount")
+        same = kind == "percentage" and Decimal(str(creem_percent or 0)) == percent
+        print(
+            f"  {code}: Creem takes off {creem_percent}"
+            f"{'%' if kind == 'percentage' else ''}, this deployment says {percent}% "
+            f"({state}) -> {'same' if same else 'DIFFERENT'}"
+        )
+        if not same:
+            problems += 1
+        if state != "active":
+            print(f"  {code}: this discount is not active in Creem.")
+            if must_exist:
+                problems += 1
     return problems
 
 

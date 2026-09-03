@@ -107,6 +107,29 @@ PROMOTION_ENDS_AT = datetime(2026, 9, 15, 0, 0, tzinfo=UTC)
 #: that can catch a disagreement, because nothing offline can see Creem.
 LAUNCH_DISCOUNT_CODE = "HILAL25"
 
+#: What any discount code may be made of: letters, digits, dash and underscore, two to
+#: forty characters.
+#:
+#: It lives here, beside the launch code, because three layers have to agree on it and
+#: two of them cannot import the third. The settings loader checks a code before it is
+#: written down, `services/discount_codes.py` checks one somebody typed, and the browser
+#: refuses the same shapes so an obvious non-code is answered without a trip to Creem.
+#:
+#: Before this was shared, the settings loader had no shape rule at all. A code of one
+#: letter loaded happily and then failed every time it was typed, because the reader
+#: demanded at least two — a discount that existed in the configuration and could not be
+#: used by anybody, which is exactly the "offered but not runnable" fault this codebase
+#: keeps finding.
+DISCOUNT_CODE_PATTERN = r"^[A-Z0-9][A-Z0-9_-]{1,39}$"
+
+_DISCOUNT_CODE_RE = re.compile(DISCOUNT_CODE_PATTERN)
+
+
+def is_discount_code_shaped(code: str) -> bool:
+    """Could this ever be a discount code? One answer, for every layer that asks."""
+
+    return bool(_DISCOUNT_CODE_RE.match(code))
+
 #: What a card says instead of a price when the plan cannot be bought yet.
 COMING_SOON_LABEL = "Soon"
 

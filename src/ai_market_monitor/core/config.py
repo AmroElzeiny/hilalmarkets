@@ -28,6 +28,11 @@ from ai_market_monitor.core.launch_stage import (
     StageExposure,
     resolve_launch_stage,
 )
+from ai_market_monitor.core.plans import (
+    LAUNCH_DISCOUNT_CODE,
+    PLAN_OFFERS,
+    is_discount_code_shaped,
+)
 from ai_market_monitor.observability.metrics import MetricRetentionPolicy
 
 
@@ -345,8 +350,14 @@ class Settings(BaseSettings):
     #:
     #: This is the **fallback** list. Codes are looked up in Creem first, because Creem is
     #: where the card route reads them; this list answers when Creem is not configured,
-    #: has never heard of the code, or cannot be reached. The launch code is not listed
-    #: here — `core/plans.py` owns what it is worth and when it stops.
+    #: has never heard of the code, or cannot be reached.
+    #:
+    #: The launch code may be written here too, so that one line names every code the
+    #: deployment honours — but `core/plans.py` stays the owner of what it is worth, and
+    #: :meth:`_launch_code_must_agree` refuses to start on a different number. Listing it
+    #: also outlives the launch window: `core/plans.py` stops offering it at
+    #: ``PROMOTION_ENDS_AT``, after which this list is what keeps it working. Leave it out
+    #: if the code should stop on that date.
     #:
     #: ``NoDecode`` because this is a line somebody edits by hand in an env file. Without
     #: it pydantic-settings JSON-decodes the value *before* any validator here runs, so a
@@ -1501,6 +1512,15 @@ class Settings(BaseSettings):
             code = "".join(str(name).split()).upper()
             if not code:
                 raise ValueError("BILLING_DISCOUNT_CODES has a discount with no code.")
+            # The same shape the code box applies to what somebody types. Without this a
+            # code could be configured that the reader then refuses on every attempt — a
+            # discount that exists in the settings and can never be used by anybody.
+            if not is_discount_code_shaped(code):
+                raise ValueError(
+                    f"BILLING_DISCOUNT_CODES has a code nobody could ever type: {code!r}. "
+                    "A code is 2 to 40 letters, digits, dashes or underscores, and starts "
+                    "with a letter or a digit."
+                )
             try:
                 percent = Decimal(str(percent_value).strip().rstrip("%").strip())
             except InvalidOperation as exc:
@@ -1516,7 +1536,60 @@ class Settings(BaseSettings):
                     "A discount must be above 0 and at most 100."
                 )
             parsed[code] = percent
+        cls._launch_code_must_agree(parsed)
         return parsed
+
+    @staticmethod
+    def _launch_code_must_agree(parsed: dict[str, Decimal]) -> None:
+        """The launch code may be written here, but never with a different number.
+
+        Two lists can name the same code: this one, and the launch offer that
+        ``core/plans.py`` owns. Listing it in both is useful — an operator reading the env
+        file sees every code the deployment honours in one place — but only while the two
+        say the same thing.
+
+        They are read by different things. The pricing cards, the sentence naming the code
+        and the crossed-out price all come from `core/plans.py`; this list is what answers
+        once the launch window has closed. So a disagreement would not look like a broken
+        setting. It would look like a page advertising one discount and a checkout applying
+        another, which is the failure this whole area is built to prevent.
+
+        Refused at startup rather than resolved by a precedence rule. A rule that quietly
+        picked a winner is how a wrong number survives for months: the deployment starts,
+        every page looks right, and only the amount charged is different.
+        """
+
+        written = parsed.get(LAUNCH_DISCOUNT_CODE)
+        if written is None:
+            return
+        allowed = sorted(
+            {
+                offer.launch_discount_percent
+                for offer in PLAN_OFFERS.values()
+                if offer.launch_discount_percent is not None
+            }
+        )
+        if not allowed:
+            # No plan runs a launch offer any more, so nothing here can disagree with one.
+            # This is the way the offer is *retired*: `core/plans.py` stops advertising the
+            # code and this list keeps it working, at whatever number is wanted. Refusing
+            # here would block the one path that retirement needs.
+            return
+        if written in allowed:
+            return
+        expected = ", ".join(f"{value}%" for value in allowed)
+        fix = (
+            f"write {LAUNCH_DISCOUNT_CODE}={allowed[0]} here"
+            if len(allowed) == 1
+            else f"remove {LAUNCH_DISCOUNT_CODE} from here"
+        )
+        raise ValueError(
+            f"BILLING_DISCOUNT_CODES gives {LAUNCH_DISCOUNT_CODE} {written}% off, but the "
+            f"application is built with {expected} for that code. The pricing pages show "
+            f"the application's number, so a visitor would be promised one discount and "
+            f"charged another. Make the two the same: either "
+            f"{fix}, or change launch_discount_percent in core/plans.py."
+        )
 
     @field_validator("api_rate_limits")
     @classmethod
