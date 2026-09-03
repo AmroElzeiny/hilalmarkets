@@ -735,6 +735,12 @@ def _settings(**overrides):
     return Settings(**base)
 
 
+def _host(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    return (urlsplit(url).hostname or "").lower()
+
+
 def test_the_google_button_is_never_offered_before_it_can_work() -> None:
     """A button that opens a window and then fails is worse than no button.
 
@@ -765,7 +771,8 @@ def test_the_address_google_returns_to_is_decided_in_one_place() -> None:
     Google matches the redirect address character for character. Behind Cloudflare the
     request's own scheme and host are not the public ones, so building it from the
     request is the classic way this works in development and fails on the day it is
-    deployed.
+    deployed. The host may *choose* between addresses settings already know about; it
+    may never contribute the string itself.
     """
 
     assert (
@@ -779,6 +786,63 @@ def test_the_address_google_returns_to_is_decided_in_one_place() -> None:
     router = _text(ROUTER)
     assert "settings.google_oauth_redirect_uri" in router
     assert "request.url_for" not in router
+    # The router may *name* the path — it serves it, and it explains itself in comments.
+    # What it must never do is glue a base onto it and make a second return address that
+    # can disagree with the one `Settings` hands out.
+    assert "}/auth/google/callback" not in router
+    for line in router.splitlines():
+        if "/auth/google/callback" in line:
+            assert "://" not in line, f"router builds a return address: {line.strip()}"
+
+
+def test_the_google_trip_comes_back_to_the_name_the_person_started_on() -> None:
+    """One deployment answers on two names, and both serve the sign-in pages.
+
+    The popup hands the page that opened it a `postMessage`, and a message aimed at a
+    different origin is never delivered — the popup shuts and nothing happens. The
+    session cookie has the same problem: it belongs to whichever host answered. So the
+    round trip has to finish where it started, for *every* name the product answers on,
+    not just the one that happened to be tried first.
+    """
+
+    settings = _settings(
+        public_base_url="https://hilalmarkets.com",
+        app_base_url="https://app.hilalmarkets.com",
+    )
+    hosts = {"hilalmarkets.com", "app.hilalmarkets.com"}
+    assert {
+        _host(uri) for uri in settings.google_oauth_redirect_uris
+    } == hosts, "every name the product answers on needs a return address"
+
+    for host in hosts:
+        chosen = settings.google_oauth_redirect_uri_for(host)
+        assert _host(chosen) == host, f"{host} would finish the trip somewhere else"
+        assert chosen in settings.google_oauth_redirect_uris
+
+    # A name nobody registered — a forged Host header — picks a known address rather
+    # than inventing one. The worst it can do is choose the other legitimate address.
+    for stranger in ("evil.example.com", "", None, "APP.HILALMARKETS.COM"):
+        chosen = settings.google_oauth_redirect_uri_for(stranger)
+        assert chosen in settings.google_oauth_redirect_uris
+
+
+def test_one_name_deployments_keep_exactly_one_return_address() -> None:
+    """Locally the two settings are the same host, and a duplicate would be one more
+    address to register for no reason."""
+
+    same = _settings(
+        public_base_url="http://localhost:8000",
+        app_base_url="http://localhost:8000",
+    )
+    assert same.google_oauth_redirect_uris == (
+        "http://localhost:8000/auth/google/callback",
+    )
+    assert (
+        same.google_oauth_redirect_uri_for("localhost")
+        == "http://localhost:8000/auth/google/callback"
+    )
+    # And with no app host set at all there is still exactly one.
+    assert len(_settings().google_oauth_redirect_uris) == 1
 
 
 def test_google_is_asked_for_the_email_and_the_name_and_nothing_else() -> None:

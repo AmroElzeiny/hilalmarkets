@@ -3,7 +3,7 @@
 {% import "hilal/dashboard_test/macros/coin.html" as coin %}
 {% set status_tone = tone.asset_tone(passport.assessment.status.value) %}
 {% set asset_symbol = passport.identity.symbol if passport.identity else passport.assessment.canonical_asset %}
-{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260901-pay-methods">{% endblock %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260903-market-simpler">{% endblock %}
 {% block content %}
 
 <div class="hm-t" data-passport-page>
@@ -370,4 +370,4 @@
 </div>
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20260901-pay-methods"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20260903-market-simpler"></script>{% endblock %}

@@ -445,3 +445,71 @@ async def test_the_way_of_paying_that_is_open_can_still_be_chosen(test_context):
     assert accepted.status_code in {200, 400}
     if accepted.status_code == 400:
         assert accepted.json()["error"]["code"] != "payment_method_unavailable"
+
+
+def _both_ways_open(test_context):
+    """Card through Creem and crypto through NOWPayments — the shape on sale today."""
+
+    settings = test_context["settings"].model_copy(
+        update={
+            "billing_enabled": True,
+            "billing_provider": "nowpayments",
+            "billing_card_provider": "creem",
+            "billing_crypto_provider": "nowpayments",
+            "creem_api_key": SecretStr("creem-key"),
+            "creem_webhook_secret": SecretStr("creem-webhook-secret"),
+            "creem_product_ids": {"trader_monthly": "prod_trader_monthly"},
+            "nowpayments_api_key": SecretStr("nowpayments-key"),
+            "nowpayments_ipn_secret": SecretStr("nowpayments-ipn-secret"),
+        }
+    )
+    test_context["app"].dependency_overrides[get_settings] = lambda: settings
+    return settings
+
+
+async def test_each_way_of_paying_names_the_company_that_will_take_the_money(test_context):
+    """The mark under each choice, on the real page, for the real settings.
+
+    Somebody about to type a card number is told whose page they are going to, and can
+    open that company before they do. The name is never written into the page: it is read
+    from the settings the server is running on.
+    """
+
+    await _signup_and_verify(test_context, email="sub-methods-secured@example.com")
+    _both_ways_open(test_context)
+
+    response = await test_context["client"].get(SUBSCRIPTION)
+    assert response.status_code == 200
+    document = lxml.html.fromstring(response.text)
+
+    for method, company, site in (
+        ("card", "Creem", "https://www.creem.io/"),
+        ("crypto", "NOWPayments", "https://nowpayments.io/"),
+    ):
+        (mark,) = document.xpath(
+            f'//div[label[@data-s-method="{method}"]]/a[@class="hm-pay-secured"]'
+        )
+        assert mark.get("href") == site
+        assert mark.get("target") == "_blank"
+        assert "noopener" in (mark.get("rel") or "")
+        words = " ".join(mark.text_content().split())
+        assert words == f"Payments secured by {company}"
+
+
+async def test_a_switched_off_way_of_paying_names_no_company(test_context):
+    """No company can take the money, so no company is named beside it."""
+
+    await _signup_and_verify(test_context, email="sub-methods-unsecured@example.com")
+    _crypto_only(test_context)
+
+    response = await test_context["client"].get(SUBSCRIPTION)
+    document = lxml.html.fromstring(response.text)
+
+    card_marks = document.xpath(
+        '//div[label[@data-s-method="card"]]/a[@class="hm-pay-secured"]'
+    )
+    crypto_marks = document.xpath(
+        '//div[label[@data-s-method="crypto"]]/a[@class="hm-pay-secured"]'
+    )
+    assert card_marks == []
+    assert len(crypto_marks) == 1

@@ -60,11 +60,6 @@ function start(root) {
     exchange: root.dataset.exchange || "binance",
     quote: root.dataset.quote || "USDT",
     filter: "all",
-    // "any" | "large" | "mid" | "small" — how big the coin is.
-    size: "any",
-    // "any" | "up" | "down", read over `moveWindow`.
-    move: "any",
-    moveWindow: "24h",
     view: "cards",
     search: searchInput ? searchInput.value : "",
     sort: { key: "volume", direction: "desc" },
@@ -346,42 +341,6 @@ function start(root) {
     return true;
   }
 
-  /* ── Size and movement ──────────────────────────────────────────────────────
-   *
-   * Everything above answers "is this coin allowed". These answer "is this coin
-   * big, and has it been going up" — the two things a beginner asks next, and the
-   * two an exchange ticker cannot say on its own.
-   *
-   * Every rule here treats a missing number as "does not match" rather than as
-   * zero. A coin the market-data provider has never heard of must not appear under
-   * "the smallest coins" simply because nobody has measured it.
-   */
-  const SIZE_BANDS = {
-    large: (value) => value >= 10e9,
-    mid: (value) => value >= 1e9 && value < 10e9,
-    small: (value) => value < 1e9,
-  };
-
-  const MOVE_FIELDS = {
-    "24h": "percentage_24h",
-    "7d": "percentage_7d",
-    "30d": "percentage_30d",
-    "90d": "percentage_90d",
-  };
-
-  function matchesSize(item) {
-    if (state.size === "any") return true;
-    const test = SIZE_BANDS[state.size];
-    return Boolean(test) && isFiniteNumber(item.market_cap_usd) && test(item.market_cap_usd);
-  }
-
-  function matchesMove(item) {
-    if (state.move === "any") return true;
-    const value = item[MOVE_FIELDS[state.moveWindow] || "percentage_24h"];
-    if (!isFiniteNumber(value)) return false;
-    return state.move === "up" ? value > 0 : value < 0;
-  }
-
   function sortValue(item) {
     if (state.sort.key === "symbol") return String(item.canonical_asset || "");
     // Rank counts upwards from the biggest coin, so rank 1 must sort as the largest
@@ -403,8 +362,7 @@ function start(root) {
 
   function visibleItems() {
     const list = Array.from(items.values()).filter(
-      (item) =>
-        matchesSearch(item) && matchesFilter(item) && matchesSize(item) && matchesMove(item),
+      (item) => matchesSearch(item) && matchesFilter(item),
     );
     const factor = state.sort.direction === "asc" ? 1 : -1;
     return list.sort((left, right) => {
@@ -673,24 +631,6 @@ function start(root) {
     });
   });
 
-  /* The size and movement pickers. Each is a radio group over one state field, so
-   * adding a band means adding a button — never a second copy of this handler. */
-  [
-    ["[data-size]", "size", (button) => button.dataset.size],
-    ["[data-move]", "move", (button) => button.dataset.move],
-    ["[data-move-window]", "moveWindow", (button) => button.dataset.moveWindow],
-  ].forEach(([selector, field, read]) => {
-    root.querySelectorAll(selector).forEach((button) => {
-      button.addEventListener("click", () => {
-        state[field] = read(button);
-        root.querySelectorAll(selector).forEach((other) => {
-          other.setAttribute("aria-checked", String(other === button));
-        });
-        applyView();
-      });
-    });
-  });
-
   root.querySelectorAll("[data-exchange]").forEach((button) => {
     button.addEventListener("click", () => {
       if (state.exchange === button.dataset.exchange) return;
@@ -763,21 +703,9 @@ function start(root) {
   root.querySelector("[data-clear-filters]")?.addEventListener("click", () => {
     state.search = "";
     state.filter = "all";
-    // The size and movement pickers are cleared here too. Leaving them set is what
-    // makes "Show all screened coins" show an empty list and look broken: a person
-    // who filtered to small coins that fell this quarter, then searched, sees nothing
-    // and presses the button that promises everything.
-    state.size = "any";
-    state.move = "any";
     if (searchInput) searchInput.value = "";
     root.querySelectorAll("[data-filter]").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.filter === "all"));
-    });
-    root.querySelectorAll("[data-size]").forEach((button) => {
-      button.setAttribute("aria-checked", String(button.dataset.size === "any"));
-    });
-    root.querySelectorAll("[data-move]").forEach((button) => {
-      button.setAttribute("aria-checked", String(button.dataset.move === "any"));
     });
     applyView();
   });

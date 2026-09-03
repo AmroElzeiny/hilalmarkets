@@ -16,6 +16,10 @@ comes from an authority's assessment and from nowhere else.
 Cached deliberately. These readings change slowly and the whole market shares one
 answer, so one call every few minutes serves every reader — which is what keeps a
 page-load off the credit budget entirely.
+
+**Nothing renders this right now.** The strip on the Halal Assets page was removed on
+3 September 2026, so no route calls ``read()`` and no provider credit is spent. The
+service is kept whole and ready for the next surface that wants a market-wide reading.
 """
 
 from __future__ import annotations

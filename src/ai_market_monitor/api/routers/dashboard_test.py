@@ -69,10 +69,12 @@ from ai_market_monitor.core.dashboard_paths import (
 )
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
+    LAUNCH_DISCOUNT_CODE,
     PLAN_DEFINITIONS,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
     UNLIMITED_SYMBOL_CAP,
+    launch_discount_percent,
     plan_offer_payload,
     visible_plan_comparison,
     visible_plan_comparison_headers,
@@ -110,6 +112,7 @@ from ai_market_monitor.services.account_settings import (
 from ai_market_monitor.services.alert_emails import alert_email_address
 from ai_market_monitor.services.automated_research_reader import AutomatedResearchReader
 from ai_market_monitor.services.billing import (
+    DISCOUNT_CODE_METHODS,
     BillingService,
     payment_method_available,
     payment_method_offers_by_method,
@@ -1615,8 +1618,18 @@ def _plan_card(
         "code": code,
         "name": plan.name,
         "who_it_is_for": presentation.description,
+        # Two prices, and they are different things.
+        #
+        # `monthly_price` is the headline on the card: the launch-code price while the
+        # launch offer runs. `full_price` is what a checkout really charges when nobody
+        # types a code — so it is what the order line in the popup starts at, and what it
+        # goes back to if the code is cleared. The popup used to open at the headline and
+        # then send somebody to a payment page for a larger amount.
         "monthly_price": offer["monthlyPrice"],
+        "full_price": offer["fullMonthlyPrice"],
         "was_price": offer["originalMonthlyPrice"],
+        "discount_code": offer["discountCode"],
+        "discount_percent": offer["discountPercent"],
         "is_free": offer["monthlyPrice"] == 0,
         "for_sale": bool(offer["monthlyAvailable"]),
         "coming_soon_label": offer["comingSoonLabel"],
@@ -1775,6 +1788,9 @@ async def subscription_page(
     open_for_plan = wanted if any(
         card["code"] == wanted and card["buyable"] for card in cards
     ) else ""
+    # The launch code, named once for the whole page. It is the one plan on sale that
+    # carries a code; a plan with no code simply shows no hint.
+    _launch_percent = launch_discount_percent("trader")
 
     context = await _context(
         request=request,
@@ -1807,6 +1823,12 @@ async def subscription_page(
             plan_codes=PURCHASABLE_PLAN_CODES,
             billing_cycle="monthly",
         ),
+        # Which ways of paying take a code, and the code worth naming. Both come from the
+        # server: a page that decided either for itself would be a second copy of a rule
+        # that checkout already owns.
+        discount_methods=list(DISCOUNT_CODE_METHODS),
+        launch_discount_code=LAUNCH_DISCOUNT_CODE if _launch_percent else "",
+        launch_discount_percent=int(_launch_percent) if _launch_percent else 0,
         open_for_plan=open_for_plan,
         settings_path=SETTINGS_PATH,
         support_path=SUPPORT_PATH,

@@ -56,6 +56,44 @@ Official references:
 - <https://docs.creem.io/features/trials>
 - <https://docs.creem.io/features/customer-portal>
 
+## Discount codes
+
+The plan costs its normal price. A **code** brings it down — the launch code and its
+percentage live in `core/plans.py` (`LAUNCH_DISCOUNT_CODE`), which every pricing card and
+every checkout reads.
+
+The two routes apply a code in two different places, and both have to be set up:
+
+| Route | Where the code is typed | Who applies it |
+|---|---|---|
+| Crypto (NOWPayments) | the box on our own checkout screens | this application, before the invoice is created |
+| Card (Creem) | the discount box on Creem's hosted page | Creem |
+
+So **the same code must exist in Creem, at the same percentage**, or a card buyer is shown
+an offer they cannot get. Create it in the Creem dashboard as a *percentage* discount named
+exactly as `LAUNCH_DISCOUNT_CODE`, applying to the product in `CREEM_PRODUCT_IDS`.
+
+Extra codes that only apply to crypto can be listed per deployment instead:
+
+```env
+BILLING_DISCOUNT_CODES=WELCOME10=10,SUMMER20=20
+```
+
+Codes are looked up in Creem first and in that list second. A code Creem *refuses* —
+expired, switched off, used up, fixed-amount, or for another product — is refused here too
+and never falls through to the list.
+
+Check both sides agree before enabling or changing anything:
+
+```bash
+.venv/Scripts/python scripts/check_creem_prices.py --env-file .env.production
+```
+
+It compares every product's price with `core/plans.py` and checks that the launch code
+exists in Creem at the right percentage. Nothing offline can see Creem, so this command is
+the only thing that can catch a disagreement — and a disagreement means a customer pays and
+the plan never starts.
+
 ## NOWPayments Crypto Invoices
 
 Set:

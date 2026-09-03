@@ -29,7 +29,9 @@
       </div>
       <div>
         <dt>Payment provider</dt>
-        <dd>{{ 'Creem' if provider_name == 'creem' else ('NOWPayments' if provider_name == 'nowpayments' else (provider_name|title if provider_name else 'No provider-managed subscription')) }}</dd>
+        {# The company's name comes from the billing service, which owns it. This line
+           kept its own copy of that list and had to be edited every time one changed. #}
+        <dd>{{ provider_name|payment_company if provider_name else 'No provider-managed subscription' }}</dd>
       </div>
       <div>
         <dt>Next billing date</dt>
@@ -55,7 +57,7 @@
       <form method="post" action="/dashboard/billing/portal">
         <input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}">
         <button class="btn btn-primary" type="submit">
-          Open secure {{ 'Creem' if provider_name == 'creem' else provider_name|title }} portal
+          Open secure {{ provider_name|payment_company }} portal
           <span data-icon="arrow" data-icon-class="icon-sm"></span>
         </button>
       </form>
@@ -64,7 +66,7 @@
         <span data-icon="info" data-icon-class="icon"></span>
         <div>
           <strong>No cancellation portal is needed</strong>
-          <p>NOWPayments purchases provide one paid access period and do not renew automatically.</p>
+          <p>{{ provider_name|payment_company }} purchases provide one paid access period and do not renew automatically.</p>
         </div>
       </div>
     {% elif subscription and provider_name %}

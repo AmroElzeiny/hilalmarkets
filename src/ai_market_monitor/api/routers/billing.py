@@ -132,6 +132,7 @@ async def get_usage(
 @router.post("/checkout")
 async def create_checkout(
     request: CheckoutRequest,
+    http_request: Request,
     principal: UserPrincipal = Depends(get_user_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
@@ -144,7 +145,10 @@ async def create_checkout(
                 "message": "Paid checkout is currently unavailable.",
             },
         )
-    base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")
+    # Back to the name this person is using. Both names serve the dashboard, and the
+    # session cookie belongs to whichever host set it — so returning them to the other
+    # name lands them on sign-in immediately after paying.
+    base_url = settings.base_url_for(http_request.url.hostname)
     try:
         result = await BillingService(session, settings).checkout_session(
             user_id=principal.user_id,
@@ -167,6 +171,7 @@ async def create_checkout(
 @router.post("/portal")
 async def create_portal(
     _request: PortalRequest,
+    http_request: Request,
     principal: UserPrincipal = Depends(get_user_principal),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
@@ -179,7 +184,7 @@ async def create_portal(
                 "message": "The billing portal is currently unavailable.",
             },
         )
-    base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")
+    base_url = settings.base_url_for(http_request.url.hostname)
     try:
         result = await BillingService(session, settings).billing_portal(
             user_id=principal.user_id,

@@ -43,11 +43,14 @@ from ai_market_monitor.core.dashboard_paths import (
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     COMING_SOON_LABEL,
+    LAUNCH_DISCOUNT_CODE,
     PLAN_DEFINITIONS,
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
+    effective_monthly_price,
+    launch_discount_percent,
     maximum_annual_saving,
     plan_offer,
     plan_offer_payload,
@@ -126,12 +129,15 @@ from ai_market_monitor.services.affiliate_payout_options import (
     payout_options_payload,
 )
 from ai_market_monitor.services.billing import (
+    DISCOUNT_CODE_METHODS,
     PAYMENT_METHODS,
     BillingError,
     BillingService,
     billing_method_provider,
     billing_provider_capabilities,
     configured_billing_provider,
+    creem_product_id_for,
+    method_takes_discount_code,
     payment_method_available,
     payment_method_offers,
     payment_method_offers_by_method,
@@ -141,12 +147,16 @@ from ai_market_monitor.services.billing import (
 from ai_market_monitor.services.capability_extensions import CapabilityExtensionService
 from ai_market_monitor.services.coverage import market_coverage_for_user
 from ai_market_monitor.services.dashboard_links import DashboardLinkError, DashboardLinkService
+from ai_market_monitor.services.discount_codes import (
+    DiscountCodeError,
+    DiscountCodeService,
+    DiscountedPrice,
+)
 from ai_market_monitor.services.email_delivery import EmailDeliveryError
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
 from ai_market_monitor.services.google_oauth import GoogleOAuthError, GoogleOAuthService
 from ai_market_monitor.services.interfaces import MarketDataProvider, RecentMarketPreviewer
 from ai_market_monitor.services.lifecycle_dashboard import lifecycle_cards
-from ai_market_monitor.services.market_sentiment import MarketSentimentService
 from ai_market_monitor.services.monitor_operations import (
     MonitorOperationError,
     MonitorOperationService,
@@ -1694,6 +1704,7 @@ def _google_popup_close(target: str) -> HTMLResponse:
 
 @router.get("/auth/google/start", include_in_schema=False)
 async def google_start(
+    request: Request,
     mode: str = Query(default="signin", max_length=20),
     popup: str = Query(default="", max_length=4),
     plan_code: str | None = Query(default=None, max_length=20),
@@ -1708,6 +1719,12 @@ async def google_start(
     suffix = f"?{urlencode(auth_query)}" if auth_query else ""
     chosen_mode = "signup" if mode == "signup" else "signin"
 
+    # The trip has to come back to the name the person is already looking at. Both
+    # hostnames serve these pages, and finishing on the other one closes the popup
+    # without ever reaching the page that opened it. `Settings` owns the choice, and it
+    # only ever picks from the addresses registered on the OAuth client.
+    redirect_uri = settings.google_oauth_redirect_uri_for(request.url.hostname)
+
     service = GoogleOAuthService(settings)
     try:
         state = service.issue_state(
@@ -1717,11 +1734,15 @@ async def google_start(
                 "plan_code": selected_plan or "",
                 "billing_interval": selected_interval or "",
                 "telegram_link": telegram_link or "",
+                # Google compares the address sent here with the one sent when the code
+                # is redeemed, character for character. Carrying the exact string in the
+                # signed state means the two halves cannot drift apart.
+                "redirect_uri": redirect_uri,
             }
         )
         return _redirect(
             service.authorization_url(
-                redirect_uri=settings.google_oauth_redirect_uri,
+                redirect_uri=redirect_uri,
                 state=state,
             )
         )
@@ -1768,11 +1789,21 @@ async def google_callback(
         failed = "google_cancelled" if error == "access_denied" else "google_unavailable"
         return _finish(_google_failure(mode, failed, suffix))
 
+    # The address the trip started with, not a freshly guessed one. It is read back out
+    # of the signed state and then checked against the registered set, so a state minted
+    # before this list changed cannot send the exchange somewhere Google will refuse.
+    carried_redirect = carried.get("redirect_uri") or ""
+    redirect_uri = (
+        carried_redirect
+        if carried_redirect in settings.google_oauth_redirect_uris
+        else settings.google_oauth_redirect_uri_for(request.url.hostname)
+    )
+
     linked_telegram_user_id: str | None = None
     try:
         profile = await service.exchange(
             code=code,
-            redirect_uri=settings.google_oauth_redirect_uri,
+            redirect_uri=redirect_uri,
         )
         auth = WebAuthService(session, settings)
         user, created = await auth.signin_or_signup_with_google(profile=profile)
@@ -2089,13 +2120,6 @@ async def screened_market_context(
     def market_page_url(target_page: int) -> str:
         return f"{base_path}?" + urlencode([*market_query, ("page", str(target_page))])
 
-    # How the whole market is behaving today. Everything else on this page answers a
-    # question about one coin; a reader watching one coin fall cannot otherwise tell
-    # whether that coin is in trouble or whether everything fell together. Cached
-    # process-wide and never allowed to fail the page — an unavailable reading renders
-    # as unavailable rather than as a stale number presented as current.
-    market_sentiment = await MarketSentimentService(settings).read()
-
     return await _context(
         request=request,
         session=session,
@@ -2103,7 +2127,6 @@ async def screened_market_context(
         user=user,
         page="screened_market",
         title="Halal Assets",
-        market_sentiment=market_sentiment,
         screened=screened,
         methodologies=methodologies,
         selected_methodology_id=selected_methodology_id,
@@ -3387,16 +3410,31 @@ async def billing_page(
                 )
             ),
             billing_selection_availability=billing_selection_availability,
+            # Which ways of paying take a code, and the code worth naming, decided by the
+            # server for the same reason every other payment fact on this page is.
+            discount_methods=list(DISCOUNT_CODE_METHODS),
+            launch_discount_code=(
+                LAUNCH_DISCOUNT_CODE if launch_discount_percent("trader") else ""
+            ),
+            launch_discount_percent=int(launch_discount_percent("trader") or 0),
             billing_plan_data={
                 "plans": {
                     code: {
                         "name": PLAN_DEFINITIONS[code].name,
-                        "monthly": str(PLAN_DEFINITIONS[code].monthly_price),
+                        # What a checkout charges with no code. Read from the one function
+                        # that also sets the amount on a payment attempt, rather than from
+                        # the plan definition — a second reading of "what does this cost"
+                        # is a second number free to disagree with the charge.
+                        "monthly": str(effective_monthly_price(code)),
                         "annual": str(PUBLIC_PLAN_PRESENTATIONS[code].annual_price),
                         "availability": billing_selection_availability[code],
                         # Decided here, per period, so the script draws an answer rather
                         # than working one out from flags a second time.
                         "methods": payment_method_payload(settings, plan_code=code),
+                        # The launch code, so the popup can name it beside the crypto
+                        # choice. `null` once the launch offer has finished.
+                        "discountCode": plan_offer_payload(code)["discountCode"],
+                        "discountPercent": plan_offer_payload(code)["discountPercent"],
                     }
                     for code in PURCHASABLE_PLAN_CODES
                 },
@@ -3511,6 +3549,7 @@ async def dashboard_billing_portal_page(
 
 @router.post("/dashboard/billing/portal", include_in_schema=False)
 async def dashboard_billing_portal(
+    request: Request,
     csrf_token_value: str = Form(..., alias="csrf_token"),
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
@@ -3521,7 +3560,7 @@ async def dashboard_billing_portal(
     if not settings.billing_enabled:
         return _redirect("/dashboard/billing/portal?error=billing_disabled")
     try:
-        base_url = str(settings.app_base_url or settings.public_base_url).rstrip("/")
+        base_url = settings.base_url_for(request.url.hostname)
         result = await BillingService(session, settings).billing_portal(
             user_id=user.id,
             return_url=f"{base_url}/dashboard/billing",
@@ -3566,6 +3605,117 @@ async def resume_billing_checkout(
             },
         )
     return _redirect("/dashboard/billing?error=checkout_not_resumable")
+
+
+async def _price_with_discount_code(
+    *,
+    session: AsyncSession,
+    settings: Settings,
+    plan_code: str,
+    payment_method: str,
+    code: str,
+) -> DiscountedPrice:
+    """What this plan costs for this person once their code is applied.
+
+    The one place a typed code becomes a price. The Apply button quotes what this
+    returns and the checkout charges what this returns, so the number somebody agrees to
+    and the number the payment company is asked for come from the same call rather than
+    from two functions that happen to be written the same way today.
+
+    Refusals are :class:`DiscountCodeError`, whose message is already written for a
+    beginner. Nothing here writes a sentence for a customer.
+    """
+
+    if plan_code not in PURCHASABLE_PLAN_CODES or not plan_offer(plan_code).monthly_available:
+        raise DiscountCodeError("discount_code_wrong_plan", "That code is for a different plan.")
+    if not method_takes_discount_code(payment_method):
+        # Named rather than ignored. Quietly dropping the code would open a payment page
+        # at the full price straight after telling somebody their code had worked.
+        raise DiscountCodeError(
+            "discount_code_card_route",
+            "A code cannot be added here. Choose crypto to use a code, or type it on the "
+            "card payment page.",
+        )
+    provider_name = configured_billing_provider(settings, payment_method)
+    service = BillingService(session, settings, provider_name=provider_name)
+    cycle = service.billing_cycle_code
+    plan = await PlanCatalogService(session).get_or_sync(plan_code)
+    full = service.checkout_amount(plan.code, plan.price_monthly, cycle)
+    return await DiscountCodeService(settings).price_for(
+        code,
+        plan_code=plan.code,
+        full_amount=full,
+        currency=plan.currency.upper(),
+        # A Creem code is scoped to Creem's product for this plan, whichever way the
+        # person is paying, so the crypto route asks about the card product rather than
+        # about nothing and failing every scoped code.
+        creem_product_id=creem_product_id_for(
+            settings, plan_code=plan.code, billing_cycle="monthly"
+        ),
+    )
+
+
+@router.post("/dashboard/billing/discount", include_in_schema=False)
+async def billing_check_discount_code(
+    request: Request,
+    plan_code: str = Form(...),
+    payment_method: str = Form(default="crypto"),
+    discount_code: str = Form(default=""),
+    csrf_token_value: str = Form(..., alias="csrf_token"),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """Answer the Apply button: is this code real, and what does it change?
+
+    Grants nothing and writes nothing. The code is checked again, from scratch, when the
+    payment is actually created — a browser saying "this was approved" proves nothing,
+    and a code can be withdrawn between the two moments.
+    """
+
+    if not csrf_token_matches(settings, user.id, csrf_token_value):
+        raise HTTPException(status_code=403, detail="Invalid form token")
+    if not settings.billing_enabled:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": {
+                    "code": "billing_disabled",
+                    "message": "Paid checkout is not available right now.",
+                }
+            },
+        )
+    try:
+        priced = await _price_with_discount_code(
+            session=session,
+            settings=settings,
+            plan_code=plan_code,
+            payment_method=payment_method,
+            code=discount_code,
+        )
+    except DiscountCodeError as exc:
+        await session.commit()
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": exc.code, "message": str(exc)}},
+        )
+    except BillingError as exc:
+        await session.commit()
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": exc.code, "message": str(exc)}},
+        )
+    await session.commit()
+    return JSONResponse(
+        {
+            "code": priced.code,
+            "percent_off": float(priced.percent),
+            "was": str(priced.full),
+            "now": str(priced.final),
+            "saving": str(priced.saving),
+            "currency": priced.currency,
+        }
+    )
 
 
 @router.get(
@@ -3626,15 +3776,13 @@ async def billing_checkout_review(
     checkout_price = billing.checkout_amount(
         plan.code, plan.price_monthly, billing.billing_cycle_code
     )
-    # A price to cross out only when this checkout really costs less than the normal
-    # monthly price — never for a free trial or a yearly total, which are different
-    # things being bought, not a discount on this one.
-    checkout_price_was = (
-        plan.price_monthly
-        if billing.billing_cycle_code not in {"trial_7_day", "annual_auto_renewal"}
-        and checkout_price < plan.price_monthly
-        else None
-    )
+    # There is nothing to cross out before a code is applied: this page opens at the
+    # price a checkout charges with no code, and the box below replaces it live when one
+    # is accepted. The old "crossed-out launch price" is gone with the automatic offer.
+    #
+    # The launch code is named on the page so nobody has to already know it exists. It is
+    # a hint only: the box accepts any code, and the server decides what each is worth.
+    launch_percent = launch_discount_percent(plan.code)
     response = templates.TemplateResponse(
         request,
         "hilal/dashboard/checkout.html",
@@ -3649,7 +3797,9 @@ async def billing_checkout_review(
             plan_limits=dict(features.get("limits") or {}),
             plan_features=dict(features.get("features") or {}),
             checkout_price=checkout_price,
-            checkout_price_was=checkout_price_was,
+            launch_discount_code=LAUNCH_DISCOUNT_CODE if launch_percent else "",
+            launch_discount_percent=int(launch_percent) if launch_percent else 0,
+            discount_methods=list(DISCOUNT_CODE_METHODS),
             promotion_ends_at=PROMOTION_ENDS_AT.isoformat(),
             billing_cycle=billing.billing_cycle_code,
             billing_provider=billing.provider.provider_name,
@@ -3684,6 +3834,7 @@ async def billing_checkout(
     billing_cycle: str = Form(default="monthly"),
     payment_method: str = Form(default="card"),
     checkout_request_id: str = Form(default="free-plan"),
+    discount_code: str = Form(default=""),
     terms_accepted: str | None = Form(default=None),
     first_name: str = Form(default=""),
     last_name: str = Form(default=""),
@@ -3713,7 +3864,7 @@ async def billing_checkout(
                 },
             )
         return _redirect("/dashboard/billing?error=billing_disabled")
-    base = str(settings.app_base_url or settings.public_base_url).rstrip("/")
+    base = settings.base_url_for(request.url.hostname)
     if plan_code not in PUBLIC_PLAN_CODES:
         return _redirect("/dashboard/billing?error=plan_not_available")
     try:
@@ -3766,6 +3917,18 @@ async def billing_checkout(
             postal_code=postal_code,
             country=country,
         )
+        # The code is priced again here, from scratch. What the browser sent is a code,
+        # never a price: a form field saying "$15" is a number anybody can edit, and a
+        # code can be withdrawn between pressing Apply and pressing Pay.
+        discount: DiscountedPrice | None = None
+        if str(discount_code or "").strip():
+            discount = await _price_with_discount_code(
+                session=session,
+                settings=settings,
+                plan_code=plan_code,
+                payment_method=payment_method,
+                code=discount_code,
+            )
         prepared = await service.prepare_checkout(
             user_id=user.id,
             plan_code=plan_code,
@@ -3773,6 +3936,7 @@ async def billing_checkout(
             request_key=checkout_request_id,
             terms_accepted=True,
             billing_profile=profile,
+            discount=discount,
         )
         await session.commit()
         if prepared.duplicate and prepared.attempt.checkout_url:
@@ -3792,7 +3956,11 @@ async def billing_checkout(
         if wants_json:
             return JSONResponse({"checkout_url": checkout.checkout_url})
         return _redirect(checkout.checkout_url)
-    except BillingError as exc:
+    except (BillingError, DiscountCodeError) as exc:
+        # A refused code and a refused checkout end the same way: nothing was charged, and
+        # the person is told which of the two it was in words they can act on. A code that
+        # stopped working between Apply and Pay lands here rather than opening a payment
+        # page at a price nobody agreed to.
         if session.in_transaction():
             await session.commit()
         if wants_json:

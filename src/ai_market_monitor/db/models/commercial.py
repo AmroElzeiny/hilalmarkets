@@ -173,6 +173,15 @@ class BillingCheckoutAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     terms_version: Mapped[str] = mapped_column(String(80), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    #: The discount code this checkout was opened with, and what it took off.
+    #:
+    #: ``amount`` above is already the discounted figure — it is the number the payment
+    #: company is asked for and the number the webhook holds the payment against, so it
+    #: must never be the pre-discount price. These two columns exist so a finished
+    #: payment can still say *why* it was cheaper, months later, when the code has been
+    #: withdrawn and neither Creem nor the env file remembers it.
+    discount_code: Mapped[str | None] = mapped_column(String(40))
+    discount_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     terms_accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

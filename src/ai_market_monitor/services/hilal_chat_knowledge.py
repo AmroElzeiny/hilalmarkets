@@ -32,11 +32,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.plans import (
+    LAUNCH_DISCOUNT_CODE,
     PLAN_DEFINITIONS,
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_PRESENTATIONS,
+    coded_monthly_price,
     effective_monthly_price,
-    original_monthly_price,
 )
 from ai_market_monitor.db.models import (
     AssetShariaAssessment,
@@ -599,18 +600,27 @@ class HilalChatKnowledge:
         for code, definition in PLAN_DEFINITIONS.items():
             if code not in PUBLIC_PLAN_PRESENTATIONS:
                 continue
-            today = effective_monthly_price(code)
-            before = original_monthly_price(code)
+            # Two prices, and Hilal must never confuse them. `price_per_month` is what a
+            # checkout charges when nobody types a code — the number somebody pays if
+            # they do nothing. The launch price is reached only with the code, so it is
+            # named beside the code that unlocks it rather than quoted on its own.
+            full = effective_monthly_price(code)
+            coded = coded_monthly_price(code)
             row: dict[str, Any] = {
                 "id": f"plan:{code}",
                 "kind": "plan",
                 "name": definition.name,
-                "price_per_month": f"{today} {definition.currency}",
+                "price_per_month": f"{full} {definition.currency}",
                 "what_it_is_for": definition.description,
             }
-            if before is not None:
-                row["normal_price_per_month"] = f"{before} {definition.currency}"
-                row["launch_price_ends_at"] = PROMOTION_ENDS_AT.isoformat()
+            if coded is not None:
+                row["price_per_month_with_code"] = f"{coded} {definition.currency}"
+                row["discount_code"] = LAUNCH_DISCOUNT_CODE
+                row["discount_code_ends_at"] = PROMOTION_ENDS_AT.isoformat()
+                row["how_the_code_is_used"] = (
+                    "Typed into the discount box when paying with crypto, or into the "
+                    "discount box on the card payment page."
+                )
             rows.append(row)
         return rows[:8]
 

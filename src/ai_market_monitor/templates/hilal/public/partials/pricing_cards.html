@@ -24,8 +24,18 @@
           {% endif %}
           <strong>${{ offer.monthlyPrice | int }}</strong><span>{{ ' free forever' if offer.monthlyPrice == 0 else '/month' }}</span>
         </div>
+        {% if offer.discountCode %}
+          {# Why the price above is the lower one. The launch price is not automatic: it
+             is reached by typing this code, and without it the plan costs the crossed-out
+             figure. Saying so on the card is the only place a visitor can learn that
+             before they reach a payment page. #}
+          <p class="price-code-note">
+            Using code <code class="hm-code-chip">{{ offer.discountCode }}</code>
+            <span>Without it the price is ${{ offer.fullMonthlyPrice | int }} a month.</span>
+          </p>
+        {% endif %}
         {% if offer.originalMonthlyPrice %}
-          <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" role="group" aria-label="Time left at this price" hidden></div>
+          <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" role="group" aria-label="Time left to use this code" hidden></div>
         {% endif %}
       {% else %}
         {# No number at all for something nobody can buy yet. A price beside "Soon"

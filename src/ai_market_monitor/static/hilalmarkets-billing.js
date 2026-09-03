@@ -38,6 +38,18 @@
   let selectedPlan = "";
   let trialSelected = false;
   let submitting = false;
+  // What a discount code changed the price to, or null while none is applied. Held here
+  // rather than read back out of the page: `refresh()` rewrites the price line on every
+  // change, and without this it would put the full price back under an applied code.
+  let discounted = null;
+
+  /** Money as this product writes it: `$15`, and cents only when there are cents. */
+  function money(amount) {
+    const value = Number(amount);
+    if (!Number.isFinite(value)) return String(amount);
+    const rounded = Math.round(value * 100) / 100;
+    return Number.isInteger(rounded) ? `$${rounded}` : `$${rounded.toFixed(2)}`;
+  }
 
   function planData() {
     return (catalog.plans || {})[selectedPlan] || null;
@@ -110,6 +122,10 @@
       const promoted = available && interval === "monthly" && Boolean(originalPrice);
       if (original) original.toggleAttribute("data-offer-inactive", !promoted);
       if (countdown) countdown.toggleAttribute("data-offer-inactive", !promoted);
+      // The code is a monthly offer. Left under a yearly price it would name a code that
+      // does nothing there, which is worse than saying nothing.
+      const codeNote = card ? card.querySelector("[data-dashboard-plan-code]") : null;
+      if (codeNote) codeNote.hidden = !promoted;
     });
     document.querySelectorAll("[data-dashboard-purchase-button]").forEach((button) => {
       const planCode = button.getAttribute("data-plan-code") || "";
@@ -188,15 +204,28 @@
         : plan.name;
     }
     if (priceLabel) {
+      // `plan.monthly` is what a checkout charges with no code. A code replaces it, and
+      // the price it replaced stays on screen so the discount is visible rather than
+      // remembered.
       priceLabel.textContent = trialSelected
-        ? `$0 today, then $${plan.monthly}/month unless cancelled`
+        ? `$0 today, then ${money(plan.monthly)}/month unless cancelled`
         : period === "annual"
-          ? `$${plan.annual} per year`
-          : `$${plan.monthly} per month`;
+          ? `${money(plan.annual)} per year`
+          : discounted
+            ? `${money(discounted.amount)} per month, was ${money(discounted.was)}`
+            : `${money(plan.monthly)} per month`;
     }
+    // The box prices against the plan being bought, so it is told which one that is and
+    // what it costs before anybody presses Apply.
+    const box = dialog.querySelector("[data-discount]");
+    if (box) box.dataset.discountFull = String(plan.monthly);
     if (summary) {
+      // The company that will really take the money, sent with the plan. Its name used to
+      // be written into this file, so the sentence said "Creem" on a server set to any
+      // other company — and named a company the buyer would never reach.
+      const cardCompany = cardDecision.company || "The payment company";
       summary.textContent = trialSelected
-        ? "Creem will show the seven-day trial and the first charge date before you confirm."
+        ? `${cardCompany} will show the seven-day trial and the first charge date before you confirm.`
         : "Review the plan and choose how you want to pay.";
     }
     if (periodOptions) periodOptions.hidden = trialSelected;
@@ -214,12 +243,19 @@
           : "";
       submit.disabled = submitting || !selectedMethod;
       if (!submitting) {
-        submit.textContent =
+        // Where this button really leads. Both company names used to be written here, so
+        // the button promised Creem or NOWPayments whatever the server was set to use.
+        const company =
           selectedMethod === "card"
-            ? "Continue to Creem"
+            ? cardDecision.company
             : selectedMethod === "crypto"
-              ? "Continue to NOWPayments"
-              : "Payment method unavailable";
+              ? cryptoDecision.company
+              : "";
+        submit.textContent = selectedMethod
+          ? company
+            ? `Continue to ${company}`
+            : "Continue to secure payment"
+          : "Payment method unavailable";
       }
     }
   }
@@ -227,6 +263,9 @@
   function open(planCode, cycle, trigger) {
     if (!(catalog.plans || {})[planCode]) return;
     selectedPlan = planCode;
+    // A code priced for one plan is not priced for another, so opening the popup on a
+    // different plan starts with no code rather than with the last one.
+    discounted = null;
     trialSelected = cycle === "trial_7_day";
     activeTrigger = trigger || null;
     // A period the server switched off cannot be chosen, not even by a link that asks
@@ -264,6 +303,13 @@
     if (activeTrigger instanceof HTMLElement) activeTrigger.focus();
   });
   periodRadios.forEach((radio) => radio.addEventListener("change", refresh));
+  // A code was applied or cleared beside the crypto choice. The box owns the code; this
+  // file owns the price line in the popup, so it listens rather than being written into.
+  dialog.addEventListener("hm:discount", (event) => {
+    const detail = event.detail || {};
+    discounted = detail.code && detail.was ? { amount: detail.amount, was: detail.was } : null;
+    refresh();
+  });
   pageIntervalRadios.forEach((radio) =>
     radio.addEventListener("change", refreshPagePricing)
   );

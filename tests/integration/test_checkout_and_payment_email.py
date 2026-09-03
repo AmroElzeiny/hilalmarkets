@@ -2,6 +2,7 @@ import hmac
 import json
 import re
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from urllib.parse import urlsplit
 
 import pytest
@@ -10,11 +11,13 @@ from sqlalchemy import func, select
 
 from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.core.plans import (
+    LAUNCH_DISCOUNT_CODE,
     PURCHASABLE_PLAN_CODES,
+    coded_monthly_price,
     effective_monthly_price,
-    original_monthly_price,
+    launch_discount_percent,
     plan_offer,
-    promotion_is_active,
+    price_after_percent,
 )
 from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
@@ -26,6 +29,7 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import SubscriptionStatus, UserRole
 from ai_market_monitor.services.billing import BillingError, BillingService, CreemBillingProvider
+from ai_market_monitor.services.discount_codes import DiscountCodeService
 from ai_market_monitor.services.entitlements import PlanCatalogService
 
 
@@ -143,21 +147,163 @@ async def test_the_review_page_quotes_the_price_it_will_charge(test_context, pla
     assert response.status_code == 200, response.text
 
     body = response.text
+    # What the payment will really ask for if nobody types a code. The launch price is
+    # reached with a code now, so this page quotes the full price and names the code
+    # beside it rather than promising the lower number to everybody.
     charged = effective_monthly_price(plan_code)
-    assert f"<strong>{charged} USD</strong>" in body
+    assert f"{charged} USD" in body
     # A page that quotes a price is a page for something on sale.
     assert plan_offer(plan_code).monthly_available is True
 
-    was = original_monthly_price(plan_code)
-    on_offer = plan_offer(plan_code).promotional_monthly_price is not None
-    if on_offer and promotion_is_active():
-        # The normal price is shown as the old one, never as the price being charged.
-        assert was is not None and was > charged
-        assert '<s class="price-original"' in body
-        assert f"The normal price is {was} USD per month." in body
+    percent = launch_discount_percent(plan_code)
+    if percent is not None:
+        coded = coded_monthly_price(plan_code)
+        assert coded is not None and coded < charged
+        assert LAUNCH_DISCOUNT_CODE in body
+        assert f"{int(percent)}% off" in body
+        # And the box to type it into, drawn for the crypto choice only.
+        assert "data-discount" in body
+        assert 'data-discount-methods="crypto"' in body
     else:
-        assert 'class="price-original"' not in body
-        assert "The normal price is" not in body
+        assert LAUNCH_DISCOUNT_CODE not in body
+
+
+async def test_a_discount_code_changes_the_amount_the_payment_is_created_for(test_context):
+    """The whole point: the code has to reach the charge, not just the screen.
+
+    A code that only changes what a page displays is worse than no code at all — the
+    person agrees to one number and is charged another.
+    """
+
+    await _signup(test_context, "discount-code@example.com")
+    enabled = test_context["settings"].model_copy(
+        update={
+            "billing_enabled": True,
+            "billing_crypto_provider": "nowpayments",
+            "billing_discount_codes": {"TESTHALF": Decimal("50")},
+        }
+    )
+    form = await _review_form(test_context, "trader")
+    # `_review_form` installs its own settings override, so ours goes on afterwards or
+    # it is quietly replaced and crypto stays switched off.
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+
+    full = effective_monthly_price("trader")
+    expected = price_after_percent(full, Decimal("50"))
+
+    # The Apply button quotes a price...
+    checked = await test_context["client"].post(
+        "/dashboard/billing/discount",
+        data={
+            "plan_code": "trader",
+            "payment_method": "crypto",
+            "discount_code": "testhalf",
+            "csrf_token": form["csrf_token"],
+        },
+    )
+    assert checked.status_code == 200, checked.text
+    quoted = checked.json()
+    assert quoted["code"] == "TESTHALF"
+    assert quoted["was"] == str(full)
+    assert quoted["now"] == str(expected)
+
+    # ...and the payment attempt is opened for exactly that, with the reason beside it.
+    #
+    # Asserted against the service rather than by driving the crypto route to a real
+    # payment company: opening the invoice is a live HTTPS call, and what matters here is
+    # the amount written down, which is what both the invoice and the webhook read.
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(
+            select(User)
+            .join(UserIdentity, UserIdentity.user_id == User.id)
+            .where(UserIdentity.normalized_identifier == "discount-code@example.com")
+        )
+        assert user is not None
+        await PlanCatalogService(session).sync_defaults()
+        service = BillingService(session, enabled, provider_name="nowpayments")
+        priced = await DiscountCodeService(enabled).price_for(
+            "TESTHALF", plan_code="trader", full_amount=full, currency="USD"
+        )
+        prepared = await service.prepare_checkout(
+            user_id=user.id,
+            plan_code="trader",
+            billing_cycle="monthly",
+            request_key="discount-test",
+            terms_accepted=True,
+            discount=priced,
+        )
+        await session.commit()
+        assert prepared.attempt.amount == expected, "the code did not reach the charge"
+        assert prepared.attempt.discount_code == "TESTHALF"
+        assert prepared.attempt.discount_percent == Decimal("50")
+
+        # The same request without the code is a different order, not the same one at a
+        # different price. Handing back the discounted attempt would charge the full-price
+        # buyer less; handing back the full-price attempt would ignore the code.
+        plain = await service.prepare_checkout(
+            user_id=user.id,
+            plan_code="trader",
+            billing_cycle="monthly",
+            request_key="discount-test",
+            terms_accepted=True,
+        )
+        await session.commit()
+        assert plain.attempt.id != prepared.attempt.id
+        assert plain.attempt.amount == full
+        assert plain.attempt.discount_code is None
+
+
+async def test_a_code_is_refused_on_the_card_route_rather_than_quietly_dropped(test_context):
+    """Dropping it would open a payment page at the full price straight after telling
+    somebody their code had worked."""
+
+    await _signup(test_context, "card-code@example.com")
+    enabled = test_context["settings"].model_copy(
+        update={
+            "billing_enabled": True,
+            "billing_discount_codes": {"TESTHALF": Decimal("50")},
+        }
+    )
+    form = await _review_form(test_context, "trader")
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+    answer = await test_context["client"].post(
+        "/dashboard/billing/discount",
+        data={
+            "plan_code": "trader",
+            "payment_method": "card",
+            "discount_code": "TESTHALF",
+            "csrf_token": form["csrf_token"],
+        },
+    )
+    assert answer.status_code == 400
+    assert answer.json()["error"]["code"] == "discount_code_card_route"
+
+
+async def test_a_wrong_code_is_refused_and_charges_nothing(test_context):
+    await _signup(test_context, "bad-code@example.com")
+    enabled = test_context["settings"].model_copy(
+        update={"billing_enabled": True, "billing_crypto_provider": "nowpayments"}
+    )
+    form = await _review_form(test_context, "trader")
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+    answer = await test_context["client"].post(
+        "/dashboard/billing/discount",
+        data={
+            "plan_code": "trader",
+            "payment_method": "crypto",
+            "discount_code": "NOTAREALCODE",
+            "csrf_token": form["csrf_token"],
+        },
+    )
+    assert answer.status_code == 400
+    assert answer.json()["error"]["code"] == "discount_code_unknown"
+    # A sentence a beginner can act on, with no code name and no field name in it.
+    message = answer.json()["error"]["message"]
+    assert "discount_code" not in message
+    assert message.endswith(".")
+
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(select(func.count(BillingCheckoutAttempt.id))) == 0
 
 
 async def test_verified_static_payment_activates_once_and_emails_once(test_context):

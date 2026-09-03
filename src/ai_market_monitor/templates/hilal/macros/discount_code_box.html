@@ -1,0 +1,70 @@
+{# The discount-code box. One macro, because three screens have one.
+
+   The subscription popup, the plan popup and the checkout review page all draw this,
+   and a copy on each of them is three chances for the boxes to drift apart in what they
+   accept, what they say, or where they post.
+
+   Nothing in here decides anything: `methods` says which ways of paying take a code and
+   comes from `services/billing.DISCOUNT_CODE_METHODS`, `full_amount` is what a checkout
+   charges with no code, and `code_hint` is only shown so nobody has to already know that
+   a code exists. `hm-discount-code.js` asks the server what a typed code is worth.
+
+   The hidden field is inside the surrounding form and travels with the payment, so the
+   server prices the code again rather than trusting the number on the screen. #}
+
+{% macro discount_code_box(methods, full_amount, currency='USD', code_hint='', percent_hint=0) %}
+<div
+  class="hm-discount"
+  data-discount
+  data-discount-methods="{{ methods|join(',') }}"
+  data-discount-full="{{ full_amount }}"
+  data-discount-currency="{{ currency }}"
+  data-discount-state="empty"
+  hidden
+>
+  <input type="hidden" name="discount_code" value="">
+  <div class="hm-discount-head">
+    <span class="hm-discount-title">
+      <span data-icon="billing" data-icon-class="icon-sm"></span>Have a discount code?
+    </span>
+    <span class="hm-discount-optional">You do not need one</span>
+  </div>
+
+  <div class="hm-discount-entry">
+    <label class="sr-only" for="hm-discount-input">Discount code</label>
+    <input
+      id="hm-discount-input"
+      type="text"
+      inputmode="latin"
+      autocomplete="off"
+      autocapitalize="characters"
+      spellcheck="false"
+      maxlength="40"
+      placeholder="{{ code_hint or 'Your code' }}"
+      data-discount-input
+    >
+    <button class="hm-discount-apply" type="button" data-discount-apply>
+      <span data-discount-apply-label>Apply</span>
+    </button>
+  </div>
+
+  {% if code_hint and percent_hint %}
+    {# Named here rather than left for somebody to find out about elsewhere. The chip is
+       the same one the pricing cards use, so the code looks like the same object in both
+       places. #}
+    <p class="hm-discount-hint">
+      Use <code class="hm-code-chip">{{ code_hint }}</code> for {{ percent_hint }}% off.
+    </p>
+  {% endif %}
+
+  <p class="hm-discount-applied" data-discount-applied-row hidden>
+    <span data-icon="check" data-icon-class="icon-sm"></span>
+    <span><code class="hm-code-chip" data-discount-applied-code>{{ code_hint }}</code> is on.</span>
+    <button class="hm-discount-clear" type="button" data-discount-clear hidden>Remove</button>
+  </p>
+
+  {# The answer, in words, where it is both seen and heard. Never colour alone: the tone
+     changes the words and the icon as well (brand rules, section 10). #}
+  <p class="hm-discount-said" role="status" aria-live="polite" data-discount-said hidden></p>
+</div>
+{% endmacro %}

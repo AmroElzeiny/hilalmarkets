@@ -1,4 +1,6 @@
 {% extends "hilal/base_dashboard.html" %}
+{% from "hilal/macros/payment_provider_badge.html" import payment_provider_badge %}
+{% from "hilal/macros/discount_code_box.html" import discount_code_box %}
 {% block content %}
 <div class="page-header checkout-heading">
   <div>
@@ -27,10 +29,10 @@
     </div>
     <dl class="checkout-facts">
       <div><dt>Access type</dt><dd>{{ 'Monthly subscription' if billing_capabilities.supports_recurring_billing else 'One-time 30-day access' }}</dd></div>
-      {# The number the payment will ask for, not the catalogue's normal price. While a
-         launch offer runs those are two different numbers, and this is the last screen
-         before the visitor pays. #}
-      <div><dt>Price</dt><dd>{% if checkout_price_was %}<s class="price-original" aria-label="Was {{ checkout_price_was }} {{ plan.currency }} per month">{{ checkout_price_was }}</s> {% endif %}{{ checkout_price }} {{ plan.currency }}</dd></div>
+      {# The number the payment will ask for. It opens at the price with no code and the
+         box below rewrites it the moment one is accepted, so this — the last screen
+         before paying — can never quote a figure the payment does not ask for. #}
+      <div><dt>Price</dt><dd><s class="price-original" data-discount-original="{plain} {{ plan.currency }}" hidden></s> <span data-discount-total="{plain} {{ plan.currency }}">{{ checkout_price }} {{ plan.currency }}</span></dd></div>
       <div><dt>Tax</dt><dd>Shown by the payment provider where applicable</dd></div>
       <div><dt>Renewal</dt><dd>{{ 'Renews monthly until cancelled' if billing_capabilities.supports_recurring_billing else 'Manual renewal; no automatic charge' }}</dd></div>
       <div><dt>Cancellation</dt><dd>{{ 'Manage through the provider portal' if billing_capabilities.supports_customer_portal else 'No subscription cancellation is needed' }}</dd></div>
@@ -45,10 +47,22 @@
 
   <aside class="panel checkout-action-card">
     <span class="kicker">Order summary</span>
-    <div class="checkout-total"><span>{{ plan.name }}</span><strong>{{ checkout_price }} {{ plan.currency }}</strong></div>
-    {% if checkout_price_was %}
-      <p class="checkout-small">Launch price. The normal price is {{ checkout_price_was }} {{ plan.currency }} per month.</p>
-      <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" role="group" aria-label="Time left at this price" hidden></div>
+    <div class="checkout-total">
+      <span>{{ plan.name }}</span>
+      <strong>
+        <s class="price-original" data-discount-original="{plain} {{ plan.currency }}" hidden></s>
+        <span data-discount-total="{plain} {{ plan.currency }}">{{ checkout_price }} {{ plan.currency }}</span>
+      </strong>
+    </div>
+    {% if launch_discount_code %}
+      {# The launch price is reached by typing a code, so the page names the code rather
+         than promising a lower number nobody has asked for yet. #}
+      <p class="checkout-small">
+        Use code <code class="hm-code-chip">{{ launch_discount_code }}</code> for
+        {{ launch_discount_percent }}% off. Without it the price stays
+        {{ checkout_price }} {{ plan.currency }} a month.
+      </p>
+      <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" role="group" aria-label="Time left to use this code" hidden></div>
     {% endif %}
     <p class="muted">Payment details are entered only on the configured payment provider's secure page.</p>
     {% if already_subscribed %}
@@ -81,12 +95,19 @@
           <legend>Payment method</legend>
           {% set first_available = (billing_method_offers.values()|selectattr('available')|list|first).method %}
           {% for method, offer in billing_method_offers.items() %}
-            <label class="{{ '' if offer.available else 'is-unavailable' }}" aria-disabled="{{ 'false' if offer.available else 'true' }}">
-              <input type="radio" name="payment_method" value="{{ method }}" {{ 'checked' if method == first_available else '' }} {{ '' if offer.available else 'disabled' }} required>
-              <span class="billing-method-card"><span data-icon="{{ 'billing' if method == 'card' else 'wallet' }}" data-icon-class="icon"></span><strong>{{ 'Card' if method == 'card' else 'Crypto' }}</strong><small>{{ offer.note }}</small></span>
-            </label>
+            <div class="billing-method-option">
+              <label class="{{ '' if offer.available else 'is-unavailable' }}" aria-disabled="{{ 'false' if offer.available else 'true' }}">
+                <input type="radio" name="payment_method" value="{{ method }}" {{ 'checked' if method == first_available else '' }} {{ '' if offer.available else 'disabled' }} required>
+                <span class="billing-method-card"><span data-icon="{{ 'billing' if method == 'card' else 'wallet' }}" data-icon-class="icon"></span><strong>{{ 'Card' if method == 'card' else 'Crypto' }}</strong><small>{{ offer.note }}</small></span>
+              </label>
+              {# The company that will really take the money, named under the choice. #}
+              {{ payment_provider_badge(offer) }}
+            </div>
           {% endfor %}
         </fieldset>
+        {# The code box, under the choice that can use it. It draws itself only when the
+           chosen way of paying takes a code, which the server decided. #}
+        {{ discount_code_box(discount_methods, checkout_price, plan.currency, launch_discount_code, launch_discount_percent) }}
         <div class="billing-profile-grid">
           <label><span>First name</span><input type="text" name="first_name" value="{{ billing_profile_defaults.first_name }}" maxlength="60" autocomplete="given-name" required></label>
           <label><span>Last name</span><input type="text" name="last_name" value="{{ billing_profile_defaults.last_name }}" maxlength="60" autocomplete="family-name" required></label>
@@ -111,5 +132,6 @@
   data-event-scope="{{ checkout_attempt.id if checkout_attempt else checkout_request_id }}"
   hidden
 ></div>
-<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260901-pay-methods"></script>
+<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260903-market-simpler"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260903-market-simpler"></script>
 {% endblock %}

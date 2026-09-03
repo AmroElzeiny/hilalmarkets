@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import Final
 from uuid import UUID
 
 from sqlalchemy import select
@@ -61,6 +62,39 @@ class WebAuthError(ValueError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+
+#: Which door opens an account. One question, one answer, one owner.
+#:
+#: There is exactly **one** account per email address — `user_identities` carries a unique
+#: constraint on (provider, normalized_identifier), so a second one cannot be made even by
+#: mistake. What differs is how it opens. An account made through Google has no password
+#: at all, and `verify_password` refuses a null hash.
+#:
+#: Four places refuse a password or refuse a sign-up because an account already exists,
+#: and all four used to answer as though every account had a password. Somebody who joined
+#: with Google and then typed a password was told "Email or password is incorrect" — which
+#: is not true, is not actionable, and sent them round the same wrong loop for ever. The
+#: question "which door is this?" is asked here, once, so all four say the same thing.
+SIGN_IN_DOOR_PASSWORD: Final[str] = "password"
+SIGN_IN_DOOR_GOOGLE: Final[str] = "google"
+
+
+def sign_in_door(identity: UserIdentity) -> str:
+    """Which door opens this account: its own password, or Google.
+
+    A stored password hash is the whole of the test. An account with none was made
+    through Google — the only path that creates one — and can only be opened by Google
+    until its owner sets a password through "I forgot my password".
+    """
+
+    return SIGN_IN_DOOR_PASSWORD if identity.password_hash else SIGN_IN_DOOR_GOOGLE
+
+
+def uses_google_only(identity: UserIdentity) -> bool:
+    """Is Google the only way into this account today?"""
+
+    return sign_in_door(identity) == SIGN_IN_DOOR_GOOGLE
 
 
 class WebAuthService:
@@ -184,12 +218,7 @@ class WebAuthService:
         password_error = password_validation_error(password)
         if password_error:
             raise WebAuthError("invalid_password", password_error)
-        identity = await self.session.scalar(
-            select(UserIdentity).where(
-                UserIdentity.provider == IdentityProvider.EMAIL,
-                UserIdentity.normalized_identifier == normalized,
-            )
-        )
+        identity = await self._email_identity(normalized)
         created = False
         if identity is None:
             parts = str(display_name or "").split(maxsplit=1)
@@ -211,8 +240,7 @@ class WebAuthService:
                 raise WebAuthError("identity_broken", "This identity is not linked correctly.")
             if existing_user.status == UserStatus.SUSPENDED:
                 raise WebAuthError("account_banned", "Your profile is banned.")
-            if not verify_password(password, identity.password_hash):
-                raise WebAuthError("invalid_login", "Email or password is incorrect.")
+            self._check_password(identity, password)
             user = existing_user
             user.last_seen_at = datetime.now(UTC)
         await self.session.flush()
@@ -243,14 +271,9 @@ class WebAuthService:
         if not normalized:
             raise WebAuthError("invalid_email", "Enter a valid email address.")
         await self._ensure_not_banned(normalized)
-        existing_identity = await self.session.scalar(
-            select(UserIdentity.id).where(
-                UserIdentity.provider == IdentityProvider.EMAIL,
-                UserIdentity.normalized_identifier == normalized,
-            )
-        )
+        existing_identity = await self._email_identity(normalized)
         if existing_identity is not None:
-            raise WebAuthError("account_exists", "This email already has an account.")
+            raise self._already_exists(existing_identity)
         return normalized
 
     async def request_signup_email_code(
@@ -307,14 +330,9 @@ class WebAuthService:
         # went round the form.
         if not clean_first_name:
             raise WebAuthError("invalid_name", "Name is required.")
-        existing_identity = await self.session.scalar(
-            select(UserIdentity.id).where(
-                UserIdentity.provider == IdentityProvider.EMAIL,
-                UserIdentity.normalized_identifier == normalized,
-            )
-        )
+        existing_identity = await self._email_identity(normalized)
         if existing_identity is not None:
-            raise WebAuthError("account_exists", "This email already has an account.")
+            raise self._already_exists(existing_identity)
 
         now = datetime.now(UTC)
         latest = await self.session.scalar(
@@ -463,15 +481,10 @@ class WebAuthService:
                 pending.consumed_at = now
             raise WebAuthError("invalid_code", "The code is invalid or expired.")
 
-        existing_identity = await self.session.scalar(
-            select(UserIdentity.id).where(
-                UserIdentity.provider == IdentityProvider.EMAIL,
-                UserIdentity.normalized_identifier == normalized,
-            )
-        )
+        existing_identity = await self._email_identity(normalized)
         if existing_identity is not None:
             pending.consumed_at = now
-            raise WebAuthError("account_exists", "This email already has an account.")
+            raise self._already_exists(existing_identity)
 
         pending.consumed_at = now
         return await self.create_account(
@@ -513,12 +526,7 @@ class WebAuthService:
             profile.last_name, label="Last name", required=False
         )
         now = datetime.now(UTC)
-        identity = await self.session.scalar(
-            select(UserIdentity).where(
-                UserIdentity.provider == IdentityProvider.EMAIL,
-                UserIdentity.normalized_identifier == normalized,
-            )
-        )
+        identity = await self._email_identity(normalized)
         if identity is None:
             user = await self.create_account(
                 normalized=normalized,
@@ -571,12 +579,7 @@ class WebAuthService:
         if not subject:
             return
         if identity is None:
-            identity = await self.session.scalar(
-                select(UserIdentity).where(
-                    UserIdentity.provider == IdentityProvider.EMAIL,
-                    UserIdentity.normalized_identifier == normalized,
-                )
-            )
+            identity = await self._email_identity(normalized)
         if identity is None:
             return
         profile_data = dict(identity.profile_data or {})
@@ -606,12 +609,7 @@ class WebAuthService:
         if not normalized or purpose not in {"login", "password_reset"}:
             return False
         await self._ensure_not_banned(normalized)
-        identity = await self.session.scalar(
-            select(UserIdentity).where(
-                UserIdentity.provider == IdentityProvider.EMAIL,
-                UserIdentity.normalized_identifier == normalized,
-            )
-        )
+        identity = await self._email_identity(normalized)
         if identity is None:
             return False
         user = await self.session.get(User, identity.user_id)
@@ -721,12 +719,7 @@ class WebAuthService:
                 challenge.consumed_at = now
             raise WebAuthError("invalid_code", "The code is invalid or expired.")
         challenge.consumed_at = now
-        identity = await self.session.scalar(
-            select(UserIdentity).where(
-                UserIdentity.provider == IdentityProvider.EMAIL,
-                UserIdentity.normalized_identifier == normalized,
-            )
-        )
+        identity = await self._email_identity(normalized)
         if identity is None:
             raise WebAuthError("identity_broken", "This identity is not linked correctly.")
         user = await self.session.get(User, identity.user_id)
@@ -756,24 +749,76 @@ class WebAuthService:
         if await identifier_is_banned(self.session, self.settings, normalized_email):
             raise WebAuthError("account_banned", "Your profile is banned.")
 
+    # ------------------------------------------------------------------
+    # One place decides what to say when an account already exists, and one place
+    # decides what to say when a password does not open it.
+    # ------------------------------------------------------------------
+
+    async def _email_identity(self, normalized: str) -> UserIdentity | None:
+        """The one identity an email address can have, or ``None``.
+
+        One row, always: `user_identities` is unique on (provider, normalized_identifier),
+        so the same address can never end up on two accounts however somebody signs up.
+        """
+
+        return await self.session.scalar(
+            select(UserIdentity).where(
+                UserIdentity.provider == IdentityProvider.EMAIL,
+                UserIdentity.normalized_identifier == normalized,
+            )
+        )
+
+    @staticmethod
+    def _already_exists(identity: UserIdentity) -> WebAuthError:
+        """"You already have an account" — said differently for the two kinds of account.
+
+        Sending a Google customer to "sign in with your password" is sending them to a
+        password that does not exist. They can only go round again.
+        """
+
+        if uses_google_only(identity):
+            return WebAuthError(
+                "account_exists_google",
+                "This email already has an account, made with Google.",
+            )
+        return WebAuthError("account_exists", "This email already has an account.")
+
+    @staticmethod
+    def _check_password(identity: UserIdentity, password: str) -> None:
+        """Refuse a password, and be honest about which of the two reasons it is.
+
+        A Google account has no password, so "email or password is incorrect" is simply
+        false there — the password is neither right nor wrong, there is nothing to check
+        it against. Saying so is also the only way somebody learns which button to press.
+
+        This does reveal that an address has an account. That is already true on this
+        route: signing up answers "this email already has an account", and signing in
+        answers "no verified account exists for that email". Naming the door adds nothing
+        an attacker did not already have, and removes a dead end for everybody else.
+        """
+
+        if uses_google_only(identity):
+            raise WebAuthError(
+                "google_sign_in_required",
+                "This account was made with Google, so it has no password yet.",
+            )
+        if not verify_password(password, identity.password_hash):
+            raise WebAuthError("invalid_login", "Email or password is incorrect.")
+
     async def signin_email(self, *, email: str, password: str) -> User:
         normalized = normalize_email(email)
         if not normalized:
             raise WebAuthError("invalid_email", "Enter a valid email address.")
         await self._ensure_not_banned(normalized)
         password = password or ""
-        if not password:
-            raise WebAuthError("invalid_login", "Email or password is incorrect.")
-        identity = await self.session.scalar(
-            select(UserIdentity).where(
-                UserIdentity.provider == IdentityProvider.EMAIL,
-                UserIdentity.normalized_identifier == normalized,
-            )
-        )
+        identity = await self._email_identity(normalized)
         if identity is None:
             raise WebAuthError("invalid_login", "No verified account exists for that email.")
-        if not verify_password(password, identity.password_hash):
-            raise WebAuthError("invalid_login", "Email or password is incorrect.")
+        # An empty box used to be refused before the account was looked at, which meant a
+        # Google customer who pressed the button with no password typed was told their
+        # password was wrong rather than that they have no password. The account is read
+        # first now, so the answer is about the account rather than about the form.
+        self._check_password(identity, password)
         user = await self.session.get(User, identity.user_id)
         if user is None:
             raise WebAuthError("identity_broken", "This identity is not linked correctly.")

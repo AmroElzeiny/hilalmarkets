@@ -60,6 +60,15 @@ def rate_limit_rules(settings: Settings) -> tuple[RateLimitRule, ...]:
             r"^/api/v1/(on-demand-scans|scan-now|light-scan|sharia/market/check)",
             configured,
         ),
+        # Before the checkout rule, because a discount check is not a checkout and must
+        # not spend a buyer's five attempts at paying. `matching_rate_limit_rule` returns
+        # the first rule that matches, so order is the whole of this decision.
+        _rule(
+            "discount_code",
+            {"POST"},
+            r"^/dashboard/billing/discount(?:/|$)",
+            configured,
+        ),
         _rule(
             "checkout",
             {"POST"},

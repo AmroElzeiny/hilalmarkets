@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from ai_market_monitor.schemas.timeframes import TIMEFRAME_MINUTES
 
@@ -88,23 +88,45 @@ def visible_public_plan_codes(*, billing_enabled: bool) -> tuple[str, ...]:
 # price on the landing page and another in the dashboard has no way to know which is real.
 # --------------------------------------------------------------------------------
 
-#: When the launch price stops. After this instant the plan costs its normal price again,
-#: and the countdown disappears. Both facts come from this one value.
+#: When the launch offer stops. After this instant the launch code stops working, the
+#: plan costs its normal price, and the countdown disappears. All three facts come from
+#: this one value.
 PROMOTION_ENDS_AT = datetime(2026, 9, 15, 0, 0, tzinfo=UTC)
+
+#: The code somebody types to get the launch price, and how much it takes off.
+#:
+#: The launch price used to apply on its own, to everybody, with nothing to type. It is a
+#: **discount code** now: the plan costs its normal price, and this code is the only way
+#: to the lower one. That is why the number below is a percentage and not a second price
+#: — one number, so "25% off" and "$15 a month" can never drift apart. Every surface that
+#: quotes the lower price derives it here through :func:`coded_monthly_price`.
+#:
+#: The card route is a separate world: Creem holds its own copy of the product price and
+#: its own discount codes, so the same code must exist in the Creem dashboard at the same
+#: percentage. `scripts/check_creem_prices.py` compares the two and is the only thing
+#: that can catch a disagreement, because nothing offline can see Creem.
+LAUNCH_DISCOUNT_CODE = "HILAL25"
 
 #: What a card says instead of a price when the plan cannot be bought yet.
 COMING_SOON_LABEL = "Soon"
 
+#: Money is rounded to the cent, and never in the customer's disfavour by accident.
+#: ``ROUND_HALF_UP`` on a percentage of a whole-dollar price is exact for every price
+#: this product sells; it is named rather than left to the default so a future price with
+#: an odd cent cannot quietly round a charge up.
+_CENTS = Decimal("0.01")
+
 
 @dataclass(frozen=True, slots=True)
 class PlanOffer:
-    """Whether a plan can be bought, per interval, and what it costs today."""
+    """Whether a plan can be bought, per interval, and what a code takes off it."""
 
     monthly_available: bool
     annual_available: bool
-    #: The launch price, while :data:`PROMOTION_ENDS_AT` is still in the future. ``None``
-    #: means the plan is simply at its normal price.
-    promotional_monthly_price: Decimal | None = None
+    #: How much :data:`LAUNCH_DISCOUNT_CODE` takes off a month, as a percentage, while
+    #: :data:`PROMOTION_ENDS_AT` is still in the future. ``None`` means this plan has no
+    #: launch code and is only ever sold at its normal price.
+    launch_discount_percent: Decimal | None = None
 
 
 PLAN_OFFERS: dict[str, PlanOffer] = {
@@ -114,7 +136,7 @@ PLAN_OFFERS: dict[str, PlanOffer] = {
     "trader": PlanOffer(
         monthly_available=True,
         annual_available=False,
-        promotional_monthly_price=Decimal("15.00"),
+        launch_discount_percent=Decimal("25"),
     ),
     # Not open yet, on either interval.
     "pro": PlanOffer(monthly_available=False, annual_available=False),
@@ -132,36 +154,83 @@ def plan_offer(code: str) -> PlanOffer:
 
 
 def promotion_is_active(now: datetime | None = None) -> bool:
-    """Is the launch price still running?"""
+    """Is the launch offer still running?"""
     return (now or datetime.now(UTC)) < PROMOTION_ENDS_AT
 
 
-def effective_monthly_price(code: str, *, now: datetime | None = None) -> Decimal:
-    """What this plan costs per month today.
+def price_after_percent(amount: Decimal, percent: Decimal) -> Decimal:
+    """``amount`` with ``percent`` taken off, to the cent.
 
-    Reads the promotion and the clock together, so the price on the page and the
-    countdown next to it can never say different things.
+    The one place this arithmetic happens. Every discount in the product — the launch
+    code, a code read from Creem, a code read from the environment — comes through here,
+    so no two of them can round differently and no page can quote a number a checkout
+    would not charge.
     """
-    definition = PLAN_DEFINITIONS[code]
+    if percent <= 0:
+        return amount.quantize(_CENTS, rounding=ROUND_HALF_UP)
+    if percent >= 100:
+        return Decimal("0.00")
+    kept = (Decimal("100") - percent) / Decimal("100")
+    return (amount * kept).quantize(_CENTS, rounding=ROUND_HALF_UP)
+
+
+def launch_discount_percent(code: str, *, now: datetime | None = None) -> Decimal | None:
+    """How much the launch code takes off this plan today, or ``None``.
+
+    Reads the offer and the clock together, so the price on a card, the sentence naming
+    the code under it and the countdown beside it can never say different things.
+    """
     offer = plan_offer(code)
-    if offer.promotional_monthly_price is not None and promotion_is_active(now):
-        return offer.promotional_monthly_price
-    return definition.monthly_price
+    if offer.launch_discount_percent is None or not promotion_is_active(now):
+        return None
+    return offer.launch_discount_percent
+
+
+def effective_monthly_price(code: str, *, now: datetime | None = None) -> Decimal:
+    """What a checkout charges for one month when **no** discount code is used.
+
+    This is the price the payment company is asked for by default, so it is also the
+    number `scripts/check_creem_prices.py` holds the Creem product against.
+
+    It used to carry the launch price. It does not any more: the launch price is reached
+    by typing :data:`LAUNCH_DISCOUNT_CODE`, and a function that quietly returned the
+    lower number would charge everybody the offer price whether they used the code or
+    not — which is exactly what "the code is the only route to it" rules out.
+    """
+    del now
+    return PLAN_DEFINITIONS[code].monthly_price
+
+
+def coded_monthly_price(code: str, *, now: datetime | None = None) -> Decimal | None:
+    """What one month costs **with** the launch code, or ``None`` when there is no code.
+
+    This is the headline figure on a pricing card, beside the crossed-out normal price.
+    """
+    percent = launch_discount_percent(code, now=now)
+    if percent is None:
+        return None
+    return price_after_percent(PLAN_DEFINITIONS[code].monthly_price, percent)
 
 
 def original_monthly_price(code: str, *, now: datetime | None = None) -> Decimal | None:
     """The crossed-out price, or ``None`` when there is nothing to cross out."""
-    if effective_monthly_price(code, now=now) == PLAN_DEFINITIONS[code].monthly_price:
+    if coded_monthly_price(code, now=now) is None:
         return None
     return PLAN_DEFINITIONS[code].monthly_price
 
 
 def annual_saving(code: str, *, now: datetime | None = None) -> Decimal:
-    """What a year on this plan saves against paying month by month."""
+    """What a year on this plan saves against paying month by month.
+
+    Measured against the price a person actually pays month by month, which is the
+    launch-code price while the launch offer is running. Comparing a year against the
+    normal monthly price would advertise a saving nobody can get.
+    """
     presentation = PUBLIC_PLAN_PRESENTATIONS.get(code)
     if presentation is None or presentation.annual_price <= 0:
         return Decimal("0.00")
-    saving = (effective_monthly_price(code, now=now) * 12) - presentation.annual_price
+    monthly = coded_monthly_price(code, now=now) or effective_monthly_price(code, now=now)
+    saving = (monthly * 12) - presentation.annual_price
     return max(saving, Decimal("0.00"))
 
 
@@ -186,23 +255,38 @@ def plan_offer_payload(code: str, *, now: datetime | None = None) -> dict[str, o
     A price for an interval that is not open yet is ``None``, not the number. Leaving the
     number in the payload would ship it in the page source for anyone to read, and the
     point of "Soon" is that there is no price to quote yet.
+
+    ``monthlyPrice`` is the headline on a card: the launch-code price while the launch
+    offer runs, the normal price otherwise. ``fullMonthlyPrice`` is always what a
+    checkout charges with no code, so a card can say "without the code it is $20" from
+    the same object rather than working it out.
     """
     offer = plan_offer(code)
+    full = effective_monthly_price(code, now=now)
+    coded = coded_monthly_price(code, now=now)
     original = original_monthly_price(code, now=now)
+    percent = launch_discount_percent(code, now=now)
     return {
         "monthlyAvailable": offer.monthly_available,
         "annualAvailable": offer.annual_available,
-        "monthlyPrice": (
-            float(effective_monthly_price(code, now=now))
-            if offer.monthly_available
-            else None
-        ),
+        "monthlyPrice": float(coded if coded is not None else full)
+        if offer.monthly_available
+        else None,
         "annualPrice": (
             float(PUBLIC_PLAN_PRESENTATIONS[code].annual_price)
             if offer.annual_available and code in PUBLIC_PLAN_PRESENTATIONS
             else None
         ),
         "originalMonthlyPrice": float(original) if original is not None else None,
+        # What a checkout charges when nobody types a code, and the code that changes it.
+        # Both are `None` for a plan nobody can buy, for the same reason as the price.
+        "fullMonthlyPrice": float(full) if offer.monthly_available else None,
+        "discountCode": (
+            LAUNCH_DISCOUNT_CODE if percent is not None and offer.monthly_available else None
+        ),
+        "discountPercent": (
+            float(percent) if percent is not None and offer.monthly_available else None
+        ),
         "comingSoonLabel": COMING_SOON_LABEL,
     }
 

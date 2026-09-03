@@ -30,6 +30,7 @@ from ai_market_monitor.db.models import (
     UserIdentity,
 )
 from ai_market_monitor.db.models.enums import IdentityProvider, SubscriptionStatus
+from ai_market_monitor.services.discount_codes import DiscountedPrice
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
 from ai_market_monitor.services.provider_reliability import ProviderCallError
 from ai_market_monitor.services.provider_runtime import provider_request
@@ -154,6 +155,103 @@ _PROVIDER_WORDS: Final[dict[str, str]] = {
 #: How each way of paying is named inside a sentence.
 _METHOD_WORDS: Final[dict[str, str]] = {"card": "card", "crypto": "crypto"}
 
+#: The payment company's own website. It is what the "Payments secured by …" mark under a
+#: way of paying links to, so a buyer can check the company before typing a card number.
+#: A company with no entry here gets no mark — `static` is this product's own local test
+#: page and has no company behind it at all.
+_PROVIDER_SITES: Final[dict[str, str]] = {
+    "creem": "https://www.creem.io/",
+    "stripe": "https://stripe.com/",
+    "nowpayments": "https://nowpayments.io/",
+}
+
+
+def provider_word(provider: str | None) -> str | None:
+    """What one payment company is called in front of a person.
+
+    One owner. The sentence under a way of paying and the mark beside it both name the
+    same company, so both ask here rather than each keeping a table of names.
+    """
+
+    if provider is None:
+        return None
+    return _PROVIDER_WORDS.get(provider)
+
+
+def provider_site(provider: str | None) -> str | None:
+    """The payment company's own website, or ``None`` when it has no public one."""
+
+    if provider is None:
+        return None
+    return _PROVIDER_SITES.get(provider)
+
+
+#: Which way of paying each company serves. A finished payment keeps only the company's
+#: name, so this is how a past payment can still be shown as "Card" or "Crypto".
+_PROVIDER_METHODS: Final[dict[str, str]] = {
+    "creem": "card",
+    "stripe": "card",
+    "static": "card",
+    "nowpayments": "crypto",
+}
+
+
+def provider_method(provider: str | None) -> str | None:
+    """The way of paying one company takes, or ``None`` for a company we do not know."""
+
+    if provider is None:
+        return None
+    return _PROVIDER_METHODS.get(provider)
+
+
+#: Which ways of paying take a discount code typed on **our** pages.
+#:
+#: Only crypto. The card route ends on Creem's own checkout page, which already has a
+#: discount box of its own, and Creem — not this application — decides what a card buyer
+#: is charged. A code box on our side of the card route would take a code, quote a price,
+#: and then watch Creem charge a different one.
+#:
+#: One owner, because three screens draw the box and one route accepts it. A page that
+#: worked this out for itself is how a box came to be offered where checkout refused it.
+DISCOUNT_CODE_METHODS: Final[tuple[str, ...]] = ("crypto",)
+
+
+def method_takes_discount_code(method: str | None) -> bool:
+    """Does this way of paying accept a code typed on our pages?"""
+
+    return method in DISCOUNT_CODE_METHODS
+
+
+def provider_takes_discount_code(provider: str | None) -> bool:
+    """Does this payment company's route accept a code typed on our pages?"""
+
+    return method_takes_discount_code(provider_method(provider))
+
+
+def creem_product_id_for(
+    settings: Settings,
+    *,
+    plan_code: str,
+    billing_cycle: str,
+) -> str | None:
+    """Which Creem product a plan and period map to, or ``None`` when there is not one.
+
+    Two callers need this and they must agree: the card checkout, which sends the id to
+    Creem, and the discount lookup, which asks Creem whether a code covers that product.
+    A code scoped to the card product is a code for *the plan*, so the crypto route asks
+    about the same product rather than about nothing.
+    """
+
+    return settings.creem_product_ids.get(f"{plan_code}_{_cycle_key(billing_cycle)}") or None
+
+
+def method_word(method: str | None) -> str | None:
+    """How one way of paying is named in front of a person."""
+
+    if method is None:
+        return None
+    return _METHOD_WORDS.get(method)
+
 
 def configured_billing_provider(settings: Settings, payment_method: str) -> str:
     if payment_method == "card":
@@ -193,12 +291,20 @@ class PaymentMethodOffer:
     ``note`` is the sentence shown under the name. It is written here rather than in a
     template because which sentence is true depends on *why* a method cannot be used,
     and a template cannot be tested on that.
+
+    ``company`` and ``company_site`` are the payment company in front of a person, and
+    its own website. They travel with the offer for the same reason: the mark that says
+    *Payments secured by Creem* must name the company the server is really configured to
+    use. A page that writes the name itself keeps saying "Creem" the day the setting
+    moves to another company.
     """
 
     method: str
     provider: str | None
     available: bool
     note: str
+    company: str | None = None
+    company_site: str | None = None
 
 
 def billing_method_provider(settings: Settings, payment_method: str) -> str | None:
@@ -320,7 +426,7 @@ def _method_note(
 ) -> str:
     word = _METHOD_WORDS.get(method, method)
     if available:
-        company = _PROVIDER_WORDS.get(provider or "", "our payment company")
+        company = provider_word(provider) or "our payment company"
         return f"Handled by {company}."
     if provider is None:
         return f"Paying by {word} is switched off just now."
@@ -358,6 +464,8 @@ def payment_method_offers(
                 provider=provider,
                 available=available,
                 note=_method_note(method=method, provider=provider, available=available),
+                company=provider_word(provider),
+                company_site=provider_site(provider),
             )
         )
     return tuple(offers)
@@ -394,11 +502,20 @@ def payment_method_payload(
     The browser is handed the **answer**, never the ingredients. Both checkout popups used
     to receive raw flags and work out for themselves which methods to offer, which is a
     second copy of this rule written in JavaScript — and a copy that can disagree.
+
+    The company's name travels with the answer for the same reason. The popup's own button
+    read "Continue to Creem" and "Continue to NOWPayments" from two strings written into
+    the script, so the day a setting names another company the button would have sent
+    people to a company that was never going to charge them.
     """
 
     return {
         cycle: {
-            offer.method: {"available": offer.available, "note": offer.note}
+            offer.method: {
+                "available": offer.available,
+                "note": offer.note,
+                "company": offer.company,
+            }
             for offer in payment_method_offers(
                 settings, plan_codes=(plan_code,), billing_cycle=cycle
             )
@@ -793,8 +910,9 @@ class CreemBillingProvider:
                 "billing_email_missing",
                 "A verified account email is required for card checkout.",
             )
-        product_key = f"{plan_code}_{_cycle_key(billing_cycle)}"
-        product_id = self.settings.creem_product_ids.get(product_key)
+        product_id = creem_product_id_for(
+            self.settings, plan_code=plan_code, billing_cycle=billing_cycle
+        )
         if not product_id:
             raise BillingError(
                 "creem_product_missing",
@@ -1105,6 +1223,7 @@ class BillingService:
         request_key: str,
         terms_accepted: bool,
         billing_profile: Mapping[str, Any] | None = None,
+        discount: DiscountedPrice | None = None,
     ) -> CheckoutAttemptResult:
         if plan_code not in PURCHASABLE_PLAN_CODES:
             raise BillingError("plan_not_available", "This plan is not available for checkout.")
@@ -1165,10 +1284,18 @@ class BillingService:
                 "checkout_request_invalid",
                 "The checkout request expired. Return to billing and try again.",
             )
+        # A discount code is part of what is being bought, so it belongs in the key that
+        # decides whether this is the same checkout as a previous one.
+        #
+        # Leaving it out was a way to charge the wrong amount: press Pay, come back, type
+        # HILAL25, press Pay again, and the second request matched the first attempt —
+        # which still held the full price and a payment page already opened at it. The
+        # code was accepted on screen and never reached the invoice.
+        discount_key = f"{discount.code}:{discount.percent}" if discount else ""
         idempotency_key = sha256(
             (
                 f"checkout:{user_id}:{plan.id}:{self.provider.provider_name}:{billing_cycle}:"
-                f"{self.settings.billing_terms_version}:{normalized_key}"
+                f"{self.settings.billing_terms_version}:{normalized_key}:{discount_key}"
             ).encode()
         ).hexdigest()
         existing = await self.session.scalar(
@@ -1186,6 +1313,12 @@ class BillingService:
                     BillingCheckoutAttempt.billing_cycle == billing_cycle,
                     BillingCheckoutAttempt.status.in_({"creating", "pending"}),
                     BillingCheckoutAttempt.expires_at > now,
+                    # Same reason as the key above: an attempt opened at a different price
+                    # is a different order, and handing it back would send somebody to a
+                    # payment page for an amount they did not agree to.
+                    BillingCheckoutAttempt.discount_code.is_(None)
+                    if discount is None
+                    else BillingCheckoutAttempt.discount_code == discount.code,
                 )
                 .order_by(BillingCheckoutAttempt.created_at.desc())
                 .limit(1)
@@ -1193,6 +1326,19 @@ class BillingService:
         if existing is not None:
             return CheckoutAttemptResult(attempt=existing, duplicate=True)
 
+        full_amount = self.checkout_amount(plan.code, plan.price_monthly, billing_cycle)
+        amount = full_amount
+        if discount is not None:
+            # The discount was priced against the amount this checkout really charges, so
+            # a mismatch here means the price moved between the Apply button and the Pay
+            # button. Refusing is the only safe reading: the alternative is charging one
+            # number while the screen shows another.
+            if discount.full != full_amount:
+                raise BillingError(
+                    "discount_price_changed",
+                    "The price changed while you were paying. Please check the code again.",
+                )
+            amount = discount.final
         attempt = BillingCheckoutAttempt(
             user_id=user_id,
             plan_id=plan.id,
@@ -1201,8 +1347,10 @@ class BillingService:
             status="creating",
             idempotency_key=idempotency_key,
             terms_version=self.settings.billing_terms_version,
-            amount=self.checkout_amount(plan.code, plan.price_monthly, billing_cycle),
+            amount=amount,
             currency=plan.currency.upper(),
+            discount_code=discount.code if discount else None,
+            discount_percent=discount.percent if discount else None,
             terms_accepted_at=now,
             expires_at=now + timedelta(minutes=self.settings.billing_checkout_ttl_minutes),
             billing_profile=_sanitize_billing_profile(billing_profile),
@@ -1220,6 +1368,9 @@ class BillingService:
                 "amount": str(attempt.amount),
                 "currency": attempt.currency,
                 "terms_version": attempt.terms_version,
+                "discount_code": attempt.discount_code or "",
+                "discount_percent": str(attempt.discount_percent or ""),
+                "discount_source": discount.source if discount else "",
             },
         )
         return CheckoutAttemptResult(attempt=attempt, duplicate=False)
@@ -1588,6 +1739,15 @@ class BillingService:
         normalized_amount = BillingService._minor_unit_amount(
             order.get("amount") if order.get("amount") is not None else product.get("price")
         )
+        # What Creem's own checkout page took off, and the code that did it.
+        #
+        # A buyer on the card route reaches Creem's page, which has a discount box we do
+        # not control. Creem reports the discount on the order; without reading it, a card
+        # payment made with a Creem code arrives smaller than the amount recorded here and
+        # is refused as underpaid — the buyer pays and never gets the plan.
+        discount = dict(checkout.get("discount") or {})
+        if not discount and isinstance(item.get("discount"), Mapping):
+            discount = dict(item["discount"])
         normalized = {
             "user_id": metadata.get("user_id"),
             "plan_code": metadata.get("plan_code"),
@@ -1611,6 +1771,12 @@ class BillingService:
             "amount": normalized_amount,
             "currency": order.get("currency") or product.get("currency"),
             "receipt_url": item.get("receipt_url") or order.get("receipt_url"),
+            "provider_discount_amount": BillingService._minor_unit_amount(
+                order.get("discount_amount")
+            ),
+            "provider_discount_code": (
+                discount.get("discountCode") or discount.get("discount_code") or None
+            ),
         }
         return {
             "id": payload.get("id"),
@@ -2003,25 +2169,51 @@ class BillingService:
             if attempt.billing_cycle == "trial_7_day" and event_type == "subscription.paid"
             else attempt.amount
         )
+        # A discount Creem itself applied on its own checkout page. It is only ever read
+        # from the provider's own report of this order, never from anything a buyer can
+        # type, and it moves the accepted amount by exactly the figure Creem states.
+        provider_discount = self._provider_discount(data) if provider == "creem" else Decimal("0")
         if event_type in {
             "checkout.session.completed",
             "invoice.payment_succeeded",
             "payment.finished",
             "subscription.paid",
         }:
-            self._validate_paid_amount_and_currency(
+            expected_amount = self._validate_paid_amount_and_currency(
                 paid_amount=data.get("amount"),
                 paid_currency=data.get("currency"),
                 expected_amount=expected_amount,
                 expected_currency=attempt.currency,
+                provider_discount=provider_discount,
             )
         if provider == "nowpayments" and event_type == "payment.finished":
             self._validate_nowpayments_settlement(data)
+        if provider_discount > 0 and not attempt.discount_code:
+            # Keep the reason beside the smaller amount. Without this the attempt says
+            # "$20" while the payment says "$15" and nothing on the record explains it.
+            attempt.discount_code = (
+                str(data.get("provider_discount_code") or "").strip().upper()[:40] or None
+            )
         data["checkout_attempt_id"] = str(attempt.id)
         data["user_id"] = str(attempt.user_id)
         data["plan_code"] = plan.code
         data["amount"] = str(expected_amount)
         data["currency"] = attempt.currency
+
+    @staticmethod
+    def _provider_discount(data: Mapping[str, Any]) -> Decimal:
+        """What the payment company says its own page took off this order.
+
+        Never negative, and a missing or unreadable figure is zero. A diagnostic must not
+        become the failure: a payment company that reports its discount badly should not
+        stop a payment that is otherwise exactly right.
+        """
+
+        try:
+            amount = Decimal(str(data.get("provider_discount_amount")))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal("0")
+        return amount if amount > 0 else Decimal("0")
 
     def _validate_paid_amount_and_currency(
         self,
@@ -2030,7 +2222,21 @@ class BillingService:
         paid_currency: object,
         expected_amount: Decimal,
         expected_currency: str,
-    ) -> None:
+        provider_discount: Decimal = Decimal("0"),
+    ) -> Decimal:
+        """Check what was paid against what was owed, and answer which figure was met.
+
+        ``provider_discount`` widens the answer by **one** extra figure, and only the one
+        the payment company itself reported taking off this order. That is not the same as
+        accepting any smaller payment: without a discount line from the provider there is
+        still exactly one acceptable amount, which is how this has always worked.
+
+        It exists because the card route ends on Creem's own checkout page, where a buyer
+        can type a Creem discount code. The payment then arrives smaller than the amount
+        recorded when the checkout was created, and every one of those buyers used to pay
+        and receive nothing.
+        """
+
         try:
             actual = Decimal(str(paid_amount))
         except (InvalidOperation, TypeError, ValueError) as exc:
@@ -2043,20 +2249,28 @@ class BillingService:
                 "payment_currency_mismatch",
                 "The paid currency does not match the checkout attempt.",
             )
-        tolerance = expected_amount * Decimal(
-            str(self.settings.billing_payment_amount_tolerance_percent)
-        ) / Decimal("100")
-        minimum = expected_amount - tolerance
-        maximum = expected_amount + tolerance
-        if actual < minimum:
+        candidates = [expected_amount]
+        if provider_discount > 0:
+            candidates.append(max(expected_amount - provider_discount, Decimal("0.00")))
+        percent = Decimal(str(self.settings.billing_payment_amount_tolerance_percent))
+        too_small = True
+        for candidate in candidates:
+            tolerance = candidate * percent / Decimal("100")
+            if actual < candidate - tolerance:
+                continue
+            too_small = False
+            if actual <= candidate + tolerance:
+                return candidate
+        if too_small:
             raise BillingError(
                 "payment_underpaid", "The verified payment is below the accepted amount."
             )
-        if actual > maximum and not self.settings.billing_allow_overpayment:
+        if not self.settings.billing_allow_overpayment:
             raise BillingError(
                 "payment_overpaid",
                 "The verified payment exceeds the accepted amount and requires manual review.",
             )
+        return max(candidates)
 
     def _validate_nowpayments_settlement(self, data: Mapping[str, Any]) -> None:
         try:

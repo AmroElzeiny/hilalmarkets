@@ -4,7 +4,7 @@
   {#- First script on the page, deliberately. It puts a time limit on every request this
       product sends to its own server, and it can only do that for a request sent after
       it has run. See `static/hm-request.js`. -#}
-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260901-pay-methods"></script>
+  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260903-market-simpler"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
@@ -46,12 +46,12 @@
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
   {# The brand faces are self-hosted, so the public site loads no third-party font
      service and renders the same typefaces as the landing page and the dashboard. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260901-pay-methods">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260903-market-simpler">
   {# One owner for the cookie banner and its settings window, which this template includes below. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260901-pay-methods">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260901-pay-methods">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260901-pay-methods">
-  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260901-pay-methods">{% endif %}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260903-market-simpler">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260903-market-simpler">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public.css') }}?v=20260903-market-simpler">
+  {% if public_chat_enabled %}<link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-public-chat.css') }}?v=20260903-market-simpler">{% endif %}
   <script>
     window.HilalMarketsConsentConfig = {{ {
       "version": cookie_consent_version,
@@ -81,13 +81,13 @@
   {% include "hilal/partials/back_to_top.html" %}
   {% include "hilal/partials/cookie_banner.html" %}
   {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260901-pay-methods"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260901-pay-methods"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260901-pay-methods"></script>
-{% if site_visit_measurement_enabled %}<script src="{{ url_for('static', path='/hm-visit-analytics.js') }}?v=20260901-pay-methods" defer></script>{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260901-pay-methods" defer></script>
-  <script src="{{ url_for('static', path='/hm-to-top.js') }}?v=20260901-pay-methods" defer></script>
-  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260901-pay-methods"></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260903-market-simpler"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260903-market-simpler"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260903-market-simpler"></script>
+{% if site_visit_measurement_enabled %}<script src="{{ url_for('static', path='/hm-visit-analytics.js') }}?v=20260903-market-simpler" defer></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260903-market-simpler" defer></script>
+  <script src="{{ url_for('static', path='/hm-to-top.js') }}?v=20260903-market-simpler" defer></script>
+  {% if public_chat_enabled %}<script src="{{ url_for('static', path='/hilalmarkets-public-chat.js') }}?v=20260903-market-simpler"></script>{% endif %}
   {% block page_scripts %}{% endblock %}
 </body>
 </html>

@@ -1,5 +1,5 @@
 {% extends "hilal/base_dashboard.html" %}
-{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260901-pay-methods">{% endblock %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260903-market-simpler">{% endblock %}
 {% block content %}
 
 <div
@@ -136,43 +136,9 @@
     <p class="t-control-note" data-result-note aria-live="polite" data-hm-guide-target="market-live-status">Loading the list...</p>
   </div>
 
-  {#- Size and movement. Two questions the exchange price cannot answer on its own:
-      how big is this coin next to the others, and has it been going up or down for
-      longer than today. Every label is written for somebody who has never read a
-      market page — "The biggest coins", not "Large cap". -#}
-  <div class="t-controls" data-hm-part="Filters for how big a coin is and how it has moved">
-    <div class="t-segment" role="radiogroup" aria-label="How big the coin is">
-      <button type="button" role="radio" data-size="any" aria-checked="true">Any size</button>
-      <button type="button" role="radio" data-size="large" aria-checked="false">The biggest</button>
-      <button type="button" role="radio" data-size="mid" aria-checked="false">Medium</button>
-      <button type="button" role="radio" data-size="small" aria-checked="false">Smaller</button>
-    </div>
-
-    <div class="t-segment" role="radiogroup" aria-label="Which way the price moved">
-      <button type="button" role="radio" data-move="any" aria-checked="true">Any move</button>
-      <button type="button" role="radio" data-move="up" aria-checked="false">Went up</button>
-      <button type="button" role="radio" data-move="down" aria-checked="false">Went down</button>
-    </div>
-
-    <div class="t-segment" role="radiogroup" aria-label="Over how long">
-      <button type="button" role="radio" data-move-window="24h" aria-checked="true">1 day</button>
-      <button type="button" role="radio" data-move-window="7d" aria-checked="false">1 week</button>
-      <button type="button" role="radio" data-move-window="30d" aria-checked="false">1 month</button>
-      <button type="button" role="radio" data-move-window="90d" aria-checked="false">3 months</button>
-    </div>
-
-    <p class="t-control-note">
-      Size and longer moves come from CoinMarketCap and are refreshed once a day. They
-      describe the market only. They have nothing to do with whether a coin is Shariah
-      screened, and they are not advice.
-    </p>
-  </div>
-
-  {#- Both of these are full-width blocks about the list as a whole, so they sit after
-      the control row rather than inside it. The notice says how the selected standard
-      reached its answer; the strip says how the whole market is behaving today. -#}
+  {#- A full-width block about the list as a whole, so it sits after the control row
+      rather than inside it. It says how the selected standard reached its answer. -#}
   {% include "hilal/partials/automated_methodology_notice.html" %}
-  {% include "hilal/partials/market_sentiment_strip.html" %}
 
   <div class="t-banner" data-tone="error" data-quote-error hidden role="alert">
     <span data-icon="alert" data-icon-class="icon"></span>
@@ -270,4 +236,4 @@
 {% include "hilal/dashboard_test/partials/favorites_dialog.html" %}
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20260901-pay-methods"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20260903-market-simpler"></script>{% endblock %}

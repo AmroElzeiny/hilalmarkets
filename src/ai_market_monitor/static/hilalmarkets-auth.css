@@ -767,12 +767,13 @@ body.hilal-auth-page {
   content: "";
 }
 
-/* Two doors side by side on a wide card, stacked on a narrow one. They used to be one
-   full-width card with a title, a sentence and an arrow, three lines tall — which is a
-   lot of screen for the way in that most people do not take. */
+/* One door per row, at every width. With no `grid-template-columns` the grid keeps its
+   single implicit column, so each way in is a full-width button on its own line and they
+   all read as one list going down. They used to sit side by side on a wide card, which
+   made each one narrower than the sign-in button above it and turned the pair into a
+   row of small controls rather than an obvious next choice. */
 .hilal-auth-page .auth-alts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 10px;
 }
 

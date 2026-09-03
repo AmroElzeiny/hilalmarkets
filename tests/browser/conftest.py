@@ -461,6 +461,53 @@ def paid_browser_app(
     )
 
 
+@pytest.fixture(scope="session")
+def live_shape_browser_app(
+    pytestconfig: pytest.Config,
+    repo_root: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> RunningApp:
+    """A server set up the way the deployed one is: card through Creem, crypto through
+    NOWPayments.
+
+    The paid server above uses `static`, the in-repository stand-in, which is not a
+    company and so names none. That is the right shape for driving the steps, and it is
+    the wrong shape for the one thing a buyer reads before typing a card number: *whose*
+    page they are about to be sent to. Nothing here can reach either company — the keys
+    are made up and no test presses Pay — but the page is built from the same settings
+    the live server holds, so the marks it draws are the marks people really see.
+    """
+
+    if (
+        pytestconfig.getoption("--browser-base-url")
+        or os.environ.get("BROWSER_E2E_BASE_URL")
+    ):
+        pytest.skip("The live-shape checkout server is only started by the fixture.")
+    yield from _run_browser_app(
+        pytestconfig,
+        repo_root,
+        tmp_path_factory,
+        slot="companies",
+        extra_env={
+            "BILLING_ENABLED": "true",
+            "BILLING_PROVIDER": "nowpayments",
+            "BILLING_CARD_PROVIDER": "creem",
+            "BILLING_CRYPTO_PROVIDER": "nowpayments",
+            "CREEM_API_KEY": "browser-e2e-creem-key",
+            "CREEM_WEBHOOK_SECRET": "browser-e2e-creem-webhook",
+            "CREEM_PRODUCT_IDS": '{"trader_monthly": "prod_browser_e2e"}',
+            "NOWPAYMENTS_API_KEY": "browser-e2e-nowpayments-key",
+            "NOWPAYMENTS_IPN_SECRET": "browser-e2e-nowpayments-ipn",
+        },
+        report_as_main=False,
+    )
+
+
+@pytest.fixture
+def live_shape_base_url(live_shape_browser_app: RunningApp) -> str:
+    return live_shape_browser_app.base_url
+
+
 def _run_browser_app(
     pytestconfig: pytest.Config,
     repo_root: Path,

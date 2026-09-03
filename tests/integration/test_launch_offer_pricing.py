@@ -15,16 +15,30 @@ import pytest
 
 from ai_market_monitor.core.plans import (
     COMING_SOON_LABEL,
+    LAUNCH_DISCOUNT_CODE,
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
     PUBLIC_PLAN_PRESENTATIONS,
     annual_saving,
+    coded_monthly_price,
     effective_monthly_price,
+    launch_discount_percent,
     maximum_annual_saving,
     original_monthly_price,
     plan_offer,
     promotion_is_active,
 )
+
+
+def headline_price(code: str) -> Decimal:
+    """The number a pricing card puts in large type.
+
+    The launch price while the launch offer runs — the card quotes it and names the code
+    that unlocks it — and the normal price once the offer has ended. Written once here
+    because six assertions below need it and each would otherwise choose for itself.
+    """
+
+    return coded_monthly_price(code) or effective_monthly_price(code)
 
 
 @pytest.fixture(autouse=True)
@@ -91,13 +105,23 @@ async def test_the_landing_page_carries_the_offer_and_its_deadline(
 
     by_code = {plan["code"]: plan for plan in commerce["plans"]}
     monitor = by_code["trader"]
-    assert monitor["monthlyPrice"] == float(effective_monthly_price("trader"))
+    assert monitor["monthlyPrice"] == float(headline_price("trader"))
+    # What a checkout charges with no code travels with the card, so the card can say
+    # "without the code it is $20" rather than working it out from the struck price.
+    assert monitor["fullMonthlyPrice"] == float(effective_monthly_price("trader"))
     was = original_monthly_price("trader")
     # While the offer runs there is a price to cross out; once it ends there is not,
     # and the page must carry nothing rather than an old number.
     assert monitor["originalMonthlyPrice"] == (float(was) if was is not None else None)
     assert (was is not None) is promotion_is_active()
     assert monitor["monthlyAvailable"] is True
+    # The code and the crossed-out price appear and disappear together: the price is
+    # crossed out *because* a code replaces it, so one without the other is incoherent.
+    percent = launch_discount_percent("trader")
+    assert (monitor["discountCode"] is not None) is (was is not None)
+    if percent is not None:
+        assert monitor["discountCode"] == LAUNCH_DISCOUNT_CODE
+        assert monitor["discountPercent"] == float(percent)
 
     assert by_code["pro"]["monthlyAvailable"] is False
     assert by_code["pro"]["originalMonthlyPrice"] is None
@@ -114,7 +138,7 @@ async def test_the_public_pricing_page_shows_the_struck_price_and_the_timer(
     assert response.status_code == 200
     body = response.text
     # Today's price always stands on the card.
-    assert f"<strong>${int(effective_monthly_price('trader'))}</strong>" in body
+    assert f"<strong>${int(headline_price('trader'))}</strong>" in body
     struck, countdown = _struck_price_marks(body)
     was = original_monthly_price("trader")
     if promotion_is_active():
@@ -123,9 +147,14 @@ async def test_the_public_pricing_page_shows_the_struck_price_and_the_timer(
         assert f"${int(was)}" in body
         # The countdown is rendered with the server's own deadline.
         assert f'data-offer-countdown="{PROMOTION_ENDS_AT.isoformat()}"' in body
+        # And the card says *why* the lower number applies. A crossed-out price with no
+        # code beside it promises a discount that nobody is told how to get.
+        assert LAUNCH_DISCOUNT_CODE in body
+        assert f"${int(effective_monthly_price('trader'))} a month" in body
     else:
-        # An offer that ended leaves no trace: no crossed-out price, no timer.
+        # An offer that ended leaves no trace: no crossed-out price, no timer, no code.
         assert not struck and not countdown and was is None
+        assert LAUNCH_DISCOUNT_CODE not in body
 
 
 @pytest.mark.anyio
@@ -183,15 +212,19 @@ async def test_the_dashboard_shows_the_same_offer_as_the_public_page(
     response = await test_context["client"].get("/dashboard/billing")
     assert response.status_code == 200
     body = response.text
-    assert f"${int(effective_monthly_price('trader'))}" in body
+    assert f"${int(headline_price('trader'))}" in body
     struck, countdown = _struck_price_marks(body)
     was = original_monthly_price("trader")
     if promotion_is_active():
         assert struck and was is not None
         assert f"${int(was)}" in body
         assert f'data-offer-countdown="{PROMOTION_ENDS_AT.isoformat()}"' in body
+        # The same sentence as the public page, naming the same code. Two surfaces that
+        # quote the same lower price must explain it the same way.
+        assert LAUNCH_DISCOUNT_CODE in body
     else:
         assert not struck and not countdown and was is None
+        assert LAUNCH_DISCOUNT_CODE not in body
     # No price anywhere for a plan nobody can buy yet.
     from ai_market_monitor.core.plans import PLAN_DEFINITIONS
 
@@ -209,10 +242,15 @@ async def test_every_pricing_surface_agrees_on_what_is_for_sale() -> None:
 
 
 def test_the_annual_saving_is_computed_from_the_prices_beside_it() -> None:
-    """A saving typed out by hand survives a price change and starts lying."""
+    """A saving typed out by hand survives a price change and starts lying.
+
+    Measured against what somebody really pays month by month, which is the launch-code
+    price while the launch offer runs. Comparing a year against the normal monthly price
+    would advertise a saving nobody can actually get.
+    """
 
     presentation = PUBLIC_PLAN_PRESENTATIONS["trader"]
-    expected = (effective_monthly_price("trader") * 12) - presentation.annual_price
+    expected = (headline_price("trader") * 12) - presentation.annual_price
     assert annual_saving("trader") == max(expected, Decimal("0.00"))
     # Nothing is on annual sale yet, so there is no saving anyone can buy.
     assert maximum_annual_saving() == Decimal("0.00")

@@ -1,7 +1,10 @@
+import json
 import re
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from types import UnionType
-from typing import Any, Literal, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
+from urllib.parse import urlsplit
 
 from pydantic import (
     AnyHttpUrl,
@@ -12,7 +15,12 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    NoDecode,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 from ai_market_monitor.core.launch_stage import (
     LaunchStage,
@@ -50,6 +58,7 @@ RATE_LIMIT_SCOPES: tuple[str, ...] = (
     "ai_chat",
     "market_check",
     "checkout",
+    "discount_code",
     "portal",
     "support",
     "passport_report",
@@ -329,6 +338,24 @@ class Settings(BaseSettings):
     billing_terms_version: str = "2026-07"
     billing_payment_amount_tolerance_percent: float = Field(default=0, ge=0, le=5)
     billing_allow_overpayment: bool = False
+    #: Extra discount codes this deployment honours, as ``CODE=percent`` pairs.
+    #:
+    #: Written as ``HILAL25=25,WELCOME10=10`` or as JSON. Codes are upper-cased on the
+    #: way in, so the case somebody types never matters.
+    #:
+    #: This is the **fallback** list. Codes are looked up in Creem first, because Creem is
+    #: where the card route reads them; this list answers when Creem is not configured,
+    #: has never heard of the code, or cannot be reached. The launch code is not listed
+    #: here — `core/plans.py` owns what it is worth and when it stops.
+    #:
+    #: ``NoDecode`` because this is a line somebody edits by hand in an env file. Without
+    #: it pydantic-settings JSON-decodes the value *before* any validator here runs, so a
+    #: blank line — which is what an unused offer looks like — crashes the whole
+    #: application at startup with "error parsing value", naming no cause a person could
+    #: act on. The friendly form never reaches a JSON parser now.
+    billing_discount_codes: Annotated[dict[str, Decimal], NoDecode] = Field(
+        default_factory=dict
+    )
     payment_email_max_attempts: int = Field(default=5, ge=1, le=20)
     payment_email_retry_minutes: int = Field(default=15, ge=1, le=1440)
     api_rate_limiting_enabled: bool = True
@@ -339,6 +366,10 @@ class Settings(BaseSettings):
             "ai_chat": {"limit": 30, "window_seconds": 60},
             "market_check": {"limit": 20, "window_seconds": 60},
             "checkout": {"limit": 5, "window_seconds": 300},
+            # Trying a discount code is cheap for a person and endless for a guesser, so
+            # it gets its own allowance rather than sharing the checkout one — a buyer
+            # who mistypes a code twice must still be able to press Pay.
+            "discount_code": {"limit": 10, "window_seconds": 300},
             "portal": {"limit": 10, "window_seconds": 300},
             "support": {"limit": 5, "window_seconds": 3600},
             "passport_report": {"limit": 5, "window_seconds": 3600},
@@ -1412,15 +1443,99 @@ class Settings(BaseSettings):
                     cleaned[key] = None
         return cleaned
 
+    @field_validator("billing_discount_codes", mode="before")
+    @classmethod
+    def read_discount_codes(cls, value: object) -> object:
+        """``HILAL25=25,WELCOME10=10`` — or JSON, for whoever prefers it.
+
+        Written in the friendly form because this is a line somebody edits by hand in an
+        env file when they want to run an offer, and ``{"HILAL25": 25}`` is a shape that
+        is easy to get wrong at the end of a long file. Both forms are accepted and both
+        arrive here as the same dictionary.
+
+        A percentage outside 0-100 is refused rather than clamped: "``HILAL250``" is a
+        typo somebody made, and clamping it to 100 would give away the product for free
+        while looking like it worked.
+        """
+
+        raw: dict[Any, Any]
+        if isinstance(value, dict):
+            raw = value
+        elif isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return {}
+            if text.startswith("{"):
+                try:
+                    decoded = json.loads(text)
+                except ValueError as exc:
+                    raise ValueError(
+                        "BILLING_DISCOUNT_CODES looks like JSON but could not be read. "
+                        "Write it as HILAL25=25,WELCOME10=10 instead."
+                    ) from exc
+                if not isinstance(decoded, dict):
+                    raise ValueError(
+                        "BILLING_DISCOUNT_CODES as JSON must be an object like "
+                        '{"HILAL25": 25}.'
+                    )
+                raw = decoded
+            else:
+                raw = {}
+                for chunk in re.split(r"[,\n;]", text):
+                    entry = chunk.strip()
+                    if not entry:
+                        continue
+                    if "=" not in entry and ":" not in entry:
+                        raise ValueError(
+                            "BILLING_DISCOUNT_CODES needs pairs like HILAL25=25, "
+                            f"but found {entry!r}."
+                        )
+                    separator = "=" if "=" in entry else ":"
+                    name, _, percent_text = entry.partition(separator)
+                    raw[name] = percent_text
+        else:
+            return value
+
+        parsed: dict[str, Decimal] = {}
+        for name, percent_value in raw.items():
+            code = "".join(str(name).split()).upper()
+            if not code:
+                raise ValueError("BILLING_DISCOUNT_CODES has a discount with no code.")
+            try:
+                percent = Decimal(str(percent_value).strip().rstrip("%").strip())
+            except InvalidOperation as exc:
+                raise ValueError(
+                    f"BILLING_DISCOUNT_CODES has a discount for {code} that is not a "
+                    f"number: {str(percent_value).strip()!r}."
+                ) from exc
+            # Refused, never clamped. `HILAL250` is a typo somebody made, and clamping it
+            # to 100 would give the product away while looking like it worked.
+            if percent <= 0 or percent > 100:
+                raise ValueError(
+                    f"BILLING_DISCOUNT_CODES gives {code} a discount of {percent}%. "
+                    "A discount must be above 0 and at most 100."
+                )
+            parsed[code] = percent
+        return parsed
+
     @field_validator("api_rate_limits")
     @classmethod
     def include_public_form_rate_limits(
         cls,
         value: dict[str, dict[str, int]],
     ) -> dict[str, dict[str, int]]:
+        """Guarantee every allowance the guards ask for by name.
+
+        ``api/request_guards.py`` reads each scope with ``configured[scope]``, so a scope
+        added in code and missing from a deployment's own ``API_RATE_LIMITS`` raises on
+        every request rather than on the one route it guards. A default here is the whole
+        of the fix: a deployment may change an allowance, never lose one.
+        """
+
         merged = dict(value)
         merged.setdefault("public_waitlist", {"limit": 5, "window_seconds": 3600})
         merged.setdefault("public_contact", {"limit": 5, "window_seconds": 3600})
+        merged.setdefault("discount_code", {"limit": 10, "window_seconds": 300})
         return merged
 
     @property
@@ -1520,22 +1635,84 @@ class Settings(BaseSettings):
         return candidate
 
     @property
-    def google_oauth_redirect_uri(self) -> str:
-        """The exact address Google is told to come back to.
+    def site_base_urls(self) -> tuple[str, ...]:
+        """Every name this deployment answers on, the application's own name first.
 
-        Google matches this string character for character against the list registered
-        on the OAuth client, so it is computed once, here, and never assembled from the
-        incoming request. Behind Cloudflare the request's own scheme and host are not
-        reliably the public ones, and a redirect address that is right in development
-        and wrong in production is the classic way this integration fails on the day it
-        is deployed.
+        One deployment answers on two names: ``deploy/Caddyfile`` sends both
+        ``hilalmarkets.com`` and ``app.hilalmarkets.com`` to the same application, and
+        neither the sign-in pages nor the dashboard refuse either one. So "where does a
+        person come back to" has to be answered per request, not once for the whole site.
 
-        The sign-in pages live on the application host, so ``APP_BASE_URL`` wins where
-        it is set. This is the string to paste into "Authorised redirect URIs".
+        Locally the two settings are the same host and this collapses to a single entry,
+        so nothing changes for a one-name install.
         """
 
-        base = str(self.app_base_url or self.public_base_url).rstrip("/")
-        return f"{base}/auth/google/callback"
+        bases: list[str] = []
+        for base in (self.app_base_url, self.public_base_url):
+            if base is None:
+                continue
+            candidate = str(base).rstrip("/")
+            if candidate not in bases:
+                bases.append(candidate)
+        return tuple(bases)
+
+    def base_url_for(self, host: str | None) -> str:
+        """The address of the name ``host``, for building a link back to where somebody is.
+
+        This is the one owner of "which of our names is this person using". Anything that
+        sends a person out to an outside service — Google, the payment company — and needs
+        them handed back has to ask this, because coming back on the *other* name means
+        coming back with no session cookie: it belongs to whichever host set it.
+
+        The answer is always one of :attr:`site_base_urls`, so a forged ``Host`` header can
+        at worst choose the other legitimate name and can never introduce a new address.
+        An unknown or missing host falls back to the first, which makes it safe to hand the
+        raw request hostname.
+        """
+
+        wanted = (host or "").strip().lower()
+        bases = self.site_base_urls
+        if wanted:
+            for base in bases:
+                if (urlsplit(base).hostname or "").lower() == wanted:
+                    return base
+        return bases[0]
+
+    @property
+    def google_oauth_redirect_uris(self) -> tuple[str, ...]:
+        """Every address Google may be told to come back to, best one first.
+
+        The sign-in pages are served on every name in :attr:`site_base_urls`, and the
+        Google round trip has to finish on the one it started on, for two reasons that
+        each break it on their own:
+
+        * the popup tells the page that opened it where to go with ``postMessage``, and a
+          message aimed at a different origin is silently never delivered. The popup shuts
+          and the page underneath sits there, as if the button had done nothing;
+        * the session cookie is set by whichever host answered the callback, so finishing
+          on the other name signs the person into a host they are not looking at.
+
+        **Every string this returns must be registered on the OAuth client** under
+        "Authorised redirect URIs". Google matches them character for character.
+        """
+
+        return tuple(f"{base}/auth/google/callback" for base in self.site_base_urls)
+
+    @property
+    def google_oauth_redirect_uri(self) -> str:
+        """The address Google comes back to when nothing says otherwise.
+
+        The application host wins where it is set, because that is where the product
+        lives. Callers that know which host the person is on should ask
+        :meth:`google_oauth_redirect_uri_for` instead of assuming this one.
+        """
+
+        return self.google_oauth_redirect_uris[0]
+
+    def google_oauth_redirect_uri_for(self, host: str | None) -> str:
+        """The return address that keeps the round trip on ``host``."""
+
+        return f"{self.base_url_for(host)}/auth/google/callback"
 
     @property
     def google_signin_enabled(self) -> bool:

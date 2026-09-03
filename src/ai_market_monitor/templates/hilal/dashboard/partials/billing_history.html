@@ -20,7 +20,9 @@
         <dl class="billing-history-facts">
           <div>
             <dt>Payment method</dt>
-            <dd>{{ 'Card via Creem' if row.attempt.provider == 'creem' else ('Crypto via NOWPayments' if row.attempt.provider == 'nowpayments' else row.attempt.provider|replace('_', ' ')|title) }}</dd>
+            {# The way of paying and the company that took it, both from the billing
+               service. This line held its own copy of that pairing. #}
+            <dd>{{ row.attempt.provider|payment_route }}</dd>
           </div>
           <div>
             <dt>Total</dt>

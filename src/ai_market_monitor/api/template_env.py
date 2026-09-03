@@ -27,6 +27,7 @@ from fastapi.templating import Jinja2Templates
 
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.dashboard_paths import MONITOR_PATH, monitor_edit_path
+from ai_market_monitor.services.billing import method_word, provider_method, provider_word
 from ai_market_monitor.services.hilal_methodology import (
     METHODOLOGY_PUBLIC_PATH as AUTOMATED_METHODOLOGY_PATH,
 )
@@ -67,12 +68,50 @@ def plan_limit(value: object) -> str:
     return str(value)
 
 
+def payment_company(value: object) -> str:
+    """What one payment company is called in front of a person.
+
+    Four pages each held their own list turning ``creem`` into "Creem" and ``nowpayments``
+    into "NOWPayments", and one of them simply wrote both names into a sentence whatever
+    the server was set to. The billing service owns that list; this is how a page reaches
+    it. Anything the service does not know is tidied rather than printed raw, so a stored
+    word like ``bank_transfer`` never reaches a reader as it is written in the database.
+    """
+
+    if not value:
+        return ""
+    known = provider_word(str(value))
+    if known is not None:
+        return known
+    return str(value).replace("_", " ").title()
+
+
+def payment_route(value: object) -> str:
+    """How a payment was taken: the way of paying, and the company that took it.
+
+    A finished payment keeps only the company's name, so which way of paying it was is
+    read back from the company. Both halves come from the billing service; the payment
+    history page used to hold its own two-line version of this.
+    """
+
+    company = payment_company(value)
+    if not company:
+        return ""
+    way = method_word(provider_method(str(value)))
+    return f"{way.title()} via {company}" if way else company
+
+
 def register(templates: Jinja2Templates) -> Jinja2Templates:
     """Give one template environment everything the product's templates expect."""
 
     templates.env.filters["short_dt"] = short_datetime
     templates.env.filters["reward_amount"] = reward_amount
     templates.env.filters["plan_limit"] = plan_limit
+    # The payment company's name, from the one place that owns it. Four pages used to
+    # translate `creem` into "Creem" themselves, and the plan popup told everybody their
+    # details go to "Creem or NOWPayments" whatever the server was really set to.
+    templates.env.filters["payment_company"] = payment_company
+    templates.env.filters["payment_route"] = payment_route
     # Plain words for a source's state and kind. Without these the System Brain printed
     # the stored value at a reviewer: "candidate", "unreachable", "not_permitted".
     templates.env.filters["source_state"] = state_label

@@ -2563,9 +2563,14 @@ body.hilal-dashboard .billing-profile-grid small {
   font-weight: 500;
 }
 
+/* Two choices side by side where there is room for two, and one under the other where
+   there is not. It used to be two columns at every width, whatever the panel around it
+   was: on the review page that panel is about a third of the screen, so each choice had
+   roughly 150 pixels and "Handled by NOWPayments." ran off its own card. The width that
+   decides this is the panel's, not the window's, which a screen-width rule cannot see. */
 body.hilal-dashboard .billing-method-options {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 10px;
 }
 
@@ -2573,8 +2578,23 @@ body.hilal-dashboard .billing-method-options legend {
   grid-column: 1 / -1;
 }
 
-body.hilal-dashboard .billing-method-options > label {
+/* One cell for each way of paying: the choice, and under it the mark naming the company
+   that takes the money. The choice takes all the room left over (`1fr`) and the mark sits
+   on the line below it, so Card and Crypto stay exactly the same size as each other —
+   whether one note runs onto a second line, or one side has no company to name. */
+body.hilal-dashboard .billing-method-option {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The label is a grid of one, so the card inside it fills the whole cell. Left as a plain
+   block, the card kept its own height and the taller of the two choices ended in a strip
+   of empty space below its own edge. The radio inside is taken out of the flow above. */
+body.hilal-dashboard .billing-method-options label {
   position: relative;
+  display: grid;
   min-width: 0;
 }
 
@@ -2614,6 +2634,89 @@ body.hilal-dashboard .billing-method-options .is-unavailable .billing-method-car
   cursor: not-allowed;
   opacity: .55;
   background: var(--hm-surface-soft);
+}
+
+/* ── "Payments secured by …" ──────────────────────────────────────────────────
+ *
+ * The mark under one way of paying, on all three screens that ask card or crypto: the
+ * plan popup, the checkout page and the "How you pay" step. It is drawn here, in the
+ * sheet every signed-in page loads, so the three cannot drift apart.
+ *
+ * It is our own shape and our own colours — the same quiet card edge and grey label as
+ * the form it sits in. The only thing borrowed is the company's logo, which is drawn in
+ * the template because it is their colour and not one of ours.
+ *
+ * The link is the target: 44 pixels tall, which is what this product asks of anything a
+ * finger has to hit. The chip inside it is what is seen, and stays the small quiet thing
+ * it should be beside the choice it belongs to.
+ */
+body.hilal-dashboard .hm-pay-secured {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  text-decoration: none;
+  /* Only so the focus ring below is rounded like everything else it sits beside. */
+  border-radius: 12px;
+}
+
+body.hilal-dashboard .hm-pay-secured-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  color: var(--hm-ink);
+  font-size: .72rem;
+  line-height: 1;
+  background: var(--hm-surface-soft);
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: 10px;
+  transition: border-color .18s ease, background .18s ease;
+}
+
+body.hilal-dashboard .hm-pay-secured:hover .hm-pay-secured-chip {
+  background: var(--hm-surface);
+  border-color: var(--hm-control-line);
+}
+
+/* The ring goes on the link, which is the thing that takes the keyboard. Drawing it on
+   the chip inside meant switching the link's own outline off, and a rule that removes a
+   focus outline is a rule that can leave somebody with no indicator at all. */
+body.hilal-dashboard .hm-pay-secured:focus-visible {
+  outline: var(--hm-focus-ring);
+  outline-offset: 2px;
+  box-shadow: var(--hm-focus-halo);
+}
+
+body.hilal-dashboard .hm-pay-secured-label {
+  color: var(--hm-muted);
+  font-weight: 600;
+}
+
+body.hilal-dashboard .hm-pay-secured-name {
+  color: var(--hm-ink);
+  font-family: var(--hm-font-ui);
+  font-weight: 700;
+}
+
+/* Either the company's own logo, drawn straight into the page, or — for a company we
+   hold no logo for — this product's own shield. Both sit on the same line as the words
+   and neither is allowed to squash them. */
+body.hilal-dashboard .hm-pay-secured-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--hm-apple-deep);
+}
+
+body.hilal-dashboard svg.hm-pay-secured-mark {
+  width: 14px;
+  height: 14px;
+}
+
+body.hilal-dashboard .hm-pay-secured-mark .icon-sm {
+  width: 14px;
+  height: 14px;
 }
 
 /* An interval nobody can buy yet stays visible and readable, but not selectable. */
@@ -3446,3 +3549,171 @@ body.hilal-dashboard {
     animation: none !important;
   }
 }
+
+/* ── The discount code ────────────────────────────────────────────────────────
+ *
+ * One box, drawn by one macro, on the three screens that can start a payment. Styled
+ * once here because `hilalmarkets-dashboard-v2.css` is the one stylesheet every
+ * dashboard page loads — the subscription popup's own sheet is loaded per page, and a
+ * second copy of these rules there is how two boxes come to look like two features.
+ *
+ * The code itself is a chip: near-black on the pale apple tint, which measures well past
+ * 4.5:1. Apple green is a 1.21:1 accent and can never carry meaning on its own, so the
+ * chip earns its emphasis from the tint behind ink-strong text, never from the accent as
+ * a colour to read.
+ */
+
+body.hilal-dashboard .hm-discount {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-2, 8px);
+  padding: var(--t-3, 12px);
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard .hm-discount[hidden] { display: none; }
+
+body.hilal-dashboard .hm-discount-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+body.hilal-dashboard .hm-discount-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--hm-ink-strong);
+  font-family: var(--hm-font-display);
+  font-size: .92rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .hm-discount-title .icon { width: 16px; height: 16px; }
+body.hilal-dashboard .hm-discount-optional { color: var(--hm-copy); font-size: .76rem; }
+
+body.hilal-dashboard .hm-discount-entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+body.hilal-dashboard .hm-discount-entry input {
+  min-width: 0;
+  flex: 1 1 160px;
+  min-height: 44px;
+  padding: 0 var(--t-3, 12px);
+  border: 1px solid var(--hm-hairline-strong);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+  font: inherit;
+  font-size: .9rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  transition: border-color 140ms var(--hm-motion);
+}
+
+body.hilal-dashboard .hm-discount-entry input::placeholder {
+  color: var(--hm-muted);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+body.hilal-dashboard .hm-discount-entry input:hover { border-color: var(--hm-ink); }
+
+body.hilal-dashboard .hm-discount-entry input:disabled {
+  border-color: var(--hm-hairline);
+  background: var(--hm-neutral-bg);
+  color: var(--hm-copy);
+}
+
+body.hilal-dashboard .hm-discount-apply {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 var(--t-4, 16px);
+  border: 1px solid var(--hm-ink-strong);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-ink-strong);
+  color: var(--hm-surface);
+  cursor: pointer;
+  font: inherit;
+  font-size: .88rem;
+  font-weight: 500;
+  transition: background 140ms var(--hm-motion);
+}
+
+body.hilal-dashboard .hm-discount-apply:hover { background: var(--hm-ink); }
+body.hilal-dashboard .hm-discount-apply:disabled { cursor: progress; opacity: .6; }
+body.hilal-dashboard .hm-discount-apply[hidden] { display: none; }
+
+body.hilal-dashboard .hm-discount-hint { margin: 0; color: var(--hm-copy); font-size: .78rem; }
+
+body.hilal-dashboard .hm-discount-applied {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--hm-success);
+  font-size: .82rem;
+}
+
+body.hilal-dashboard .hm-discount-applied[hidden] { display: none; }
+body.hilal-dashboard .hm-discount-applied .icon { flex: none; width: 15px; height: 15px; }
+
+body.hilal-dashboard .hm-discount-clear {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--hm-info);
+  cursor: pointer;
+  font: inherit;
+  font-size: .78rem;
+  text-decoration: underline;
+}
+
+body.hilal-dashboard .hm-discount-clear[hidden] { display: none; }
+
+/* The answer. Never colour alone: the tone changes the words written into it and the
+   icon beside them, so the state survives a greyscale screen. */
+body.hilal-dashboard .hm-discount-said {
+  margin: 0;
+  color: var(--hm-copy);
+  font-size: .8rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .hm-discount-said[hidden] { display: none; }
+body.hilal-dashboard .hm-discount-said[data-tone="danger"] { color: var(--hm-danger); }
+body.hilal-dashboard .hm-discount-said[data-tone="good"] { color: var(--hm-success); }
+
+/* ── The code chip, in this palette ───────────────────────────────────────── */
+/*
+ * The chip and the "Using code" line are shaped once, in `hilalmarkets.css`, because the
+ * public pricing page and the dashboard both draw them and one shape is the whole point.
+ * Only the four colours differ, and only because the two halves of this product still
+ * run different palettes: the public Jinja pages are on the older emerald-and-gold set,
+ * the dashboard is on the brand tokens. Four properties, not a second copy of the rule.
+ */
+
+body.hilal-dashboard {
+  --code-chip-bg: var(--hm-apple-soft);
+  --code-chip-line: var(--hm-apple-pale);
+  --code-chip-ink: var(--hm-ink-strong);
+  --code-note-ink: var(--hm-copy);
+  --code-note-quiet: var(--hm-muted);
+}
+
+/* The price a code replaced, in the subscription popup's order line. */
+body.hilal-dashboard .s-order-was {
+  color: var(--hm-muted);
+  font-family: var(--hm-font-display);
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+body.hilal-dashboard .s-order-was[hidden] { display: none; }

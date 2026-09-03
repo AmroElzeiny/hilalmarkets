@@ -161,16 +161,63 @@ function start(scope) {
     else label.textContent = "Go to the card payment page";
   }
 
+  /** The order line, for whatever this order now costs.
+   *
+   * `full_price` is what a checkout charges with no code, so that is what the popup
+   * opens at. It used to open at the card's headline figure, which is the launch-code
+   * price — so somebody who typed no code read one number here and was sent to a payment
+   * page for a larger one.
+   */
+  function paintOrder(amount, wasAmount) {
+    if (!dialog || !plan) return;
+    const total = dialog.querySelector("[data-s-order-total]");
+    const when = dialog.querySelector("[data-s-order-when]");
+    if (total) {
+      total.textContent = money(amount);
+      // The old price stays visible beside the new one, crossed out, so the discount is
+      // something a person can see rather than something they have to remember.
+      const struck = wasAmount ? ` was ${money(wasAmount)}` : "";
+      total.setAttribute(
+        "aria-label",
+        wasAmount ? `${money(amount)} a month,${struck}` : `${money(amount)} a month`,
+      );
+    }
+    const struckNode = dialog.querySelector("[data-s-order-was]");
+    if (struckNode) {
+      struckNode.textContent = wasAmount ? money(wasAmount) : "";
+      struckNode.hidden = !wasAmount;
+    }
+    if (when) {
+      when.textContent =
+        `${money(amount)} today, then ${money(amount)} every month until you stop it. ` +
+        "You can stop it whenever you like.";
+    }
+  }
+
+  /** Money as this product writes it: `$15`, and cents only when there are cents. */
+  function money(amount) {
+    const value = Number(amount);
+    if (!Number.isFinite(value)) return String(amount);
+    const rounded = Math.round(value * 100) / 100;
+    return Number.isInteger(rounded) ? `$${rounded}` : `$${rounded.toFixed(2)}`;
+  }
+
   /** Everything in the popup that is about *which* plan, in one place. */
   function fillOrder(code) {
     plan = facts.find((item) => item.code === code) || null;
     if (!plan || !dialog) return false;
-    const price = Number(plan.monthly_price) || 0;
+    // What a checkout really charges with no code. `monthly_price` is the card headline,
+    // which already carries the launch-code discount.
+    const price = Number(plan.full_price ?? plan.monthly_price) || 0;
     dialog.querySelector("[data-s-plan-code]").value = plan.code;
     dialog.querySelector("[data-s-order-plan]").textContent = plan.name;
-    dialog.querySelector("[data-s-order-total]").textContent = `$${price}`;
-    dialog.querySelector("[data-s-order-when]").textContent =
-      `$${price} today, then $${price} every month until you stop it. You can stop it whenever you like.`;
+    paintOrder(price, "");
+    const box = dialog.querySelector("[data-discount]");
+    if (box) {
+      // The box prices against the plan now being bought, so it has to be told which one
+      // that is before anybody presses Apply.
+      box.dataset.discountFull = String(price);
+    }
     const includes = dialog.querySelector("[data-s-includes]");
     includes.textContent = "";
     for (const feature of (plan.features || []).slice(0, 5)) {
@@ -220,6 +267,14 @@ function start(scope) {
 
   methods.forEach((input) => input.addEventListener("change", refreshPay));
   agree?.addEventListener("change", refreshPay);
+
+  /* A code was applied or cleared. The box owns the code; the order line owns the price
+     on screen. It listens rather than being written into, so neither file has to know
+     how the other draws its half. */
+  form?.addEventListener("hm:discount", (event) => {
+    const { amount, was } = event.detail || {};
+    if (amount) paintOrder(amount, was || "");
+  });
 
   /** Mark every empty required field, and say how many there are. */
   function checkFields() {

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 
+import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import (
@@ -283,6 +284,104 @@ def test_the_last_button_stays_shut_until_the_person_has_agreed(
     page.locator("[data-s-agree]").check()
     expect(pay).to_be_enabled()
     expect(page.locator("[data-s-pay-label]")).to_contain_text("card payment page")
+
+
+def _reach_the_paying_step(page: Page, base_url: str) -> None:
+    """Walk to step three, the way a person does, and stop where the choice is made."""
+
+    _open_checkout(page, base_url)
+    page.locator("[data-s-next]").click()
+    for name, value in [
+        ("first_name", "Amina"),
+        ("last_name", "Yusuf"),
+        ("address_line1", "1 Market Street"),
+        ("country", "Malaysia"),
+    ]:
+        page.locator(f'[data-s-panel="2"] input[name="{name}"]').fill(value)
+    page.locator("[data-s-next]").click()
+    expect(page.locator("[data-s-step-of]")).to_have_text("Step 3 of 3")
+
+
+def test_each_way_of_paying_names_the_company_that_takes_the_money(
+    page: Page, live_shape_base_url: str
+) -> None:
+    """The mark under each choice, on a server set up the way the live one is.
+
+    A buyer is about to be sent somewhere else to type a card number. Before that, they
+    can read whose page it is and open that company in a new tab.
+    """
+
+    _reach_the_paying_step(page, live_shape_base_url)
+
+    for method, company, site in (
+        ("card", "Creem", "https://www.creem.io/"),
+        ("crypto", "NOWPayments", "https://nowpayments.io/"),
+    ):
+        mark = page.locator(f'[data-s-method="{method}"] + .hm-pay-secured')
+        expect(mark).to_be_visible()
+        expect(mark).to_have_text(f"Payments secured by {company}")
+        expect(mark).to_have_attribute("href", site)
+        expect(mark).to_have_attribute("target", "_blank")
+
+    # Grey enough to stay quiet, dark enough to read. 4.5:1 is what WCAG asks of text
+    # this size, and the mark sits on the soft fill rather than on white.
+    assert_contrast(
+        page,
+        [[".hm-pay-secured-label", "color"], [".hm-pay-secured-name", "color"]],
+        at_least=4.5,
+    )
+
+
+def test_the_two_ways_of_paying_stay_the_same_size_beside_each_other(
+    page: Page, live_shape_base_url: str
+) -> None:
+    """Card and Crypto are one choice made twice, so they are drawn as one pair.
+
+    Measured rather than looked at: a mark under one of them changes how tall that side
+    is, and a note that runs onto a second line changes it again.
+    """
+
+    _reach_the_paying_step(page, live_shape_base_url)
+    page.wait_for_timeout(400)
+
+    boxes = page.evaluate(
+        """() => [...document.querySelectorAll('.s-method-choice')].map(cell => {
+            const choice = cell.querySelector('.s-method').getBoundingClientRect();
+            const mark = cell.querySelector('.hm-pay-secured').getBoundingClientRect();
+            return {
+                cell: Math.round(cell.getBoundingClientRect().height),
+                choice: Math.round(choice.height),
+                choiceTop: Math.round(choice.top),
+                markTop: Math.round(mark.top),
+                markLeft: Math.round(mark.left - cell.getBoundingClientRect().left),
+            };
+        })"""
+    )
+
+    assert len(boxes) == 2, boxes
+    card, crypto = boxes
+    assert card["cell"] == crypto["cell"], boxes
+    assert card["choice"] == crypto["choice"], boxes
+    assert card["choiceTop"] == crypto["choiceTop"], boxes
+    # The two marks sit on one line, each under its own choice and against its left edge.
+    assert card["markTop"] == crypto["markTop"], boxes
+    assert card["markLeft"] == crypto["markLeft"] == 0, boxes
+    assert card["markTop"] > card["choiceTop"] + card["choice"] - 1, boxes
+
+
+def test_the_paying_step_still_fits_a_phone(
+    page: Page, live_shape_base_url: str
+) -> None:
+    """A mark added beside a choice must not push the popup sideways on a small screen."""
+
+    # Walked at full size and then narrowed, like the checkout's own phone check beside
+    # it: at phone width the cookie banner and the assistant sit over the buttons a
+    # person would press on the way here, which is those working rather than a fault.
+    _reach_the_paying_step(page, live_shape_base_url)
+    page.set_viewport_size(PHONE)
+    expect(page.locator(".hm-pay-secured").first).to_be_visible()
+    assert_no_horizontal_overflow(page)
+    assert _too_small(page, ".hm-pay-secured") == []
 
 
 def test_the_checkout_closes_on_escape_and_gives_the_keyboard_back(
@@ -758,3 +857,182 @@ def test_the_pages_still_work_for_somebody_who_asked_for_less_movement(
             .filter((element) => Number(getComputedStyle(element).opacity) < 0.99).length"""
     )
     assert faded == 0
+
+
+def test_the_code_box_appears_only_for_crypto(page: Page, live_shape_base_url: str) -> None:
+    """Rule: the box is offered exactly where a code can be used.
+
+    Card checkout ends on Creem's own page, which has a discount box of its own and
+    decides the amount itself. A box on our side of that route would take a code, quote a
+    price, and then watch Creem charge a different one.
+    """
+
+    _reach_the_paying_step(page, live_shape_base_url)
+    box = page.locator("[data-discount]")
+
+    page.locator('[data-s-method="card"] input').check()
+    expect(box).to_be_hidden()
+
+    page.locator('[data-s-method="crypto"] input').check()
+    expect(box).to_be_visible()
+    # And it names the code, so nobody has to already know one exists.
+    expect(box).to_contain_text("HILAL25")
+
+
+def test_a_code_changes_the_price_on_screen_and_crosses_out_the_old_one(
+    page: Page, live_shape_base_url: str
+) -> None:
+    """The one thing only a browser can answer: pressing Apply really works.
+
+    The server is asked, the answer comes back, and the order line above the box shows
+    the new amount with the old one struck through beside it.
+    """
+
+    _reach_the_paying_step(page, live_shape_base_url)
+    page.locator('[data-s-method="crypto"] input').check()
+
+    total = page.locator("[data-s-order-total]")
+    was = page.locator("[data-s-order-was]")
+    before = total.inner_text()
+    expect(was).to_be_hidden()
+
+    page.locator("[data-discount-input]").fill("hilal25")
+    page.locator("[data-discount-apply]").click()
+
+    # The answer is said in words, where it is both seen and heard.
+    expect(page.locator("[data-discount-said]")).to_contain_text("HILAL25", timeout=15_000)
+    expect(page.locator("[data-discount-said]")).to_have_attribute("data-tone", "good")
+    # The old price is crossed out and the new one stands where the old one was.
+    expect(was).to_be_visible()
+    expect(was).to_have_text(before)
+    assert total.inner_text() != before, "the price did not move"
+    # And the code travels with the payment, so the server prices it again.
+    assert page.locator('input[name="discount_code"]').input_value() == "HILAL25"
+
+    # Removing it puts the full price back, rather than leaving a discount nobody chose.
+    page.locator("[data-discount-clear]").click()
+    expect(was).to_be_hidden()
+    expect(total).to_have_text(before)
+    assert page.locator('input[name="discount_code"]').input_value() == ""
+
+
+@pytest.mark.deliberate_console_errors("Failed to load resource", "400")
+def test_a_wrong_code_says_so_and_changes_no_price(
+    page: Page, live_shape_base_url: str
+) -> None:
+    """A refusal a beginner can act on, and nothing charged.
+
+    The refusal *is* the behaviour under test, so the 400 the browser logs is the server
+    working. The marker names it; anything else this test logs still fails it.
+    """
+
+    _reach_the_paying_step(page, live_shape_base_url)
+    page.locator('[data-s-method="crypto"] input').check()
+    total = page.locator("[data-s-order-total]")
+    before = total.inner_text()
+
+    page.locator("[data-discount-input]").fill("NOTAREALCODE")
+    page.locator("[data-discount-apply]").click()
+
+    said = page.locator("[data-discount-said]")
+    expect(said).to_have_attribute("data-tone", "danger", timeout=15_000)
+    expect(said).to_contain_text("not working")
+    # The state is in the words and the icon, never in the colour alone.
+    expect(total).to_have_text(before)
+    expect(page.locator("[data-s-order-was]")).to_be_hidden()
+    assert page.locator('input[name="discount_code"]').input_value() == ""
+
+
+def test_switching_back_to_card_drops_a_code_that_cannot_be_used(
+    page: Page, live_shape_base_url: str
+) -> None:
+    """Keeping it would send somebody to a card payment page for a price the box showed
+    and that route will not charge."""
+
+    _reach_the_paying_step(page, live_shape_base_url)
+    page.locator('[data-s-method="crypto"] input').check()
+    total = page.locator("[data-s-order-total]")
+    before = total.inner_text()
+    page.locator("[data-discount-input]").fill("HILAL25")
+    page.locator("[data-discount-apply]").click()
+    expect(page.locator("[data-s-order-was]")).to_be_visible(timeout=15_000)
+
+    page.locator('[data-s-method="card"] input').check()
+    expect(page.locator("[data-discount]")).to_be_hidden()
+    expect(total).to_have_text(before)
+    assert page.locator('input[name="discount_code"]').input_value() == ""
+
+
+def test_the_code_box_is_readable_and_reachable(
+    page: Page, live_shape_base_url: str
+) -> None:
+    """Nothing too small to press, nothing too faint to read, and no sideways scroll."""
+
+    _reach_the_paying_step(page, live_shape_base_url)
+    page.locator('[data-s-method="crypto"] input').check()
+    expect(page.locator("[data-discount]")).to_be_visible()
+
+    assert _too_small(page, "[data-discount-input]") == []
+    assert _too_small(page, "[data-discount-apply]") == []
+    assert_contrast(
+        page,
+        [
+            [".hm-discount-title", "color"],
+            [".hm-discount-hint", "color"],
+            [".hm-code-chip", "color"],
+        ],
+        at_least=4.5,
+    )
+    page.set_viewport_size(PHONE)
+    expect(page.locator("[data-discount]")).to_be_visible()
+    assert_no_horizontal_overflow(page)
+
+
+def test_the_review_page_code_box_rewrites_both_prices_in_its_own_wording(
+    page: Page, live_shape_base_url: str
+) -> None:
+    """The other checkout screen. Same box, same server, different wording for money.
+
+    This page writes the currency out as a word — "20.00 USD" — while the popups use a
+    symbol. One box fills both, so the wording travels with each place rather than being
+    decided inside the box: filling this page the popup's way produced "$15 USD", which
+    names the currency twice and reads like a different amount.
+    """
+
+    signup(page, live_shape_base_url, unique_email("review-code"))
+    close_any_open_guide(page)
+    page.goto(
+        f"{live_shape_base_url}/dashboard/billing/checkout?plan_code=trader",
+        wait_until="domcontentloaded",
+    )
+    close_any_open_guide(page)
+    _settle_cookie_choice(page)
+
+    totals = page.locator("[data-discount-total]")
+    expect(totals.first).to_be_visible()
+    before = totals.first.inner_text()
+    assert before.endswith(" USD"), before
+
+    # The box is hidden until crypto is chosen, exactly as in the popup.
+    box = page.locator("[data-discount]")
+    page.locator('input[name="payment_method"][value="card"]').check()
+    expect(box).to_be_hidden()
+    page.locator('input[name="payment_method"][value="crypto"]').check()
+    expect(box).to_be_visible()
+
+    page.locator("[data-discount-input]").fill("HILAL25")
+    page.locator("[data-discount-apply]").click()
+    expect(page.locator("[data-discount-said]")).to_have_attribute(
+        "data-tone", "good", timeout=15_000
+    )
+
+    after = totals.first.inner_text()
+    assert after != before, "the review page did not change its price"
+    # Written this page's way: a number, a space, and the currency once.
+    assert re.fullmatch(r"\d+\.\d{2} USD", after), after
+    originals = page.locator("[data-discount-original]")
+    expect(originals.first).to_be_visible()
+    assert originals.first.inner_text() == before
+    # Every place this page shows the total moved together — the facts list and the
+    # order summary both, so the two cannot disagree on one screen.
+    assert {totals.nth(i).inner_text() for i in range(totals.count())} == {after}

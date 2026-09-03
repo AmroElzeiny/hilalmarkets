@@ -44,8 +44,8 @@ batch size, the unscreened-research controls, and the automated-screen controls
 | Where a project publishes | `sharia_source_resolution`, layer `PROVIDER` | 1 credit per 100 coins |
 | The whole reading pipeline's seeds | [Automated coin research](AUTOMATED_COIN_RESEARCH.md) | shared with the above |
 | A coin's logo | `core/asset_logos.py`, under its own key | free, comes with the record |
-| Size, rank, 7/30/90-day movement | The Market page's filters | 2 credits daily for the whole list |
-| Market mood, Bitcoin's share, market size | The Market page's strip | 2 credits per refresh |
+| Size, rank, 7/30/90-day movement | The Market page's table and its sorting | 2 credits daily for the whole list |
+| Market mood, Bitcoin's share, market size | Nothing shows these today — see "New market-wide indicators" | nothing, the page stopped asking |
 
 ### The logo has its own key
 
@@ -143,6 +143,10 @@ else it holds answers a question about one coin:
 Each carries a plain sentence written for a beginner, kept beside the bands rather than
 in a template so every surface says the same thing. None of it is advice, none of it is
 a signal, and none of it touches eligibility.
+
+**No page shows these today.** The strip that used to carry them on the Halal Assets page
+was removed on 3 September 2026, and the page no longer calls the service, so the reading
+costs nothing until some page asks for it again.
 
 ## The rules that hold
 

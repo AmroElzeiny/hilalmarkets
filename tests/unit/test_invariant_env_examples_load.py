@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, get_args, get_origin
 
 import pytest
+from pydantic_settings import NoDecode
 
 from ai_market_monitor.core.config import Settings
 
@@ -29,16 +30,53 @@ KEY = re.compile(r"^([A-Z][A-Z0-9_]*)=")
 STRUCTURED = (list, dict, set, frozenset, tuple)
 
 
+def _reads_json(field: Any) -> bool:
+    """Does the loader parse this field's value as JSON?
+
+    Not every structured setting is a JSON one. A field marked ``NoDecode`` is handed to
+    its own validator as the raw string, on purpose — that is how a setting an operator
+    edits by hand can be written as ``HILAL25=25`` instead of as a JSON object. Applying
+    the JSON rule to those would demand a shape the loader never asks for, and refuse a
+    line that loads perfectly well.
+    """
+
+    return not any(
+        item is NoDecode or isinstance(item, NoDecode) for item in field.metadata
+    )
+
+
 def _structured_settings() -> dict[str, Any]:
     """Every setting whose value the loader parses as JSON rather than as plain text."""
 
     found: dict[str, Any] = {}
     for name, field in Settings.model_fields.items():
+        if not _reads_json(field):
+            continue
         annotation = field.annotation
         candidates = [annotation, *get_args(annotation)]
         for candidate in candidates:
             if (get_origin(candidate) or candidate) in STRUCTURED:
                 found[name.upper()] = annotation
+                break
+    return found
+
+
+def _hand_written_settings() -> dict[str, Any]:
+    """Every structured setting the loader hands to a validator as plain text.
+
+    The JSON rules above cannot describe these, but the *real* rule still holds and is
+    checked below: whatever the example writes has to load.
+    """
+
+    found: dict[str, Any] = {}
+    for name, field in Settings.model_fields.items():
+        if _reads_json(field):
+            continue
+        annotation = field.annotation
+        candidates = [annotation, *get_args(annotation)]
+        for candidate in candidates:
+            if (get_origin(candidate) or candidate) in STRUCTURED:
+                found[name] = annotation
                 break
     return found
 
@@ -103,5 +141,33 @@ def test_every_structured_value_is_the_shape_its_setting_expects(example: str) -
             wrong.append(f"{key} (expects a mapping)")
         if not wants_mapping and isinstance(parsed, dict):
             wrong.append(f"{key} (expects a sequence)")
+
+    assert not wrong, f"{example} has values that cannot become their setting: {wrong}"
+
+
+@pytest.mark.parametrize("example", EXAMPLES)
+def test_a_hand_written_structured_value_really_loads(example: str) -> None:
+    """The rule the JSON checks above are a proxy for, asserted directly.
+
+    A setting the loader hands to its own validator as plain text cannot be judged by
+    whether it looks like JSON — but it must still become its declared type. So the value
+    the example ships is fed through the real setting, which is a stronger check than the
+    shape rule and would have caught the blank list that started this file.
+    """
+
+    written = _written_values(example)
+    wrong: list[str] = []
+    for name, annotation in _hand_written_settings().items():
+        key = name.upper()
+        if key not in written:
+            continue
+        try:
+            loaded = getattr(Settings(**{name: written[key]}), name)  # type: ignore[arg-type]
+        except Exception as exc:  # noqa: BLE001
+            wrong.append(f"{key} ({type(exc).__name__}, expects {annotation})")
+            continue
+        origin = get_origin(annotation) or annotation
+        if not isinstance(loaded, origin):
+            wrong.append(f"{key} (loaded as {type(loaded).__name__}, expects {annotation})")
 
     assert not wrong, f"{example} has values that cannot become their setting: {wrong}"

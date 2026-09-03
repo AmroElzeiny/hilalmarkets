@@ -1,4 +1,6 @@
 {% extends "hilal/base_dashboard.html" %}
+{% from "hilal/macros/payment_provider_badge.html" import payment_provider_badge %}
+{% from "hilal/macros/discount_code_box.html" import discount_code_box %}
 {% block content %}
 <section class="plan-current billing-current-plan" data-hm-guide-target="billing-plan-limits">
   <div class="billing-current-main">
@@ -88,8 +90,17 @@
           <strong data-dashboard-plan-amount>{{ offer.comingSoonLabel if not offer.monthlyAvailable else '$' ~ (offer.monthlyPrice | int) }}</strong>
           <span data-dashboard-plan-period>{{ 'Not available yet' if not offer.monthlyAvailable else ('Free forever' if offer.monthlyPrice == 0 else 'per month') }}</span>
         </div>
+        {% if offer.discountCode %}
+          {# Why the price above is the lower one. Marked with `data-dashboard-plan-code`
+             so the monthly/annual switch can hide it: the code is a monthly offer, and
+             leaving it under a yearly price would name a code that does nothing there. #}
+          <p class="price-code-note" data-dashboard-plan-code>
+            Using code <code class="hm-code-chip">{{ offer.discountCode }}</code>
+            <span>Without it the price is ${{ offer.fullMonthlyPrice | int }} a month.</span>
+          </p>
+        {% endif %}
         {% if offer.originalMonthlyPrice %}
-          <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" data-dashboard-offer-countdown role="group" aria-label="Time left at this price" hidden></div>
+          <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" data-dashboard-offer-countdown role="group" aria-label="Time left to use this code" hidden></div>
         {% endif %}
 
         {% if not offer.monthlyAvailable %}
@@ -201,15 +212,25 @@
          on that. The script narrows both again for the plan and period actually chosen. #}
       <fieldset class="billing-method-options">
         <legend>Payment method</legend>
-        <label data-billing-method-card class="{{ '' if billing_method_offers.card.available else 'is-unavailable' }}" aria-disabled="{{ 'false' if billing_method_offers.card.available else 'true' }}">
-          <input type="radio" name="payment_method" value="card" {{ '' if billing_method_offers.card.available else 'disabled' }}>
-          <span class="billing-method-card"><span data-icon="billing" data-icon-class="icon"></span><strong>Card</strong><small data-billing-method-note>{{ billing_method_offers.card.note }}</small></span>
-        </label>
-        <label data-billing-method-crypto class="{{ '' if billing_method_offers.crypto.available else 'is-unavailable' }}" aria-disabled="{{ 'false' if billing_method_offers.crypto.available else 'true' }}">
-          <input type="radio" name="payment_method" value="crypto" {{ '' if billing_method_offers.crypto.available else 'disabled' }}>
-          <span class="billing-method-card"><span data-icon="wallet" data-icon-class="icon"></span><strong>Crypto</strong><small data-billing-method-note>{{ billing_method_offers.crypto.note }}</small></span>
-        </label>
+        <div class="billing-method-option">
+          <label data-billing-method-card class="{{ '' if billing_method_offers.card.available else 'is-unavailable' }}" aria-disabled="{{ 'false' if billing_method_offers.card.available else 'true' }}">
+            <input type="radio" name="payment_method" value="card" {{ '' if billing_method_offers.card.available else 'disabled' }}>
+            <span class="billing-method-card"><span data-icon="billing" data-icon-class="icon"></span><strong>Card</strong><small data-billing-method-note>{{ billing_method_offers.card.note }}</small></span>
+          </label>
+          {{ payment_provider_badge(billing_method_offers.card) }}
+        </div>
+        <div class="billing-method-option">
+          <label data-billing-method-crypto class="{{ '' if billing_method_offers.crypto.available else 'is-unavailable' }}" aria-disabled="{{ 'false' if billing_method_offers.crypto.available else 'true' }}">
+            <input type="radio" name="payment_method" value="crypto" {{ '' if billing_method_offers.crypto.available else 'disabled' }}>
+            <span class="billing-method-card"><span data-icon="wallet" data-icon-class="icon"></span><strong>Crypto</strong><small data-billing-method-note>{{ billing_method_offers.crypto.note }}</small></span>
+          </label>
+          {{ payment_provider_badge(billing_method_offers.crypto) }}
+        </div>
       </fieldset>
+
+      {# The code box, under the choice that can use it. `hilalmarkets-billing.js` keeps
+         the price line in this popup; the box tells it when a code changes the amount. #}
+      {{ discount_code_box(discount_methods, '', 'USD', launch_discount_code, launch_discount_percent) }}
 
       <label class="checkout-consent">
         <input type="checkbox" name="terms_accepted" value="true" required>
@@ -220,7 +241,11 @@
         <button class="btn btn-secondary" type="button" data-billing-dialog-close>Cancel</button>
         <button class="btn btn-primary" type="submit" data-billing-submit disabled>Continue to secure payment</button>
       </div>
-      <div class="checkout-security"><span data-icon="shield" data-icon-class="icon"></span><p>Card and wallet credentials are entered only on Creem or NOWPayments. Hilal Markets does not receive them.</p></div>
+      {# The companies the server is really set to use, not two names written into the
+         page. This sentence said "Creem or NOWPayments" whatever the settings held, so
+         with card payments switched off it named a company nobody would ever reach. #}
+      {% set paying_companies = billing_method_offers.values()|map(attribute='company')|select|unique|list %}
+      <div class="checkout-security"><span data-icon="shield" data-icon-class="icon"></span><p>You type your card or wallet details on the payment company's own page{{ ' — ' ~ paying_companies|join(' or ') if paying_companies else '' }}. Hilal Markets never sees them.</p></div>
     </form>
   </div>
 </dialog>
@@ -274,5 +299,6 @@
 </section>
 {% endblock %}
 {% block page_scripts %}
-<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260901-pay-methods"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260903-market-simpler"></script>
+<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260903-market-simpler"></script>
 {% endblock %}

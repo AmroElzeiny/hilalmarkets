@@ -4,15 +4,15 @@
   {#- First script on the page, deliberately. It puts a time limit on every request this
       product sends to its own server, and it can only do that for a request sent after
       it has run. See `static/hm-request.js`. -#}
-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260901-pay-methods"></script>
+  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260903-market-simpler"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <meta name="description" content="{{ title }} from Hilal Markets Halal Assets intelligence.">
   <title>{{ title }} · Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260901-pay-methods">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260901-pay-methods">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260903-market-simpler">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260903-market-simpler">
 </head>
 <body>
   <nav class="public-nav"><div class="public-nav-inner">
@@ -46,6 +46,6 @@
   </div></main>
   <section class="section-sm"><div class="container"><div class="cta-panel"><span class="eyebrow">Start with evidence</span><h2>Explore Halal Assets and create your first Watchlist.</h2><div class="hero-actions"><a class="btn btn-gold" href="/signup">Create an account</a><a class="btn btn-secondary" href="{{ dashboard_entry_url if dashboard_entry_url is defined else '/dashboard-entry' }}">Open dashboard</a></div></div></div></section>
   <footer class="site-footer"><div class="container"><div class="footer-bottom"><span>© 2026 Hilal Markets. Research and monitoring only.</span><span>No automatic trading. Users keep control of every decision.</span></div></div></footer>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260901-pay-methods"></script><script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260901-pay-methods"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260903-market-simpler"></script><script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260903-market-simpler"></script>
 </body>
 </html>

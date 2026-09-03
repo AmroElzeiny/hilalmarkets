@@ -1,0 +1,33 @@
+{#- "Payments secured by …" — the mark under one way of paying.
+
+    Written once for every screen that asks card or crypto: the plan popup on
+    `/dashboard/billing`, the review page on `/dashboard/billing/checkout`, and the
+    "How you pay" step on `/dashboard/subscription`. Three copies of this markup would
+    be three chances to name a payment company the server no longer uses.
+
+    The company is read from the offer, which the billing service filled in from the
+    settings the server is really running on. Nothing here decides it, and no page
+    writes "Creem" by hand.
+
+    A way of paying that is switched off has no company behind it, and the local test
+    payment page is not a company, so both get no mark. -#}
+{% macro payment_provider_badge(offer) -%}
+{%- if offer and offer.company and offer.company_site -%}
+{#- The chip inside the link is what is seen; the link around it is what is pressed. It
+    is taller than the chip on purpose, so a finger has the 44 pixels rule D6 asks for
+    without the mark growing into a button beside the choice it belongs to. -#}
+<a class="hm-pay-secured" href="{{ offer.company_site }}" target="_blank" rel="noopener">
+  <span class="hm-pay-secured-chip">
+    <span class="hm-pay-secured-label">Payments secured by</span>
+    {%- if offer.provider == 'creem' %}
+    {#- Creem's own mark, in Creem's own purple. It is a company logo, not a colour of
+        ours, which is why it is drawn here and never in a stylesheet of ours. -#}
+    <svg class="hm-pay-secured-mark" width="14" height="14" viewBox="0 0 121 121" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M22.1102 11C24.1187 11 25.9669 12.0982 26.9281 13.8619L51.2059 58.4106C52.5699 60.9134 55.7048 61.8368 58.2077 60.473C60.7108 59.109 61.6342 55.9742 60.2701 53.4712L41.5466 19.113C39.554 15.4566 42.2004 11 46.3645 11H103.806C107.885 11 110.539 15.2933 108.715 18.9416L65.0579 106.254C63.0356 110.298 57.2654 110.298 55.2431 106.254L11.5863 18.9416C9.76212 15.2933 12.4156 11 16.4946 11H22.1102Z" fill="#B09CFB"/></svg>
+    {%- else %}
+    <span class="hm-pay-secured-mark" data-icon="shield" data-icon-class="icon-sm"></span>
+    {%- endif %}
+    <strong class="hm-pay-secured-name">{{ offer.company }}</strong>
+  </span>
+</a>
+{%- endif -%}
+{%- endmacro %}

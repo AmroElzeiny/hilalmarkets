@@ -568,6 +568,30 @@ _ERRORS: Final[dict[str, tuple[str, str, str, str, str]]] = {
         "Go to sign in",
         "signin",
     ),
+    # The same fact as above, for the other kind of account. It is answered separately
+    # because the sentence above sends somebody to a password, and an account made with
+    # Google does not have one — so that answer put those people in a loop they could not
+    # get out of. There is still only ever one account per address; only the door differs.
+    "account_exists_google": (
+        "error",
+        "You already have an account",
+        "You made it with Google. Go to sign in and use the Google button. "
+        "It is the same account either way.",
+        "Go to sign in",
+        "signin",
+    ),
+    # Somebody typed a password into an account that has none. Their password is not
+    # wrong — there is nothing to check it against — so "email or password is incorrect"
+    # was false as well as useless. Both ways forward are named: the button that works
+    # today, and how to have a password from now on.
+    "google_sign_in_required": (
+        "error",
+        "This account uses Google",
+        "You made it with Google, so it has no password yet. Use the Google button "
+        "above. If you would rather use a password, set one now.",
+        "Set a password",
+        "reset",
+    ),
     "account_not_registered": (
         "error",
         "We cannot find that account",

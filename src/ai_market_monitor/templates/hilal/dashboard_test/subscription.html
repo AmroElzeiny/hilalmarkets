@@ -1,7 +1,9 @@
 {% extends "hilal/base_dashboard.html" %}
+{% from "hilal/macros/payment_provider_badge.html" import payment_provider_badge %}
+{% from "hilal/macros/discount_code_box.html" import discount_code_box %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260901-pay-methods">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260901-pay-methods">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260903-market-simpler">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260903-market-simpler">
 {% endblock %}
 {% block content %}
 
@@ -142,6 +144,15 @@
             <strong>${{ plan.monthly_price | int }}</strong><span>a month</span>
           {% endif %}
         </p>
+
+        {%- if plan.discount_code and plan.for_sale and not plan.is_free %}
+          {#- Why the number above is the lower one. Without the code the plan costs the
+              crossed-out figure, and this card is where somebody finds that out. -#}
+          <p class="price-code-note">
+            Using code <code class="hm-code-chip">{{ plan.discount_code }}</code>
+            <span>Without it the price is ${{ plan.full_price | int }} a month.</span>
+          </p>
+        {%- endif %}
 
         {% if plan.highlight and plan.for_sale %}
         <p class="s-plan-highlight">
@@ -319,6 +330,9 @@
           <small>You are buying</small>
           <strong data-s-order-plan>—</strong>
         </div>
+        {#- The price a code replaced, crossed out beside the new one. Hidden until there
+            is one, so a full-price order shows one number and not two. -#}
+        <s class="s-order-was" data-s-order-was hidden></s>
         <span class="s-order-total" data-s-order-total>—</span>
         <p class="s-order-when" data-s-order-when></p>
       </div>
@@ -386,24 +400,40 @@
 
               The sentence comes from the billing service, not from here — which one is
               true depends on *why* the method cannot be used, and a template cannot be
-              tested on that. The script narrows both again for the plan actually chosen. -#}
+              tested on that. The script narrows both again for the plan actually chosen.
+
+              Under each choice sits the mark naming the company that will take the
+              money. It is outside the label on purpose: it holds a link, and a link
+              inside a choice would read as part of that choice's name. -#}
           <fieldset class="s-methods" data-s-methods>
             <legend class="sr-only">Choose how to pay</legend>
-            <label class="s-method" data-s-method="card" data-available="{{ 'true' if pay_methods.card.available else 'false' }}" aria-disabled="{{ 'false' if pay_methods.card.available else 'true' }}">
-              <input type="radio" name="payment_method" value="card" {{ '' if pay_methods.card.available else 'disabled' }}>
-              <span class="s-method-copy">
-                <strong><span data-icon="billing" data-icon-class="icon-sm"></span>Card</strong>
-                <small data-s-method-note>{{ pay_methods.card.note }}</small>
-              </span>
-            </label>
-            <label class="s-method" data-s-method="crypto" data-available="{{ 'true' if pay_methods.crypto.available else 'false' }}" aria-disabled="{{ 'false' if pay_methods.crypto.available else 'true' }}">
-              <input type="radio" name="payment_method" value="crypto" {{ '' if pay_methods.crypto.available else 'disabled' }}>
-              <span class="s-method-copy">
-                <strong><span data-icon="wallet" data-icon-class="icon-sm"></span>Crypto</strong>
-                <small data-s-method-note>{{ pay_methods.crypto.note }}</small>
-              </span>
-            </label>
+            <div class="s-method-choice">
+              <label class="s-method" data-s-method="card" data-available="{{ 'true' if pay_methods.card.available else 'false' }}" aria-disabled="{{ 'false' if pay_methods.card.available else 'true' }}">
+                <input type="radio" name="payment_method" value="card" {{ '' if pay_methods.card.available else 'disabled' }}>
+                <span class="s-method-copy">
+                  <strong><span data-icon="billing" data-icon-class="icon-sm"></span>Card</strong>
+                  <small data-s-method-note>{{ pay_methods.card.note }}</small>
+                </span>
+              </label>
+              {{ payment_provider_badge(pay_methods.card) }}
+            </div>
+            <div class="s-method-choice">
+              <label class="s-method" data-s-method="crypto" data-available="{{ 'true' if pay_methods.crypto.available else 'false' }}" aria-disabled="{{ 'false' if pay_methods.crypto.available else 'true' }}">
+                <input type="radio" name="payment_method" value="crypto" {{ '' if pay_methods.crypto.available else 'disabled' }}>
+                <span class="s-method-copy">
+                  <strong><span data-icon="wallet" data-icon-class="icon-sm"></span>Crypto</strong>
+                  <small data-s-method-note>{{ pay_methods.crypto.note }}</small>
+                </span>
+              </label>
+              {{ payment_provider_badge(pay_methods.crypto) }}
+            </div>
           </fieldset>
+
+          {#- The code box sits under the choice that can use it rather than on a step of
+              its own. A fourth step would ask everybody a question that only matters to
+              the few who hold a code, and it appears the moment Crypto is picked, which
+              is exactly where the reason for it is. -#}
+          {{ discount_code_box(discount_methods, '', 'USD', launch_discount_code, launch_discount_percent) }}
 
           <label class="s-agree" data-s-field>
             <input type="checkbox" name="terms_accepted" value="true" required data-s-agree>
@@ -434,5 +464,6 @@
 <script id="s-plan-facts" type="application/json">{{ plan_cards|tojson }}</script>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260901-pay-methods"></script>
+<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260903-market-simpler"></script>
+<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260903-market-simpler"></script>
 {% endblock %}

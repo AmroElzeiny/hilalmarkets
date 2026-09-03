@@ -41,6 +41,15 @@ type Plan = {
   annualAvailable?: boolean
   /** The old price to cross out, or null when nothing changed. */
   originalMonthlyPrice?: number | null
+  /**
+   * What a checkout charges when nobody types a code. `monthlyPrice` above is the
+   * headline, which already carries the launch-code discount, so the card needs both:
+   * one to show, and one to say what the price is without the code.
+   */
+  fullMonthlyPrice?: number | null
+  /** The code that unlocks the headline price, or null when there is no code running. */
+  discountCode?: string | null
+  discountPercent?: number | null
   comingSoonLabel?: string
 }
 
@@ -83,6 +92,9 @@ const PLANS: Plan[] = [
     name: 'Monitor',
     monthlyPrice: 15,
     originalMonthlyPrice: 20,
+    fullMonthlyPrice: 20,
+    discountCode: 'HILAL25',
+    discountPercent: 25,
     annualPrice: 120,
     monthlyAvailable: true,
     annualAvailable: false,
@@ -420,6 +432,29 @@ export default function Pricing() {
                   <span>{price.period}</span>
                 </div>
               )}
+              {/*
+                Why the price above is the lower one. The launch price is not automatic:
+                it is reached by typing this code, and without it the plan costs the
+                crossed-out figure. This card is the only place on the public site where
+                a visitor can learn that before they reach a payment page.
+
+                Monthly only — the code is a monthly offer, and naming it under a yearly
+                price would advertise a code that does nothing there.
+              */}
+              {price.kind === 'price' &&
+                interval === 'monthly' &&
+                promotionRunning &&
+                plan.discountCode && (
+                  <p className="price-code-note">
+                    <span className="price-code-line">
+                      Using code <code className="hm-code-chip">{plan.discountCode}</code>
+                    </span>
+                    <span>
+                      Without it the price is ${plan.fullMonthlyPrice ?? plan.originalMonthlyPrice}{' '}
+                      a month.
+                    </span>
+                  </p>
+                )}
               {price.kind === 'price' && price.original && (
                 <OfferCountdown endsAt={promotionEndsAt} now={now} />
               )}

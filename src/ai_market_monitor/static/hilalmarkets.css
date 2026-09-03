@@ -978,3 +978,56 @@ html[dir="rtl"] body.hilal-dashboard .readiness-candidate.state-invalidated{bord
   .asset-removal-dialog,.asset-removal-plan{transition:none}
   .live-quote,.live-market-row{transition:none}
 }
+
+/* ── "Using code HILAL25" ─────────────────────────────────────────────────────
+ *
+ * The launch price is not automatic: it is reached by typing a code, and the card that
+ * quotes the lower price is where a visitor learns that. Shaped here because both halves
+ * of the product draw it — the public pricing page and the dashboard plan cards — and
+ * one shape drawn twice is two things that drift.
+ *
+ * The four colours are properties, defaulted here to the palette the public Jinja pages
+ * run on and overridden by the dashboard's own sheet. Emphasis comes from a pale tint
+ * behind near-black text, never from a colour that has to be read: the accent measures
+ * about 1.21:1 on white and cannot carry meaning on its own.
+ */
+
+:root {
+  --code-chip-bg: var(--gold-2);
+  --code-chip-line: var(--gold);
+  --code-chip-ink: var(--ink);
+  --code-note-ink: var(--ink);
+  --code-note-quiet: var(--muted);
+}
+
+.hm-code-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--code-chip-line);
+  border-radius: 999px;
+  background: var(--code-chip-bg);
+  color: var(--code-chip-ink);
+  font-family: inherit;
+  font-size: .82em;
+  font-weight: 600;
+  letter-spacing: .06em;
+  white-space: nowrap;
+}
+
+.price-code-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  color: var(--code-note-ink);
+  font-size: .82rem;
+}
+
+.price-code-note[hidden] { display: none; }
+
+.price-code-note > span {
+  flex-basis: 100%;
+  color: var(--code-note-quiet);
+  font-size: .76rem;
+}

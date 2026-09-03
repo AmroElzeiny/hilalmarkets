@@ -829,6 +829,47 @@ body:hover *::-webkit-scrollbar-thumb {
   text-decoration-thickness: 2px;
 }
 
+/* "Using code HILAL25" — why the price above is the lower one.
+   The launch price is reached by typing a code, so the card names it. The chip takes its
+   emphasis from a pale tint behind near-black text: apple green measures about 1.21:1 on
+   white and can never be a colour anybody has to read. The two tints are the brand's own
+   soft and pale apple values. */
+.price-code-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 10px 0 0;
+  color: var(--color-ink);
+  font-size: 13.5px;
+}
+
+.price-code-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.price-code-note > span:last-child {
+  flex-basis: 100%;
+  color: var(--color-ink-soft);
+  font-size: 12.5px;
+}
+
+.hm-code-chip {
+  display: inline-block;
+  padding: 2px 9px;
+  border: 1px solid #e8fbbf;
+  border-radius: 999px;
+  background: #f1fadf;
+  color: var(--color-ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
 .pricing-card.is-coming-soon {
   border-style: dashed;
   box-shadow: none;

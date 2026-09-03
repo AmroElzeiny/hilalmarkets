@@ -519,6 +519,17 @@ body.hilal-dashboard .s-field-wrong .icon { width: 13px; height: 13px; }
 
 body.hilal-dashboard .s-methods { display: grid; gap: var(--t-2); grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 
+/* One cell for each way of paying: the choice, and under it the mark naming the company
+   that takes the money. The choice takes all the room left over (`1fr`) and the mark sits
+   on the line below it, so Card and Crypto stay exactly the same size as each other —
+   whether one note runs onto a second line, or one side has no company to name. */
+body.hilal-dashboard .s-method-choice {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: var(--t-2);
+  min-width: 0;
+}
+
 body.hilal-dashboard .s-method {
   display: flex;
   align-items: flex-start;
