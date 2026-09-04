@@ -24,6 +24,8 @@ page that already existed.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -431,7 +433,23 @@ def test_a_pdf_has_no_links_to_read() -> None:
 def test_every_layer_is_less_trusted_than_the_one_before_it() -> None:
     scores = [LAYER_CONFIDENCE[layer] for layer in LAYER_ORDER]
     assert scores == sorted(scores, reverse=True)
-    assert len(set(LAYER_ORDER)) == len(DiscoveryLayer)
+    assert len(set(LAYER_ORDER)) == len(LAYER_ORDER), "a layer is listed twice"
+
+
+def test_only_the_retired_guessing_layer_is_left_out_of_the_walk() -> None:
+    """No layer may be dropped from the order by accident.
+
+    This used to read ``len(LAYER_ORDER) == len(DiscoveryLayer)``, which said "every
+    layer that exists is walked". That is still the rule for every layer but one:
+    ``CONVENTION`` was retired on 4 September 2026 and is deliberately not walked, while
+    the member stays so rows already stored under it remain readable.
+
+    Written as an exact set rather than a count, so adding a new layer and forgetting to
+    walk it fails here instead of quietly never running.
+    """
+
+    assert set(DiscoveryLayer) - set(LAYER_ORDER) == {DiscoveryLayer.CONVENTION}
+    assert all(layer in LAYER_CONFIDENCE for layer in DiscoveryLayer)
 
 
 @pytest.mark.parametrize("layer", [DiscoveryLayer.SOCIAL, DiscoveryLayer.SEARCH])
@@ -811,6 +829,359 @@ async def test_one_sweep_asks_a_site_for_its_rules_once(test_context) -> None:
 
 
 # ---------------------------------------------------------------------------
+# The provider's homepage is a homepage
+# ---------------------------------------------------------------------------
+
+
+class _ProviderHolding:
+    """A market-data provider that holds a record for one coin."""
+
+    def __init__(self, symbol: str, **fields) -> None:
+        from ai_market_monitor.services.coinmarketcap import CoinLinks
+
+        self.enabled = True
+        self._records = {
+            symbol: CoinLinks(cmc_id=1, name=symbol, symbol=symbol, **fields)
+        }
+
+    async def coin_links(self, symbols):
+        return {s: self._records[s] for s in symbols if s in self._records}
+
+
+#: Provider fields that are deliberately not a news or community page, with the reason.
+#: Anything else the provider publishes must reach the catalog, or it is a free link
+#: being thrown away.
+_PROVIDER_FIELDS_NOT_SOURCES = {
+    "cmc_id": "the provider's own row number",
+    "name": "not an address",
+    "symbol": "not an address",
+    "slug": "not an address",
+    "logo": "a picture, not a page",
+    "category": "not an address",
+    "tags": "not an address",
+    "date_added": "a date",
+    "description": "the provider's own prose about the coin, not the project's page",
+    "notice": "the provider's own warning text, not the project's page",
+    "is_hidden": "a flag",
+    "platform": "the chain a token lives on, not a page",
+    "contract_address": "an on-chain address, not something anyone publishes to",
+    "explorer": "a block explorer belongs to nobody and publishes no announcements",
+}
+
+
+def test_every_address_the_provider_publishes_reaches_the_catalog() -> None:
+    """A fetched field that no reader consumes is a link bought and thrown away.
+
+    ``twitter`` was exactly that: parsed into the record, dropped one line before the
+    catalog, and then hunted for by the search layer and the paid model layer. This
+    asserts the whole record rather than that one field, so the next field added to the
+    provider client cannot go quiet in the same way.
+    """
+
+    from dataclasses import fields as dataclass_fields
+
+    from ai_market_monitor.services.coinmarketcap import CoinLinks
+    from ai_market_monitor.services.sharia_source_catalog import PROVIDER_FIELD_CATEGORY
+    from ai_market_monitor.services.sharia_source_resolution import _provider_link_fields
+
+    published = {f.name for f in dataclass_fields(CoinLinks)}
+    unexplained = published - set(_PROVIDER_FIELDS_NOT_SOURCES)
+    assert unexplained <= set(PROVIDER_FIELD_CATEGORY), (
+        f"the provider publishes {sorted(unexplained - set(PROVIDER_FIELD_CATEGORY))} "
+        "and no layer reads it. Either give it a category or say here why it is not a "
+        "source."
+    )
+
+    # The reshape is the only bridge between the two vocabularies, so a category with no
+    # field behind it is just as dead as a field with no category.
+    record = CoinLinks(cmc_id=1, name="Frax", symbol="FXS")
+    assert set(_provider_link_fields(record)) == set(PROVIDER_FIELD_CATEGORY), (
+        "the reshape and the category table disagree about which fields exist. One of "
+        "them is carrying a name nothing on the other side will ever read."
+    )
+
+
+async def test_the_providers_homepage_is_read_when_we_have_not_approved_one(
+    test_context,
+) -> None:
+    """A coin with no approved website is not a coin with no website.
+
+    Its homepage was sitting in the provider record the layer above had already
+    fetched, and the footer of that homepage is where a project lists its Telegram, its
+    X account and its blog. Skipping the harvest threw that away and pushed the coin
+    down to the paid model layer to be asked for a link we were already holding.
+    """
+
+    async with test_context["session_factory"]() as session:
+        asset = await _asset(session, symbol="FXS", name="Frax", website="")
+        discovery = _Discovery()
+        service = SourceResolutionService(
+            session,
+            test_context["settings"],
+            fetcher=_Internet({}),
+            discovery=discovery,
+            coinmarketcap=_ProviderHolding("FXS", website=("https://frax.com/",)),
+        )
+        await service.resolve_asset(asset, deep=True)
+
+    assert "https://frax.com/" in discovery.read, (
+        "the provider's homepage was never opened. The address was already in hand and "
+        f"the harvest was pointed at {discovery.read!r} instead."
+    )
+
+
+async def test_the_case_never_says_no_website_while_the_provider_holds_one(
+    test_context,
+) -> None:
+    """The sentence a reviewer reads must describe the world, not our paperwork."""
+
+    async with test_context["session_factory"]() as session:
+        asset = await _asset(session, symbol="FXS", name="Frax", website="")
+        service = SourceResolutionService(
+            session,
+            test_context["settings"],
+            fetcher=_Internet({}),
+            discovery=_Discovery(configured=False),
+            coinmarketcap=_ProviderHolding("FXS", website=("https://frax.com/",)),
+        )
+        await service.resolve_asset(asset, deep=True)
+        await session.flush()
+        case = await session.scalar(
+            select(ReviewCase).where(
+                ReviewCase.idempotency_key == f"official-source-gap:{asset.id}"
+            )
+        )
+
+    if case is not None:
+        assert "no approved official website" not in case.human_review_reason, (
+            "the case told a reviewer this coin has no website while the provider "
+            f"record held one: {case.human_review_reason!r}"
+        )
+
+
+async def test_a_coin_with_no_website_anywhere_still_says_so(test_context) -> None:
+    """The other half of the rule. Removing a false message must not remove a true one."""
+
+    async with test_context["session_factory"]() as session:
+        asset = await _asset(session, symbol="ZZZ", name="Nowhere", website="")
+        service = SourceResolutionService(
+            session,
+            test_context["settings"],
+            fetcher=_Internet({}),
+            discovery=_Discovery(configured=False),
+            coinmarketcap=_ProviderHolding("ZZZ"),
+        )
+        await service.resolve_asset(asset, deep=True)
+        await session.flush()
+        case = await session.scalar(
+            select(ReviewCase).where(
+                ReviewCase.idempotency_key == f"official-source-gap:{asset.id}"
+            )
+        )
+
+    assert case is not None
+    assert "no approved official website" in case.human_review_reason
+
+
+# ---------------------------------------------------------------------------
+# Our own outage is never written down as the site's answer
+# ---------------------------------------------------------------------------
+#
+# One breaker bucket used to hold the whole open web. `official_source` is not an
+# upstream — it is whichever company a coin publishes with — so five failures spread
+# over five unrelated dead domains opened the circuit for every site at once. Every
+# address asked during that window was then filed under "the site would not say what it
+# allows", and the origin was cached as unreadable for the rest of the sweep.
+#
+# That is how Frax's review case came to list `github.com/FraxFinance/...` as a site
+# that would not state its rules. GitHub has served robots.txt to everyone for fifteen
+# years. The sentence was about us, and it sent a reviewer looking for a page that was
+# never once fetched.
+
+
+def _dead_and_live_internet(dead_suffix: str, live_host: str):
+    """An internet where a whole family of hosts is unreachable and one is fine."""
+
+    def handler(request):
+        if (request.url.host or "").endswith(dead_suffix):
+            raise httpx.ConnectError("no route to host", request=request)
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nAllow: /\n")
+        return httpx.Response(
+            200,
+            text=(
+                "<html><body><h1>Releases</h1><p>"
+                + ("A note about the release. " * 40)
+                + "</p></body></html>"
+            ),
+            headers={"content-type": "text/html"},
+        )
+
+    return httpx.MockTransport(handler)
+
+
+async def test_a_dead_domain_never_makes_a_live_one_unreadable(test_context) -> None:
+    """The defect class, asserted on the shape rather than on Frax.
+
+    A sweep reads a dozen addresses per coin and twenty-five coins per run. Some of
+    those domains are always dead — projects move, and a review case is what tells us.
+    Not one of them may cost us the sites that *are* answering.
+
+    The dead hosts are all **different**, because that is the real shape: one dead host
+    is asked for its rules once and then cached, so it can never trip a threshold on its
+    own. What tripped it was a sweep walking twenty-five coins' worth of unrelated
+    domains and adding all of their failures into one bucket.
+    """
+
+    settings = test_context["settings"]
+    transport = _dead_and_live_internet(".gone.example", "github.com")
+    fetcher = OfficialEvidenceFetcher(settings, transport=transport)
+
+    # Enough distinct dead domains to trip any threshold the product ships with.
+    for index in range(12):
+        with pytest.raises(ShariaResearchError):
+            await fetcher.fetch(FetchTarget(f"https://project{index}.gone.example/blog"))
+
+    body, _headers, status = await fetcher.fetch(
+        FetchTarget("https://github.com/FraxFinance/frax-solidity/releases")
+    )
+    assert status == 200, (
+        "a live site was refused because unrelated domains were dead. That is the "
+        "breaker treating the whole open web as one upstream."
+    )
+    assert "Releases" in body
+
+
+async def test_a_call_we_never_sent_is_not_reported_as_the_site_refusing(
+    test_context,
+) -> None:
+    """Two different sentences, because they need two different actions.
+
+    "The site would not say what it allows" is a fact about the site and it is cached
+    for the sweep. "We did not ask" is a fact about us, it is cached nowhere, and the
+    next address on that host tries again.
+    """
+
+    from ai_market_monitor.services.provider_reliability import (
+        AttemptRecord,
+        FailureClass,
+        ProviderCallError,
+    )
+
+    refused = ProviderCallError(
+        "official_source is not answering right now.",
+        failure_class=FailureClass.TRANSIENT,
+        attempts=[
+            AttemptRecord(
+                provider="official_source",
+                operation="robots",
+                attempt=0,
+                status=None,
+                failure_class=FailureClass.TRANSIENT,
+                latency_ms=0,
+                disposition="circuit_open",
+            )
+        ],
+    )
+    calls = {"n": 0}
+
+    async def never_sent(*args, **kwargs):
+        calls["n"] += 1
+        raise refused
+
+    fetcher = OfficialEvidenceFetcher(test_context["settings"])
+    import ai_market_monitor.services.sharia_research as research_module
+
+    original = research_module.provider_request
+    research_module.provider_request = never_sent
+    try:
+        with pytest.raises(ShariaResearchError) as first:
+            await fetcher.fetch(FetchTarget("https://github.com/org/repo/releases"))
+        with pytest.raises(ShariaResearchError) as second:
+            await fetcher.fetch(FetchTarget("https://github.com/org/repo/discussions"))
+    finally:
+        research_module.provider_request = original
+
+    assert first.value.code == "robots_not_asked", (
+        "a request the breaker refused to send was filed as the site refusing to "
+        "answer. Nobody asked the site anything."
+    )
+    assert second.value.code == "robots_not_asked"
+    assert calls["n"] == 2, (
+        "the second address on the same host was refused from a cache built out of our "
+        "own outage. That cache is for what a site told us, and the site told us nothing."
+    )
+
+
+def test_a_case_about_pages_nobody_opened_asks_nobody_to_do_anything() -> None:
+    """The whole sentence, because a reviewer reads the whole sentence.
+
+    This is the message the Frax case carried. Every clause in it was about us — a
+    paused checker — and it ended by telling a person to go and configure a search
+    engine. It must not claim the pages were judged, and it must not name a switched-off
+    layer as the reason, because neither is true.
+    """
+
+    from ai_market_monitor.services.sharia_source_resolution import (
+        AssetSourceOutcome,
+        SourceResolutionService,
+    )
+
+    outcome = AssetSourceOutcome(asset_id=uuid4(), symbol="FXS")
+    outcome.missing = (NEWS,)
+    outcome.rejected = [
+        "official news: https://github.com/FraxFinance/frax-solidity/releases — "
+        "our own checker was paused, so this address was never tried",
+        "official community: https://github.com/FraxFinance/frax-solidity/discussions — "
+        "our own checker was paused, so this address was never tried",
+    ]
+    outcome.unfinished = len(outcome.rejected)
+
+    asset = CanonicalAsset(symbol="FXS", name="Frax", asset_type="coin")
+    reason = SourceResolutionService._gap_reason(
+        SimpleNamespace(_what_stops_looking=lambda _asset: ["web search is not usable."]),
+        asset,
+        outcome,
+    )
+
+    assert "none of them proved usable" not in reason, (
+        f"pages nobody opened were reported as judged: {reason!r}"
+    )
+    assert "GOOGLE" not in reason.upper() and "search" not in reason, (
+        f"a paused checker was reported as a missing search key: {reason!r}"
+    )
+    assert "tries again on the next sweep" in reason
+
+
+async def test_the_plain_words_never_blame_the_site_for_our_own_pause() -> None:
+    """A reviewer reads the sentence, not the code. It has to name the right culprit."""
+
+    from ai_market_monitor.services.sharia_source_resolution import (
+        _FAILURE_WORDS,
+        UNFINISHED_CHECK_CODES,
+        _why_not_usable,
+    )
+
+    words = _why_not_usable(
+        SourceProof(
+            reachable=False,
+            allowed=True,
+            readable=False,
+            fresh=False,
+            error_code="robots_not_asked",
+        )
+    )
+    assert "our own" in words, words
+    assert "the site" not in words, (
+        f"our outage is described as the site's behaviour: {words!r}"
+    )
+    # Every code that means "nothing was learned" must have plain words of its own, or
+    # the reviewer sees a raw error code in a review case.
+    for code in UNFINISHED_CHECK_CODES:
+        assert code in _FAILURE_WORDS, code
+
+
+# ---------------------------------------------------------------------------
 # Blank credentials
 # ---------------------------------------------------------------------------
 
@@ -897,6 +1268,7 @@ class _Discovery:
         self._results = results
         self._configured = configured
         self.searched = 0
+        self.read: list[str] = []
 
     @property
     def search_configured(self) -> bool:
@@ -906,6 +1278,9 @@ class _Discovery:
         return "" if self._configured else "Web search is not configured in this test."
 
     async def channel_links(self, official_website):
+        #: Which homepage the harvest was pointed at. "" means it was skipped, and that
+        #: is a real outcome worth asserting on rather than an absence.
+        self.read.append(official_website or "")
         return self._links
 
     async def search(self, *, asset_name, symbol):

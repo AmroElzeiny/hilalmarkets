@@ -236,10 +236,96 @@ def test_the_number_of_addresses_already_tried_is_named():
         evidence_completeness=0.0,
         missing_information_count=0,
         contradiction_count=0,
-        coverage=SourceCoverage(proved={}, tried=11),
+        coverage=SourceCoverage(proved={}, tried=11, failed=11),
     )
 
     assert "11 address(es)" in signal.reason
+
+
+def _gap_reason(coverage: SourceCoverage) -> str:
+    return classify(
+        case_type=ReviewCaseType.OFFICIAL_SOURCE_GAP,
+        state="needs_evidence",
+        risk_severity="low",
+        asset_name="HTX DAO",
+        done=False,
+        dossier_present=False,
+        evidence_completeness=0.0,
+        missing_information_count=0,
+        contradiction_count=0,
+        coverage=coverage,
+    ).reason
+
+
+def test_none_worked_is_only_said_when_none_worked():
+    """The sentence a reviewer stopped believing.
+
+    "10 address(es) have been tried and none worked yet" was built from the count of
+    **every stored address**, working ones included. A coin holding two live community
+    pages and eight dead news guesses was told it had ten failures — about pages the
+    reviewer could open in a browser. Asserted across the whole family of shapes, not the
+    one coin that was reported.
+    """
+
+    # Every address failed: the old sentence, and here it is true.
+    assert "none worked yet" in _gap_reason(
+        SourceCoverage(proved={}, tried=8, failed=8)
+    )
+    # Some work. It must not claim they did not.
+    mixed = _gap_reason(
+        SourceCoverage(proved={"official_community": 2}, tried=10, failed=8)
+    )
+    assert "none worked" not in mixed
+    assert "8 address(es)" in mixed
+    assert "2 that do work" in mixed
+    # Everything stored works, but none of it is the required page.
+    only_working = _gap_reason(
+        SourceCoverage(proved={"official_community": 3}, tried=3, failed=0)
+    )
+    assert "none worked" not in only_working
+    assert "3 working address(es)" in only_working
+    # Nothing tried at all must not claim a failure.
+    nothing = _gap_reason(EMPTY_COVERAGE)
+    assert "none worked" not in nothing
+    assert "no address has been tried yet" in nothing
+
+
+@pytest.mark.parametrize(
+    "coverage",
+    [
+        EMPTY_COVERAGE,
+        SourceCoverage(proved={}, tried=8, failed=8),
+        SourceCoverage(proved={"official_community": 2}, tried=10, failed=8),
+        SourceCoverage(proved={"official_community": 3}, tried=3, failed=0),
+        SourceCoverage(proved={}, tried=1, failed=1),
+    ],
+)
+def test_the_gap_sentence_never_counts_more_failures_than_addresses(coverage):
+    """No shape of coverage may produce a number larger than the addresses that exist."""
+
+    reason = _gap_reason(coverage)
+    for number in re.findall(r"(\d+) address\(es\)", reason):
+        assert int(number) <= coverage.tried
+    assert coverage.working == max(coverage.tried - coverage.failed, 0)
+
+
+def test_failed_addresses_are_counted_apart_from_working_ones():
+    """The count behind the sentence, taken straight from the rows the page selects."""
+
+    asset = uuid4()
+    coverage = coverage_from_rows(
+        [
+            (asset, "official_news", "verified", True),
+            (asset, "official_news", "unreachable", True),
+            (asset, "official_news", "not_permitted", True),
+            (asset, "official_community", "verified", False),
+        ]
+    )[asset]
+
+    assert coverage.tried == 4
+    # Two never worked, and the switched-off one does not work now either.
+    assert coverage.failed == 3
+    assert coverage.working == 1
 
 
 def test_coverage_is_counted_from_plain_rows_without_loading_the_table():

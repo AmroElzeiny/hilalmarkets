@@ -48,8 +48,7 @@ from sqlalchemy import select
 
 from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.core.database import SessionFactory
-from ai_market_monitor.db.models import CanonicalAsset, OfficialSource, ReviewCase
-from ai_market_monitor.db.models.enums import ReviewCaseType
+from ai_market_monitor.db.models import CanonicalAsset, OfficialSource
 from ai_market_monitor.services.sharia_page_render import render_engine_available
 from ai_market_monitor.services.sharia_source_activity import ACTIVITY_FLOOR
 from ai_market_monitor.services.sharia_source_catalog import (
@@ -63,6 +62,7 @@ from ai_market_monitor.services.sharia_source_discovery import WebSourceDiscover
 from ai_market_monitor.services.sharia_source_resolution import (
     AssetSourceOutcome,
     SourceResolutionService,
+    pending_asset_ids,
 )
 
 WORKING = state_label(VERIFIED)
@@ -109,24 +109,6 @@ def _browser_state(settings) -> str:
         f"on, using {engine}, up to "
         f"{settings.sharia_source_browser_render_max_pages} page(s) per run"
     )
-
-
-async def _pending_asset_ids(session) -> set:
-    """The coins the System Brain is currently asking a person about, under "Pages not found".
-
-    Read from the open review cases rather than recomputed, so this script works through
-    exactly the rows a person is looking at on the page — not a second, slightly
-    different idea of what "pending" means.
-    """
-
-    rows = await session.scalars(
-        select(ReviewCase.canonical_asset_id).where(
-            ReviewCase.case_type == ReviewCaseType.OFFICIAL_SOURCE_GAP,
-            ReviewCase.done_at.is_(None),
-            ReviewCase.canonical_asset_id.is_not(None),
-        )
-    )
-    return {row for row in rows.all() if row is not None}
 
 
 def _asset_report(
@@ -311,7 +293,7 @@ async def _run(args: argparse.Namespace) -> int:
                 query = query.where(CanonicalAsset.symbol.in_(sorted(wanted)))
             # Read every time, not only for --pending-only: it is one cheap query, and it
             # is what lets any run report how many open tasks it actually closed.
-            pending = await _pending_asset_ids(session)
+            pending = await pending_asset_ids(session)
             print(f"Coins the System Brain is asking about: {len(pending)}")
             if args.pending_only:
                 if not pending:

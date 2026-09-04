@@ -50,6 +50,7 @@ from typing import Any
 import httpx
 import structlog
 
+from ai_market_monitor.services.provider_credentials import authenticates
 from ai_market_monitor.services.reliability_metrics import METRICS, safe_metric_fields
 
 logger = structlog.get_logger(__name__)
@@ -78,19 +79,38 @@ class FailureClass(StrEnum):
     PERMANENT = "permanent"
 
 
-#: Status codes that mean "your credentials are wrong", never "try again".
+#: Status codes that mean "your credentials are wrong", never "try again" — but only when
+#: a credential was actually sent. See ``classify_status``.
 _AUTH_STATUSES = frozenset({401, 403})
 #: Status codes worth another attempt: request timeout, conflict, and every server error.
 _TRANSIENT_STATUSES = frozenset({408, 409, 500, 502, 503, 504, 507, 509, 599})
 
 
-def classify_status(status: int) -> FailureClass:
-    """Turn an HTTP status into the one word the retry decision needs."""
+def classify_status(status: int, *, authenticated: bool = True) -> FailureClass:
+    """Turn an HTTP status into the one word the retry decision needs.
+
+    ``authenticated`` says whether this call carried a credential of ours, and it is the
+    difference between two opposite readings of the same number. 401 and 403 mean "your
+    key is wrong" **only to a caller that sent a key**. To one that sent none they mean
+    the far side does not serve anonymous visitors — which, for a fetcher whose
+    "provider" is the open web, is ordinary and says nothing about our configuration.
+
+    Without this the evidence fetcher's every Cloudflare 403 was filed as a credential
+    failure: an operator was told over and over that ``official_source`` had a broken key
+    and that "the feature stays off until the key is fixed", when ``official_source``
+    holds no key, nothing had stopped, and the only thing that had happened was one
+    website declining one visit.
+
+    Unauthenticated 401/403 lands in ``PERMANENT``: the same request gets the same
+    refusal, so it is not retried, and — unlike ``TRANSIENT`` — it never counts towards
+    opening the circuit for that host. Who sends a credential is declared once, in
+    :mod:`ai_market_monitor.services.provider_credentials`.
+    """
 
     if 200 <= status < 300:
         return FailureClass.OK
     if status in _AUTH_STATUSES:
-        return FailureClass.AUTH
+        return FailureClass.AUTH if authenticated else FailureClass.PERMANENT
     if status == 429:
         return FailureClass.RATE_LIMITED
     if status in _TRANSIENT_STATUSES or status >= 500:
@@ -186,6 +206,15 @@ class ProviderCallError(RuntimeError):
         self.failure_class = failure_class
         self.attempts = attempts
         self.status = status
+        #: True when the request was never sent because the circuit for this upstream was
+        #: already open. It is the one failure that says nothing whatever about the far
+        #: side: we did not ask it. A caller that records *why* an address could not be
+        #: used must be able to tell that apart from an answer, or it writes down our own
+        #: outage as the other site's behaviour. Read from the attempt record so
+        #: ``call_with_reliability`` stays the single owner of what a disposition means.
+        self.circuit_open = bool(
+            attempts and attempts[-1].disposition == "circuit_open"
+        )
         #: The transport exception from the last attempt, when the failure was a transport
         #: one. Kept because ``ConnectTimeout``, ``ReadTimeout`` and a DNS failure are three
         #: different things to tell a person, and a caller that already distinguishes them
@@ -741,6 +770,7 @@ async def call_with_reliability(
     deadline_seconds: float,
     mutation_committed: bool = False,
     model: str | None = None,
+    circuit_key: str | None = None,
     on_auth_failure: Callable[[str, str, int | None], Awaitable[None]] | None = None,
 ) -> CallOutcome:
     """Make one provider call, with pooling, bounded retries and the circuit breaker.
@@ -751,15 +781,29 @@ async def call_with_reliability(
 
     ``mutation_committed`` must be True whenever the call has already changed state on the
     far side. It disables retries entirely, because a retry would be a second change.
+
+    ``circuit_key`` names the **thing that can be down**, and defaults to ``provider``
+    because for a named upstream — OpenAI, Stripe, CoinMarketCap — they are the same
+    thing. They are not the same thing for a caller whose "provider" is *the open web*:
+    ``official_source`` fetches a different company's website on every call, so one
+    bucket meant five failures spread over five unrelated dead domains opened the circuit
+    for every site on the internet at once. Naming the host keeps the breaker's own
+    promise — "one failing upstream never stops another" — while the metric label stays
+    ``provider``, so per-host keys cannot turn into per-host counters.
     """
 
     outcome = CallOutcome(response=None)
     started = monotonic()
+    circuit = circuit_key or provider
+    # Whether a 401 or a 403 from this caller can possibly be about our own credentials.
+    # Declared per provider, never guessed from the outgoing headers — see
+    # ``provider_credentials`` for why guessing is the dangerous direction.
+    sends_credential = authenticates(provider)
 
     def remaining() -> float:
         return deadline_seconds - (monotonic() - started)
 
-    if not await breaker.allow(provider):
+    if not await breaker.allow(circuit):
         outcome.attempts.append(
             AttemptRecord(
                 provider=provider,
@@ -819,7 +863,7 @@ async def call_with_reliability(
                 "openai-request-id"
             )
             service_tier = response.headers.get("openai-processing-ms")
-            failure = classify_status(status)
+            failure = classify_status(status, authenticated=sends_credential)
             if failure is FailureClass.RATE_LIMITED:
                 retry_after = parse_retry_after(response.headers.get("retry-after"))
         except Exception as error:  # noqa: BLE001 - classified, then re-raised or retried
@@ -850,7 +894,7 @@ async def call_with_reliability(
             record.count()
             METRICS.record_call(provider=provider, operation=operation, outcome="succeeded")
             logger.info("provider_call", **record.to_log())
-            await breaker.record_success(provider)
+            await breaker.record_success(circuit)
             outcome.response = response
             return outcome
 
@@ -892,7 +936,7 @@ async def call_with_reliability(
         logger.warning("provider_call_failed", **record.to_log())
 
         if failure in {FailureClass.TRANSIENT, FailureClass.RATE_LIMITED}:
-            await breaker.record_failure(provider)
+            await breaker.record_failure(circuit)
         elif failure is FailureClass.AUTH:
             # Not a provider outage: our configuration is wrong. Opening the circuit
             # would hide a mistake only an operator can fix.

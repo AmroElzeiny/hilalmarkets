@@ -27,6 +27,7 @@ import httpx
 import structlog
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.services.provider_credentials import credential_setting
 from ai_market_monitor.services.provider_reliability import (
     CallOutcome,
     CircuitBreaker,
@@ -173,7 +174,18 @@ async def release_provider_runtime_for_loop() -> None:
 
 
 def _auth_alert(settings: Settings) -> Callable[[str, str, int | None], Awaitable[None]]:
-    """Tell an operator that a credential was refused, at most once per cooldown."""
+    """Tell an operator that a credential was refused, at most once per cooldown.
+
+    It names the **setting** to go and look at, not "the key". Nine settings hold a
+    credential in this product, so "check the configured API key" left a person opening
+    ``.env`` and reading all of them. The setting *name* is not the secret; the value is,
+    and the value is never read here, quoted, or hinted at.
+
+    It is only ever reached for a caller that actually sends a credential.
+    :func:`~ai_market_monitor.services.provider_reliability.classify_status` will not
+    raise ``AUTH`` for one that sends none, so an ordinary 403 from a stranger's website
+    can no longer arrive on somebody's phone as a broken key.
+    """
 
     async def alert(provider: str, operation: str, status: int | None) -> None:
         now = monotonic()
@@ -183,13 +195,15 @@ def _auth_alert(settings: Settings) -> Callable[[str, str, int | None], Awaitabl
         _auth_alerted_at[provider] = now
         from ai_market_monitor.services.admin_notifications import AdminNotificationService
 
-        # Provider, operation and status only. The key itself is never named, quoted or
-        # hinted at — an alert that leaks the secret it is complaining about is worse than
-        # no alert.
+        setting = credential_setting(provider)
+        where = f"Check {setting}." if setting else "Check this provider's credential."
+        # Provider, operation, status and the setting's name only. The key itself is never
+        # read, named, quoted or hinted at — an alert that leaks the secret it is
+        # complaining about is worse than no alert.
         await AdminNotificationService(settings).send(
             f"Provider credentials refused: {provider} ({operation}) returned "
             f"{status if status is not None else 'an auth error'}. "
-            "The feature stays off until the key is fixed."
+            f"{where} The feature stays off until it is fixed."
         )
 
     return alert
@@ -208,6 +222,7 @@ async def provider_call(
     retry: bool = True,
     mutation_committed: bool = False,
     model: str | None = None,
+    circuit_key: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     **request_kwargs: Any,
 ) -> CallOutcome:
@@ -255,6 +270,7 @@ async def provider_call(
             deadline_seconds=budget,
             mutation_committed=mutation_committed,
             model=model,
+            circuit_key=circuit_key,
             on_auth_failure=_auth_alert(settings),
         )
     finally:
@@ -277,6 +293,7 @@ async def provider_request(
     raise_for_failure: bool = False,
     unwrap_transport_errors: bool = True,
     model: str | None = None,
+    circuit_key: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     **request_kwargs: Any,
 ) -> httpx.Response:
@@ -310,6 +327,11 @@ async def provider_request(
     files, evidence documents, price lookups, embeddings — where a repeat costs nothing
     but a little time.
 
+    ``circuit_key`` names what the breaker should count failures against, when that is not
+    the provider itself. Pass it whenever ``provider`` is a *kind* of call rather than one
+    upstream — fetching an arbitrary project's website is the case in this codebase — so a
+    dead domain cannot trip the breaker for every other site the same code path visits.
+
     ``transport`` exists for tests. Production never passes one, so production always uses
     the shared pool; a supplied transport gets its own short-lived pool so an injected
     stub cannot be cached into the process-wide client and leak into another test.
@@ -328,6 +350,7 @@ async def provider_request(
             retry=retry,
             mutation_committed=mutation_committed,
             model=model,
+            circuit_key=circuit_key,
             transport=transport,
             **request_kwargs,
         )

@@ -50,6 +50,21 @@ _SOURCE_METHODOLOGY_CODES = {
 }
 
 
+def _circuit_key(url: str) -> str:
+    """Which breaker bucket an open-web fetch belongs in: one per host.
+
+    ``official_source`` is not an upstream service. It is whatever website a coin happens
+    to publish on, so every call under that name reaches a different company. Counting
+    their failures together made the breaker say "the provider is down" when what was
+    really true was "five unrelated domains are dead", and it then refused the live sites
+    in the same sweep. One owner for this key so the two call sites — the page and its
+    ``robots.txt`` — always land in the same bucket for the same host.
+    """
+
+    host = urlparse(url).netloc.casefold()
+    return f"official_source:{host}" if host else "official_source"
+
+
 class ShariaResearchError(RuntimeError):
     def __init__(self, code: str, message: str, *, retryable: bool = False):
         super().__init__(message)
@@ -207,6 +222,10 @@ class OfficialEvidenceFetcher:
                 provider="official_source",
                 operation="fetch_evidence",
                 timeout=90,
+                # One breaker bucket per site. "official_source" is not an upstream, it is
+                # every project's website in turn, and counting them together let a handful
+                # of dead domains stop the sweep reading live ones.
+                circuit_key=_circuit_key(source.source_url),
                 # Reading a public document changes nothing on the far side.
                 mutation_committed=False,
                 transport=self.transport,
@@ -276,6 +295,14 @@ class OfficialEvidenceFetcher:
         "could not find out" are remembered per origin, so a sweep asks a site for its
         rules once instead of once per address. The cache lives as long as the fetcher,
         which is one sweep, so a site having a bad hour is retried on the next one.
+
+        **Our own outage is never written down as the site's answer.** A request the
+        breaker refused to send was never made, so it says nothing at all about that
+        origin — and caching it would then refuse every address on that host for the rest
+        of the sweep on the strength of a failure somewhere else entirely. That is how
+        ``github.com``, which has served ``robots.txt`` to everyone for fifteen years,
+        came to be reported as a site that "would not say what it allows". It is raised
+        under its own code so the sentence a reviewer reads names the real cause.
         """
 
         if not self.settings.sharia_scraper_obey_robots:
@@ -298,6 +325,7 @@ class OfficialEvidenceFetcher:
                     provider="official_source",
                     operation="robots",
                     timeout=20,
+                    circuit_key=_circuit_key(robots_url),
                     mutation_committed=False,
                     transport=self.transport,
                     follow_redirects=True,
@@ -305,7 +333,22 @@ class OfficialEvidenceFetcher:
                         "User-Agent": "HilalMarketsEvidenceBot/1.0 (+compliance research)"
                     },
                 )
-            except (httpx.HTTPError, ProviderCallError) as exc:
+            except ProviderCallError as exc:
+                if exc.circuit_open:
+                    # We never sent it. Not an answer, not this origin's fault, and not
+                    # cached: the next address on this host asks again.
+                    raise ShariaResearchError(
+                        "robots_not_asked",
+                        "This site was not asked for its rules on this run.",
+                        retryable=True,
+                    ) from exc
+                self._unreadable_robots.add(origin)
+                raise ShariaResearchError(
+                    "robots_unavailable",
+                    "The official source robots policy could not be read.",
+                    retryable=True,
+                ) from exc
+            except httpx.HTTPError as exc:
                 # Could not ask. That is not permission, so nothing on this origin is
                 # read this run — but it is remembered so the whole sweep asks once.
                 self._unreadable_robots.add(origin)

@@ -77,7 +77,10 @@ document.querySelectorAll("[data-decision-form], [data-guarded-form]").forEach((
       submitter.disabled = false;
       submitter.setAttribute("aria-busy", "true");
       const original = submitter.textContent.trim();
-      submitter.textContent = `Recording: ${original}`;
+      /* "Recording" is the right word for a decision and the wrong word for everything
+         else. A button that only asks the system to go and look must not tell the
+         reviewer something is being written down, so it says what it is really doing. */
+      submitter.textContent = submitter.dataset.busyLabel || `Recording: ${original}`;
     }
   });
 });
@@ -327,6 +330,13 @@ document.querySelectorAll("[data-accept-ai-rationale]").forEach((button) => {
   const all = table.querySelector("[data-select-all]");
   const count = bar.querySelector("[data-bulk-count]");
   const limitNote = bar.querySelector("[data-bulk-limit-note]");
+  /* "Go and look for evidence" is a separate form with a separate address, so the ticked
+     cases have to reach it as its own fields. They are written here, inside the one
+     function that already knows what is ticked, so the number shown and the cases sent
+     come from the same list in the same call and can never drift apart. */
+  const researchForm = document.querySelector("[data-research-form]");
+  const researchIds = researchForm?.querySelector("[data-research-ids]");
+  const researchCount = researchForm?.querySelector("[data-research-count]");
 
   /* A missing or unreadable attribute must not become "no limit". Falling back to
      Infinity would rebuild the exact bug this replaces, so an unreadable value falls
@@ -338,6 +348,19 @@ document.querySelectorAll("[data-accept-ai-rationale]").forEach((button) => {
     const selected = boxes.filter((box) => box.checked);
     bar.hidden = selected.length === 0;
     if (count) count.textContent = String(selected.length);
+    if (researchForm) researchForm.hidden = selected.length === 0;
+    if (researchCount) researchCount.textContent = String(selected.length);
+    if (researchIds) {
+      researchIds.replaceChildren(
+        ...selected.map((box) => {
+          const field = document.createElement("input");
+          field.type = "hidden";
+          field.name = "case_id";
+          field.value = box.value;
+          return field;
+        }),
+      );
+    }
     boxes.forEach((box) => {
       box.closest("[data-case-row]")?.classList.toggle("is-selected", box.checked);
     });
@@ -376,24 +399,29 @@ document.querySelectorAll("[data-accept-ai-rationale]").forEach((button) => {
   });
 
   /* Last stop before the request. Nothing on this page can build a selection over the
-     ceiling any more, but a decision the endpoint will refuse must never leave the
+     ceiling any more, but a request the endpoint will refuse must never leave the
      browser, however it came to be ticked.
+
+     Both forms that carry the selection are checked, not only the decision one. The
+     research form posts the same ticked cases to a different address against the same
+     ceiling, so guarding one and not the other would leave the second able to send a
+     selection the server throws away whole — the exact silent failure this replaces.
 
      Bound on the document in the capture phase so it runs *before* the shared
      confirm-before-submit handler on the form. Bound on the form it would run after it,
-     and the reviewer would answer "are you sure?" about a decision that was never going
+     and the reviewer would answer "are you sure?" about a request that was never going
      to be sent. */
   document.addEventListener(
     "submit",
     (event) => {
-      if (event.target !== bar) return;
+      if (event.target !== bar && event.target !== researchForm) return;
       const selected = boxes.filter((box) => box.checked).length;
       if (selected <= maximum) return;
       event.preventDefault();
       event.stopPropagation();
       window.alert(
-        `${selected} cases are selected and ${maximum} is the most one decision can cover. ` +
-          "Untick some before deciding.",
+        `${selected} cases are selected and ${maximum} is the most one request can cover. ` +
+          "Untick some before carrying on.",
       );
     },
     true,

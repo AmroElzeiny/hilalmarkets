@@ -17,6 +17,7 @@ from ai_market_monitor.core.copy_rules import (
     BYTE_ORDER_MARK,
     FORBIDDEN_CLAIM_PHRASES,
     FORBIDDEN_PRODUCT_PHRASES,
+    MOJIBAKE_MARKERS,
     customer_copy_sources,
     scan_customer_copy,
     scan_text,
@@ -395,6 +396,53 @@ def test_no_file_a_browser_downloads_begins_with_a_byte_order_mark() -> None:
         if path.read_bytes().startswith(b"\xef\xbb\xbf")
     ]
     assert marked == [], marked
+
+
+def test_no_template_or_asset_holds_a_mangled_character() -> None:
+    """A broken em dash is a broken em dash wherever a person reads it.
+
+    The copy lint checks ``MOJIBAKE_MARKERS`` too, but only over *customer* copy — the
+    public templates and the modules that write customer words. That left the admin
+    console out, and on 4 September 2026 two em dashes in ``system_brain.html`` were
+    written back mangled and nothing said so: every page rendered, ruff and mypy passed,
+    and the copy lint was not looking at that file.
+
+    Scoped like the byte-order-mark rule above, and for the same reason: this is a
+    file-format rule, not a brand-voice one. Which words are allowed depends on who reads
+    them; whether the bytes survived a round trip does not.
+    """
+
+    watched = (
+        *(ROOT / "src" / "ai_market_monitor" / "templates").rglob("*.html"),
+        *(ROOT / "src" / "ai_market_monitor" / "static").glob("*.css"),
+        *(ROOT / "src" / "ai_market_monitor" / "static").glob("*.js"),
+    )
+    assert len(watched) > 50, "the scan found almost nothing; it is broken, not the files"
+    damaged: list[str] = []
+    for path in watched:
+        text = path.read_text(encoding="utf-8")
+        hits = sorted({marker for marker in MOJIBAKE_MARKERS if marker in text})
+        if hits:
+            damaged.append(f"{path.relative_to(ROOT).as_posix()}: {hits}")
+    assert damaged == [], (
+        "These files hold characters damaged by a lossy read/write round trip. Repair "
+        "them in Python, never with a PowerShell file write:\n" + "\n".join(damaged)
+    )
+
+
+@pytest.mark.parametrize("marker", sorted(MOJIBAKE_MARKERS))
+def test_the_mangled_character_scan_can_actually_fire(marker: str) -> None:
+    """Every marker individually, so the rule above cannot be one that matches nothing.
+
+    The exact failure this guards against: the two mangled em dashes were the sequence
+    for one marker only, and a scan that happened to hold a different set would have
+    passed over them in silence.
+    """
+
+    text = f"<p>Read the rules{marker} then decide.</p>"
+
+    assert any(item in text for item in MOJIBAKE_MARKERS)
+    assert any(item.rule for item in scan_text(text, Path("hilal/example.html")))
 
 
 @pytest.mark.parametrize("phrase", FORBIDDEN_CLAIM_PHRASES)

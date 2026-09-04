@@ -12,6 +12,7 @@ from tests.browser.conftest import (
     assert_hilal_brand_palette,
     assert_no_horizontal_overflow,
     assert_no_raw_traceback,
+    seed_system_brain_reviewer,
     signup,
     unique_email,
 )
@@ -154,6 +155,71 @@ def test_system_brain_user_controls_use_branded_confirmation_dialog(
     assert_no_horizontal_overflow(page)
 
 
+def test_research_is_nowhere_near_the_decision_bar(
+    page: Page,
+    base_url: str,
+    browser_app,
+) -> None:
+    """Measured in a real browser, because the claims are about what a person sees.
+
+    Three of them, and none can be proved by reading the files:
+
+    * with nothing ticked, **neither** bar is on screen. The Cases page loads only the
+      brand tokens and its own stylesheet, so there is no reset behind them: the browser's
+      own ``[hidden] { display: none }`` is the weakest rule there is, and the decision
+      bar's ``display: grid`` beat it. Approve and Reject sat in front of the reviewer all
+      the time, with nothing selected;
+    * once a case is ticked, both appear — and the research button is a long way below the
+      decision bar, so a hand aiming at one is nowhere near the other;
+    * the research button is one line tall. Every ``svg`` on this page is a block, and
+      ``.brain-secondary-button`` never laid its icon inline, so the icon dropped above
+      the words.
+    """
+
+    email = signup(page, base_url, unique_email("research-admin"))
+    # `seed_system_brain_reviewer`, not `_promote_admin_and_seed_case`. The second one
+    # builds the full SC-Malaysia fixture, whose monitoring run has a **fixed**
+    # idempotency key — so two tests in this file sharing one browser database would make
+    # the later one fail on a unique constraint. This test only needs a reviewer and one
+    # row in the list, which is exactly what this seeder makes, with a fresh key.
+    seed_system_brain_reviewer(browser_app.database_url, email)
+
+    page.goto(f"{base_url}/dashboard/system-brain/cases", wait_until="networkidle")
+    decision = page.locator("#bulk-decision-form")
+    research = page.locator("#case-research-form")
+
+    # Nothing ticked: nothing offered.
+    expect(decision).to_be_hidden()
+    expect(research).to_be_hidden()
+
+    page.locator("[data-case-select]").first.check()
+    expect(decision).to_be_visible()
+    expect(research).to_be_visible()
+
+    approve = decision.get_by_role("button", name=re.compile("Approve", re.I))
+    run = research.get_by_role("button", name=re.compile("Run research", re.I))
+    approve_box = approve.bounding_box()
+    run_box = run.bounding_box()
+    assert approve_box and run_box
+    gap = run_box["y"] - (approve_box["y"] + approve_box["height"])
+    assert gap > 200, (
+        f"Run research sits {gap:.0f}px below Approve; it must be far enough away that "
+        "a mis-click cannot reach the decision"
+    )
+
+    # One line tall, so the icon is beside the label and not stacked over it.
+    assert run_box["height"] < 60, f"the research button is {run_box['height']:.0f}px tall"
+
+    # And the two forms really do go to two different places.
+    assert research.get_attribute("action").split("?")[0].endswith("/cases/research")
+    assert decision.get_attribute("action").split("?")[0].endswith("/cases/bulk-decision")
+    # Both bars are only on screen once something is ticked, so the section walk in the
+    # visual QA test never sees them. This is the only place their colours are measured.
+    assert_hilal_brand_palette(page)
+    assert_no_horizontal_overflow(page)
+    assert_no_raw_traceback(page)
+
+
 def test_sharia_governance_workspace_visual_qa(
     page: Page,
     base_url: str,
@@ -207,8 +273,13 @@ def test_sharia_governance_workspace_visual_qa(
     )
     # The review page was rewritten to carry the facts and the controls, and none of the
     # sentences that explained what a panel was for. These are what a reviewer now sees.
+    #
+    # The button is "Approve & publish", not "Approve". It was renamed when approving and
+    # publishing became one governed step, and this file still asked for the old name —
+    # nothing caught it, because the palette check a few lines above failed first and this
+    # part of the test had not run since.
     expect(page.get_by_text("AI suggestions by field")).to_be_visible()
-    expect(page.get_by_role("button", name="Approve", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="Approve & publish", exact=True)).to_be_visible()
     expect(page.get_by_role("button", name="Approve with note")).to_be_visible()
     expect(page.get_by_role("button", name="Mark all as passed")).to_be_visible()
     expect(page.get_by_label("Your reason")).to_be_visible()
@@ -216,7 +287,7 @@ def test_sharia_governance_workspace_visual_qa(
 
     page.set_viewport_size({"width": 390, "height": 844})
     expect(page.locator(".brain-mobile-decision-note")).to_be_visible()
-    expect(page.get_by_role("button", name="Approve", exact=True)).to_be_hidden()
+    expect(page.get_by_role("button", name="Approve & publish", exact=True)).to_be_hidden()
     page.screenshot(path=str(output / "review-case-mobile-390.png"), full_page=True)
 
     page.emulate_media(reduced_motion="reduce")
@@ -254,17 +325,16 @@ def test_sharia_governance_workspace_visual_qa(
         "The retained source, identity mapping, dossier, and criteria were reviewed."
     )
     page.once("dialog", lambda dialog: dialog.accept())
-    page.get_by_role("button", name="Approve", exact=True).click()
+    page.get_by_role("button", name="Approve & publish", exact=True).click()
     page.wait_for_url("**/dashboard/system-brain/cases/**?success=**")
-    expect(page.get_by_role("button", name="Publish…")).to_be_visible()
-    page.get_by_role("button", name="Publish…").click()
-    publication = page.locator("[data-publication-dialog]")
-    expect(publication).to_be_visible()
-    publication.get_by_label("Why publish").fill(
-        "Publish the separately approved immutable Passport for customer evidence."
-    )
-    publication.get_by_role("button", name="Publish", exact=True).click()
-    page.wait_for_url("**/dashboard/system-brain/cases/**?success=**")
+    # Approving **is** publishing now: a reviewer approving an asset is asking for it to
+    # be in front of customers, so the two run together as two recorded governed steps
+    # rather than two clicks. This file still walked the old second click and its
+    # "Publish…" dialog, which no longer exists on this path — and nothing caught that,
+    # because the palette check earlier in the test failed first and none of this had run
+    # since. The separate dialog still exists for the cases that legitimately wait (a
+    # second reviewer, or written permission not yet recorded); this one does not.
+    expect(page.get_by_role("button", name="Publish…")).to_have_count(0)
     expect(page.locator(".brain-terminal strong")).to_have_text("Published")
     page.screenshot(path=str(output / "review-case-published-tablet-900.png"), full_page=True)
     assert_no_raw_traceback(page)

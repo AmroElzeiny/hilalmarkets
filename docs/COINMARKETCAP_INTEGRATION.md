@@ -15,6 +15,43 @@ searching, guessing conventional paths like `/blog`, and finally **paying a mode
 recall an address. A provider that already holds the answer replaces the weakest three
 of those layers for most coins.
 
+### The guessing layer is gone — 4 September 2026
+
+"Replaces for most coins" was implemented as **ordering**, not removal. The provider ran
+earlier, but when its record held no news page the sweep still fell through to guessing,
+which built `<host>/blog`, `<host>/news`, `<host>/announcements`, `<host>/updates`,
+`<host>/newsroom`, `<host>/press` and two subdomains, and offered them as candidates.
+
+It was the only layer with **no gate at all**, so it ran for every coin that was short of
+a category. HTX DAO's review case then read *"10 address(es) have been tried and none
+worked yet"* and listed five of those paths. Every one was a 404. Nobody had ever
+published any of them — the product invented them — and a reviewer reading that list
+could not tell an invented address from a real one.
+
+An official source is the project **saying** where it publishes. A guess is this product
+assuming, and proving the guess afterwards does not turn one into the other. So the layer
+was removed. Addresses now come only from:
+
+| Layer | Who states the address |
+|---|---|
+| `CURATED` | a person typed it |
+| `PROVIDER` | the CoinMarketCap record for the coin |
+| `IDENTITY` | the official site a reviewer approved |
+| `SOCIAL` | a link on the project's own website |
+| `SEARCH` | a search result, kept only if provably the project's own |
+| `ASSISTED` | a model, filtered the same way as a search result |
+
+Rows already stored under the `convention` layer are **kept**. A guessed page that was
+fetched and proved is still a working page, and withdrawing it would delete evidence that
+answers. Nothing writes that layer any more.
+
+What HTX DAO shows is that removing it costs nothing that was real. CoinMarketCap does
+hold links for that coin — its Telegram channel and its X account, both of which count as
+news. X refuses automated readers in its `robots.txt`, and the Telegram channel view
+returns 108 characters of readable text, below the 200 the product requires. So the coin
+genuinely has no news page anyone can read, and it belongs with a person. The eight
+guesses added nothing but noise on top of that answer.
+
 Measured on a live key:
 
 | Coin | Website | Whitepaper | Source code | Community |

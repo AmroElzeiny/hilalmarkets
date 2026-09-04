@@ -14,12 +14,14 @@ project change what it does". Every caller imports the names from here rather th
 re-typing them, because the recurring failure in this codebase is two modules that each
 understood a different subset of the same word list.
 
-**The layers.** A link can be known in five ways, and they are not equally trustworthy:
+**The layers.** A link can be known in six ways, and they are not equally trustworthy:
 
 ======================  ==================================================  ==========
 Layer                   How it knows                                        Confidence
 ======================  ==================================================  ==========
 ``CURATED``             Written down here by a person who checked it          0.95/0.80
+``PROVIDER``            The CoinMarketCap record for the coin: where it       0.85
+                        says the project publishes
 ``IDENTITY``            Derived from the identity a reviewer already          0.75
                         approved: the official site, the docs, the
                         provider profile
@@ -28,16 +30,21 @@ Layer                   How it knows                                        Conf
 ``SEARCH``              Found by searching the open web for the project's     0.55/0.45
                         own news, and kept only if it is provably the
                         project's own page or handle
-``CONVENTION``          Guessed from the official domain — ``/blog``,         0.45
-                        ``/news``, ``/community``
+``ASSISTED``            A model asked where the project publishes; the        0.55/0.45
+                        last layer and the only paid one
 ======================  ==================================================  ==========
+
+**Every one of these is somebody stating an address.** Nothing is ever derived from the
+shape of a domain. A guessing layer that built ``<host>/blog`` and ``<host>/news`` was
+removed on 4 September 2026 — see the note above ``channel_candidates`` for what it cost.
+An official source is the project *saying* where it publishes; a guess is this product
+assuming, and proving the guess afterwards does not turn one into the other.
 
 Nothing here touches the network or the database. A candidate produced by this module is
 a **proposal**, never a fact. It becomes a usable source only after
 ``sharia_source_resolution`` has fetched it and proved it is alive, permitted, readable
-and — for news — recent. That ordering is what makes a guessed URL safe to propose: a
-wrong guess cannot promote itself, it can only fail its proof and fall through to the
-next layer, and then to a person.
+and — for news — recent. So a stated address that has moved cannot promote itself either:
+it fails its proof and falls through to the next layer, and then to a person.
 
 The two layers that need the network are still decided here. ``sharia_source_discovery``
 does the fetching and the searching; it hands the raw links and the raw search results
@@ -155,6 +162,12 @@ class DiscoveryLayer(StrEnum):
     IDENTITY = "identity"
     SOCIAL = "social"
     SEARCH = "search"
+    #: **Retired on 4 September 2026 and never proposed again.** It guessed ``/blog`` and
+    #: ``/news`` from the coin's own domain. Kept as a member because rows written before
+    #: that date still carry the word, and a guessed page that was proved is still a
+    #: working page — withdrawing them would delete evidence that answers. It is also the
+    #: value ``_layer_of`` falls back to for a row whose layer name is unreadable, which
+    #: is safe precisely because it is the lowest confidence there is.
     CONVENTION = "convention"
     #: A language model asked, in the exact words a person would use, where a project
     #: publishes. The **last** layer and the only paid one: it runs for a coin only when
@@ -167,13 +180,15 @@ class DiscoveryLayer(StrEnum):
 
 #: The order the layers are tried in. A layer runs only for the categories the
 #: layers before it could not settle.
+#: ``CONVENTION`` is deliberately absent. It is a label stored rows still carry, not a
+#: layer that runs — see the note above ``channel_candidates``. A layer added back here
+#: starts proposing addresses again, so this tuple is the one place that decision lives.
 LAYER_ORDER: tuple[DiscoveryLayer, ...] = (
     DiscoveryLayer.CURATED,
     DiscoveryLayer.PROVIDER,
     DiscoveryLayer.IDENTITY,
     DiscoveryLayer.SOCIAL,
     DiscoveryLayer.SEARCH,
-    DiscoveryLayer.CONVENTION,
     DiscoveryLayer.ASSISTED,
 )
 
@@ -983,6 +998,10 @@ _PROVIDER_FIELD_CATEGORY: tuple[tuple[str, str], ...] = (
     ("message_board", COMMUNITY),
     ("reddit", COMMUNITY),
     ("chat", COMMUNITY),
+    #: An X account is where a project announces things, so it is news. It is still put
+    #: through ``classify_channel`` like every other provider address, so a field holding
+    #: something that is not an X account cannot smuggle one in.
+    ("twitter", NEWS),
 )
 
 
@@ -1084,81 +1103,38 @@ def provider_candidates(
     return tuple(candidates)
 
 
-#: The paths a project is most likely to publish under, in the order they are worth
-#: trying. Every one of these is a guess and is scored as one.
+#: **The guessing layer was removed on 4 September 2026.** Nothing invents an address any
+#: more, and this note is here so nobody adds one back without reading why.
 #:
-#: Every word here is also a word in :data:`NEWS_PATH_WORDS` or
-#: :data:`COMMUNITY_PATH_WORDS`, and that is not a coincidence to be maintained by hand —
-#: ``test_invariant_official_links_in_layers`` asserts it. A guessed path whose own word
-#: the classifier does not recognise would be fetched, proved, and then filed under the
-#: wrong category by the very next reader.
-_CONVENTION_PATHS: dict[str, tuple[str, ...]] = {
-    NEWS: ("blog", "news", "announcements", "updates", "newsroom", "press"),
-    COMMUNITY: ("community", "forum"),
-}
-#: Subdomains projects conventionally publish under.
-_CONVENTION_HOSTS: dict[str, tuple[str, ...]] = {
-    NEWS: ("blog", "news"),
-    COMMUNITY: ("forum", "gov"),
-}
+#: It used to glue a fixed word list — ``blog``, ``news``, ``announcements``, ``updates``,
+#: ``newsroom``, ``press``, ``community``, ``forum``, plus ``blog.``/``news.``/``forum.``
+#: subdomains — onto a coin's own domain and propose the results as candidate sources.
+#:
+#: **Why it went.** An official source is the project *saying* where it publishes. A
+#: guess is the product assuming, and the two are not the same claim however carefully the
+#: result is proved afterwards. Worse, the failures were reported to a reviewer as work:
+#: HTX DAO's review case read *"10 address(es) have been tried and none worked yet"* and
+#: listed ``/blog``, ``/news``, ``/announcements``, ``/updates``, ``/newsroom`` — eight
+#: addresses nobody had ever published, invented here, every one a 404. A person reading
+#: that reasonably concluded the product was broken, because the sentence described real
+#: attempts at real pages and none of it was true.
+#:
+#: It was also the only layer with no gate. ``SOCIAL`` and ``SEARCH`` must earn their
+#: fetches through ``_may_look``, the paid layer through ``_may_ask_a_model``; this one ran
+#: for every coin that was short of a category, spending up to eight requests against
+#: somebody else's server to prove nothing.
+#:
+#: Where addresses come from now: a person typed it (``CURATED``), the CoinMarketCap
+#: record (``PROVIDER``), the approved identity (``IDENTITY``), or a link on the project's
+#: own website (``SOCIAL``). When those give nothing, the coin goes to a person — with a
+#: reason that names what was really asked.
+#:
+#: :data:`DiscoveryLayer.CONVENTION` itself stays, because rows written before this date
+#: still carry it and a proved one is still a working page. It is now a **read-only**
+#: label: never proposed, never in :data:`LAYER_ORDER`.
 
 
-def convention_candidates(
-    *,
-    asset_name: str,
-    official_website: str | None,
-) -> tuple[SourceCandidate, ...]:
-    """Layer 2 — the addresses a project usually publishes under.
 
-    Pure guesswork, priced accordingly. A guess is only ever worth proposing because
-    nothing downstream trusts it: it has to be fetched, allowed by robots, readable
-    and recent before it counts, and the same proof would reject a wrong guess.
-
-    Guesses are made for :data:`REQUIRED_CATEGORIES` only. Every guess is a request to
-    somebody else's server, and guessing ``/community`` and ``/forum`` for a project that
-    runs neither spent four fetches per coin to prove nothing — the community page is not
-    required, so it is not worth guessing at.
-    """
-
-    website = (official_website or "").strip()
-    if not website or not is_official_url(website):
-        return ()
-    parsed = urlsplit(website)
-    host = parsed.netloc.casefold()
-    root = host[4:] if host.startswith("www.") else host
-    confidence = LAYER_CONFIDENCE[DiscoveryLayer.CONVENTION]
-    candidates: list[SourceCandidate] = []
-    seen: set[str] = set()
-    for category in REQUIRED_CATEGORIES:
-        for path in _CONVENTION_PATHS.get(category, ()):
-            url = f"https://{host}/{path.strip('/')}"
-            if url in seen:
-                continue
-            seen.add(url)
-            candidates.append(
-                SourceCandidate(
-                    category=category,
-                    title=_title(asset_name, category),
-                    url=url,
-                    layer=DiscoveryLayer.CONVENTION,
-                    confidence=confidence,
-                )
-            )
-        for subdomain in _CONVENTION_HOSTS.get(category, ()):
-            url = f"https://{subdomain}.{root}/"
-            if url in seen:
-                continue
-            seen.add(url)
-            candidates.append(
-                SourceCandidate(
-                    category=category,
-                    title=_title(asset_name, category),
-                    url=url,
-                    layer=DiscoveryLayer.CONVENTION,
-                    confidence=confidence,
-                )
-            )
-    return tuple(candidates)
 
 
 # ---------------------------------------------------------------------------
@@ -1785,7 +1761,9 @@ def candidates_for(
             results=search_results,
             layer=layer,
         )
-    return convention_candidates(
-        asset_name=asset_name,
-        official_website=official_website,
-    )
+    # No layer left proposes anything. ``CONVENTION`` used to land here and invent
+    # addresses from the coin's domain; it was removed on 4 September 2026 — see the note
+    # above ``channel_candidates``. Answering with nothing rather than raising keeps a
+    # stored ``convention`` row readable: ``_layer_of`` maps an unknown layer name onto
+    # that member, and asking this function about it must not be an error.
+    return ()

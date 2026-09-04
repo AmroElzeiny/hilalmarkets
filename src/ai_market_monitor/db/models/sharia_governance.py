@@ -125,8 +125,14 @@ class OfficialSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: decides when the machine gives up and asks a person. It is never read as, and
     #: never contributes to, a Sharia status.
     confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    #: Which layer proposed this link — curated, identity, or convention. Kept so a
-    #: reviewer can see whether a person wrote the address down or a rule guessed it.
+    #: Which layer proposed this link — curated, provider, identity, social, search or
+    #: assisted. Kept so a reviewer can see who stated the address: a person, the
+    #: CoinMarketCap record, or the project's own website.
+    #:
+    #: Rows written before 4 September 2026 may also hold ``convention``, the layer that
+    #: guessed ``/blog`` and ``/news`` from the coin's domain. It was removed that day and
+    #: nothing writes it any more, but a guessed page that was proved is still a working
+    #: page, so those rows are kept rather than withdrawn.
     discovery_layer: Mapped[str | None] = mapped_column(String(32))
     #: When the link was last fetched and proved. ``NULL`` means never checked, which
     #: is a different thing from checked and failed.

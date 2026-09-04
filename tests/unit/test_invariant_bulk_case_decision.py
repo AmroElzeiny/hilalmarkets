@@ -40,9 +40,11 @@ from ai_market_monitor.services.system_brain_bulk_review import (
     BULK_ACTIONS,
     BULK_DECISION_ACTIONS,
     COVERED_DECISION,
+    DEFAULT_RESEARCH_REASON,
     MAX_BATCH_SIZE,
     MIN_REASON_LENGTH,
     PASS_OUTCOME,
+    RESEARCH_ACTION,
     BulkReviewError,
     BulkReviewService,
 )
@@ -461,9 +463,8 @@ async def test_research_can_be_asked_for_on_a_whole_selection(test_context):
     async with test_context["session_factory"]() as session:
         case, _ = await _ready_case(session)
         reviewer = await _reviewer(session)
-        outcome = await BulkReviewService(session, test_context["settings"]).apply(
+        outcome = await BulkReviewService(session, test_context["settings"]).research(
             [case.id],
-            action="start_research",
             reason=REASON,
             admin_user_id=reviewer.id,
         )
@@ -486,9 +487,8 @@ async def test_asking_for_research_records_no_decision_and_cannot_be_undone(test
     async with test_context["session_factory"]() as session:
         case, _ = await _ready_case(session)
         reviewer = await _reviewer(session)
-        outcome = await BulkReviewService(session, test_context["settings"]).apply(
+        outcome = await BulkReviewService(session, test_context["settings"]).research(
             [case.id],
-            action="start_research",
             reason=REASON,
             admin_user_id=reviewer.id,
         )
@@ -504,19 +504,77 @@ async def test_asking_for_research_records_no_decision_and_cannot_be_undone(test
     assert all(item.decision_id is None for item in outcome.results)
 
 
-async def test_asking_for_research_uses_the_same_reason_floor(test_context):
-    """Recorded on every case it touches, so it is held to the same floor."""
+async def test_asking_for_research_needs_no_written_sentence(test_context):
+    """A decision needs a person's words. Asking a machine to go and look does not.
+
+    The reason floor exists so that an approval or a rejection carries what a person
+    actually said. Research records nothing of the kind — it moves a case to
+    *researching* so evidence is gathered — and demanding a justification for it was part
+    of what made a "go and look" button feel like a verdict a reviewer had to defend.
+    """
 
     async with test_context["session_factory"]() as session:
         case, _ = await _ready_case(session)
         reviewer = await _reviewer(session)
-        with pytest.raises(BulkReviewError):
+        outcome = await BulkReviewService(session, test_context["settings"]).research(
+            [case.id],
+            reason="",
+            admin_user_id=reviewer.id,
+        )
+        await session.commit()
+        refreshed = await session.get(ReviewCase, case.id)
+
+    assert outcome.applied == 1
+    assert refreshed is not None
+    assert refreshed.state == "researching"
+
+
+async def test_research_is_refused_by_the_decision_route(test_context):
+    """The whole separation, in one assertion.
+
+    Research shared the decision route, and with it the decision form, the required
+    sentence and the decision path's refusals — so a reviewer who only wanted the system
+    to search was answered as though they had tried to approve something. It has its own
+    method and its own address now, and this is the guard that keeps it there.
+    """
+
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        reviewer = await _reviewer(session)
+        with pytest.raises(BulkReviewError) as raised:
             await BulkReviewService(session, test_context["settings"]).apply(
                 [case.id],
-                action="start_research",
-                reason="x" * (MIN_REASON_LENGTH - 1),
+                action=RESEARCH_ACTION,
+                reason=REASON,
                 admin_user_id=reviewer.id,
             )
+
+    assert RESEARCH_ACTION not in BULK_ACTIONS
+    # And the refusal has to say where the button really is, or it is the same dead end
+    # in different words.
+    assert "Run research" in str(raised.value), str(raised.value)
+
+
+async def test_a_reason_written_for_research_is_the_one_recorded(test_context):
+    """Optional does not mean ignored, and a default never claims a person's words."""
+
+    async with test_context["session_factory"]() as session:
+        case, _ = await _ready_case(session)
+        reviewer = await _reviewer(session)
+        service = BulkReviewService(session, test_context["settings"])
+        await service.research([case.id], reason=REASON, admin_user_id=reviewer.id)
+        await session.commit()
+        written = [
+            (row.metadata_redacted or {}).get("reason")
+            for row in (
+                await session.scalars(
+                    select(AuditEvent).where(AuditEvent.target_id == str(case.id))
+                )
+            ).all()
+        ]
+
+    assert REASON in written, written
+    assert DEFAULT_RESEARCH_REASON not in written, "the reviewer's sentence was replaced"
 
 
 # --------------------------------------------------------------------------------

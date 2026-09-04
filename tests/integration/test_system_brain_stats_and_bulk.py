@@ -18,6 +18,7 @@ from ai_market_monitor.db.models import (
     PublishedAssetAssessment,
     ReviewActionBatch,
     ReviewCase,
+    ReviewDecision,
     SiteVisit,
     User,
     UserIdentity,
@@ -460,6 +461,62 @@ async def test_a_batch_with_a_blocked_case_still_records_every_other_one(test_co
     # Not approved — sent to gather what it is missing, without anybody opening it.
     assert sent is not None and sent.state == "researching"
     assert sent.publication_state == "unpublished"
+
+
+async def test_asking_for_research_never_travels_through_the_decision_route(test_context):
+    """The reviewer's complaint, driven through the real routes.
+
+    Pressing "Run research" used to post to the address whose job is to record a
+    decision, so a case with no verdict to give answered with a refusal about verdicts.
+    Two things have to hold now: the research address does the work, and the decision
+    address refuses that word by name instead of quietly taking it back.
+    """
+
+    admin = await _admin(test_context, email="research-admin@hilalmarkets.test")
+    headers = {"X-User-ID": str(admin.id)}
+    case = await _open_case(test_context)
+    page = await test_context["client"].get(
+        "/dashboard/system-brain/cases", headers=headers
+    )
+    token = _csrf(page.text)
+
+    # The page offers the button in its own form, at its own address.
+    assert 'id="case-research-form"' in page.text
+    assert "/dashboard/system-brain/cases/research" in page.text
+
+    asked = await test_context["client"].post(
+        "/dashboard/system-brain/cases/research",
+        headers=headers,
+        data={"case_id": [str(case.id)], "reason": "", "csrf_token": token},
+    )
+
+    assert asked.status_code == 303
+    assert "success=" in asked.headers["location"]
+    async with test_context["session_factory"]() as session:
+        refreshed = await session.get(ReviewCase, case.id)
+    assert refreshed is not None and refreshed.state == "researching"
+    # Nothing was decided: no ReviewDecision, and no batch to undo.
+    async with test_context["session_factory"]() as session:
+        decisions = (
+            await session.scalars(
+                select(ReviewDecision).where(ReviewDecision.review_case_id == case.id)
+            )
+        ).all()
+    assert not decisions
+
+    refused = await test_context["client"].post(
+        "/dashboard/system-brain/cases/bulk-decision",
+        headers=headers,
+        data={
+            "action": "start_research",
+            "reason": "Trying the old address that used to accept this.",
+            "case_id": [str(case.id)],
+            "csrf_token": token,
+        },
+    )
+
+    assert refused.status_code == 303
+    assert "error=" in refused.headers["location"]
 
 
 async def test_the_cases_page_says_what_kind_of_problem_each_case_is(test_context):

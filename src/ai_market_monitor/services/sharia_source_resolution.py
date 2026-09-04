@@ -60,7 +60,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -120,12 +120,36 @@ from ai_market_monitor.services.sharia_source_catalog import (
     candidates_for,
     categories_below,
     category_label,
+    is_aggregator_url,
     is_official_url,
     normalized_url,
 )
 from ai_market_monitor.services.sharia_source_discovery import WebSourceDiscovery
 
 logger = logging.getLogger(__name__)
+
+
+async def pending_asset_ids(session: AsyncSession) -> set[UUID]:
+    """The coins the System Brain is currently asking a person about, under "Pages not found".
+
+    One owner for the question "which coins are waiting?", because three callers ask it —
+    the operator's script, the on-demand button, and the reporting that says how many
+    tasks a run closed. Recomputing "pending" separately in each is how two of them would
+    quietly come to mean slightly different sets, and then a button that claims to re-check
+    "the coins in this list" re-checks a different list.
+
+    Read from the **open review cases**, which is the same row the page draws, so the
+    coins re-checked are exactly the coins the reviewer can see.
+    """
+
+    rows = await session.scalars(
+        select(ReviewCase.canonical_asset_id).where(
+            ReviewCase.case_type == ReviewCaseType.OFFICIAL_SOURCE_GAP,
+            ReviewCase.done_at.is_(None),
+            ReviewCase.canonical_asset_id.is_not(None),
+        )
+    )
+    return {row for row in rows.all() if row is not None}
 
 
 def _provider_link_fields(record: CoinLinks) -> dict[str, tuple[str, ...]]:
@@ -143,6 +167,13 @@ def _provider_link_fields(record: CoinLinks) -> dict[str, tuple[str, ...]]:
         "message_board": record.message_board,
         "reddit": record.reddit,
         "chat": record.chat,
+        # Fetched, parsed, and then dropped here until 4 September 2026. A crypto
+        # project's X account is the single most common place it announces anything,
+        # ``classify_channel`` has always known what one looks like, and the provider
+        # publishes it per coin — so this was a free, per-coin news channel being thrown
+        # away one line before the catalog could see it. Coins then fell through to the
+        # search layer and the paid model layer looking for it.
+        "twitter": record.twitter,
     }
 
 __all__ = [
@@ -155,6 +186,7 @@ __all__ = [
     "SourceProof",
     "SourceResolutionService",
     "newest_published_at",
+    "pending_asset_ids",
     "score_candidate",
 ]
 
@@ -179,6 +211,20 @@ DEFINITIVE_FAILURE_CODES = frozenset({"robots_disallowed"})
 #: already existed.
 NOT_PERMITTED_STATUSES = frozenset({403})
 NOT_PERMITTED_CODES = frozenset({"robots_disallowed"})
+
+#: Codes that mean **nothing was learned about the address**. The fetch did not fail on
+#: the page's content — it never got a look at the page at all, because a network hop, a
+#: site's robots endpoint or our own breaker got in the way. They are the difference
+#: between "this coin needs a person to find an address" and "this sweep had a bad
+#: minute": the first is a task, the second is a retry, and reporting the second as the
+#: first is what sent reviewers hunting for pages that already worked.
+UNFINISHED_CHECK_CODES = frozenset(
+    {
+        "robots_not_asked",
+        "robots_unavailable",
+        "official_source_unavailable",
+    }
+)
 
 
 def _capped(value: object, limit: int = 300) -> str:
@@ -263,6 +309,10 @@ class AssetSourceOutcome:
     symbol: str
     proved: list[str] = field(default_factory=list)
     rejected: list[str] = field(default_factory=list)
+    #: How many of ``rejected`` were never actually checked — see
+    #: :data:`UNFINISHED_CHECK_CODES`. When it equals ``len(rejected)`` this asset has not
+    #: been judged at all yet, and asking a person to find an address would be wrong.
+    unfinished: int = 0
     withdrawn: list[str] = field(default_factory=list)
     #: Categories with no working link at all. These raise a task for a person.
     missing: tuple[str, ...] = ()
@@ -336,10 +386,18 @@ class SourceResolutionService:
         self.session = session
         self.settings = settings
         self.fetcher = fetcher or OfficialEvidenceFetcher(settings)
-        self.discovery = discovery or WebSourceDiscovery(settings, fetcher=self.fetcher)
         #: The second way of reading a page, for the ones a plain request cannot read.
         #: One browser for the whole sweep, started only if a page actually needs it.
+        #:
+        #: Built **before** the discovery below, and handed to it, because the discovery
+        #: needs a browser too — a project homepage whose navigation is drawn by
+        #: JavaScript shows no links at all to a plain fetch. Two renderers would mean two
+        #: Chromiums, two page budgets, and only one of them ever shut down; on a 3.9 GB
+        #: server the second one is the largest thing running.
         self.renderer = renderer or BrowserPageRenderer(settings)
+        self.discovery = discovery or WebSourceDiscovery(
+            settings, fetcher=self.fetcher, renderer=self.renderer
+        )
         #: The last way of finding one, for a coin every free layer gave up on.
         self.ai_discovery = ai_discovery or AISourceDiscovery(settings)
         #: A market-data provider's record of where each project publishes. It runs
@@ -423,9 +481,82 @@ class SourceResolutionService:
                 )
             ).all()
         )
+        # One provider call for the whole batch instead of one per coin. See
+        # ``preload_provider_links``: the endpoint carries up to a hundred symbols, so a
+        # 100-coin sweep costs about one credit here and about a hundred without it.
+        await self.preload_provider_links([asset.symbol for asset in assets])
         try:
             for asset in assets:
                 sweep.assets.append(await self.resolve_asset(asset, deep=deep))
+        finally:
+            # One browser for the whole sweep, and it has to be shut down whatever
+            # happened — a Chromium left running is the largest thing on a 3.9 GB server.
+            await self.renderer.aclose()
+        return sweep
+
+    async def resolve_open_cases(
+        self,
+        *,
+        limit: int | None = None,
+        only: Collection[UUID] | None = None,
+    ) -> ResolutionSweep:
+        """Re-check the coins the System Brain is currently asking a person about.
+
+        This is the **on-demand** sweep, the one a reviewer starts by pressing a button,
+        as opposed to :meth:`resolve_pending`, which the worker runs on its own calendar.
+        The two differ in three ways and each one matters:
+
+        * **Which coins.** The scheduled sweep walks the whole verified universe oldest
+          first, a batch at a time, so it can be weeks before it returns to any one coin.
+          This one takes the coins with an open "Pages not found" task — the rows on the
+          page the reviewer is looking at. ``only`` narrows that to the ones they ticked;
+          it can never widen it, so a stale or foreign id fetches nothing rather than
+          pulling in a coin nobody asked about.
+        * **The calendar is ignored.** ``force_recheck`` fetches every address again even
+          if it was checked an hour ago. Without it a button pressed after a fix would
+          re-read the stored answer and change nothing, which is indistinguishable from
+          the button being broken.
+        * **Every layer runs.** ``deep`` lets it read the CoinMarketCap record again and
+          re-read the project's own homepage — header, footer and body — which is where a
+          news page that the provider does not list is actually found.
+
+        Each coin it settles closes its own task; each one it cannot settle has its task
+        rewritten with what was tried **this time** and why each address failed. That
+        rewrite is the point as much as the fetching is: a task whose wording came from
+        older code keeps showing an explanation that is no longer true, and a person
+        reading "the site would not say what it allows" about an address that simply does
+        not exist goes looking for a fault in the product instead of a better address.
+        """
+
+        sweep = ResolutionSweep()
+        if not self.settings.sharia_source_resolution_enabled:
+            return sweep
+        pending = await pending_asset_ids(self.session)
+        if only is not None:
+            # Narrowed, never widened. Intersecting keeps the one rule this whole method
+            # rests on — a coin is only ever re-read because it has an open task — so a
+            # caller cannot reach a coin the reviewer is not being asked about.
+            pending &= set(only)
+        if not pending:
+            return sweep
+        query = (
+            select(CanonicalAsset)
+            .where(
+                CanonicalAsset.mapping_state == "verified",
+                CanonicalAsset.id.in_(pending),
+            )
+            .order_by(CanonicalAsset.symbol.asc())
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        assets = list((await self.session.scalars(query)).all())
+        # The provider record for every waiting coin, in one call. This is the layer the
+        # whole button exists to run again, and asking for 157 coins one at a time spends
+        # 157 credits and 157 round trips before the first page is even fetched.
+        await self.preload_provider_links([asset.symbol for asset in assets])
+        try:
+            for asset in assets:
+                sweep.assets.append(await self.resolve_asset(asset, deep=True))
         finally:
             # One browser for the whole sweep, and it has to be shut down whatever
             # happened — a Chromium left running is the largest thing on a 3.9 GB server.
@@ -826,10 +957,14 @@ class SourceResolutionService:
         channel_links: tuple[str, ...] = ()
         search_results: tuple[SearchResult, ...] = ()
         provider_links: dict[str, tuple[str, ...]] | None = None
+        # Which site this layer measures "is that the same project?" against. Normally
+        # the approved one; see ``_site_to_read`` for the coins that have none.
+        site = (asset.official_website or "").strip()
         if layer is DiscoveryLayer.PROVIDER:
             provider_links = await self._provider_links(asset.symbol)
         elif layer is DiscoveryLayer.SOCIAL:
-            channel_links = await self.discovery.channel_links(asset.official_website)
+            site = await self._site_to_read(asset)
+            channel_links = await self.discovery.channel_links(site)
         elif layer is DiscoveryLayer.SEARCH:
             search_results = await self.discovery.search(
                 asset_name=asset.name, symbol=asset.symbol
@@ -845,12 +980,58 @@ class SourceResolutionService:
             layer,
             symbol=asset.symbol,
             asset_name=asset.name,
-            official_website=asset.official_website,
+            official_website=site or asset.official_website,
             official_documentation=asset.official_documentation,
             channel_links=channel_links,
             search_results=search_results,
             provider_links=provider_links,
         )
+
+    async def _site_to_read(self, asset: CanonicalAsset) -> str:
+        """The homepage whose own links are worth harvesting.
+
+        The approved website when there is one — a person checked it, and nothing beats
+        that. When there is not, the market-data provider's ``website`` field, which is
+        that provider's core record and the one address it is most reliable about.
+
+        Without this fallback a coin with no approved website skipped the harvest
+        completely, and its review case said so: "this coin has no approved official
+        website, so the pages a project links to cannot be tried". That sentence was
+        true about our own records and false about the world — the address was sitting
+        in the provider record the layer above had *already fetched*. A project's
+        homepage footer is where its Telegram, its X account and its blog are listed, so
+        skipping it threw away the richest free source of channels there is, and then
+        the coin fell through to the paid model layer for want of a link the provider
+        had handed over a moment earlier.
+
+        Costs no extra provider credit: the PROVIDER layer runs first in ``LAYER_ORDER``
+        and leaves the record in ``_provider_cache``.
+        """
+
+        approved = (asset.official_website or "").strip()
+        if approved:
+            return approved
+        await self._provider_links(asset.symbol)
+        return self._provider_website(asset.symbol)
+
+    def _provider_website(self, symbol: str) -> str:
+        """The provider's homepage for this coin, from the cache only. Never fetches.
+
+        Split from :meth:`_site_to_read` so the reporting side — which is not async and
+        must never make a provider call just to word a sentence — can ask the same
+        question and get the same answer. One owner, so the layer that reads a site and
+        the case that says whether a site was available can never disagree.
+        """
+
+        for url in (self._provider_cache.get(symbol.strip().upper()) or {}).get(
+            "website"
+        ) or ():
+            candidate = (url or "").strip()
+            # Same test every other provider address gets. An aggregator's own profile
+            # page is not a project homepage, whatever field it arrived in.
+            if candidate and is_official_url(candidate) and not is_aggregator_url(candidate):
+                return candidate
+        return ""
 
     async def _provider_links(self, symbol: str) -> dict[str, tuple[str, ...]]:
         """What the market-data provider holds for this coin.
@@ -954,6 +1135,8 @@ class SourceResolutionService:
                 # none, and a page the browser could not read is the machine's problem
                 # and not theirs.
                 outcome.rejected.append(f"{label} — {_why_not_usable(proof)}")
+                if (proof.error_code or "") in UNFINISHED_CHECK_CODES:
+                    outcome.unfinished += 1
                 continue
             outcome.proved.append(label)
             if proof.activity_score >= self.activity_floor:
@@ -1228,11 +1411,19 @@ class SourceResolutionService:
         browser to render a page that needs one. A reviewer was being asked to do the
         machine's job, two hundred times, for a reason nobody had told them.
 
-        This says three things instead, and only the ones that are true:
+        This says four things instead, and only the ones that are true:
 
         * what is missing — the category, not "every official page";
+        * **where the product looked**, by name;
         * what was already tried, and what it did;
         * what is stopping the machine from going further, when something is.
+
+        Naming the places is new on 4 September 2026 and it is the half that was missing.
+        Until the guessing layer was removed, every address in the "tried" list was one the
+        product had invented from the coin's domain, so a reviewer read eight plausible
+        URLs and had no way to know that nobody had ever published any of them. Now every
+        address in that list is one somebody stated — so saying who stated it is what makes
+        the list mean anything.
         """
 
         missing = ", ".join(category_label(item) for item in outcome.missing)
@@ -1241,24 +1432,48 @@ class SourceResolutionService:
             parts.append(
                 f"{asset.name} ({asset.symbol}) still has no working {missing} page."
             )
+            parts.append(
+                "The system looks in two places: the CoinMarketCap record for this coin, "
+                "and the links on the project's own website. Neither gave a page that "
+                "works. It never guesses an address."
+            )
         if outcome.withdrawn:
             parts.append(
                 f"{len(outcome.withdrawn)} link(s) that used to work are gone: "
                 + "; ".join(outcome.withdrawn[:5])
                 + "."
             )
+        # Whether a single one of these addresses was actually looked at. It changes the
+        # verb, not just an extra sentence: "tried and none proved usable" is a claim
+        # about the pages, and it must not be made about pages nobody opened.
+        nothing_checked = bool(outcome.rejected) and outcome.unfinished == len(
+            outcome.rejected
+        )
         tried = outcome.rejected[:5]
         if tried:
             more = len(outcome.rejected) - len(tried)
             tail = f" and {more} more" if more > 0 else ""
-            parts.append(
-                "The system tried these and none of them proved usable: "
-                + "; ".join(tried)
-                + f"{tail}."
+            opening = (
+                "The system could not reach these, so nothing is known about them yet: "
+                if nothing_checked
+                else "The system tried these and none of them proved usable: "
             )
+            parts.append(opening + "; ".join(tried) + f"{tail}.")
+        # When nothing was actually checked, the switched-off-layer list below is worse
+        # than unhelpful: it tells a reviewer to go and buy a search key for a coin whose
+        # pages were never asked a single question.
+        if nothing_checked:
+            parts.append(
+                "The system tries again on the next sweep. Nothing needs to be done "
+                "here unless it keeps saying this."
+            )
+            return " ".join(parts)
         blocked = self._what_stops_looking(asset)
         if blocked:
-            parts.append("It cannot look any further because " + " ".join(blocked))
+            parts.append(
+                "Separately, some ways of looking are switched off, which may or may not "
+                "be why this one failed: " + " ".join(blocked)
+            )
         else:
             parts.append(
                 "The system keeps looking on every sweep. Open this only if you already "
@@ -1276,10 +1491,15 @@ class SourceResolutionService:
 
         blocked: list[str] = []
         site = (asset.official_website or "").strip()
+        # The provider's homepage counts. Saying "no website" while the market-data
+        # record holds one, and while the harvest has just read it, is the report
+        # describing our own paperwork instead of what actually happened.
+        if not site or not is_official_url(site):
+            site = self._provider_website(asset.symbol)
         if not site or not is_official_url(site):
             blocked.append(
-                "this coin has no approved official website, so the pages a project "
-                "links to and the usual /blog and /community addresses cannot be tried;"
+                "this coin has no approved official website, so the links a project "
+                "puts on its own site cannot be read;"
             )
         if not self.discovery.search_configured:
             blocked.append(f"web search is not usable: {self.discovery.search_requirement()}")
@@ -1318,6 +1538,8 @@ class SourceResolutionService:
 _FAILURE_WORDS: dict[str, str] = {
     "robots_disallowed": "the site's own rules say we may not read it",
     "robots_unavailable": "the site would not say what it allows, so nothing on it was read",
+    # Ours, not the site's. Worded so nobody reads it as a fact about the project.
+    "robots_not_asked": "our own checker was paused, so this address was never tried",
     "too_short": "the page loaded but showed no readable text",
     "unreadable_document": "the page could not be read as text",
     "official_source_unavailable": "nothing answered at that address",

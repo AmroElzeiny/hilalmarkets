@@ -16,6 +16,16 @@
 }
 
 * { box-sizing: border-box; }
+/* `hidden` means hidden, everywhere on this page.
+ *
+ * There is no reset sheet behind this one — the System Brain loads only the brand tokens
+ * and this file — so the browser's own `[hidden] { display: none }` is the weakest rule
+ * in the cascade, and **any** author rule that gives an element a `display` beats it. The
+ * quick-decision bar said `display: grid`, so `hidden` on it did nothing and the
+ * Approve / Reject row sat on the page with nothing selected. Two elements had already
+ * been patched one at a time (`.brain-agent-window[hidden]`, `.brain-bulk-limit[hidden]`);
+ * this is the rule for the whole class, and those two patches are gone with it. */
+[hidden] { display: none !important; }
 html { scroll-behavior: smooth; }
 body {
   min-height: 100vh;
@@ -34,7 +44,13 @@ body::before {
   content: "";
   pointer-events: none;
 }
-button, input, select, textarea { font: inherit; }
+/* `color` for the same reason as `font`. A form control does not inherit either one: with
+   no colour of its own it falls back to the browser's ButtonText or FieldText, which is
+   pure black and is not in the brand palette at all. Every control that named its own ink
+   was fine and every one that did not was black — the row checkboxes on Cases, the
+   customer chat log's filters, and one secondary button. Set once here, so a control added
+   tomorrow is right without anybody remembering. */
+button, input, select, textarea { font: inherit; color: inherit; }
 a { color: inherit; }
 img, svg { display: block; max-width: 100%; }
 .icon { width: 19px; height: 19px; }
@@ -480,7 +496,6 @@ tbody tr:hover { background: var(--hm-apple-soft); }
   background: var(--hm-surface);
   box-shadow: 0 30px 90px -26px rgba(43, 46, 53, .55);
 }
-.brain-agent-window[hidden] { display: none; }
 
 .brain-agent-head {
   display: grid;
@@ -595,10 +610,18 @@ tbody tr:hover { background: var(--hm-apple-soft); }
 .brain-conversation-results { max-height: 640px; overflow: auto; }
 .brain-conversation-detail { min-height: 260px; border-left: 1px solid var(--hm-hairline); padding-left: 14px; }
 .brain-customer-timeline { display: grid; gap: 8px; max-height: 520px; overflow: auto; padding: 10px 0; }
-/* The text colour is set on purpose. A <button> with no colour of its own falls back to
-   the browser's ButtonText, which is pure black and outside the brand palette. Every
-   other button here names its own ink; this one was the last that did not. */
-.brain-secondary-button { border: 1px solid var(--hm-hairline); border-radius: 9px; background: var(--hm-surface); padding: 9px 12px; color: var(--hm-ink); cursor: pointer; }
+/* Two properties here are corrections, not taste.
+ *
+ * The text colour: a <button> with no colour of its own falls back to the browser's
+ * ButtonText, which is pure black and outside the brand palette. Every other button here
+ * names its own ink; this one was the last that did not.
+ *
+ * `display` and `gap`: the page's own reset makes every `svg` a block, so an icon inside
+ * a plain button drops onto its own line and the label sits under it.
+ * `.brain-action-button` has always laid its icon inline; this one never did, and every
+ * secondary button carrying an icon — Undo, Check these coins again, Run research — was
+ * drawn two lines tall with the icon floating above the words. */
+.brain-secondary-button { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--hm-hairline); border-radius: 9px; background: var(--hm-surface); padding: 9px 12px; color: var(--hm-ink); cursor: pointer; }
 
 /* Unified registry and progressive operations */
 .brain-saved-views { display: flex; gap: 7px; margin: 0 0 12px; padding-bottom: 2px; overflow-x: auto; }
@@ -674,15 +697,6 @@ tbody tr:hover { background: var(--hm-apple-soft); }
   margin-bottom: 12px;
 }
 .brain-case-filters label { display: grid; gap: 5px; color: var(--hm-muted); font-size: 10px; font-weight: 620; }
-.brain-case-filters :where(input, select) {
-  width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
-  border: 1px solid var(--hm-hairline-strong);
-  border-radius: 12px;
-  background: var(--hm-surface);
-  color: var(--hm-ink);
-}
 .brain-operation-grid { display: grid; gap: 10px; }
 .brain-progressive,
 .brain-operation-grid > details { padding: 0; overflow: hidden; }
@@ -731,6 +745,17 @@ tbody tr:hover { background: var(--hm-apple-soft); }
   font-size: 11px;
   font-weight: 620;
 }
+/* One look for every box a person types or picks in on this page.
+ *
+ * There were two of these rules, near-identical — the case filters and the user filters —
+ * differing only by a pixel of height and one background token. The customer chat log's
+ * filters were written later and matched neither, so its three inputs and two menus fell
+ * back to the browser's own control — black text inside a grey system border, off the
+ * brand palette entirely and the only unstyled controls in the product's admin.
+ *
+ * A form added tomorrow joins this list. It does not get a fourth copy. */
+.brain-case-filters :where(input, select),
+.brain-explorer-filters :where(input, select),
 .brain-user-filters :where(input, select),
 .brain-months-field input,
 .brain-confirm-dialog textarea {
@@ -744,6 +769,18 @@ tbody tr:hover { background: var(--hm-apple-soft); }
   outline: none;
   transition: border-color var(--hm-motion), box-shadow var(--hm-motion), background var(--hm-motion);
 }
+/* The tick box is a tick box. The rule above is for boxes that hold text, and it made
+   this one a 43px-tall full-width rectangle. */
+.brain-explorer-filters .brain-check input[type="checkbox"] {
+  width: 17px;
+  min-height: 0;
+  height: 17px;
+  padding: 0;
+  accent-color: var(--hm-apple-deep);
+  cursor: pointer;
+}
+.brain-case-filters :where(input, select):focus,
+.brain-explorer-filters :where(input, select):focus,
 .brain-user-filters :where(input, select):focus,
 .brain-months-field input:focus,
 .brain-confirm-dialog textarea:focus {
@@ -1489,7 +1526,6 @@ body::before { display: none; }
    screen when the ceiling actually bit. No `display` here on purpose, so the `hidden`
    attribute the script sets is what decides whether it shows. */
 .brain-bulk-limit { flex-basis: 100%; color: var(--hm-apple); font-size: 11px; line-height: 1.5; }
-.brain-bulk-limit[hidden] { display: none; }
 .brain-bulk-reason {
   width: 100%;
   min-height: 42px;
@@ -1518,7 +1554,13 @@ body::before { display: none; }
 .brain-bulk-actions .brain-secondary-button { background: transparent; color: rgba(255, 255, 255, .8); border-color: rgba(255, 255, 255, .25); }
 .brain-bulk-actions button .icon { width: 15px; height: 15px; }
 
-.brain-undo-bar {
+/* One shape for the three "here is a standing offer" bars around the case list: undo the
+   last quick decision, check the waiting coins again, and go and look for evidence on the
+   selected ones. They are the same object to a reader, so they share the rule rather than
+   each carrying its own copy of it. */
+.brain-undo-bar,
+.brain-research-bar,
+.brain-recheck-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1531,8 +1573,42 @@ body::before { display: none; }
   background: var(--hm-surface-soft);
   font-size: 12px;
 }
-.brain-undo-bar span { display: inline-flex; align-items: center; gap: 8px; color: var(--hm-copy); }
-.brain-undo-bar .icon { width: 15px; height: 15px; color: var(--hm-muted); }
+.brain-undo-bar span,
+.brain-research-bar span,
+.brain-recheck-bar span { display: inline-flex; align-items: center; gap: 8px; color: var(--hm-copy); }
+.brain-undo-bar .icon,
+.brain-research-bar .icon,
+.brain-recheck-bar .icon { width: 15px; height: 15px; color: var(--hm-muted); }
+
+/* Research asks for evidence. It never decides and never publishes, so it is drawn as
+   far from the quick-decision bar as the page allows: below the table instead of stuck
+   to the top of the screen, pale instead of dark, and with no button in it that carries
+   an approve or a reject colour. The wide gap above it is deliberate — a reach, not a
+   neighbour of Approve. */
+.brain-research-bar {
+  margin-top: 26px;
+  border-style: solid;
+  border-left: 3px solid var(--hm-hairline-strong);
+  background: var(--hm-canvas);
+}
+.brain-research-bar .brain-research-said { flex: 1 1 260px; line-height: 1.5; }
+.brain-research-bar strong { font-variant-numeric: tabular-nums; }
+.brain-research-reason {
+  flex: 1 1 200px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: 10px;
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+}
+.brain-research-reason:focus { border-color: var(--hm-apple-deep); outline: none; }
+/* It sits above the filters rather than below the table, so it reads as being about the
+   whole list. Its own margin, because the undo bar follows a table and this follows a
+   row of filter chips. */
+.brain-recheck-bar { margin: 12px 0 4px; }
+.brain-recheck-bar button[disabled] { opacity: .55; cursor: not-allowed; }
 
 .brain-select-cell { width: 42px; text-align: center; }
 .brain-select-cell input { width: 17px; height: 17px; accent-color: var(--hm-apple-deep); cursor: pointer; }

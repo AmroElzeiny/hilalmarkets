@@ -4,19 +4,19 @@
   {#- First script on the page, deliberately, and without `defer`: it puts a time limit
       on every request this product sends to its own server, and it can only do that for
       a request sent after it has run. See `static/hm-request.js`. -#}
-  <script src="/static/hm-request.js?v=20260903-discount-codes"></script>
+  <script src="/static/hm-request.js?v=20260904-research-split"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
   <title>System Brain | Hilal Markets</title>
   <link rel="icon" type="image/png" href="/static/favicon-dark.png">
-  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260903-discount-codes">
-  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260903-discount-codes">
-  <link rel="stylesheet" href="/static/system-brain.css?v=20260903-discount-codes">
+  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260904-research-split">
+  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260904-research-split">
+  <link rel="stylesheet" href="/static/system-brain.css?v=20260904-research-split">
   <script src="/static/hilalmarkets-icons.js" defer></script>
-  <script src="/static/chat-message-renderer.js?v=20260903-discount-codes" defer></script>
-  <script src="/static/system-brain.js?v=20260903-discount-codes" defer></script>
-  <script src="/static/system-brain-agent.js?v=20260903-discount-codes" defer></script>
+  <script src="/static/chat-message-renderer.js?v=20260904-research-split" defer></script>
+  <script src="/static/system-brain.js?v=20260904-research-split" defer></script>
+  <script src="/static/system-brain-agent.js?v=20260904-research-split" defer></script>
 </head>
 <body data-system-brain-csrf="{{ csrf_token }}" data-brain-section="{{ section }}">
   <a class="brain-skip" href="#admin-content">Skip to admin content</a>
@@ -737,6 +737,30 @@
         {% if review_tag %}<a class="brain-tag-clear" href="/dashboard/system-brain/cases">Show every kind</a>{% endif %}
       </nav>
 
+      {#- Check the "Pages not found" coins again, now, instead of waiting for the daily
+          sweep to come round to them. Shown only when a coin is actually waiting: a
+          button that would visit nothing is a button that teaches people to distrust it.
+          It decides nothing and publishes nothing — it re-reads addresses and rewrites
+          what each task says. -#}
+      {% if source_gap_waiting %}
+      <form class="brain-recheck-bar" method="post"
+            action="/dashboard/system-brain/cases/recheck-sources?{{ request.url.query }}"
+            data-guarded-form data-testid="recheck-sources-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <span>
+          <i data-icon="search"></i>
+          <strong>{{ source_gap_waiting }}</strong> coin{{ '' if source_gap_waiting == 1 else 's' }}
+          {{ 'is' if source_gap_waiting == 1 else 'are' }} waiting for an official page.
+          The system checks {{ 'it' if source_gap_waiting == 1 else 'them' }} on its own each day.
+        </span>
+        <button class="brain-secondary-button" type="submit"
+                {{ 'disabled' if not source_resolution_enabled else '' }}
+                data-confirm="Check {{ 'this coin' if source_gap_waiting == 1 else 'all ' ~ source_gap_waiting ~ ' of these coins' }} again now? Nothing is decided and nothing is published — the system reads the addresses again and updates what each task says. It takes a few minutes.">
+          <i data-icon="refresh"></i>Check {{ 'this coin' if source_gap_waiting == 1 else 'these coins' }} again
+        </button>
+      </form>
+      {% endif %}
+
       <details class="brain-filter-drawer" {{ 'open' if review_asset or review_kind or review_state or review_priority or review_deadline else '' }}>
         <summary><i data-icon="filter"></i> Filters</summary>
         <form class="brain-case-filters" method="get">
@@ -794,17 +818,11 @@
             value="reject"
             data-confirm="Reject the selected cases and keep their evidence?"
           ><i data-icon="close"></i>Reject</button>
-          {#- The way out of "this case is missing part of its evidence". An imported
-              case has no research folder until research runs, and every decision needs
-              one, so without this button the only route was opening each case and
-              pressing the same thing. Decides nothing; asks for the evidence. -#}
-          <button
-            class="brain-secondary-button"
-            type="submit"
-            name="action"
-            value="start_research"
-            data-confirm="Send the selected cases for research? Nothing is decided — the assistant gathers the evidence and you decide afterwards."
-          ><i data-icon="search"></i>Run research</button>
+          {#- Research is **not** here. It decides nothing, so it does not belong in the
+              row of buttons that decide, does not travel to the decision address, and
+              does not share this box's required sentence. It has its own form under the
+              table. Putting it back in this row is what made a reviewer feel they were
+              approving something when they only wanted the system to go and look. -#}
           <button class="brain-secondary-button" type="button" data-bulk-clear>Clear</button>
         </div>
       </form>
@@ -822,6 +840,50 @@
       {% set data = {'recent_cases': cases} %}
       {% set select_mode = true %}
       {% include 'system_brain_case_table.html' %}
+
+      {#- Go and look. Its own form, its own address, its own words.
+
+          Everything about it is separated from the quick decision above on purpose:
+
+          * its own ``<form>``, so nothing it sends can reach the decision address and
+            nothing the decision sends can reach this one;
+          * its own place — under the table, not stuck to the top of the screen — so a
+            hand aiming at it is nowhere near Approve or Reject;
+          * its own words. No reason is required, because nothing is being decided and
+            demanding a written justification is what made this feel like a verdict.
+
+          The ticked cases reach it as hidden fields the selection script writes from the
+          very same list it counts, in the same call. One owner: the number on screen and
+          the cases sent can never be different numbers. -#}
+      <form
+        id="case-research-form"
+        class="brain-research-bar"
+        method="post"
+        action="/dashboard/system-brain/cases/research?{{ request.url.query }}"
+        data-research-form
+        data-guarded-form
+        hidden
+      >
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div data-research-ids hidden></div>
+        <span class="brain-research-said">
+          <i data-icon="search"></i>
+          Go and look for evidence on the <strong data-research-count>0</strong> ticked case(s).
+          Nothing is decided and nothing is published.
+        </span>
+        <input
+          class="brain-research-reason"
+          name="reason"
+          maxlength="2000"
+          placeholder="Why are you asking? Optional."
+        >
+        <button
+          class="brain-secondary-button"
+          type="submit"
+          data-busy-label="Looking…"
+          data-confirm="Ask the system to go and look for evidence on the ticked cases? Nothing is decided and nothing is published. Cases that need a dossier go to the assistant and you decide them afterwards. Coins with no official page yet are read again from CoinMarketCap and from the project's own website, and those close by themselves once a page is found."
+        ><i data-icon="search"></i>Run research</button>
+      </form>
     </section>
 
     {% elif section == 'review-detail' %}

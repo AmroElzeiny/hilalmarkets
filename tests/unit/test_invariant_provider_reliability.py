@@ -23,6 +23,7 @@ import httpx
 import pytest
 
 from ai_market_monitor.services.provider_reliability import (
+    METRICS,
     AttemptRecord,
     CircuitBreaker,
     CircuitState,
@@ -352,6 +353,69 @@ async def test_one_failing_provider_never_blocks_another() -> None:
 
     assert await breaker.allow("broken") is False
     assert await breaker.allow("healthy") is True
+
+
+async def test_a_caller_may_name_the_thing_that_can_be_down() -> None:
+    """``circuit_key`` separates *what failed* from *what the metric is called*.
+
+    A provider name is the right bucket only when it names one upstream. It is the wrong
+    bucket for a caller whose "provider" is the open web: ``official_source`` reaches a
+    different company on every call, so counting them together let a few dead domains
+    open the circuit for every live site the same sweep needed to read.
+    """
+
+    breaker = CircuitBreaker(failure_threshold=1, recovery_seconds=60.0)
+    pool = _pool(lambda request: httpx.Response(503))
+
+    with pytest.raises(ProviderCallError):
+        await _call(pool, breaker, circuit_key="official_source:dead.example")
+
+    assert await breaker.allow("official_source:dead.example") is False
+    assert await breaker.allow("official_source:github.com") is True
+    # The undivided name must not have been touched, or every other caller under it
+    # would inherit one dead domain's failures.
+    assert await breaker.allow("testprovider") is True
+
+
+async def test_the_metric_label_stays_coarse_when_the_circuit_key_is_fine() -> None:
+    """Per-host breaker keys must not become per-host counters.
+
+    The point of the split is that the breaker gets to be precise without the metrics
+    growing one series per website the product has ever fetched.
+    """
+
+    breaker = CircuitBreaker(failure_threshold=99, recovery_seconds=60.0)
+    pool = _pool(lambda request: httpx.Response(200))
+    METRICS.provider_calls.clear()
+
+    await _call(pool, breaker, circuit_key="official_source:example.com")
+
+    labels = set(METRICS.provider_calls)
+    assert labels == {"testprovider:probe:succeeded"}, (
+        f"a host leaked into a metric label: {labels}"
+    )
+
+
+async def test_a_refused_call_says_it_was_never_sent() -> None:
+    """The one failure that is ours, and callers must be able to see that it is.
+
+    A request the breaker refused reached nobody, so it proves nothing about the far
+    side. A caller that writes down *why* an address could not be used has to tell that
+    apart from an answer, or it records our own outage as the other site's behaviour.
+    """
+
+    breaker = CircuitBreaker(failure_threshold=1, recovery_seconds=60.0)
+    pool = _pool(lambda request: httpx.Response(503))
+
+    with pytest.raises(ProviderCallError) as first:
+        await _call(pool, breaker)
+    assert first.value.circuit_open is False, (
+        "a call that really was sent and really did fail must not claim it was skipped"
+    )
+
+    with pytest.raises(ProviderCallError) as second:
+        await _call(pool, breaker)
+    assert second.value.circuit_open is True
 
 
 async def test_an_unreachable_shared_store_degrades_to_closed_not_open() -> None:

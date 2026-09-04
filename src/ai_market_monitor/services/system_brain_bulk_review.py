@@ -1,4 +1,4 @@
-"""One quick decision over several cases, and the way back from it.
+"""One quick decision over several cases, the way back from it, and asking to go and look.
 
 The Cases page lets a reviewer tick several cases and record one decision on all of them.
 This is the only place that happens, and it is deliberately **not** a shortcut around the
@@ -38,13 +38,24 @@ return to where it was. Nothing is ever deleted.
 selected cases. It is refused, per case, when the methodology does not allow ``pass`` on
 one of its criteria: the honest answer there is that this case needs opening, not that
 its criterion should be recorded as something it is not.
+
+**Asking for research is not a decision, and lives apart from all of the above.**
+:meth:`BulkReviewService.research` is its own entry point with its own route and its own
+form on the page. It used to be a third value of ``action`` on :meth:`~BulkReviewService.
+apply`, and that one line gave a search every piece of the decision machinery — the same
+button row, the same required sentence, the same refusals — so a reviewer who only wanted
+the system to go and look was answered "this one is a job to find a missing official page,
+not a case with a verdict". Nothing in the research path writes a ``ReviewDecision``,
+records a batch, or offers an Undo, because nothing was decided.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any
 from uuid import UUID
 
@@ -69,21 +80,33 @@ logger = logging.getLogger(__name__)
 PASS_OUTCOME = "pass"
 COVERED_DECISION = "covered"
 
-#: The quick actions the page offers on a selection.
+#: The quick **decisions** the page offers on a selection. Nothing else may travel
+#: through :meth:`BulkReviewService.apply`.
 #:
-#: ``start_research`` is not a decision — it is the way out of the refusal every other
-#: bulk action gives on a case that has no evidence yet. An imported case arrives with an
-#: asset identity and a provider row but **no research folder**, and the approval needs
-#: all three, so a reviewer selecting a hundred imported cases got a hundred copies of
-#: "This case is missing part of its evidence… Open it and run research." Opening a
-#: hundred cases one at a time to press the same button is not review work.
-BULK_ACTIONS = ("approve", "reject", "start_research")
+#: Research used to be a third value here, and that one line is what made the page and the
+#: server treat "go and look" as a kind of verdict. It shared the decision form, the
+#: decision address, the decision's required sentence and the decision's refusals, so a
+#: reviewer who only wanted the system to search was answered as though they had tried to
+#: approve something. It now has :meth:`BulkReviewService.research`, its own route and its
+#: own form, and this tuple is the guard that keeps it out of here.
+BULK_ACTIONS = ("approve", "reject")
 
-#: The actions that record a governed decision on the case. ``start_research`` asks for
-#: evidence to be gathered and decides nothing, so it is deliberately not one of them:
-#: it writes no ``ReviewDecision``, and it is not undoable, because there is no decision
-#: to take back.
+#: The actions that record a governed decision on the case. Every member of
+#: :data:`BULK_ACTIONS` is one; the two names are kept apart because the decision *path*
+#: is also reached from inside an approval that had to stop and gather evidence first.
 BULK_DECISION_ACTIONS = ("approve", "reject")
+
+#: What a research request is called wherever it is written down — the audit record, the
+#: message the page shows back, and the refusal that names it. One spelling, so the button,
+#: the route and the record cannot mean three different things.
+RESEARCH_ACTION = "start_research"
+
+#: Recorded against a case when the reviewer asks for research and writes nothing.
+#:
+#: Research is not a decision, so no sentence is demanded of the person. Something still
+#: has to be written in the audit trail, and this says the plain fact — who asked and from
+#: where. It never claims a judgement, and it never claims words the reviewer did not say.
+DEFAULT_RESEARCH_REASON = "Research asked for from the case list."
 
 #: Case types that carry no verdict at all. They are jobs for a person — go and find
 #: something — so approving, rejecting or researching one is meaningless rather than
@@ -127,6 +150,16 @@ class CaseOutcome:
     #: instead. The case is not decided, but nothing is left for the reviewer to do
     #: by hand either, so it is reported apart from a plain refusal.
     sent_for_research: bool = False
+    #: Set when this case is a "find the missing official page" job and the reviewer
+    #: asked for research. It starts the source hunt, not the evidence sweep — a
+    #: different worker task — so it is counted separately from ``sent_for_research``.
+    #: Merging the two would send one queue's work to the other's task.
+    sent_for_source_hunt: bool = False
+    #: The coin this case is about, kept so the source hunt can be aimed at exactly the
+    #: coins the reviewer ticked. Without it the hunt read the whole waiting list, and a
+    #: message saying "3 coins are being looked up again" was followed by 157 being
+    #: fetched — a report that did not describe the work it started.
+    asset_id: UUID | None = None
 
 
 @dataclass(slots=True)
@@ -154,6 +187,27 @@ class BatchOutcome:
         return sum(1 for item in self.results if item.sent_for_research)
 
     @property
+    def hunting(self) -> int:
+        """Sent to look for a missing official page, from the provider and the coin's site."""
+
+        return sum(1 for item in self.results if item.sent_for_source_hunt)
+
+    @property
+    def hunt_asset_ids(self) -> list[UUID]:
+        """Exactly the coins the hunt was asked to look at, in the order they were ticked.
+
+        Always as many as :attr:`hunting`: a gap job with no coin attached is refused
+        rather than counted, so the number the message says and the number the worker
+        fetches are the same number.
+        """
+
+        return [
+            item.asset_id
+            for item in self.results
+            if item.sent_for_source_hunt and item.asset_id is not None
+        ]
+
+    @property
     def stuck(self) -> int:
         """Refused, and still waiting for a person. The only number to act on."""
 
@@ -171,13 +225,33 @@ class BatchOutcome:
                 f"{self.applied} case(s) put back. The earlier decision stays in the "
                 "history."
             )
-        if self.action == "start_research":
+        if self.action == RESEARCH_ACTION:
             when = (
                 "Research is running now."
                 if self.research_queued
                 else "The cases are marked; research starts on the next sweep."
             )
+            if self.hunting and self.hunting == self.applied:
+                # Every selected case was a missing-page job. Saying "sent for research"
+                # here would name the wrong job and the wrong wait: this one reads the
+                # CoinMarketCap record and the coin's own website, and it needs nothing
+                # from the reviewer afterwards.
+                done = (
+                    f"{self.hunting} coin(s) are being looked up again, starting from "
+                    "CoinMarketCap and each project's own website."
+                )
+                if not self.failed:
+                    return (
+                        f"{done} Any page it finds is saved by itself and the job closes. "
+                        "Nothing else is needed from you."
+                    )
+                return f"{done} {self.stuck} could not be sent — see below."
             done = f"{self.applied} case(s) sent for research. {when}"
+            if self.hunting:
+                done += (
+                    f" {self.hunting} of them were missing-page jobs and are being looked "
+                    "up from CoinMarketCap and the project's own website instead."
+                )
             if not self.failed:
                 return f"{done} Come back when it finishes, then decide them."
             return f"{done} {self.stuck} could not be sent — see below."
@@ -224,6 +298,16 @@ class BulkReviewService:
         reason: str,
         admin_user_id: UUID,
     ) -> BatchOutcome:
+        if action == RESEARCH_ACTION:
+            # Not a decision, so it is not made here at all. The old code let this value
+            # through and gave research every piece of the decision machinery: the same
+            # form, the same required sentence, the same refusals. Refusing it by name is
+            # what keeps the two apart, and the message says where the button really is.
+            raise BulkReviewError(
+                "research_is_not_a_decision",
+                "Research decides nothing, so it is not done here. Use the "
+                '"Run research" button under the case list.',
+            )
         if action not in BULK_ACTIONS:
             raise BulkReviewError("unknown_action", "That quick decision is not available.")
         if len(reason.strip()) < MIN_REASON_LENGTH:
@@ -232,14 +316,7 @@ class BulkReviewService:
                 "Write one sentence saying why, in at least 10 characters. "
                 "It is recorded on every selected case.",
             )
-        unique_ids = list(dict.fromkeys(case_ids))
-        if not unique_ids:
-            raise BulkReviewError("nothing_selected", "Select at least one case first.")
-        if len(unique_ids) > MAX_BATCH_SIZE:
-            raise BulkReviewError(
-                "too_many_cases",
-                f"Select at most {MAX_BATCH_SIZE} cases so each decision stays a review.",
-            )
+        unique_ids = self._selection(case_ids)
 
         outcome = BatchOutcome(batch_id=None, action=action)
         for case_id in unique_ids:
@@ -256,15 +333,8 @@ class BulkReviewService:
         if outcome.researched and action in BULK_DECISION_ACTIONS:
             # Some cases were refused for missing evidence and sent to gather it. The
             # sweep reads them from the database, so it is queued by the caller after
-            # the commit, exactly as the explicit research action does.
+            # the commit, exactly as the explicit research request does.
             outcome.research_queued = False
-        if action == "start_research":
-            # Deliberately does **not** queue the worker here. This runs inside the
-            # caller's transaction, and the sweep reads the cases from the database — a
-            # task sent now can start before the commit and find the old states. The
-            # caller queues it with `queue_research_sweep` once the commit has landed.
-            outcome.research_queued = False
-            return outcome
         if applied and action in BULK_DECISION_ACTIONS:
             batch = ReviewActionBatch(
                 actor_user_id=admin_user_id,
@@ -294,6 +364,137 @@ class BulkReviewService:
             outcome.batch_id = batch.id
         return outcome
 
+    def _selection(self, case_ids: list[UUID]) -> list[UUID]:
+        """The ticked cases, deduplicated and inside the ceiling.
+
+        One owner for the two checks both entry points need. Written twice they would
+        drift, and then one route would accept a selection the other refuses while the
+        page shows the same number for both.
+        """
+
+        unique_ids = list(dict.fromkeys(case_ids))
+        if not unique_ids:
+            raise BulkReviewError("nothing_selected", "Select at least one case first.")
+        if len(unique_ids) > MAX_BATCH_SIZE:
+            raise BulkReviewError(
+                "too_many_cases",
+                f"Select at most {MAX_BATCH_SIZE} cases so each request stays reviewable.",
+            )
+        return unique_ids
+
+    async def research(
+        self,
+        case_ids: list[UUID],
+        *,
+        reason: str,
+        admin_user_id: UUID,
+    ) -> BatchOutcome:
+        """Ask for evidence to be gathered on the selected cases. Decides nothing.
+
+        This is the whole of the "go and look" path, kept apart from :meth:`apply` on
+        purpose. Nothing here writes a ``ReviewDecision``, nothing is approved, nothing is
+        published, no ``ReviewActionBatch`` is written and Undo has nothing to take back —
+        because nothing was decided.
+
+        Two different jobs come out of it, chosen by what the case actually is:
+
+        * a **missing official page** job has no dossier to gather and no verdict to
+          record. It goes to the source hunt, which reads the coin's CoinMarketCap record
+          and its own website again, header, footer and body;
+        * every other case goes to :meth:`ShariaGovernanceService.start_research`, which
+          moves it to *researching* so the assistant gathers its evidence.
+
+        Sending one to the other's queue marks the case handled while the thing it needs
+        never runs, so the two are counted apart all the way out to the message.
+
+        **No written sentence is required.** A decision needs a person's words on the
+        record; asking a machine to fetch some pages does not, and demanding one was part
+        of what made this feel like a verdict. What the reviewer types is recorded when
+        they type it, and :data:`DEFAULT_RESEARCH_REASON` states the plain fact when they
+        do not.
+
+        Like :meth:`apply`, this deliberately queues **no** worker task. It runs inside
+        the caller's transaction and the workers read these cases from the database, so a
+        task sent now could start before the commit and find the old states. The caller
+        queues them after committing, with :meth:`queue_research_sweep` and
+        :meth:`queue_source_hunt`.
+        """
+
+        unique_ids = self._selection(case_ids)
+        written = reason.strip() or DEFAULT_RESEARCH_REASON
+        outcome = BatchOutcome(batch_id=None, action=RESEARCH_ACTION, research_queued=False)
+        for case_id in unique_ids:
+            outcome.results.append(
+                await self._isolated(
+                    case_id,
+                    partial(
+                        self._research_one,
+                        case_id,
+                        reason=written,
+                        admin_user_id=admin_user_id,
+                    ),
+                )
+            )
+        return outcome
+
+    async def _research_one(
+        self,
+        case_id: UUID,
+        *,
+        reason: str,
+        admin_user_id: UUID,
+    ) -> CaseOutcome:
+        """One case, sent to the job it actually needs."""
+
+        case = await self.session.get(ReviewCase, case_id)
+        if case is None:
+            return CaseOutcome(case_id, str(case_id), False, "This case no longer exists.")
+        reference = case.case_reference
+        if case.case_type in UNDECIDABLE_CASE_TYPES:
+            # A job to go and find a page. There is nothing to gather and nothing to
+            # decide, so the case is left exactly as it is and the coin is handed to the
+            # source hunt. Nobody has to type an address.
+            if case.canonical_asset_id is None:
+                # No coin, nothing to look up. Refused rather than counted as sent: the
+                # hunt is aimed by coin, so an empty aim would fall back to "every waiting
+                # coin" — a hundred and fifty-seven fetches started by a case that named
+                # none of them, under a message saying one coin was being looked at.
+                return CaseOutcome(
+                    case_id,
+                    reference,
+                    False,
+                    "This job is not attached to a coin, so there is nothing to look up. "
+                    "Open it and say which coin it is about.",
+                )
+            return CaseOutcome(
+                case_id,
+                reference,
+                True,
+                "Looking for its official page again, starting from CoinMarketCap and "
+                "the project's own website.",
+                sent_for_source_hunt=True,
+                asset_id=case.canonical_asset_id,
+            )
+        previous_state = case.state
+        previous_publication_state = case.publication_state
+        try:
+            await self.governance.start_research(
+                case_id,
+                admin_user_id=admin_user_id,
+                reason=reason,
+            )
+        except (ShariaGovernanceError, BulkReviewError) as exc:
+            # Said in the plain words every screen uses, never the raw rule sentence.
+            return CaseOutcome(case_id, reference, False, explain_error(exc).sentence())
+        return CaseOutcome(
+            case_id,
+            reference,
+            True,
+            "Queued for research.",
+            previous_state=previous_state,
+            previous_publication_state=previous_publication_state,
+        )
+
     def queue_research_sweep(self) -> bool:
         """Ask the worker to run its research sweep now instead of on its own timer.
 
@@ -317,6 +518,43 @@ class BulkReviewService:
             return False
         return True
 
+    def queue_source_hunt(self, asset_ids: Sequence[UUID] | None = None) -> bool:
+        """Ask the worker to go and find the missing official pages now.
+
+        The other half of :meth:`queue_research_sweep`, for the case type that has no
+        verdict to record. Same rules: called **after** the commit, and one send for the
+        whole selection rather than one per case — a second send would only duplicate the
+        first against the same third-party hosts.
+
+        ``asset_ids`` is **the coins the reviewer ticked**, and passing them is what makes
+        the message true. Without them the task took every coin with an open "Pages not
+        found" job, so a reviewer who ticked three coins was told "3 coins are being
+        looked up again" while a hundred and fifty-seven were fetched — minutes of work
+        nobody asked for, and a sentence that did not describe it. Passing nothing still
+        means "every waiting coin", which is what the whole-list button up the page wants.
+
+        The task itself holds a lock, so a send that arrives while one is already running
+        is refused there rather than starting a second sweep against the same hosts.
+
+        Reported rather than raised, for the same reason as the research sweep: the
+        selection is already committed, so a worker that cannot be reached means "it runs
+        on its own schedule instead", not "nothing happened".
+        """
+
+        try:
+            from ai_market_monitor.worker import app as worker_app
+
+            worker_app.send_task(
+                "ai_market_monitor.recheck_official_sources_for_open_cases",
+                kwargs=(
+                    {"asset_ids": [str(item) for item in asset_ids]} if asset_ids else {}
+                ),
+            )
+        except Exception:  # noqa: BLE001 - reported to the reviewer, never raised
+            logger.warning("Source hunt could not be queued; the daily sweep still runs.")
+            return False
+        return True
+
     async def _apply_isolated(
         self,
         case_id: UUID,
@@ -325,7 +563,25 @@ class BulkReviewService:
         reason: str,
         admin_user_id: UUID,
     ) -> CaseOutcome:
-        """One case, decided inside its own savepoint.
+        """One decision, inside its own savepoint."""
+
+        return await self._isolated(
+            case_id,
+            partial(
+                self._apply_one,
+                case_id,
+                action=action,
+                reason=reason,
+                admin_user_id=admin_user_id,
+            ),
+        )
+
+    async def _isolated(
+        self,
+        case_id: UUID,
+        run: Callable[[], Awaitable[CaseOutcome]],
+    ) -> CaseOutcome:
+        """One case, handled inside its own savepoint.
 
         This is what makes "190 selected, 8 refused, 182 recorded" true rather than
         hopeful. Two failures used to reach past the case that caused them:
@@ -345,14 +601,12 @@ class BulkReviewService:
 
         savepoint = await self.session.begin_nested()
         try:
-            result = await self._apply_one(
-                case_id, action=action, reason=reason, admin_user_id=admin_user_id
-            )
+            result = await run()
         except SQLAlchemyError:
             # Not a refusal — the database itself said no. Reported against this case so
-            # the rest of the selection is still decided, and logged because nobody can
+            # the rest of the selection is still handled, and logged because nobody can
             # act on it from the screen.
-            logger.exception("Quick decision failed on case %s at the database", case_id)
+            logger.exception("Quick action failed on case %s at the database", case_id)
             await savepoint.rollback()
             return CaseOutcome(
                 case_id,
@@ -381,18 +635,23 @@ class BulkReviewService:
             return CaseOutcome(case_id, str(case_id), False, "This case no longer exists.")
         reference = case.case_reference
         if case.case_type in UNDECIDABLE_CASE_TYPES:
-            # A job for a person, not a case with a verdict. Without this guard the
-            # decision path refuses it much later and much worse: the reviewer is told
-            # the case "is missing part of its evidence: the asset identity, the
-            # official source record, or the research folder", which is true of every
-            # blocked case and tells them nothing about what this one actually wants.
+            # A job to go and find a page, not a case with a verdict. Approving or
+            # rejecting it means nothing — there is no dossier to decide on — so the
+            # refusal names the button that does work instead.
+            #
+            # That button is :meth:`research`, under the case list, and it starts the
+            # hunt: the coin's CoinMarketCap record is read again and its own website is
+            # re-read, header, footer and body. Nobody has to type an address. A reviewer
+            # who selected 157 of these was previously told only that the system "keeps
+            # looking by itself", which is true and useless: it left them with a screen
+            # full of refusals and nothing to press.
             return CaseOutcome(
                 case_id,
                 reference,
                 False,
                 "This one is a job to find a missing official page, not a case with a "
-                "verdict. The system keeps looking for it by itself; open it only if "
-                "you already know the address.",
+                "verdict. Use Run research under the list instead and the system goes "
+                "and looks — you do not need to know the address.",
             )
         previous_state = case.state
         previous_publication_state = case.publication_state
@@ -403,23 +662,6 @@ class BulkReviewService:
         # research that follows would be written on top of them and committed together.
         attempt = await self.session.begin_nested()
         try:
-            if action == "start_research":
-                # Asks for the evidence; decides nothing. Returns early because there is
-                # no ReviewDecision to record and nothing for Undo to take back.
-                await self.governance.start_research(
-                    case_id,
-                    admin_user_id=admin_user_id,
-                    reason=reason,
-                )
-                await attempt.commit()
-                return CaseOutcome(
-                    case_id,
-                    reference,
-                    True,
-                    "Queued for research.",
-                    previous_state=previous_state,
-                    previous_publication_state=previous_publication_state,
-                )
             if action == "reject":
                 decision = await self.governance.reject_and_store(
                     case_id,

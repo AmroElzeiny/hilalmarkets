@@ -9,11 +9,13 @@ exist and two of them disagreed about a trailing slash, so one page could be sto
 twice under one asset and counted twice as evidence. The pairs below fail if any copy
 comes back.
 
-**A guess can never promote itself.** The cheapest layer invents addresses like
-``https://site/blog``. That is only safe because nothing downstream trusts a candidate:
-it has to be fetched, permitted, readable and recent first. So the tests check the
-scoring rule for *every* combination of proof outcomes and *every* layer, not for the
-one case that happens to work.
+**Nothing is ever invented, and nothing promotes itself.** Every candidate must trace
+back to somebody stating an address — a person, the CoinMarketCap record, the approved
+identity, or a link on the project's own site. The layer that built ``https://site/blog``
+out of a domain was removed on 4 September 2026; see "No address is ever invented" below
+for what it cost. Even a stated address is not trusted: it has to be fetched, permitted,
+readable and recent first. So the tests check the scoring rule for *every* combination of
+proof outcomes and *every* layer, not for the one case that happens to work.
 
 **A dead link and an unreachable link are different.** Only a settled answer — 404, 410,
 robots says no — may withdraw a source a review already relies on. A timeout must change
@@ -43,13 +45,12 @@ from ai_market_monitor.services.sharia_source_catalog import (
     REQUIRED_CATEGORIES,
     SOURCE_CATEGORIES,
     TRACKED_CATEGORIES,
+    DiscoveryLayer,
     candidates_for,
-    convention_candidates,
     curated_candidates,
     is_official_url,
     missing_categories,
     normalized_url,
-    page_category,
 )
 from ai_market_monitor.services.sharia_source_resolution import (
     SourceProof,
@@ -58,7 +59,7 @@ from ai_market_monitor.services.sharia_source_resolution import (
     score_candidate,
 )
 from ai_market_monitor.services.system_brain_bulk_review import (
-    BULK_ACTIONS,
+    BULK_DECISION_ACTIONS,
     BulkReviewService,
 )
 
@@ -179,7 +180,7 @@ def test_the_layers_are_ordered_from_most_to_least_trusted() -> None:
 def test_no_layer_can_answer_without_being_proved(layer) -> None:
     """A layer's own confidence never reaches the floor plus proof on its own.
 
-    This is what makes the guessing layer safe to keep.
+    Even the curated table — a person's own typing — has to be fetched before it counts.
     """
 
     assert LAYER_CONFIDENCE[layer] < 1.0
@@ -216,58 +217,91 @@ def test_every_candidate_any_layer_offers_is_fetchable(layer) -> None:
         assert candidate.layer is layer
 
 
-def test_the_guessing_layer_only_guesses_on_the_projects_own_domain() -> None:
-    """A guess that wandered onto another host would be somebody else's page."""
+# --------------------------------------------------------------------------
+# No address is ever invented
+# --------------------------------------------------------------------------
+#
+# The guessing layer was removed on 4 September 2026. It built `<host>/blog`,
+# `<host>/news` and six more from a coin's own domain and offered them as candidates.
+# HTX DAO's review case then told a person "10 address(es) have been tried and none
+# worked yet" and listed five of them — eight addresses nobody had ever published, every
+# one a 404. The reviewer could not tell invented URLs from real ones, so the honest
+# conclusion available to them was that the product was broken.
+#
+# An official source is the project *saying* where it publishes. These tests pin that:
+# every candidate must trace back to somebody stating an address.
 
-    produced = convention_candidates(
-        asset_name="Example", official_website="https://example.org/"
-    )
-    assert produced, "the guessing layer offered nothing at all"
-    for candidate in produced:
-        assert "example.org" in candidate.url
-        assert candidate.category in REQUIRED_CATEGORIES
 
+def test_no_layer_invents_an_address_from_the_domain() -> None:
+    """The whole family: give every layer a website and nothing else to go on.
 
-def test_the_guessing_layer_says_nothing_without_an_official_website() -> None:
-    assert convention_candidates(asset_name="Example", official_website=None) == ()
-
-
-def test_every_guessed_address_is_read_back_as_the_category_it_was_guessed_for() -> None:
-    """One vocabulary, both ways round.
-
-    The guessing layer picks a path because it believes a project publishes news there.
-    :func:`page_category` is what every other reader — the crawler, the provider filter,
-    a reviewer's paste — uses to decide what that same address is. If the two ever hold
-    different word lists, an address is fetched as news and then filed as something else
-    by the next thing that touches it.
-
-    Asserted over every guess the layer can make, not over one example.
+    With no provider record, no harvested links and no search results, the only thing a
+    layer could build a candidate out of is the domain itself. Nothing may.
     """
 
-    produced = convention_candidates(
-        asset_name="Example", official_website="https://example.org/"
-    )
-    assert produced, "the guessing layer offered nothing at all"
-    for candidate in produced:
-        assert page_category(candidate.url) == candidate.category, (
-            f"{candidate.url} is guessed as {candidate.category} but reads back as "
-            f"{page_category(candidate.url)}"
+    for layer in DiscoveryLayer:
+        produced = candidates_for(
+            layer,
+            symbol="EXA",
+            asset_name="Example",
+            official_website="https://example.org/",
+            official_documentation=None,
+        )
+        invented = [
+            item.url
+            for item in produced
+            # A curated entry is a person's typing and an identity candidate is the
+            # approved site itself; neither is built out of thin air.
+            if layer not in {DiscoveryLayer.CURATED, DiscoveryLayer.IDENTITY}
+        ]
+        assert invented == [], (
+            f"{layer} built {invented} out of the domain alone. An address must come "
+            "from somebody stating it — CoinMarketCap, the project's own site, a search "
+            "result, or a person."
         )
 
 
-def test_the_guessing_layer_does_not_spend_requests_on_optional_pages() -> None:
-    """Every guess is a request to somebody else's server.
+def test_the_guessing_layer_is_not_in_the_running_order() -> None:
+    """Removed from LAYER_ORDER, so it is never walked."""
 
-    Guessing ``/community`` and ``/forum`` for a project that runs neither cost four
-    fetches per coin to prove nothing, and the community page is not required — so it is
-    not guessed at. A forum the project actually links to is still found, by the layer
-    that reads the project's own homepage.
+    assert DiscoveryLayer.CONVENTION not in LAYER_ORDER
+
+
+def test_the_guessed_paths_are_gone_from_the_module() -> None:
+    """The word list itself, not just its caller.
+
+    Leaving the table behind is how a layer comes back: the next person to want a
+    fallback finds a ready-made list of paths and wires it up again.
     """
 
-    produced = convention_candidates(
-        asset_name="Example", official_website="https://example.org/"
+    import ai_market_monitor.services.sharia_source_catalog as catalog
+
+    assert not hasattr(catalog, "convention_candidates")
+    assert not hasattr(catalog, "_CONVENTION_PATHS")
+    assert not hasattr(catalog, "_CONVENTION_HOSTS")
+
+
+def test_a_stored_convention_row_is_still_readable() -> None:
+    """Rows written before the removal keep working. This is the "keep proved rows" half.
+
+    The layer name survives in the database and `_layer_of` also falls back to it for a
+    row whose layer is unreadable. Asking the catalog about it must answer emptily, never
+    raise — a proved page that answers is evidence, and deleting it would lose a coin its
+    only news source.
+    """
+
+    assert DiscoveryLayer("convention") is DiscoveryLayer.CONVENTION
+    assert DiscoveryLayer.CONVENTION in LAYER_CONFIDENCE
+    assert (
+        candidates_for(
+            DiscoveryLayer.CONVENTION,
+            symbol="EXA",
+            asset_name="Example",
+            official_website="https://example.org/",
+            official_documentation=None,
+        )
+        == ()
     )
-    assert {item.category for item in produced} == set(REQUIRED_CATEGORIES)
 
 
 def test_a_curated_coin_may_carry_more_than_one_link() -> None:
@@ -870,33 +904,39 @@ async def test_a_working_link_a_person_typed_closes_the_job(test_context) -> Non
         assert case.done_at is not None, "the job should be finished"
 
 
-@pytest.mark.parametrize("action", list(BULK_ACTIONS))
+async def _gap_case(session, settings, *, symbol: str = "NOTLISTED"):
+    """A coin with an open "no official page" job, and a reviewer to act on it."""
+
+    asset = await _asset(session, symbol=symbol, name="Not Listed")
+    await SourceResolutionService(
+        session, settings, fetcher=_StubFetcher({})
+    ).resolve_asset(asset)
+    await session.commit()
+    case = await session.scalar(
+        select(ReviewCase).where(ReviewCase.canonical_asset_id == asset.id)
+    )
+    assert case is not None
+    reviewer = User(display_name="Reviewer", role=UserRole.ADMIN)
+    session.add(reviewer)
+    await session.flush()
+    return case, reviewer
+
+
+@pytest.mark.parametrize("action", list(BULK_DECISION_ACTIONS))
 async def test_a_link_hunting_job_is_never_treated_as_a_case_to_decide(
     test_context, action
 ) -> None:
-    """Every bulk action, not just approve.
+    """Approving or rejecting a "go and find a page" job means nothing.
 
     A gap task has no dossier, so the decision path would refuse it anyway — with the
     sentence that started this work: "this case is missing part of its evidence: the
     asset identity, the official source record, or the research folder". That is true
     of every blocked case and tells a reviewer nothing. The refusal has to name the
-    actual job instead.
+    actual job instead, **and** name the button that does it.
     """
 
     async with test_context["session_factory"]() as session:
-        asset = await _asset(session, symbol="NOTLISTED", name="Not Listed")
-        await SourceResolutionService(
-            session, test_context["settings"], fetcher=_StubFetcher({})
-        ).resolve_asset(asset)
-        await session.commit()
-        case = await session.scalar(
-            select(ReviewCase).where(ReviewCase.canonical_asset_id == asset.id)
-        )
-        assert case is not None
-
-        reviewer = User(display_name="Reviewer", role=UserRole.ADMIN)
-        session.add(reviewer)
-        await session.flush()
+        case, reviewer = await _gap_case(session, test_context["settings"])
         outcome = await BulkReviewService(session, test_context["settings"]).apply(
             [case.id],
             action=action,
@@ -909,10 +949,115 @@ async def test_a_link_hunting_job_is_never_treated_as_a_case_to_decide(
         said = outcome.results[0].message
         assert "find a missing official page" in said, said
         assert "research folder" not in said, "the confusing old sentence came back"
-        # And it never asks the reviewer to do the machine's job. The resolver walks its
-        # layers again on every sweep; telling somebody to go and type an address for two
-        # hundred coins is what this wording replaced.
-        assert "keeps looking" in said, said
+        # A refusal that names no way forward is what sent a reviewer to ask about 157
+        # cases they could not act on. It must point at the action that works.
+        assert "Run research" in said, said
+
+
+async def test_running_research_on_a_gap_job_goes_and_looks_instead(test_context) -> None:
+    """The whole point of the change: no address has to be typed by a person.
+
+    "Run research" on a missing-page job is not refused — it starts the hunt, which reads
+    the coin's CoinMarketCap record and its own website again.
+    """
+
+    async with test_context["session_factory"]() as session:
+        case, reviewer = await _gap_case(session, test_context["settings"])
+        outcome = await BulkReviewService(session, test_context["settings"]).research(
+            [case.id],
+            reason="Go and look for the official page again.",
+            admin_user_id=reviewer.id,
+        )
+
+        assert outcome.applied == 1
+        assert outcome.failed == 0
+        assert outcome.hunting == 1
+        # Named, so the hunt fetches the coin that was ticked and not the whole waiting
+        # list. A message saying "1 coin is being looked up" followed by 157 fetches is a
+        # report that does not describe the work it started.
+        assert outcome.hunt_asset_ids == [case.canonical_asset_id]
+        # Counted apart from the evidence sweep. They are two different worker tasks, and
+        # sending one queue's work to the other marks the case handled while the thing it
+        # needs never runs.
+        assert outcome.researched == 0
+        said = outcome.message()
+        assert "CoinMarketCap" in said, said
+        assert "Nothing else is needed from you" in said, said
+
+
+async def test_a_page_hunt_with_no_coin_is_refused_rather_than_sent(test_context) -> None:
+    """An empty aim must never become "look at every waiting coin".
+
+    The hunt is aimed by coin. A gap job with no coin attached would name none, and the
+    worker reads "no names" as "the whole waiting list" — so one unattached case would
+    start a hundred and fifty-seven fetches under a message saying one coin was being
+    looked at. Counting it as sent is what would make the message false, so it is not
+    counted at all.
+    """
+
+    async with test_context["session_factory"]() as session:
+        case, reviewer = await _gap_case(session, test_context["settings"], symbol="NOCOIN")
+        case.canonical_asset_id = None
+        await session.flush()
+        outcome = await BulkReviewService(session, test_context["settings"]).research(
+            [case.id],
+            reason="Go and look for the official page again.",
+            admin_user_id=reviewer.id,
+        )
+
+    assert outcome.hunting == 0
+    assert outcome.hunt_asset_ids == []
+    assert outcome.applied == 0
+    assert "not attached to a coin" in outcome.results[0].message
+
+
+async def test_the_hunt_never_says_more_coins_than_it_looks_at(test_context) -> None:
+    """The count in the message and the list sent to the worker are one number."""
+
+    async with test_context["session_factory"]() as session:
+        first, reviewer = await _gap_case(session, test_context["settings"], symbol="AAACOIN")
+        second, _ = await _gap_case(session, test_context["settings"], symbol="BBBCOIN")
+        outcome = await BulkReviewService(session, test_context["settings"]).research(
+            [first.id, second.id],
+            reason="Go and look for both official pages again.",
+            admin_user_id=reviewer.id,
+        )
+
+    assert outcome.hunting == len(outcome.hunt_asset_ids) == 2
+    assert str(outcome.hunting) in outcome.message()
+
+
+async def test_the_source_hunt_and_the_research_sweep_are_different_tasks() -> None:
+    """One send each, to the task that does that job.
+
+    ``queue_research_sweep`` gathers evidence for cases that have a dossier;
+    ``queue_source_hunt`` goes and finds official pages. A gap job sent to the first
+    would be reported as handled and nothing would look for its page.
+    """
+
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "ai_market_monitor"
+        / "services"
+        / "system_brain_bulk_review.py"
+    ).read_text(encoding="utf-8")
+    assert "ai_market_monitor.recheck_official_sources_for_open_cases" in source
+    assert "ai_market_monitor.process_sharia_authority_imports" in source
+
+    router = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "ai_market_monitor"
+        / "api"
+        / "routers"
+        / "system_brain.py"
+    ).read_text(encoding="utf-8")
+    # The router sends the hunt only when a hunting case was actually marked, so a plain
+    # approval never wakes the source worker — and it names the coins, so the hunt does
+    # the work that was asked for rather than the whole waiting list.
+    assert "if outcome.hunting:" in router
+    assert "service.queue_source_hunt(outcome.hunt_asset_ids)" in router
 
 
 # --------------------------------------------------------------------------

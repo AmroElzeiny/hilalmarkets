@@ -352,7 +352,10 @@
       <label>Why<textarea name="reason" minlength="5" maxlength="5000" required></textarea></label>
       <label>Evidence needed<textarea name="requested_evidence"></textarea></label>
       <div class="brain-decision-actions">
-        {% if case.state in ['draft','research_failed','needs_evidence'] %}<button name="action" value="{{ 'retry_research' if case.state == 'research_failed' else 'start_research' }}" class="approve">{{ 'Retry research' if case.state == 'research_failed' else 'Start research' }}</button>{% endif %}
+        {#- Not `approve`. Research decides nothing, so it must not wear the colour the
+            product uses for a verdict — the same confusion the Cases page had, in the
+            one other place research is offered. -#}
+        {% if case.state in ['draft','research_failed','needs_evidence'] %}<button name="action" value="{{ 'retry_research' if case.state == 'research_failed' else 'start_research' }}" class="secondary">{{ 'Retry research' if case.state == 'research_failed' else 'Start research' }}</button>{% endif %}
         {% if case.state in ['researching','needs_evidence'] %}<button name="action" value="mark_ready_for_review" class="approve">Mark ready</button>{% endif %}
         <button name="action" value="request_more_evidence" class="secondary">Ask for evidence</button>
         <button name="action" value="add_admin_note" class="secondary">Add note</button>

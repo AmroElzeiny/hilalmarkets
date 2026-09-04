@@ -428,7 +428,13 @@ def test_the_retryable_list_and_the_guard_agree() -> None:
 
 
 async def test_a_page_only_a_browser_can_read_becomes_a_working_source(test_context) -> None:
-    """The whole point: the page was alive all along, and the plain fetch saw a shell."""
+    """The whole point: the page was alive all along, and the plain fetch saw a shell.
+
+    The blog address comes from the **project's own homepage**, which is where every
+    on-site address comes from now. Until 4 September 2026 this test leaned on the
+    guessing layer to invent ``/blog``; that layer is gone, and leaning on it was hiding
+    the fact that the browser retry had never been proved on a link anybody published.
+    """
 
     settings = test_context["settings"]
     async with test_context["session_factory"]() as session:
@@ -444,7 +450,12 @@ async def test_a_page_only_a_browser_can_read_becomes_a_working_source(test_cont
                     "https://www.reddit.com/r/jsx/": _live_page(),
                 }
             ),
-            discovery=_Discovery(links=("https://www.reddit.com/r/jsx/",)),
+            discovery=_Discovery(
+                links=(
+                    "https://jsx.example/blog",
+                    "https://www.reddit.com/r/jsx/",
+                )
+            ),
             renderer=browser,
         )
         await service.resolve_asset(asset, deep=True)

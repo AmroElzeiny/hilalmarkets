@@ -34,6 +34,10 @@ import httpx
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.services.provider_reliability import ProviderCallError
 from ai_market_monitor.services.provider_runtime import provider_request
+from ai_market_monitor.services.sharia_page_render import (
+    RETRYABLE_WITH_BROWSER,
+    BrowserPageRenderer,
+)
 from ai_market_monitor.services.sharia_research import (
     FetchTarget,
     OfficialEvidenceFetcher,
@@ -68,10 +72,15 @@ class WebSourceDiscovery:
         settings: Settings,
         *,
         fetcher: OfficialEvidenceFetcher | None = None,
+        renderer: BrowserPageRenderer | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.settings = settings
         self.fetcher = fetcher or OfficialEvidenceFetcher(settings, transport=transport)
+        #: The second way of reading a homepage, for the ones whose navigation is drawn
+        #: by JavaScript. Supplied by the resolver so a sweep runs **one** browser; built
+        #: here only when this class is used on its own.
+        self.renderer = renderer or BrowserPageRenderer(settings)
         self.transport = transport
         self._links: dict[str, tuple[str, ...]] = {}
         self._searches: dict[str, tuple[SearchResult, ...]] = {}
@@ -84,6 +93,33 @@ class WebSourceDiscovery:
         Answers with nothing rather than raising. A homepage that is down means this
         layer has no opinion this sweep, which is different from the homepage being
         wrong, and the resolver already knows how to carry on to the next layer.
+
+        **A homepage that answers 200 and shows no links at all has not been read.** That
+        is not a project with no links; it is a page whose navigation is written by
+        JavaScript, and the plain fetcher does not run JavaScript. Measured on 4 September
+        2026 against five projects' real homepages:
+
+        ==================  ====================
+        Homepage            Links in the raw HTML
+        ==================  ====================
+        bitcoin.org         63
+        ethereum.org        96
+        solana.com          56
+        htxdao.com          **0**
+        tron.network        **0**
+        ==================  ====================
+
+        There is no middle ground to pick a threshold out of: a served page gives dozens,
+        a script-drawn one gives none. So zero is the signal, and zero is when the browser
+        is worth spending — the same browser the resolver already uses to *prove* a page,
+        with the same per-run page budget.
+
+        This is the layer that reads a project saying "these are ours", the strongest
+        claim there is short of a reviewer typing one. Losing it silently sent every
+        script-drawn project down to the guessing layer, which invents ``/blog`` and
+        ``/news``; those 404, and the coin was then reported to a person as having no news
+        page. HTX DAO is one of those coins and TRON is another, so this was never about
+        one project.
         """
 
         site = (official_website or "").strip()
@@ -95,15 +131,57 @@ class WebSourceDiscovery:
         try:
             body, _headers, _status = await self.fetcher.fetch(FetchTarget(site))
         except ShariaResearchError as exc:
+            if exc.code in RETRYABLE_WITH_BROWSER:
+                # Not an answer yet — a refusal a real browser may get past. The same
+                # list the page prover uses, imported rather than repeated, so the
+                # homepage and a candidate page can never disagree about which failures
+                # are worth a second look.
+                #
+                # ``hedera.com`` answers **403** to a plain request from this bot and
+                # nothing else. Before this the harvest gave up there and the coin's own
+                # website — the place its news link actually lives — was never read at
+                # all, for any coin behind a bot filter.
+                #
+                # ``robots_disallowed`` and ``robots_unavailable`` are deliberately not in
+                # that list. When a site's own rules say no, opening a browser instead is
+                # not a second try, it is going around the answer.
+                found = await self._links_after_scripts_run(site)
+                self._links[site] = found
+                return found
             logger.info("Could not read %s for its own links: %s", site, exc.code)
             self._links[site] = ()
             return ()
         except (httpx.HTTPError, ProviderCallError):
+            # The fetcher turns these into ``official_source_unavailable`` above, so this
+            # is defence rather than a live path. Left refusing, because a failure that
+            # got past that conversion is one nothing here understands.
             logger.info("Could not reach %s for its own links", site)
             self._links[site] = ()
             return ()
         found = extract_links(body, site)[:MAXIMUM_HARVESTED_LINKS]
+        if not found:
+            found = await self._links_after_scripts_run(site)
         self._links[site] = found
+        return found
+
+    async def _links_after_scripts_run(self, site: str) -> tuple[str, ...]:
+        """Draw the homepage in a browser and read its links from what a person would see.
+
+        Never raises and never fails the layer: the renderer reports every problem as a
+        reason rather than an exception, and a homepage nobody could draw simply means
+        this layer has no opinion — exactly what an empty answer already meant.
+        """
+
+        rendered = await self.renderer.render(site)
+        if not rendered.ok:
+            logger.info(
+                "Could not read %s with a browser either: %s",
+                site,
+                rendered.unavailable_reason,
+            )
+            return ()
+        found = extract_links(rendered.html, site)[:MAXIMUM_HARVESTED_LINKS]
+        logger.info("Read %d link(s) from %s after its scripts ran", len(found), site)
         return found
 
     # -- the open web ----------------------------------------------------------

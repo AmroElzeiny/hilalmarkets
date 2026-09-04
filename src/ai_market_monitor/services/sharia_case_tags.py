@@ -171,7 +171,23 @@ class SourceCoverage:
     """How many working official links one asset holds, per required category."""
 
     proved: dict[str, int]
+    #: Every address this coin has stored, working or not. An honest count of attempts.
     tried: int
+    #: How many of those are **not** working right now.
+    #:
+    #: Its own number, because ``tried`` alone cannot carry the sentence the queue prints.
+    #: "10 address(es) have been tried and none worked yet" was built from ``tried`` on
+    #: its own, so a coin holding two working community pages and eight dead news guesses
+    #: was described as having ten failures — and the reviewer was told nothing worked
+    #: when two things plainly did. Counting the failures separately is what lets the
+    #: sentence say only what is true.
+    failed: int = 0
+
+    @property
+    def working(self) -> int:
+        """Addresses that answer and count. Never negative, whatever the caller passed."""
+
+        return max(self.tried - self.failed, 0)
 
     @property
     def missing_categories(self) -> tuple[str, ...]:
@@ -201,16 +217,25 @@ def coverage_from_rows(rows) -> dict:
 
     proved: dict[object, dict[str, int]] = {}
     tried: dict[object, int] = {}
+    failed: dict[object, int] = {}
     for asset_id, category, verification_state, is_active in rows:
         tried[asset_id] = tried.get(asset_id, 0) + 1
         if verification_state != VERIFIED or not is_active:
+            # Counted here and not just skipped. A row that is switched off or was never
+            # proved is an address that did not work, and the queue's sentence is built
+            # from that number — not from how many rows exist.
+            failed[asset_id] = failed.get(asset_id, 0) + 1
             continue
         if category not in TRACKED_CATEGORIES:
             continue
         bucket = proved.setdefault(asset_id, {})
         bucket[category] = bucket.get(category, 0) + 1
     return {
-        asset_id: SourceCoverage(proved=proved.get(asset_id, {}), tried=count)
+        asset_id: SourceCoverage(
+            proved=proved.get(asset_id, {}),
+            tried=count,
+            failed=failed.get(asset_id, 0),
+        )
         for asset_id, count in tried.items()
     }
 
@@ -339,15 +364,35 @@ def classify(
 
 
 def _source_gap_reason(name: str, coverage: SourceCoverage) -> str:
+    """Why this coin still needs a page, saying only what is true of its addresses.
+
+    Three different situations produce this case and they must not share one sentence:
+
+    * nothing has been tried yet — say that, and do not claim any address failed;
+    * things were tried and **every one** failed — "none worked yet" is then true;
+    * things were tried, some of them work, and the coin is still short of the one
+      category the product requires. This is the case the old wording got wrong. It
+      counted every stored address, working ones included, and then said none of them
+      worked — so a coin with two live community pages and eight dead news guesses was
+      reported as ten failures. A reviewer reading "none worked" about pages they can
+      open in a browser stops believing the queue.
+    """
+
     missing = coverage.missing_categories
     what = (
         " or ".join(category_label(item) for item in missing) if missing else "official news"
     )
-    tried = (
-        f"{coverage.tried} address(es) have been tried and none worked yet"
-        if coverage.tried
-        else "no address has worked yet"
-    )
+    if not coverage.tried:
+        tried = "no address has been tried yet"
+    elif not coverage.working:
+        tried = f"{coverage.failed} address(es) have been tried and none worked yet"
+    elif not coverage.failed:
+        tried = f"its {coverage.working} working address(es) are not {what} pages"
+    else:
+        tried = (
+            f"{coverage.failed} address(es) have been tried without success, "
+            f"and the {coverage.working} that do work are not {what} pages"
+        )
     return (
         f"No working {what} page for {name}: {tried}. The system keeps looking by itself "
         "on every sweep — open this only if you already know the right address."

@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -76,7 +77,10 @@ from ai_market_monitor.services.sharia_source_catalog import (
     is_official_url,
     state_label,
 )
-from ai_market_monitor.services.sharia_source_resolution import SourceResolutionService
+from ai_market_monitor.services.sharia_source_resolution import (
+    SourceResolutionService,
+    pending_asset_ids,
+)
 from ai_market_monitor.services.site_analytics import SiteAnalyticsService
 from ai_market_monitor.services.system_brain_actions import (
     SystemBrainActionError,
@@ -100,6 +104,8 @@ from ai_market_monitor.services.system_brain_conversations import (
 from ai_market_monitor.services.system_brain_repository_index import (
     RepositoryEvidenceIndexService,
 )
+
+logger = logging.getLogger(__name__)
 
 PACKAGE_DIR = Path(__file__).resolve().parents[2]
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
@@ -421,6 +427,11 @@ async def system_brain_reviews(
             "undo_batch": await BulkReviewService(session, settings).latest_undoable_batch(
                 principal.user_id
             ),
+            # How many coins are waiting for somebody to find them an official page. Read
+            # from the same owner the on-demand check uses, so the number on the button is
+            # the number of coins the button will really visit.
+            "source_gap_waiting": len(await pending_asset_ids(session)),
+            "source_resolution_enabled": settings.sharia_source_resolution_enabled,
         }
     )
     return _protect(
@@ -510,10 +521,10 @@ async def system_brain_bulk_case_decision(
         await session.rollback()
         return _cases_redirect(request, error=str(exc))
     # Only once the marked cases are really in the database. The sweep reads them from
-    # there, so a task sent before the commit can look and find nothing. It is sent for
-    # an approval too, because an approval that met missing evidence sends those cases
-    # for research in the same click.
-    if outcome.researched or (action == "start_research" and outcome.applied):
+    # there, so a task sent before the commit can look and find nothing. This is an
+    # approval or a rejection, and an approval that met missing evidence sends those
+    # cases for research in the same click — that is the only research this route starts.
+    if outcome.researched:
         outcome.research_queued = service.queue_research_sweep()
     refused = _refused_summary(outcome.results)
     if not outcome.applied and not outcome.researched:
@@ -524,6 +535,149 @@ async def system_brain_bulk_case_decision(
     return _cases_redirect(
         request,
         success=outcome.message() + (f" Still waiting for you — {refused}" if refused else ""),
+    )
+
+
+@router.post(
+    "/dashboard/system-brain/cases/research",
+    include_in_schema=False,
+)
+async def system_brain_start_case_research(
+    request: Request,
+    reason: str = Form(default=""),
+    case_id: list[UUID] = Form(default=[]),
+    csrf_token: str = Form(...),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Go and look for evidence on the selected cases. Its own address, on purpose.
+
+    Research is not a decision, and until now it was posted to the address whose whole
+    job is "record one decision on the selected cases". Everything followed from that:
+    it needed the decision form's written sentence, it was answered with the decision
+    path's refusals, and a reviewer who only wanted the system to search was told their
+    case had no verdict to give. Splitting the address splits all of it.
+
+    **Nothing here decides or publishes anything.** No Shariah status is touched, no
+    ``ReviewDecision`` is written, and nothing reaches a customer. Two background jobs
+    come out of it and they are kept apart, because sending one to the other's queue
+    marks a case handled while the work it needs never runs:
+
+    * cases with a dossier to gather go to the research sweep;
+    * "no official page found yet" jobs go to the source hunt, which re-reads the coin's
+      CoinMarketCap record and its own website — and it is told **exactly which coins**,
+      so it does the work the reviewer asked for and not the whole waiting list.
+
+    Both are handed over after the commit and the reviewer comes straight back. A hundred
+    coins is a hundred fetches against other people's servers with a wait between each,
+    which is minutes — far longer than a web request may take.
+    """
+
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    service = BulkReviewService(session, settings)
+    try:
+        outcome = await service.research(
+            case_id,
+            reason=reason,
+            admin_user_id=principal.user_id,
+        )
+        await session.commit()
+    except BulkReviewError as exc:
+        await session.rollback()
+        return _cases_redirect(request, error=str(exc))
+    # Only once the marked cases are really in the database. Both workers read them from
+    # there, so a task sent before the commit can look and find nothing.
+    if outcome.applied > outcome.hunting:
+        outcome.research_queued = service.queue_research_sweep()
+    # Looking for official pages can be switched off. The worker then stops without doing
+    # anything and says so only in its own log, so without this the reviewer would read
+    # "3 coins are being looked up again" about a search that never started.
+    switched_off = ""
+    if outcome.hunting:
+        if settings.sharia_source_resolution_enabled:
+            service.queue_source_hunt(outcome.hunt_asset_ids)
+        else:
+            switched_off = (
+                " Looking for official pages is switched off, so those coins were not "
+                "checked. Turn on SHARIA_SOURCE_RESOLUTION_ENABLED first."
+            )
+    refused = _refused_summary(outcome.results)
+    if not outcome.applied:
+        return _cases_redirect(
+            request,
+            error=refused or "No case could be sent for research.",
+        )
+    return _cases_redirect(
+        request,
+        success=outcome.message()
+        + switched_off
+        + (f" Still waiting for you — {refused}" if refused else ""),
+    )
+
+
+@router.post(
+    "/dashboard/system-brain/cases/recheck-sources",
+    include_in_schema=False,
+)
+async def system_brain_recheck_official_sources(
+    request: Request,
+    csrf_token: str = Form(...),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Look at every coin in the "Pages not found" list again, now.
+
+    The scheduled sweep walks the whole coin universe oldest first, so after a fix lands
+    it can be days before it reaches the coins a reviewer is actually looking at. This is
+    the same work, aimed only at those coins, started by hand.
+
+    It **decides nothing**. It re-reads addresses and rewrites what each task says; no
+    Shariah status is touched, nothing is published, and no case is closed except one
+    whose pages were genuinely found.
+
+    The work happens in the worker, not here. A hundred coins is a hundred fetches
+    against other people's servers with a wait between each, which is minutes — far
+    longer than a web request may take. So this hands the job over and comes straight
+    back, and the reviewer reads the result on the page as the tasks update themselves.
+    """
+
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    if not settings.sharia_source_resolution_enabled:
+        return _cases_redirect(
+            request,
+            error=(
+                "Looking for official pages is switched off, so nothing was checked. "
+                "Turn on SHARIA_SOURCE_RESOLUTION_ENABLED first."
+            ),
+        )
+    waiting = len(await pending_asset_ids(session))
+    if not waiting:
+        return _cases_redirect(
+            request,
+            success="No coin is waiting for an official page, so there was nothing to check.",
+        )
+    try:
+        from ai_market_monitor.worker import app as worker_app
+
+        worker_app.send_task("ai_market_monitor.recheck_official_sources_for_open_cases")
+    except Exception:  # noqa: BLE001 - told to the reviewer, never raised
+        logger.warning("On-demand official source recheck could not be queued.")
+        return _cases_redirect(
+            request,
+            error=(
+                "The check could not be started just now. The scheduled one still runs "
+                "on its own."
+            ),
+        )
+    return _cases_redirect(
+        request,
+        success=(
+            f"Checking {waiting} coin(s) again. Each one takes a little while because "
+            "the system waits between visits to other people's sites. Come back to this "
+            "page in a few minutes — the tasks update themselves."
+        ),
     )
 
 
@@ -2119,7 +2273,7 @@ async def system_brain_add_official_source(
     address" without giving anybody a place to add it would be a queue that can only
     ever grow.
 
-    The address a person types is **not** trusted more than one the machine guessed. It
+    The address a person types is **not** trusted more than one the machine found. It
     goes in as a candidate and is fetched immediately; if it is dead, or the site
     refuses robots, or it is a news page that stopped publishing years ago, it is
     refused here and the task stays open. A person can be wrong about a URL, and the

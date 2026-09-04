@@ -1,6 +1,9 @@
+import contextlib
 import logging
 import time
-from typing import TYPE_CHECKING
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any
 
 from celery import Celery
 from celery.signals import task_postrun
@@ -548,6 +551,11 @@ def process_sharia_authority_imports() -> dict:
 @app.task(name="ai_market_monitor.resolve_official_sources")
 def resolve_official_sources() -> dict:
     return _run_async_task(_resolve_official_sources())
+
+
+@app.task(name="ai_market_monitor.recheck_official_sources_for_open_cases")
+def recheck_official_sources_for_open_cases(asset_ids: list[str] | None = None) -> dict:
+    return _run_async_task(_recheck_official_sources_for_open_cases(asset_ids))
 
 
 @app.task(name="ai_market_monitor.send_sharia_review_reminders")
@@ -1384,6 +1392,135 @@ async def _resolve_official_sources() -> dict:
         # looking for company for.
         "links_gone_quiet": sweep.quiet,
         "sent_to_a_person": sweep.escalated,
+    }
+
+
+#: How long one on-demand source recheck may hold its lock before another may start.
+#:
+#: Long enough for a real run: a few hundred coins, several addresses each, with a
+#: politeness wait between every fetch. Short enough that a worker killed mid-run does not
+#: block the button for the rest of the day — the lock expires by itself, so there is
+#: nothing for a person to clear.
+RECHECK_LOCK_SECONDS = 2 * 60 * 60
+
+RECHECK_LOCK_KEY = "hilalmarkets:lock:recheck-official-sources"
+
+
+@asynccontextmanager
+async def _only_one_recheck() -> AsyncIterator[bool]:
+    """Hold a lock shared by every worker, so one press means one sweep.
+
+    A button a person can press twice is pressed twice. Two sweeps at once would send two
+    requests to the same third-party site at the same moment — which is exactly what
+    ``SHARIA_SCRAPER_CONCURRENCY``, fixed at 1, and the wait between fetches exist to
+    prevent — and would start a second Chromium on a 3.9 GB server. The Celery worker runs
+    one process per CPU, so "the task is already running" is a real state, not a
+    theoretical one.
+
+    **No Redis means the sweep still runs.** A missing lock is a missing *guard*, not a
+    reason to refuse work: this yields True and the run goes ahead, exactly as it did
+    before there was a lock. Failing closed here would let a Redis outage silently turn
+    the button off with no way for anybody to tell.
+    """
+
+    client: Any = None
+    if settings.app_env != "test":
+        try:
+            from redis.asyncio import Redis
+
+            client = Redis.from_url(settings.redis_url)
+            taken = await client.set(
+                RECHECK_LOCK_KEY, "1", nx=True, ex=RECHECK_LOCK_SECONDS
+            )
+        except Exception:  # noqa: BLE001 - a guard that cannot run is not a failure
+            logger.warning("Could not take the recheck lock; running without one.")
+            client, taken = None, True
+    else:
+        taken = True
+    try:
+        yield bool(taken)
+    finally:
+        # Released whatever happened, so a second press does not wait out the expiry. The
+        # expiry is the backstop for a worker killed before it reaches this line. Only the
+        # run that took the lock may release it — a run that was refused must never delete
+        # the key the running one is holding.
+        if client is not None:
+            if taken:
+                with contextlib.suppress(Exception):
+                    await client.delete(RECHECK_LOCK_KEY)
+            with contextlib.suppress(Exception):
+                await client.aclose()
+
+
+async def _recheck_official_sources_for_open_cases(
+    asset_ids: list[str] | None = None,
+) -> dict:
+    """Check the coins that have an open "Pages not found" task, right now.
+
+    Started by a reviewer on the Cases page, never by the calendar. It is the same work
+    the daily sweep does, aimed at a different set: only the coins somebody is being
+    asked about, every address fetched again whatever the recheck calendar says, and
+    every discovery layer allowed to run.
+
+    ``asset_ids`` narrows it to the coins the reviewer actually ticked. Two buttons send
+    this one task and they mean different sets, so the set has to be said out loud:
+
+    * "Check these coins again" above the list means every waiting coin, and sends
+      nothing here;
+    * "Run research" under the list means the ticked ones, and names them. Without that
+      a reviewer who ticked three coins started a fetch of all hundred and fifty-seven,
+      minutes of work against other people's servers that nobody asked for.
+
+    Reported and never raised, like the scheduled sweep. This is a background job nobody
+    is watching the return value of; a coin whose site is down must not stop the rest.
+    """
+
+    from uuid import UUID
+
+    from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.sharia_source_resolution import (
+        SourceResolutionService,
+    )
+
+    if not settings.sharia_source_resolution_enabled:
+        return {"status": "disabled"}
+    only: set[UUID] | None = None
+    if asset_ids:
+        # Fail closed. An unreadable id must not quietly widen the run into "every
+        # waiting coin" — that is the opposite of what was asked for, and it would be
+        # invisible.
+        try:
+            only = {UUID(str(item)) for item in asset_ids}
+        except (ValueError, AttributeError, TypeError):
+            logger.warning("On-demand source recheck was sent an unreadable coin id.")
+            return {"status": "bad_request"}
+    async with _only_one_recheck() as may_run:
+        if not may_run:
+            logger.info("An on-demand source recheck is already running; this one stops.")
+            return {"status": "already_running"}
+        async with SessionFactory() as session:
+            try:
+                sweep = await SourceResolutionService(
+                    session,
+                    settings,
+                    # The whole point of pressing the button. Without it every address
+                    # that was fetched inside the recheck window is skipped, and the run
+                    # reports success having changed nothing.
+                    force_recheck=True,
+                ).resolve_open_cases(only=only)
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                logger.exception("On-demand official source recheck failed")
+                return {"status": "failed"}
+    return {
+        "status": "completed",
+        "assets_checked": len(sweep.assets),
+        "links_proved": sweep.proved,
+        "links_gone_quiet": sweep.quiet,
+        # Coins still without a working page. Their task stays open, rewritten with what
+        # was tried this time; the rest were closed.
+        "still_open": sweep.escalated,
     }
 
 
