@@ -10,8 +10,8 @@
     There is no assistant on this page: no chat panel, no chat popup, and no
     "Hilal Markets Assistant" box. Authoring never requires the assistant. -#}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260904-research-split">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-monitor-test.css') }}?v=20260904-research-split">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260905-inspector-left">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-monitor-test.css') }}?v=20260905-inspector-left">
 {% endblock %}
 {% block content %}
 
@@ -171,6 +171,19 @@
     </div>
 
     <div class="m-work">
+      {#- The settings panel is first in the markup because it is first on the screen:
+          it sits on the inline-start side of the board. Reading order and tab order
+          follow the eye rather than crossing the board and coming back. -#}
+      <aside class="m-inspector" data-inspector hidden aria-label="Card settings">
+        <header class="m-inspector-head">
+          <span class="m-inspector-kind" data-inspector-kind></span>
+          <button class="t-close" type="button" data-inspector-close aria-label="Close card settings">
+            <span data-icon="close" data-icon-class="icon"></span>
+          </button>
+        </header>
+        <div class="m-inspector-body" data-inspector-body></div>
+      </aside>
+
       <div class="m-board" id="m-board" data-board tabindex="0" aria-label="The board. Use the arrow keys to move between cards.">
         <div class="m-world" data-world>
           {#- The arrow heads say which way the rule flows. Two of them, because a
@@ -220,16 +233,6 @@
           </div>
         </div>
       </div>
-
-      <aside class="m-inspector" data-inspector hidden aria-label="Card settings">
-        <header class="m-inspector-head">
-          <span class="m-inspector-kind" data-inspector-kind></span>
-          <button class="t-close" type="button" data-inspector-close aria-label="Close card settings">
-            <span data-icon="close" data-icon-class="icon"></span>
-          </button>
-        </header>
-        <div class="m-inspector-body" data-inspector-body></div>
-      </aside>
     </div>
 
     <section class="m-checks" data-checks hidden aria-label="What is still missing">
@@ -501,4 +504,4 @@
 
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-monitor-test.js') }}?v=20260904-research-split"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-monitor-test.js') }}?v=20260905-inspector-left"></script>{% endblock %}

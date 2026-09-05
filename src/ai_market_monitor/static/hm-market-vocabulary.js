@@ -78,16 +78,19 @@ export function toneIcon(tone) {
 /**
  * The words shown on a status chip.
  *
- * The stored label is authoritative. "Eligible" is rewritten to "Halal" only because
- * that is the word this product uses with its own customers for the same stored
- * status — the status itself is never reinterpreted here.
+ * The stored label is authoritative. "Eligible" is rewritten to "Shariah-compliant"
+ * only because that is the word this product uses with its own customers for the same
+ * stored status — the status itself is never reinterpreted here.
+ *
+ * The spelling is "Shariah", not "Sharia". Brand guide section 16: a status badge is
+ * technical usage, and `core/copy_rules.py` enforces that spelling elsewhere.
  */
 export function statusText(item) {
   const stored = String(item?.status_label || "").trim();
-  if (stored) return stored.replace(/^eligible\b/i, "Halal");
+  if (stored) return stored.replace(/^eligible\b/i, "Shariah-compliant");
   const tone = assetTone(item?.status);
   return {
-    eligible: "Halal",
+    eligible: "Shariah-compliant",
     review: "Being reviewed",
     excluded: "Not eligible",
     neutral: "Not enough information",

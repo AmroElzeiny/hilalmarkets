@@ -103,11 +103,14 @@ if (root) {
 
   function marketStatusLabel(item) {
     const fallback = item.status === "eligible"
-      ? "Halal"
+      ? "Shariah-compliant"
       : item.status === "eligible_with_qualifications"
-        ? "Halal with qualifications"
+        ? "Shariah-compliant with qualifications"
         : "Screened";
-    return String(item.status_label || fallback).replace(/^eligible\b/i, "Halal");
+    return String(item.status_label || fallback).replace(
+      /^eligible\b/i,
+      "Shariah-compliant",
+    );
   }
 
   function loadLogo(container, item) {

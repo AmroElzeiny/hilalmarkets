@@ -269,7 +269,9 @@ def test_a_shariah_status_always_has_its_evidence_within_reach(
     assert not offences, f"the screened watchlist rendered: {offences}"
 
     # Half one: the status is stated, and its evidence is offered beside it.
-    assert "halal" in card.inner_text().casefold(), "the card states no status to check"
+    assert "shariah-compliant" in card.inner_text().casefold(), (
+        "the card states no status to check"
+    )
     passport_button = card.locator("[data-quick-view]")
     expect(passport_button).to_be_visible()
 

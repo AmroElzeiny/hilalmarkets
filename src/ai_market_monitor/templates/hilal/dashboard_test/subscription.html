@@ -2,8 +2,8 @@
 {% from "hilal/macros/payment_provider_badge.html" import payment_provider_badge %}
 {% from "hilal/macros/discount_code_box.html" import discount_code_box %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260904-research-split">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260904-research-split">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260905-inspector-left">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260905-inspector-left">
 {% endblock %}
 {% block content %}
 
@@ -464,6 +464,6 @@
 <script id="s-plan-facts" type="application/json">{{ plan_cards|tojson }}</script>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260904-research-split"></script>
-<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260904-research-split"></script>
+<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260905-inspector-left"></script>
+<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260905-inspector-left"></script>
 {% endblock %}

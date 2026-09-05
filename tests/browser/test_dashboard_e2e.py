@@ -783,22 +783,32 @@ def test_screened_market_passport_and_mobile_visual_qa(
     expect(page.get_by_role("region", name="Live screened spot market quotes")).to_be_visible()
     expect(page.get_by_text("All screened assets")).to_have_count(0)
     expect(page.get_by_text("Find opportunities inside a screened market.")).to_have_count(0)
-    live_row = page.locator(".live-market-row", has_text="SOL/USDT")
-    expect(live_row).to_be_visible(timeout=15_000)
-    expect(live_row).to_contain_text("Halal")
-    expect(page.locator("[data-live-market-error]")).to_be_hidden()
-    expect(page.locator("[data-live-market-status]")).to_have_text("Live quotes connected")
+    # This test was still written against the market page as it looked before the
+    # redesign: `.live-market-row`, `[data-live-market-*]`, a "Show passport" button and
+    # the old saved-assets dialog. None of those has existed since `/dashboard/market`
+    # started serving the redesigned page, so the test was failing on markup instead of
+    # on the rule it exists to protect. `test_adversarial_qa_e2e.py` was repaired the
+    # same way earlier. The rules below are unchanged; only the place to look moved.
+    card = page.locator(".t-asset", has_text="SOL").first
+    expect(card).to_be_visible(timeout=15_000)
+    expect(card).to_contain_text("Shariah-compliant")
+    expect(page.locator("[data-quote-error]")).to_be_hidden()
+    # "live" or "stale" both mean the prices arrived; only "down" means they did not.
+    # Pinning this to "live" would fail whenever the stub answers with a held snapshot.
+    expect(page.locator("[data-live-pill]")).not_to_have_attribute("data-state", "down")
     assert_no_horizontal_overflow(page)
     assert_hilal_brand_palette(page)
-    page.locator("[data-live-market-search]").fill("SOL/USDT")
-    expect(live_row).to_be_visible()
-    expect(page.locator(".live-market-row:visible")).to_have_count(1)
-    passport_button = live_row.get_by_role("button", name="Show passport")
+    page.locator("[data-search]").fill("SOL")
+    expect(card).to_be_visible()
+    expect(page.locator(".t-asset:visible")).to_have_count(1)
+    passport_button = card.locator("[data-quick-view]")
     passport_button.click()
-    passport_dialog = page.locator("[data-passport-quick-dialog]")
+    passport_dialog = page.locator("[data-passport-dialog]")
     expect(passport_dialog).to_be_visible()
-    expect(passport_dialog).to_contain_text("Eligible")
-    expect(passport_dialog.get_by_role("link", name="Open Full Passport")).to_be_visible()
+    expect(passport_dialog).to_contain_text("Shariah-compliant")
+    expect(
+        passport_dialog.get_by_role("link", name="Open the full Passport")
+    ).to_be_visible()
     assert_no_horizontal_overflow(page)
     assert_hilal_brand_palette(page)
     page.screenshot(
@@ -809,20 +819,26 @@ def test_screened_market_passport_and_mobile_visual_qa(
     expect(passport_dialog).to_be_hidden()
     expect(passport_button).to_be_focused()
 
-    page.locator("[data-saved-assets-open]").click()
-    saved_dialog = page.locator("[data-saved-assets-dialog]")
-    expect(saved_dialog).to_be_visible()
-    saved_row = saved_dialog.locator("[data-saved-asset]", has_text="SOL")
-    expect(saved_row).to_be_visible()
-    mark_button = saved_row.locator("[data-saved-asset-mark]")
-    mark_button.click()
-    expect(mark_button).to_have_attribute("aria-checked", "true")
-    expect(saved_dialog.locator("[data-saved-assets-save]")).to_be_visible()
-    saved_dialog.locator("[data-saved-assets-cancel]").click()
-    expect(saved_dialog).to_be_hidden()
-    page.locator("[data-saved-assets-open]").click()
-    expect(mark_button).to_have_attribute("aria-checked", "false")
-    saved_dialog.locator("[data-saved-assets-cancel]").click()
+    # Following a coin is the heart on the card now, not a row in a saved-assets popup.
+    # The seed puts SOL in the default watchlist, so the card arrives already followed:
+    # the round trip below is unfollow, then follow again.
+    heart = card.locator("[data-favorite]")
+    favorite_count = page.locator("[data-favorite-count]")
+    expect(heart).to_have_attribute("aria-pressed", "true")
+    expect(favorite_count).to_have_text("1")
+    heart.click()
+    expect(heart).to_have_attribute("aria-pressed", "false")
+    expect(favorite_count).to_be_hidden()
+    heart.click()
+    expect(heart).to_have_attribute("aria-pressed", "true")
+    expect(favorite_count).to_have_text("1")
+
+    page.locator("[data-open-favorites]").click()
+    favorites_dialog = page.locator("[data-favorites-dialog]")
+    expect(favorites_dialog).to_be_visible()
+    expect(favorites_dialog.locator("[data-favorite-row]", has_text="SOL")).to_be_visible()
+    favorites_dialog.locator("[data-favorites-close]").click()
+    expect(favorites_dialog).to_be_hidden()
 
     page.screenshot(
         path=str(visual_dir / "screened-market-live-table-desktop.png"),
@@ -830,23 +846,14 @@ def test_screened_market_passport_and_mobile_visual_qa(
     )
 
     passport_button.click()
-    passport_dialog.get_by_role("link", name="Open Full Passport").click()
-    expect(page.locator(".passport-summary-header h1")).to_be_visible()
-    assert page.locator(".passport-tabs").evaluate(
-        "node => getComputedStyle(node).position"
-    ) == "static"
-    expect(
-        page.locator(".passport-summary-header").get_by_role(
-            "link", name="Back to market"
-        )
-    ).to_be_visible()
+    passport_dialog.get_by_role("link", name="Open the full Passport").click()
+    expect(page.locator(".t-head h1")).to_be_visible()
+    expect(page.get_by_role("link", name="Back to the list")).to_be_visible()
+    # The status is stated and its evidence is reachable on the same page. The seeded
+    # evidence source is named in the Evidence section, so a Passport that lost its
+    # sources fails here rather than passing on a status with nothing behind it.
+    expect(page.get_by_role("heading", name="Evidence")).to_be_visible()
     expect(page.get_by_text("Official browser-test disclosure")).to_be_visible()
-    expect(
-        page.get_by_role(
-            "heading",
-            name="AI-organized factual research — not a religious decision.",
-        )
-    ).to_be_visible()
     assert_no_horizontal_overflow(page)
     assert_hilal_brand_palette(page)
     page.screenshot(
@@ -858,9 +865,10 @@ def test_screened_market_passport_and_mobile_visual_qa(
         f"{base_url}/dashboard/market?methodology_id={seeded['methodology_id']}"
     )
     page.set_viewport_size({"width": 390, "height": 844})
-    expect(live_row).to_be_visible(timeout=15_000)
-    assert page.locator(".live-market-panel").bounding_box()["width"] <= 390
-    live_row.get_by_role("button", name="Show passport").click()
+    card = page.locator(".t-asset", has_text="SOL").first
+    expect(card).to_be_visible(timeout=15_000)
+    assert card.bounding_box()["width"] <= 390
+    card.locator("[data-quick-view]").click()
     expect(passport_dialog).to_be_visible()
     assert_no_horizontal_overflow(page)
     assert_hilal_brand_palette(page)

@@ -1,12 +1,12 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260904-research-split">
-<link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260904-research-split">
+<link rel="stylesheet" href="{{ url_for('static', path='/dashboard.css') }}?v=20260905-inspector-left">
+<link rel="stylesheet" href="{{ url_for('static', path='/sharia-product.css') }}?v=20260905-inspector-left">
 {% endblock %}
 {% block content %}
 {% include "hilal/dashboard/partials/strategy_detail_content.html" %}
 {% endblock %}
 {% block page_scripts %}
-<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260904-research-split"></script>
-<script src="{{ url_for('static', path='/hilalmarkets-cockpit.js') }}?v=20260904-research-split"></script>
+<script src="{{ url_for('static', path='/dashboard.js') }}?v=20260905-inspector-left"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-cockpit.js') }}?v=20260905-inspector-left"></script>
 {% endblock %}

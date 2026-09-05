@@ -736,13 +736,17 @@ body.hilal-dashboard .hm-m .m-coach .t-action {
 
 /* ── Inspector ─────────────────────────────────────────────────────────────── */
 
+/* The panel is the first child of .m-work, so it sits on the inline-start side of the
+   board and the dividing line belongs on its inline-end edge — the side that touches
+   the board. A start-side border would draw against the outer frame instead and leave
+   the panel and the board with no line between them. */
 body.hilal-dashboard .hm-m .m-inspector {
   display: flex;
   overflow: hidden auto;
   width: var(--m-inspector-w);
   flex: 0 0 var(--m-inspector-w);
   flex-direction: column;
-  border-inline-start: 1px solid var(--t-line);
+  border-inline-end: 1px solid var(--t-line);
   background: var(--t-surface);
 }
 
@@ -1785,7 +1789,7 @@ body.hilal-dashboard dialog.m-launch .m-outcome[data-tone="bad"] .m-outcome-mark
     max-height: 72%;
     flex: none;
     border-top: 1px solid var(--t-line);
-    border-inline-start: 0;
+    border-inline-end: 0;
     border-radius: var(--t-r-lg) var(--t-r-lg) 0 0;
     box-shadow: var(--hm-shadow-md);
   }
