@@ -223,48 +223,6 @@ class ConditionCapabilityRegistry:
         payload["items"] = []
         hidden_provider_required: list[dict[str, Any]] = []
         hidden_unavailable: list[dict[str, Any]] = []
-        candle_parameters = [
-            {
-                "name": "min_body_percent",
-                "type": "number",
-                "default": 25,
-                "required": False,
-                "description": "Minimum real-body percentage of the candle range.",
-                "options": (),
-            },
-            {
-                "name": "max_body_percent",
-                "type": "number",
-                "default": 40,
-                "required": False,
-                "description": "Maximum real-body percentage of the candle range.",
-                "options": (),
-            },
-            {
-                "name": "wick_ratio",
-                "type": "number",
-                "default": 2,
-                "required": False,
-                "description": "Required wick-to-body ratio.",
-                "options": (),
-            },
-            {
-                "name": "trend_context_required",
-                "type": "boolean",
-                "default": False,
-                "required": False,
-                "description": "Require deterministic preceding trend context.",
-                "options": (),
-            },
-            {
-                "name": "confirmation_required",
-                "type": "boolean",
-                "default": False,
-                "required": False,
-                "description": "Require a confirming candle after the pattern.",
-                "options": (),
-            },
-        ]
         for capability in self._capabilities:
             item = capability.to_dict()
             compatibility_row = compatibility.get(capability.key)
@@ -278,21 +236,6 @@ class ConditionCapabilityRegistry:
                     else compatibility_row.availability
                 )
                 item["compatibility_notes"] = list(compatibility_row.notes)
-            if capability.condition_type == "candle_pattern":
-                known = {parameter["name"] for parameter in item["parameters"]}
-                item["parameters"].extend(
-                    parameter for parameter in candle_parameters if parameter["name"] not in known
-                )
-                item["default_parameters"] = {
-                    "min_body_percent": 25,
-                    "max_body_percent": 40,
-                    "wick_ratio": 2,
-                    "trend_context_required": False,
-                    "confirmation_required": False,
-                    "pattern_strength": "medium",
-                    "direction": "neutral",
-                    **item["default_parameters"],
-                }
             item["condition_template"] = builder_template_payload(capability)
             item["condition_template"]["availability"] = item["availability"]
             item["condition_template"]["provider_required"] = bool(

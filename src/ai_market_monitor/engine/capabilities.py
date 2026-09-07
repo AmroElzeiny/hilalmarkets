@@ -449,6 +449,32 @@ def _resource_cost(warmup_candles: int, provider_required: str | None) -> str:
     return "low"
 
 
+CANDLE_PATTERN_PARAMETERS = (
+    CapabilityParameter(
+        "min_body_percent", "number", 25,
+        description="Minimum real-body percentage of the candle range.",
+        minimum=0, maximum=100,
+    ),
+    CapabilityParameter(
+        "max_body_percent", "number", 40,
+        description="Maximum real-body percentage of the candle range.",
+        minimum=0, maximum=100,
+    ),
+    CapabilityParameter(
+        "wick_ratio", "number", 2, description="Required wick-to-body ratio.",
+        minimum=0,
+    ),
+    CapabilityParameter(
+        "trend_context_required", "boolean", False,
+        description="Require deterministic preceding trend context.",
+    ),
+    CapabilityParameter(
+        "confirmation_required", "boolean", False,
+        description="Require a confirming candle after the pattern.",
+    ),
+)
+
+
 def _cap(
     key: str,
     label: str,
@@ -514,6 +540,19 @@ def _cap(
     proof_template: str | None = None,
     resource_cost: str | None = None,
 ) -> CapabilitySpec:
+    if condition_type == "candle_pattern":
+        # Settle the exposed inputs before generating the schema. Publication,
+        # templates and compiler validation all read this same capability.
+        known = {parameter.name for parameter in parameters}
+        parameters = (*parameters, *(
+            parameter for parameter in CANDLE_PATTERN_PARAMETERS if parameter.name not in known
+        ))
+        default_parameters = {
+            **{parameter.name: parameter.default for parameter in CANDLE_PATTERN_PARAMETERS},
+            "pattern_strength": "medium",
+            "direction": "neutral",
+            **(default_parameters or {}),
+        }
     searchable_text = " ".join((key, label, category, description, *aliases, *examples))
     resolved_comparator, supported_comparators = _resolve_comparison(
         key=key,
@@ -3398,24 +3437,11 @@ def _candle_pattern_capabilities() -> list[CapabilitySpec]:
             aliases=(name.replace("_", " "),),
             operand_kind="candle_pattern",
             operand_name=name,
-            default_parameters={
-                "min_body_percent": 25,
-                "max_body_percent": 40,
-                "wick_ratio": 2,
-                "trend_context_required": False,
-                "confirmation_required": False,
-                "pattern_strength": "medium",
-                "direction": "neutral",
-            },
             supported_comparators=("is_true", "is_false"),
             default_comparator="is_true",
             default_threshold=True,
             parameters=(
-                CapabilityParameter("min_body_percent", "number", 25),
-                CapabilityParameter("max_body_percent", "number", 40),
-                CapabilityParameter("wick_ratio", "number", 2),
-                CapabilityParameter("trend_context_required", "boolean", False),
-                CapabilityParameter("confirmation_required", "boolean", False),
+                *CANDLE_PATTERN_PARAMETERS,
                 CapabilityParameter(
                     "pattern_strength",
                     "choice",

@@ -120,49 +120,15 @@
     });
   }
 
-  const defaultCapabilities = {
-    condition_types: [
-      { value: "indicator", label: "Indicator" },
-      { value: "price_action", label: "Price action" },
-      { value: "candle_pattern", label: "Candle pattern" },
-      { value: "market_filter", label: "Market filter" },
-      { value: "risk", label: "Risk" },
-    ],
-    indicators: [
-      { name: "ema", label: "EMA" },
-      { name: "sma", label: "SMA" },
-      { name: "rsi", label: "RSI" },
-      { name: "macd", label: "MACD" },
-      { name: "volume_ratio", label: "Volume ratio" },
-      { name: "vwap", label: "VWAP" },
-    ],
-    price_actions: [
-      { name: "range_breakout", label: "Range breakout" },
-      { name: "bullish_liquidity_sweep", label: "Bullish liquidity sweep" },
-    ],
-    candle_patterns: [
-      { name: "bullish_engulfing", label: "Bullish engulfing" },
-      { name: "strong_close_near_high", label: "Strong close near high" },
-    ],
-    market_filters: [{ name: "average_volume", label: "Average volume" }],
-    risk_rules: [],
-    items: [],
-    categories: [],
-    logic_operators: [
-      { key: "and", display_name: "All of", parameters: [] },
-      { key: "or", display_name: "Any of", parameters: [] },
-      { key: "not", display_name: "Not", parameters: [] },
-      { key: "sequence", display_name: "Sequence / Then", parameters: [] },
-    ],
-  };
-
-  let capabilityRegistry = defaultCapabilities;
+  let capabilityRegistry = null;
 
   async function loadCapabilityRegistry() {
+    // A failed refresh must also discard any previously loaded condition items.
+    capabilityRegistry = null;
     try {
       capabilityRegistry = await api("/capabilities");
     } catch {
-      capabilityRegistry = defaultCapabilities;
+      throw new Error("Conditions are unavailable. Reload the page to try again.");
     }
     return capabilityRegistry;
   }

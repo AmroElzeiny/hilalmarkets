@@ -59,17 +59,6 @@ def condition_template(
     key: str | None = None,
 ) -> dict[str, Any]:
     parameters = deepcopy(capability.default_parameters)
-    if capability.condition_type == "candle_pattern":
-        parameters = {
-            "min_body_percent": 25,
-            "max_body_percent": 40,
-            "wick_ratio": 2,
-            "trend_context_required": False,
-            "confirmation_required": False,
-            "pattern_strength": "medium",
-            "direction": "neutral",
-            **parameters,
-        }
     comparator = capability.default_comparator
     if comparator not in capability.supported_comparators:
         # This used to pick a replacement comparison — "gte" if the capability allowed
