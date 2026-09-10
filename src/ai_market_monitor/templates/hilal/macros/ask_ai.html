@@ -1,0 +1,22 @@
+{#- The Ask AI button.
+
+    One producer. Every surface that wants a button calls this macro, so the markup,
+    the accessible name, and the gate all live in one place and cannot drift apart.
+
+    The macro must be imported `with context` because it reaches for `hilal_chat` and
+    `settings` to decide whether the assistant is on. When the gate is off, nothing is
+    rendered — there is no disabled button and no dead control.
+
+    The visible label is always "Ask AI". The accessible name is passed by the caller
+    and must start with those words (WCAG 2.5.3). The button is not a toggle: it opens
+    the assistant window and never closes it, so it carries `aria-haspopup` and
+    `aria-controls` but not `aria-expanded`.
+-#}
+{%- macro ask_ai(name, topic=none, compact=false) -%}
+  {%- if hilal_chat_gate(hilal_chat|default(false), settings) -%}
+    <button type="button" class="t-action t-action-is-ask{% if compact %} is-compact{% endif %}" aria-haspopup="dialog" aria-controls="hilal-window" data-hilal-ask{% if topic %} data-hilal-topic="{{ topic }}"{% endif %} aria-label="{{ name }}">
+      <span data-icon="spark" data-icon-class="icon-sm"></span>
+      Ask AI
+    </button>
+  {%- endif -%}
+{%- endmacro -%}

@@ -6,8 +6,13 @@ from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_PRESENTATIONS,
+    PURCHASABLE_PLAN_CODES,
     plan_offer_payload,
+    visible_plan_comparison,
 )
+
+#: The deadline exactly as the fallback in `Pricing.tsx` has to spell it.
+DEFAULT_PROMOTION_DEADLINE = PROMOTION_ENDS_AT.isoformat()
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "Hilal-Markets-Website" / "src"
@@ -538,7 +543,15 @@ def test_pricing_uses_approved_plans_accessibility_and_real_handoff():
     """The plans quote what the server charges, and never a number typed out here."""
 
     app = APP.read_text(encoding="utf-8")
-    pricing = (FRONTEND / "components" / "Pricing.tsx").read_text(encoding="utf-8")
+    # A TypeScript string escapes the apostrophe in "Why wasn't I alerted?" as \'. The
+    # backslash is source punctuation, not something a visitor reads, so it is taken out
+    # before comparing the file with the words the server would send.
+    pricing = (
+        (FRONTEND / "components" / "Pricing.tsx")
+        .read_text(encoding="utf-8")
+        .replace("\\'", "'")
+        .replace('\\"', '"')
+    )
     chrome = (FRONTEND / "components" / "SiteChrome.tsx").read_text(encoding="utf-8")
     styles = STYLES.read_text(encoding="utf-8")
 
@@ -553,24 +566,28 @@ def test_pricing_uses_approved_plans_accessibility_and_real_handoff():
     assert 'aria-controls="site-mobile-menu"' in chrome
     for content in (
         "Choose how deeply you want to monitor the market.",
-        "Basic",
-        "Monitor",
-        "Pro",
-        # Annual is not open on any plan, and Pro is not open at all.
+        # Annual is not open on any plan; both paid plans are open monthly.
         "annualAvailable: false",
-        "monthlyAvailable: false",
-        "Choose Monitor monthly",
-        "7-day money-back guarantee",
-        "Cancel within 7 days of payment for a full refund.",
-        "5 active market monitors",
-        "2 monitor notifications per week across all monitors",
-        "1 quick scan per week",
-        "10 active market monitors",
-        "Up to 50 monitor alerts per day",
-        "Unlimited monitor alerts per day",
-        "WhatsApp delivery - coming soon",
+        "monthlyAvailable: true",
     ):
         assert content in pricing
+
+    # Every plan name, button word, refund sentence and feature line the server would
+    # send has to be in the fallback too, spelled the same way. Read from `core.plans`
+    # rather than typed here, so renaming a plan or editing one bullet fails this test
+    # instead of quietly leaving the landing page saying the old thing.
+    for code, presentation in PUBLIC_PLAN_PRESENTATIONS.items():
+        assert PLAN_DEFINITIONS[code].name in pricing, code
+        assert presentation.cta_label in pricing, code
+        if presentation.trial_note:
+            assert presentation.trial_note in pricing, code
+        for feature in (*presentation.visible_features, *presentation.additional_features):
+            assert feature in pricing, (code, feature)
+
+    # And the comparison table underneath says the same as the server's.
+    for row in visible_plan_comparison(billing_enabled=True):
+        for cell in row:
+            assert cell in pricing, cell
 
     # The hardcoded list in the component is only a fallback, used when the page is
     # opened with no runtime config. It must still say exactly what the server would
@@ -578,17 +595,18 @@ def test_pricing_uses_approved_plans_accessibility_and_real_handoff():
     # so a price changed in one place fails this test instead of quietly leaving the
     # landing page quoting the old one.
     inside_promotion = PROMOTION_ENDS_AT - timedelta(days=1)
-    trader = plan_offer_payload("trader", now=inside_promotion)
-    for expected in (
-        f"monthlyPrice: {int(trader['monthlyPrice'])}",  # type: ignore[arg-type]
-        f"originalMonthlyPrice: {int(trader['originalMonthlyPrice'])}",  # type: ignore[arg-type]
-        f"annualPrice: {int(PUBLIC_PLAN_PRESENTATIONS['trader'].annual_price)}",
-        # Pro shows no price on the page; the fallback still has to carry the real one
-        # so the card can quote it the day Pro opens.
-        f"monthlyPrice: {int(PLAN_DEFINITIONS['pro'].monthly_price)}",
-        f"annualPrice: {int(PUBLIC_PLAN_PRESENTATIONS['pro'].annual_price)}",
-    ):
-        assert expected in pricing
+    expected_numbers: list[str] = [DEFAULT_PROMOTION_DEADLINE]
+    for code in PURCHASABLE_PLAN_CODES:
+        offer = plan_offer_payload(code, now=inside_promotion)
+        expected_numbers.append(f"monthlyPrice: {int(offer['monthlyPrice'])}")  # type: ignore[arg-type]
+        expected_numbers.append(
+            f"originalMonthlyPrice: {int(offer['originalMonthlyPrice'])}"  # type: ignore[arg-type]
+        )
+        expected_numbers.append(
+            f"annualPrice: {int(PUBLIC_PLAN_PRESENTATIONS[code].annual_price)}"
+        )
+    for expected in expected_numbers:
+        assert expected in pricing, expected
     for removed in (
         "first Watchlist",
         "markets per Watchlist",
@@ -599,8 +617,29 @@ def test_pricing_uses_approved_plans_accessibility_and_real_handoff():
         "Paid subscriptions are not available yet.",
         # No plan is ranked for the buyer. The badge said one was.
         "Most Popular",
+        # Withdrawn from every plan and every column of the table.
+        "quick scan",
+        "WhatsApp",
+        # The launch price needs no code typed in, so no code may be named.
+        "discountCode",
+        "HILAL25",
+        # The old plan names, so a half-finished rename fails here.
+        "Basic",
+        "Monitor monthly",
+        # Removed pricing-card copy must not survive in the fallback or its renderer.
+        "Launch price, no code needed",
+        "It normally costs $15 a month.",
+        "It normally costs $25 a month.",
+        "For traders who want the AI assistant, screened-asset evidence, and a measured "
+        "introduction to market monitoring.",
+        "For regular traders who want AI-assisted market monitoring and clear evidence "
+        "behind every alert.",
+        "For active traders who need more simultaneous monitors and unlimited monitor alerts.",
+        "AI assistant with Explore limits",
+        "Halal assets, methodologies, and evidence reports",
+        "Describe a market monitor in a prompt and the AI builds it",
     ):
-        assert removed not in pricing
+        assert removed not in pricing, removed
     assert "Discord" not in pricing
     assert 'role="status"' in pricing
     assert 'type="radio"' in pricing

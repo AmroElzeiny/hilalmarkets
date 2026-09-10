@@ -169,6 +169,7 @@ from ai_market_monitor.services.market_preview import timeframe_duration
 from ai_market_monitor.services.notification_preferences import offered_channels
 from ai_market_monitor.services.on_demand_scans import OnDemandScanError, OnDemandScanService
 from ai_market_monitor.services.openai_interpreter import configured_strategy_interpreter
+from ai_market_monitor.services.plan_limits import feature_needs_a_bigger_plan
 from ai_market_monitor.services.setup_chat_evaluation import (
     build_setup_chat_evaluation_contract,
 )
@@ -535,9 +536,11 @@ async def _require_missed_alert_investigations(
             "missed_alert_investigations",
         )
     except EntitlementError as exc:
+        # The sentence is built from the catalog, not typed here. It said "the Monitor
+        # plan" long after the plan was renamed to Plus, in this route and in one more.
         raise HTTPException(
             status_code=403,
-            detail="Why wasn't I alerted? is available on the Monitor plan.",
+            detail=feature_needs_a_bigger_plan("missed_alert_investigations"),
         ) from exc
 
 

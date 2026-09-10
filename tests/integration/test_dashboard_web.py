@@ -7,7 +7,13 @@ from sqlalchemy import select
 
 from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.core.csrf import csrf_token
-from ai_market_monitor.core.plans import plan_offer_payload
+from ai_market_monitor.core.plans import (
+    PLAN_DEFINITIONS,
+    PURCHASABLE_PLAN_CODES,
+    money_back_headline,
+    money_back_note,
+    plan_offer_payload,
+)
 from ai_market_monitor.core.security import hash_password
 from ai_market_monitor.db.models import (
     ApprovedWatchlist,
@@ -32,6 +38,7 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.fixture_market_data import FixtureMarketDataProvider
+from ai_market_monitor.services.plan_changes import switch_label_soon
 from ai_market_monitor.services.telegram_account_links import TelegramAccountLinkService
 from ai_market_monitor.telegram.adapter import TelegramDeliveryResult
 
@@ -579,25 +586,26 @@ async def test_disabled_provider_blocks_checkout_without_obsolete_beta_copy(test
     assert "Free forever" in page.text
     assert 'data-billing-page-interval' in page.text
     assert 'value="annual"' in page.text
-    assert "Choose Monitor monthly" in page.text
-    assert "7-day money-back guarantee" in page.text
-    assert "Cancel within 7 days of payment for a full refund." in page.text
+    # The refund promise, in the words `core/plans.py` owns. Written out here it said
+    # "7-day money-back guarantee" while the page said "7 days money-back guarantee".
+    assert money_back_headline("pro") in page.text
+    assert money_back_note("pro") in page.text
     assert 'value="annual"' in page.text and 'disabled aria-disabled=true' in page.text
     assert 'id="billing-checkout-dialog"' in page.text
-    # The Pro plan is not on sale yet, so the card says "Soon" and carries no price.
-    # A number beside "Soon" reads as a charge the user is about to face.
-    assert "Pro is coming soon" in page.text
-    assert "$22" not in page.text
-    # The Monitor launch price, with the old one crossed out beside it. Both numbers
-    # come from `core.plans`, not from this file, and the assertion still holds on the
-    # day the offer ends, when there is no crossed-out price left to show.
-    trader_offer = plan_offer_payload("trader")
-    assert f"${int(trader_offer['monthlyPrice'])}" in page.text  # type: ignore[arg-type]
-    original = trader_offer["originalMonthlyPrice"]
-    if original:
-        assert f"${int(original)}" in page.text  # type: ignore[arg-type]
-        assert 'class="price-original"' in page.text
-        assert "data-offer-countdown" in page.text
+    # No payment company is configured on this server, so nothing can be bought — and
+    # every paid card says so, in the same words the public pricing page uses. This is
+    # the whole point of the test: the card must not invite a purchase the checkout
+    # would refuse. It used to assert "Choose Monitor monthly" here, which was the card
+    # doing exactly that.
+    for code in PURCHASABLE_PLAN_CODES:
+        assert switch_label_soon(PLAN_DEFINITIONS[code].name) in page.text, code
+    # And no price beside "Soon". A number there reads as a charge the user is about
+    # to face for something they cannot buy.
+    for code in PURCHASABLE_PLAN_CODES:
+        offer = plan_offer_payload(code)
+        assert f"${int(offer['monthlyPrice'])}" not in page.text, code  # type: ignore[arg-type]
+    assert 'class="price-original"' not in page.text
+    assert "data-offer-countdown" not in page.text
     review = await test_context["client"].get(
         "/dashboard/billing/checkout?plan_code=trader",
         follow_redirects=False,

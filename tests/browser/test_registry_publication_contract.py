@@ -1,5 +1,6 @@
 import json
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -184,6 +185,151 @@ def test_current_builder_renders_only_its_published_catalog_and_counts(page: Pag
     for name, value in expected.items():
         assert operand.parameters[name] == value
     assert isinstance(StrategyRuleEngine._candle_pattern(operand, candle_sets()["15m"]), bool)
+
+
+def test_active_builder_fields_round_trip_to_exact_impulse_and_pivot_semantics(
+    page: Page,
+    base_url: str,
+):
+    signup(page, base_url)
+    close_any_open_guide(page)
+    response = page.request.get(f"{base_url}/api/v1/dashboard/setup-chat/builder-contract")
+    assert response.ok
+    payload = response.json()
+    keys = {
+        "capability:all_time_high_breakout",
+        "capability:head_and_shoulders_formed",
+        "capability:head_and_shoulders_neckline_break",
+        "capability:impulse_candle",
+        "capability:level_strength_score",
+        "capability:pivot_points",
+    }
+    payload["mechanics"] = [item for item in payload["mechanics"] if item["key"] in keys]
+    assert {item["key"] for item in payload["mechanics"]} == keys
+    assert not {
+        "capability:daily_high_low",
+        "capability:monthly_high_low",
+    } & {item["key"] for item in payload["mechanics"] if item["available"]}
+    page.route(CONTRACT_URL, lambda route: route.fulfill(json=payload))
+
+    source = Path("src/ai_market_monitor/static/hm-monitor-test.js").read_text(encoding="utf-8")
+    source = source.replace(
+        "  function planForServer() {",
+        "  window.publicationPlan = planForServer;\n  function planForServer() {",
+    )
+    page.route(
+        "**/static/hm-monitor-test.js*",
+        lambda route: route.fulfill(content_type="application/javascript", body=source),
+    )
+    page.goto(f"{base_url}{MONITOR_PATH}", wait_until="domcontentloaded")
+    close_any_open_guide(page)
+    page.locator("[data-loading]").wait_for(state="hidden")
+
+    def add(key: str) -> str:
+        page.locator("[data-open-library]").click()
+        page.locator(f"[data-library-list] .m-lib-item[data-key='{key}']").click()
+        page.locator("[data-library-add]").click()
+        node_id = page.locator("[data-node][data-kind='rule']").last.get_attribute("data-node")
+        assert node_id is not None
+        return node_id
+
+    def remove(node_id: str) -> None:
+        page.locator(f"[data-node='{node_id}']").click()
+        page.locator("[data-inspector-remove]").click()
+        expect(page.locator(f"[data-node='{node_id}']")).to_have_count(0)
+
+    all_time_id = add("capability:all_time_high_breakout")
+    expect(page.locator("[data-inspector-body] [data-set='lookback']")).to_have_count(0)
+    expect(page.locator("[data-inspector-body] [data-set='tolerance_percent']")).to_have_count(0)
+    remove(all_time_id)
+
+    level_id = add("capability:level_strength_score")
+    expect(page.locator("[data-inspector-body] input[data-set='lookback']")).to_be_visible()
+    expect(
+        page.locator("[data-inspector-body] input[data-set='tolerance_percent']")
+    ).to_be_visible()
+    remove(level_id)
+
+    formed_id = add("capability:head_and_shoulders_formed")
+    expect(
+        page.locator("[data-inspector-body] [data-set='breakout_buffer_percent']")
+    ).to_have_count(0)
+    remove(formed_id)
+
+    confirmed_id = add("capability:head_and_shoulders_neckline_break")
+    expect(
+        page.locator("[data-inspector-body] input[data-set='breakout_buffer_percent']")
+    ).to_be_visible()
+    remove(confirmed_id)
+
+    add("capability:pivot_points")
+    expect(page.locator("[data-inspector-body] input[data-set='component']")).to_have_count(0)
+    for component in ("pivot", "r1", "s1", "r2", "s2"):
+        expect(
+            page.locator(
+                f"[data-inspector-body] button[data-set='component'][data-value='{component}']"
+            )
+        ).to_be_visible()
+    page.locator(
+        "[data-inspector-body] button[data-set='component'][data-value='s2']"
+    ).click()
+    page.locator(
+        "[data-inspector-body] button[data-set='comparator'][data-value='gt']"
+    ).click()
+
+    add("capability:impulse_candle")
+    for direction in ("up", "down"):
+        expect(
+            page.locator(
+                f"[data-inspector-body] button[data-set='direction'][data-value='{direction}']"
+            )
+        ).to_be_visible()
+    expect(
+        page.locator("[data-inspector-body] button[data-set='direction'][data-value='neutral']")
+    ).to_have_count(0)
+    page.locator(
+        "[data-inspector-body] button[data-set='direction'][data-value='down']"
+    ).click()
+    page.locator(
+        "[data-inspector-body] button[data-set='comparator'][data-value='is_true']"
+    ).click()
+    page.locator("[data-node='alert']").click()
+    page.locator("[data-inspector-body] [data-channel='web']").click()
+    expect(page.locator("[data-saved-pill]")).to_have_attribute("data-state", "saved")
+
+    page.reload(wait_until="domcontentloaded")
+    page.locator("[data-loading]").wait_for(state="hidden")
+    close_any_open_guide(page)
+    plan_payload = page.evaluate("() => publicationPlan()")
+
+    def flatten(node):
+        return [node, *(child for item in node.get("children", []) for child in flatten(item))]
+
+    nodes = {node.get("mechanic"): node for node in flatten(plan_payload["root"])}
+    assert nodes["capability:pivot_points"]["values"]["component"] == "s2"
+    assert nodes["capability:impulse_candle"]["values"]["direction"] == "down"
+
+    plan = CanvasPlan.model_validate(plan_payload)
+    ast = build_condition_ast(plan.root, source_turn_id="synthetic-browser", settings=Settings())
+    definition = compile_strategy_draft_v2(StrategyDraftV2(condition_ast=ast))
+    operands = {rule.capability_key: rule.left for rule in definition.conditions.children}
+    assert operands["pivot_points"].parameters["component"] == "s2"
+    assert operands["impulse_candle"].parameters["direction"] == "down"
+    history = candle_sets()["15m"]
+    reference = history[-2]
+    pivot = (reference.high + reference.low + reference.close) / 3
+    assert StrategyRuleEngine().indicators.calculate(
+        "pivot_points", history, **operands["pivot_points"].parameters
+    ) == pytest.approx(pivot - (reference.high - reference.low))
+
+    impulse_history = [
+        replace(item, high=item.open + 1, low=item.open - 1, close=item.open)
+        for item in history[-21:-1]
+    ]
+    impulse_history.append(replace(history[-1], high=104, low=96, open=100, close=97))
+    assert StrategyRuleEngine._price_action(
+        operands["impulse_candle"], impulse_history
+    )
 
 
 @pytest.mark.deliberate_console_errors("Failed to load resource", "503")

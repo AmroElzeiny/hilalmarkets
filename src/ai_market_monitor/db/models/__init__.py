@@ -20,6 +20,8 @@ from ai_market_monitor.db.models.accounts import (
 )
 from ai_market_monitor.db.models.affiliate import (
     AffiliateApplication,
+    AffiliateCodeUse,
+    AffiliateCommission,
     AffiliatePayoutRequest,
 )
 from ai_market_monitor.db.models.automated_screen import (
@@ -53,8 +55,10 @@ from ai_market_monitor.db.models.commercial import (
     EntitlementSnapshot,
     PaymentEmailDelivery,
     Plan,
+    PlanMoveMoneyOwed,
     ReferralRelationship,
     Subscription,
+    SubscriptionPlanChange,
     Trial,
     TrialAlertAttribution,
     TrialCycle,
@@ -233,6 +237,8 @@ from ai_market_monitor.db.models.whatsapp import (
 __all__ = [
     "AIAnalysisSnapshot",
     "AffiliateApplication",
+    "AffiliateCodeUse",
+    "AffiliateCommission",
     "AffiliatePayoutRequest",
     "AccountAdminAction",
     "AccountBan",
@@ -327,6 +333,7 @@ __all__ = [
     "OutcomeReview",
     "PendingEmailSignup",
     "PaymentEmailDelivery",
+    "PlanMoveMoneyOwed",
     "Plan",
     "PublishedAssetAssessment",
     "HilalChatConversation",
@@ -383,6 +390,7 @@ __all__ = [
     "SourceChangeEvent",
     "SourceSnapshot",
     "Subscription",
+    "SubscriptionPlanChange",
     "SupportIntakeRecord",
     "SupportRequest",
     "SupportTicketMessage",

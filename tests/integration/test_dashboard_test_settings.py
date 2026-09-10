@@ -106,6 +106,29 @@ async def test_the_page_renders(test_context):
     assert "Settings" in page
 
 
+async def test_every_settings_group_has_a_jump_link(test_context):
+    """The jump bar and the group sections are built from one list.
+
+    A group added to the page without a matching link fails here, instead of being
+    silently unreachable.
+    """
+
+    page = await _page(test_context, "set-jump@example.com")
+    document = lxml.html.fromstring(page)
+
+    group_ids = [
+        section.get("id")
+        for section in document.xpath("//section[contains(@class, 'g-group')]")
+    ]
+    jump_hrefs = {
+        a.get("href") for a in document.xpath("//*[@data-g-jump-link]")
+    }
+
+    assert group_ids
+    for group_id in group_ids:
+        assert f"#{group_id}" in jump_hrefs, f"{group_id} has no jump link"
+
+
 async def test_every_setting_says_what_it_does_for_the_person(test_context):
     """Rule H3. The live page put a bare label beside a box — "Near-miss alerts",
     "Maximum alerts per hour" — and left a beginner to work out the rest."""

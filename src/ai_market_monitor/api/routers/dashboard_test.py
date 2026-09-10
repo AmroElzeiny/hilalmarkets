@@ -23,7 +23,6 @@ change that does.
 
 from __future__ import annotations
 
-from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -35,19 +34,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.api.routers.dashboard import (
-    _active_paid_plan_codes,
     _billing_history_rows,
     _builder_screening_context,
     _context,
     _monitor_cards_context,
     _permanent_redirect,
-    _plan_checkout_allowed,
     _require_user,
     _timezone_options,
     asset_passport_context,
     screened_market_context,
     templates,
 )
+from ai_market_monitor.api.template_env import day_only as _day_only
 from ai_market_monitor.api.template_env import short_datetime as _short_datetime
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.config import Settings, get_settings
@@ -69,12 +67,11 @@ from ai_market_monitor.core.dashboard_paths import (
 )
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
-    LAUNCH_DISCOUNT_CODE,
     PLAN_DEFINITIONS,
+    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
     UNLIMITED_SYMBOL_CAP,
-    launch_discount_percent,
     plan_offer_payload,
     visible_plan_comparison,
     visible_plan_comparison_headers,
@@ -112,11 +109,14 @@ from ai_market_monitor.services.account_settings import (
 from ai_market_monitor.services.alert_emails import alert_email_address
 from ai_market_monitor.services.automated_research_reader import AutomatedResearchReader
 from ai_market_monitor.services.billing import (
+    CHARGE_STORY_BEFORE_CHOOSING,
     DISCOUNT_CODE_METHODS,
     BillingService,
-    payment_method_available,
+    active_paid_plan_codes,
+    paid_access_can_be_repriced,
     payment_method_offers_by_method,
     payment_method_payload,
+    plan_checkout_availability,
 )
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
 from ai_market_monitor.services.interfaces import MarketDataProvider
@@ -1578,6 +1578,7 @@ def _payment_row(row: dict[str, Any], timezone_name: str) -> dict[str, Any]:
     provider = str(attempt.provider or "")
     return {
         "plan_name": row["plan_name"],
+        "plan_code": row.get("plan_code", ""),
         "label": label,
         "tone": tone,
         "meaning": meaning,
@@ -1585,6 +1586,8 @@ def _payment_row(row: dict[str, Any], timezone_name: str) -> dict[str, Any]:
         "when_ago": how_long_ago(attempt.created_at),
         "amount": f"{attempt.amount} {attempt.currency}",
         "method": _PAYMENT_METHOD_WORDS.get(provider, provider.replace("_", " ") or "Unknown"),
+        "next_step": row.get("next_step"),
+        "blocked_reason": row.get("blocked_reason"),
         "can_resume": bool(row["can_resume"]),
         "resume_url": row["resume_url"],
     }
@@ -1594,7 +1597,6 @@ def _plan_card(
     code: str,
     *,
     entitlement: Any,
-    active_paid_plan_codes: Collection[str],
     availability: dict[str, Any],
     pay_methods: dict[str, dict[str, dict[str, object]]],
 ) -> dict[str, Any]:
@@ -1608,28 +1610,30 @@ def _plan_card(
     plan = PLAN_DEFINITIONS[code]
     presentation = PUBLIC_PLAN_PRESENTATIONS[code]
     offer = plan_offer_payload(code)
-    current = code == entitlement.plan.code or code in active_paid_plan_codes
-    buyable = bool(
-        offer["monthlyAvailable"]
-        and availability.get("purchasable")
-        and (availability.get("card_monthly") or availability.get("crypto_monthly"))
-    )
+    # "Do they hold this plan" and "are they on a different paid plan" are read from
+    # `plan_checkout_availability`, never worked out here. This card used to answer both
+    # from the raw set of plan codes, and its version of "a different paid plan" counted
+    # plan codes that are not on sale at all - so the two answers could disagree about
+    # the same account.
+    current = code == entitlement.plan.code or bool(availability.get("holds_this"))
+    buyable = bool(offer["monthlyAvailable"] and availability.get("purchasable"))
+    # "Change plan on the billing page" is only true advice when a change is really the
+    # route. Crypto access cannot be changed, only replaced by a purchase, and sending
+    # that person to the switch buttons sends them nowhere.
+    holds_other_paid_plan = bool(availability.get("must_switch_instead"))
     return {
         "code": code,
         "name": plan.name,
-        "who_it_is_for": presentation.description,
-        # Two prices, and they are different things.
+        # One price, in two fields. `monthly_price` is the headline on the card and
+        # `full_price` is what a checkout charges; they became the same number the day the
+        # launch price stopped needing a code. Both are kept because the popup's order line
+        # reads `full_price` and goes back to it when a code is cleared, and a code from
+        # `BILLING_DISCOUNT_CODES` can still be typed on the crypto route.
         #
-        # `monthly_price` is the headline on the card: the launch-code price while the
-        # launch offer runs. `full_price` is what a checkout really charges when nobody
-        # types a code — so it is what the order line in the popup starts at, and what it
-        # goes back to if the code is cleared. The popup used to open at the headline and
-        # then send somebody to a payment page for a larger amount.
+        # `was_price` is the normal price to cross out, or nothing once the offer ends.
         "monthly_price": offer["monthlyPrice"],
         "full_price": offer["fullMonthlyPrice"],
         "was_price": offer["originalMonthlyPrice"],
-        "discount_code": offer["discountCode"],
-        "discount_percent": offer["discountPercent"],
         "is_free": offer["monthlyPrice"] == 0,
         "for_sale": bool(offer["monthlyAvailable"]),
         "coming_soon_label": offer["comingSoonLabel"],
@@ -1650,11 +1654,20 @@ def _plan_card(
                 if offer["monthlyPrice"] == 0
                 else f"{plan.name} is not open for new subscriptions yet."
                 if not offer["monthlyAvailable"]
+                else "Change plan on the billing page"
+                if holds_other_paid_plan
                 else "Paid subscriptions are switched off just now. Nothing was charged."
             )
         ),
         "highlight": presentation.highlighted_feature,
-        "features": list(presentation.visible_features),
+        # The highlighted bullet already has its own line above the list on this card, so
+        # it is taken out of the list. Leaving it in printed the same sentence twice, one
+        # under the other, on every card that has a highlight.
+        "features": [
+            feature
+            for feature in presentation.visible_features
+            if feature != presentation.highlighted_feature
+        ],
         "more_features": list(presentation.additional_features),
         "money_back": presentation.trial_note,
         # Which ways of paying really work for *this* plan, decided on the server. The
@@ -1684,7 +1697,7 @@ async def subscription_page(
     await PlanCatalogService(session).sync_defaults()
     entitlement = await EntitlementService(session).current(user.id)
     trial = await session.scalar(select(Trial).where(Trial.user_id == user.id))
-    active_paid_plan_codes = await _active_paid_plan_codes(session, user_id=user.id)
+    user_active_paid_plan_codes = await active_paid_plan_codes(session, user_id=user.id)
     watchlists_running = int(
         await session.scalar(
             select(func.count(Strategy.id)).where(
@@ -1696,19 +1709,14 @@ async def subscription_page(
         or 0
     )
 
+    held_access_repriceable = await paid_access_can_be_repriced(session, user_id=user.id)
     availability = {
-        code: {
-            "purchasable": _plan_checkout_allowed(
-                plan_code=code,
-                active_paid_plan_codes=active_paid_plan_codes,
-            ),
-            "card_monthly": payment_method_available(
-                settings, method="card", plan_code=code, billing_cycle="monthly"
-            ),
-            "crypto_monthly": payment_method_available(
-                settings, method="crypto", plan_code=code, billing_cycle="monthly"
-            ),
-        }
+        code: plan_checkout_availability(
+            settings,
+            plan_code=code,
+            active_paid_plan_codes=user_active_paid_plan_codes,
+            held_access_can_be_repriced=held_access_repriceable,
+        )
         for code in PURCHASABLE_PLAN_CODES
     }
 
@@ -1733,7 +1741,9 @@ async def subscription_page(
     }
     payments = [
         _payment_row(row, user.timezone or "UTC")
-        for row in _billing_history_rows(attempts, history_plans, now=datetime.now(UTC))
+        for row in _billing_history_rows(
+            attempts, history_plans, settings, now=datetime.now(UTC)
+        )
     ]
 
     primary_email = await session.scalar(
@@ -1757,9 +1767,12 @@ async def subscription_page(
     if entitlement.plan.code == "demo":
         renewal = "Free, with no end date and nothing to cancel."
     elif entitlement.source == "trial" and trial is not None:
+        # The day it ends, not the second. This sentence read "ends on 2026-10-10
+        # 07:07:46 UTC", which asks a beginner to read four numbers to find the one day
+        # they need — and prints it in a timezone that is not theirs.
         renewal = (
             "Your trial access ends on "
-            f"{_short_datetime(trial.ends_at, user.timezone or 'UTC')}. "
+            f"{_day_only(trial.ends_at, user.timezone or 'UTC')}. "
             "Nothing renews by itself."
         )
     elif billing.provider_capabilities.supports_recurring_billing:
@@ -1771,7 +1784,6 @@ async def subscription_page(
         _plan_card(
             code,
             entitlement=entitlement,
-            active_paid_plan_codes=active_paid_plan_codes,
             availability=availability.get(code, {}),
             pay_methods=payment_method_payload(
                 settings, plan_code=code, billing_cycles=("monthly",)
@@ -1788,10 +1800,6 @@ async def subscription_page(
     open_for_plan = wanted if any(
         card["code"] == wanted and card["buyable"] for card in cards
     ) else ""
-    # The launch code, named once for the whole page. It is the one plan on sale that
-    # carries a code; a plan with no code simply shows no hint.
-    _launch_percent = launch_discount_percent("trader")
-
     context = await _context(
         request=request,
         session=session,
@@ -1808,7 +1816,9 @@ async def subscription_page(
             billing_enabled=settings.billing_enabled
         ),
         payments=payments,
-        unfinished_payment=next((row for row in payments if row["can_resume"]), None),
+        unfinished_payment=next(
+            (row for row in payments if row["next_step"] is not None), None
+        ),
         billing_enabled=settings.billing_enabled,
         checkout_request_id=uuid4().hex,
         checkout_profile={
@@ -1823,12 +1833,14 @@ async def subscription_page(
             plan_codes=PURCHASABLE_PLAN_CODES,
             billing_cycle="monthly",
         ),
-        # Which ways of paying take a code, and the code worth naming. Both come from the
-        # server: a page that decided either for itself would be a second copy of a rule
-        # that checkout already owns.
+        # Which ways of paying take a code. It comes from the server: a page that decided
+        # it for itself would be a second copy of a rule that checkout already owns.
         discount_methods=list(DISCOUNT_CODE_METHODS),
-        launch_discount_code=LAUNCH_DISCOUNT_CODE if _launch_percent else "",
-        launch_discount_percent=int(_launch_percent) if _launch_percent else 0,
+        # What the popup says about the charge before a way of paying has been ticked.
+        # Each method carries its own sentence; this is the one that is true while none
+        # of them has been chosen.
+        charge_story_before_choosing=CHARGE_STORY_BEFORE_CHOOSING,
+        promotion_ends_at=PROMOTION_ENDS_AT.isoformat(),
         open_for_plan=open_for_plan,
         settings_path=SETTINGS_PATH,
         support_path=SUPPORT_PATH,

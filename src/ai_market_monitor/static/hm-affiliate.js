@@ -1,10 +1,11 @@
-/* The payout form's one moving part: the network list follows the coin.
+/* The affiliate page's two moving parts: the network list, and the time-log popups.
  *
- * A coin and a network are not independent choices. USDC does not exist on Litecoin, and
- * a form that lets somebody pick that pair sends money to a chain their wallet cannot
- * see. The server refuses such a pair outright — `affiliate_payout_options.network_for`
- * returns nothing and the request is turned away — and this makes the same rule visible
- * before anybody presses the button, rather than after.
+ * **The network list follows the coin.** A coin and a network are not independent
+ * choices. USDC does not exist on Litecoin, and a form that lets somebody pick that pair
+ * sends money to a chain their wallet cannot see. The server refuses such a pair outright
+ * — `affiliate_payout_options.network_for` returns nothing and the request is turned away
+ * — and this makes the same rule visible before anybody presses the button, rather than
+ * after.
  *
  * The options come from the page, not from a copy of the catalogue written here. A
  * second list in JavaScript is a list that drifts: a network removed on the server would
@@ -13,9 +14,29 @@
  *
  * With scripting off, the network select is empty and the form cannot be submitted with
  * a wrong pair; the server still holds the rule either way.
+ *
+ * **The popups open what each figure is made of.** Every row inside them is already in
+ * the page's markup, drawn by the server — nothing is fetched and nothing is counted
+ * here. That is deliberate: a popup that worked its own totals out would be a second
+ * answer to the question the card already answered, and nobody could tell which was
+ * right. Opening, closing, the focus trap and the movement are `hm-dialog.js`, shared
+ * with every other popup in the product.
  */
+import { manageDialog } from "./hm-dialog.js";
+
 (() => {
   "use strict";
+
+  /* Each popup is wired to the buttons that name it. A `<dialog>` is moved to the top
+     layer and is not a descendant of the page, so its own close button is looked for
+     inside it — which is what `closers` does. */
+  for (const dialog of document.querySelectorAll("[data-hm-aff-log]")) {
+    const popup = manageDialog(dialog, { closers: ["[data-hm-aff-log-close]"] });
+    const selector = `[data-hm-aff-log-open="${dialog.id}"]`;
+    for (const trigger of document.querySelectorAll(selector)) {
+      trigger.addEventListener("click", () => popup.open(trigger));
+    }
+  }
 
   const form = document.querySelector("[data-hm-affiliate-payout]");
   if (!form) return;

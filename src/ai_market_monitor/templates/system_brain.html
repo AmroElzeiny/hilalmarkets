@@ -4,19 +4,19 @@
   {#- First script on the page, deliberately, and without `defer`: it puts a time limit
       on every request this product sends to its own server, and it can only do that for
       a request sent after it has run. See `static/hm-request.js`. -#}
-  <script src="/static/hm-request.js?v=20260905-inspector-left"></script>
+  <script src="/static/hm-request.js?v=20260910-pay-now"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
   <title>System Brain | Hilal Markets</title>
   <link rel="icon" type="image/png" href="/static/favicon-dark.png">
-  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260905-inspector-left">
-  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260905-inspector-left">
-  <link rel="stylesheet" href="/static/system-brain.css?v=20260905-inspector-left">
+  <link rel="stylesheet" href="/static/hilalmarkets-fonts.css?v=20260910-pay-now">
+  <link rel="stylesheet" href="/static/hilalmarkets-brand.css?v=20260910-pay-now">
+  <link rel="stylesheet" href="/static/system-brain.css?v=20260910-pay-now">
   <script src="/static/hilalmarkets-icons.js" defer></script>
-  <script src="/static/chat-message-renderer.js?v=20260905-inspector-left" defer></script>
-  <script src="/static/system-brain.js?v=20260905-inspector-left" defer></script>
-  <script src="/static/system-brain-agent.js?v=20260905-inspector-left" defer></script>
+  <script src="/static/chat-message-renderer.js?v=20260910-pay-now" defer></script>
+  <script src="/static/system-brain.js?v=20260910-pay-now" defer></script>
+  <script src="/static/system-brain-agent.js?v=20260910-pay-now" defer></script>
 </head>
 <body data-system-brain-csrf="{{ csrf_token }}" data-brain-section="{{ section }}">
   <a class="brain-skip" href="#admin-content">Skip to admin content</a>
@@ -56,6 +56,7 @@
       <a class="{{ 'active' if section == 'operations' else '' }}" href="/dashboard/system-brain/operations"><i data-icon="activity"></i><span>Operations</span></a>
       <a class="{{ 'active' if section == 'governance' else '' }}" href="/dashboard/system-brain/governance"><i data-icon="methodology"></i><span>Governance</span></a>
       <a class="{{ 'active' if section == 'users' else '' }}" href="/dashboard/system-brain/users"><i data-icon="user"></i><span>Users</span></a>
+      <a class="{{ 'active' if section == 'payments' else '' }}" href="/dashboard/system-brain/payments"><i data-icon="billing"></i><span>Payments</span></a>
       <a class="{{ 'active' if section == 'affiliate' else '' }}" href="/dashboard/system-brain/affiliate"><i data-icon="gift"></i><span>Affiliate</span></a>
       <a class="{{ 'active' if section == 'audit-settings' else '' }}" href="/dashboard/system-brain/audit-settings"><i data-icon="shield"></i><span>Audit &amp; Settings</span></a>
     </nav>
@@ -73,6 +74,7 @@
           {% if section == 'overview' %}System Brain
           {% elif section == 'review-detail' %}Review case
           {% elif section == 'affiliate' %}Affiliate
+          {% elif section == 'payments' %}Payments
           {% elif section == 'users' %}Users
           {% elif section == 'stats' %}Stats
           {% elif section in ['initial-reviews','change-reviews','user-reports'] %}Cases
@@ -342,6 +344,249 @@
         the apply route reads no such field, so this screen is the only place in the
         product where that number can be moved. Somebody who wants more than the standard
         share is told on their own page to write to the office address instead. -#}
+
+    {#- Payments.
+
+        Read-only on purpose. Every figure on this page is the figure that was stored
+        when the money moved, never one worked out again from today's price list: Plus
+        went from $15 to $9 on 8 September 2026, and a page that recalculated would have
+        silently restated every older payment.
+
+        The forms a customer submitted to cancel or move down a plan are shown with the
+        exact sentence they ticked, word for word. A tick box records that somebody
+        agreed; only the sentence records what they agreed to. -#}
+    {% elif section == 'payments' %}
+    <section class="brain-section brain-reveal">
+      <div class="brain-section-head">
+        <div>
+          <h2>Money taken</h2>
+          <p>Every payment that really went through, what it was for, and everything a
+            customer asked to change.</p>
+        </div>
+      </div>
+
+      <div class="brain-stat-tiles">
+        <article class="brain-stat-tile" data-stat="paying-customers">
+          <span class="brain-stat-label">Customers who paid</span>
+          <strong class="brain-stat-value">{{ payments_totals.paying_customers }}</strong>
+          <small>Accounts with at least one payment that went through.</small>
+        </article>
+        <article class="brain-stat-tile" data-stat="payments-made">
+          <span class="brain-stat-label">Payments made</span>
+          <strong class="brain-stat-value">{{ payments_totals.payments_made }}</strong>
+          <small>Every payment, including repeat months.</small>
+        </article>
+        <article class="brain-stat-tile" data-stat="money-taken">
+          <span class="brain-stat-label">Money taken</span>
+          <strong class="brain-stat-value">${{ '%.2f'|format(payments_totals.money_taken) }}</strong>
+          <small>The amounts charged, added up as they were stored.</small>
+        </article>
+        <article class="brain-stat-tile" data-stat="changes-waiting">
+          <span class="brain-stat-label">Changes waiting</span>
+          <strong class="brain-stat-value">{{ payments_totals.changes_waiting }}</strong>
+          <small>Cancels and plan moves that have not taken effect yet.</small>
+        </article>
+        <article class="brain-stat-tile" data-stat="changes-failed">
+          <span class="brain-stat-label">Changes that failed</span>
+          <strong class="brain-stat-value">{{ payments_totals.changes_failed }}</strong>
+          <small>The payment company refused. Somebody has to look.</small>
+        </article>
+      </div>
+
+      <form class="brain-user-filters" method="get" action="/dashboard/system-brain/payments" role="search">
+        <label>
+          <span>Find a customer</span>
+          <input class="brain-search" type="search" name="q" value="{{ payments_query }}"
+                 maxlength="160" placeholder="Name or email address" autocomplete="off">
+        </label>
+        <button class="brain-action-button" type="submit"><i data-icon="search"></i>Search</button>
+      </form>
+
+      {% if payment_customers %}
+      <div class="brain-table-wrap">
+        <table data-testid="payments-table">
+          <caption class="sr-only">Customers who have paid, newest payment first</caption>
+          <thead>
+            <tr>
+              <th scope="col">Customer</th>
+              <th scope="col">Plan now</th>
+              <th scope="col">Times paid</th>
+              <th scope="col">Total paid</th>
+              <th scope="col">First payment</th>
+              <th scope="col">Last payment</th>
+              <th scope="col"><span class="sr-only">Open</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in payment_customers %}
+            <tr>
+              <th scope="row">
+                <strong>{{ row.display_name }}</strong>
+                <small class="brain-affiliate-email">{{ row.email }}</small>
+              </th>
+              <td>{{ row.current_plan_words }}</td>
+              <td>{{ row.payment_count }}</td>
+              <td>${{ '%.2f'|format(row.total_paid) }}</td>
+              <td>{{ row.first_paid_at.strftime('%d %b %Y') if row.first_paid_at else '-' }}</td>
+              <td>{{ row.last_paid_at.strftime('%d %b %Y') if row.last_paid_at else '-' }}</td>
+              <td>
+                <a class="brain-action-button secondary"
+                   href="/dashboard/system-brain/payments?customer={{ row.user_id }}{% if payments_query %}&amp;q={{ payments_query|urlencode }}{% endif %}&amp;page={{ payments_page }}">
+                  Open
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <nav class="brain-pagination" aria-label="Payment pages">
+        {% if payments_has_previous %}
+        <a href="/dashboard/system-brain/payments?page={{ payments_page - 1 }}{% if payments_query %}&amp;q={{ payments_query|urlencode }}{% endif %}">Back</a>
+        {% endif %}
+        <span>Page {{ payments_page }}</span>
+        {% if payments_has_next %}
+        <a href="/dashboard/system-brain/payments?page={{ payments_page + 1 }}{% if payments_query %}&amp;q={{ payments_query|urlencode }}{% endif %}">Next</a>
+        {% endif %}
+      </nav>
+      {% else %}
+      <p class="brain-empty">Nobody has paid yet.</p>
+      {% endif %}
+    </section>
+
+    {% if payment_customer %}
+    <section class="brain-section brain-reveal" id="payment-customer" data-testid="payment-customer">
+      <div class="brain-section-head">
+        <div>
+          <h2>{{ payment_customer.display_name }}</h2>
+          <p class="brain-affiliate-email">{{ payment_customer.email }}</p>
+        </div>
+        <span class="brain-status neutral">{{ payment_customer.current_plan_words }}</span>
+      </div>
+
+      <dl class="brain-affiliate-asked">
+        <div><dt>Times paid</dt><dd>{{ payment_customer.payment_count }}</dd></div>
+        <div><dt>Total paid</dt><dd>${{ '%.2f'|format(payment_customer.total_paid) }}</dd></div>
+        <div>
+          <dt>Paid period ends</dt>
+          <dd>{{ payment_customer.period_ends_at.strftime('%d %b %Y') if payment_customer.period_ends_at else 'No paid period' }}</dd>
+        </div>
+        {#- Attempts that never became money. Shown apart from the payment count because
+            "tried to pay four times" and "paid four times" are very different facts. -#}
+        <div><dt>Unfinished attempts</dt><dd>{{ payment_customer.unfinished_attempts }}</dd></div>
+      </dl>
+
+      <h3>What they paid for</h3>
+      {% if payment_customer.payments %}
+      <div class="brain-table-wrap">
+        <table data-testid="payment-history">
+          <caption class="sr-only">Every payment this customer made</caption>
+          <thead>
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">Plan</th>
+              <th scope="col">Amount</th>
+              <th scope="col">Paid with</th>
+              <th scope="col">Code used</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for payment in payment_customer.payments %}
+            <tr>
+              <td>{{ payment.paid_at.strftime('%d %b %Y, %H:%M UTC') }}</td>
+              <td>{{ payment.plan_words }}</td>
+              <td>{{ '%.2f'|format(payment.amount) }} {{ payment.currency|upper }}</td>
+              <td>{{ payment.provider }}</td>
+              <td>
+                {% if payment.discount_code %}
+                {{ payment.discount_code }}{% if payment.discount_percent %} ({{ '%.0f'|format(payment.discount_percent) }}% off){% endif %}
+                {% else %}-{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="brain-empty">No payment has gone through for this account.</p>
+      {% endif %}
+
+      <h3>Forms they sent</h3>
+      {% if payment_customer.plan_changes %}
+      <div class="brain-affiliate-list">
+        {% for change in payment_customer.plan_changes %}
+        <article class="brain-panel brain-affiliate-card" data-testid="plan-change-form">
+          <header class="brain-affiliate-head">
+            <div>
+              <h4>
+                {% if change.kind == 'cancel' %}Cancelled {{ change.from_plan_words }}
+                {% elif change.kind == 'upgrade' %}Moved up from {{ change.from_plan_words }} to {{ change.to_plan_words }}
+                {% else %}Moved down from {{ change.from_plan_words }} to {{ change.to_plan_words }}{% endif %}
+              </h4>
+              <small>Sent {{ change.requested_at.strftime('%d %b %Y, %H:%M UTC') }}</small>
+            </div>
+            {#- The class is the stored status word itself, which is what the shared
+                `.brain-status` rules already colour: `failed` reads danger, `completed`
+                reads success. A second colour vocabulary here would be a copy of a rule
+                that already exists. -#}
+            <span class="brain-status {{ 'warning' if change.status in ['requested', 'scheduled'] else change.status }}">
+              {{ change.status }}
+            </span>
+          </header>
+
+          <dl class="brain-affiliate-asked">
+            <div><dt>Reason they picked</dt><dd>{{ change.reason_words }}</dd></div>
+            <div><dt>When it takes effect</dt><dd>{{ change.timing_words }}</dd></div>
+            <div>
+              <dt>Effective date</dt>
+              <dd>{{ change.effective_at.strftime('%d %b %Y') if change.effective_at else 'Not set' }}</dd>
+            </div>
+            <div>
+              <dt>Took effect</dt>
+              <dd>{{ change.applied_at.strftime('%d %b %Y') if change.applied_at else 'Not yet' }}</dd>
+            </div>
+          </dl>
+
+          {% if change.reason_text %}
+          <p class="brain-affiliate-note">“{{ change.reason_text }}”</p>
+          {% endif %}
+
+          {#- The promise, word for word, exactly as it was on the screen they ticked. -#}
+          <p class="brain-consent-record">
+            <strong>They agreed to:</strong> {{ change.consent_text }}
+            <small>Ticked {{ change.consented_at.strftime('%d %b %Y, %H:%M UTC') }}</small>
+          </p>
+
+          {% if change.provider_error %}
+          <p class="brain-affiliate-note is-problem">
+            The payment company refused: {{ change.provider_error }}
+          </p>
+          {% endif %}
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="brain-empty">They have not asked to cancel or change plan.</p>
+      {% endif %}
+
+      <h3>Everything that happened</h3>
+      {% if payment_customer.timeline %}
+      <ol class="brain-timelog" data-testid="payment-timelog">
+        {% for entry in payment_customer.timeline %}
+        <li class="brain-timelog-entry is-{{ entry.kind }}">
+          <time datetime="{{ entry.happened_at.isoformat() }}">{{ entry.happened_at.strftime('%d %b %Y, %H:%M UTC') }}</time>
+          <strong>{{ entry.headline }}</strong>
+          <span>{{ entry.detail }}</span>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <p class="brain-empty">Nothing has happened on this account yet.</p>
+      {% endif %}
+    </section>
+    {% endif %}
+
     {% elif section == 'affiliate' %}
     <section class="brain-section brain-reveal">
       <div class="brain-section-head">
@@ -408,10 +653,20 @@
                 <small>Required. What the customer saves.</small>
               </label>
               <label>
-                <span>Their share</span>
+                <span>Their share the first time somebody pays</span>
                 <input name="commission_percent" type="number" min="1" max="100" step="1"
                        inputmode="numeric" placeholder="{{ '%.0f'|format(default_commission) }}">
                 <small>Empty uses {{ '%.0f'|format(default_commission) }}%.</small>
+              </label>
+              {#- The second rate. Empty means "the same as the first one", never zero:
+                  an empty box read as "earns nothing on renewals" would quietly stop
+                  paying somebody, so the fallback goes the safe way and the label says
+                  which way it goes. -#}
+              <label>
+                <span>Their share every time after that</span>
+                <input name="subsequent_commission_percent" type="number" min="1" max="100" step="1"
+                       inputmode="numeric" placeholder="{{ '%.0f'|format(default_commission) }}">
+                <small>Every later payment from the same customer. Empty uses the first share.</small>
               </label>
             </div>
             <button class="brain-action-button" type="submit"><i data-icon="check"></i>Approve</button>
@@ -524,7 +779,7 @@
       <div class="brain-table-wrap">
         <table>
           <caption class="sr-only">Affiliate applications already decided</caption>
-          <thead><tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Result</th><th scope="col">Code</th><th scope="col">Discount</th><th scope="col">Share</th><th scope="col">When</th></tr></thead>
+          <thead><tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Result</th><th scope="col">Code</th><th scope="col">Discount</th><th scope="col">First share</th><th scope="col">Later share</th><th scope="col">When</th></tr></thead>
           <tbody>
             {% for row in decided_applications %}{% set application = row.application %}{% set applicant_email = row.email %}
             <tr>
@@ -534,6 +789,10 @@
               <td>{{ application.discount_code or '—' }}</td>
               <td>{{ ('%.0f'|format(application.discount_percent)) ~ '%' if application.discount_percent else '—' }}</td>
               <td>{{ ('%.0f'|format(application.commission_percent)) ~ '%' if application.commission_percent else '—' }}</td>
+              {#- Read through the same resolver the money uses, so this column cannot say
+                  "—" for an approved affiliate who really does earn something on
+                  renewals. An empty column would read as "nothing". -#}
+              <td>{{ ('%.0f'|format(commission_rates_for(application).subsequent_percent)) ~ '%' if application.commission_percent else '—' }}</td>
               <td>{{ application.decided_at.strftime('%d %b %Y') if application.decided_at else '—' }}</td>
             </tr>
             {% endfor %}

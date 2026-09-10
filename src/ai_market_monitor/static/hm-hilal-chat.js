@@ -128,6 +128,24 @@ class HilalChat {
 
   bind() {
     this.orb.addEventListener("click", () => (this.open ? this.closeChat() : this.openChat()));
+
+    // Any "Ask AI" button on the page opens the assistant. The window is never opened
+    // by page-level scripts; it always goes through this path so focus lands inside
+    // the same way it does from the orb. An optional topic seeds the composer.
+    document.addEventListener("click", async (event) => {
+      const ask = event.target.closest("[data-hilal-ask]");
+      if (!ask) return;
+      event.preventDefault();
+      await this.openChat();
+      const topic = ask.dataset.hilalTopic;
+      if (topic) {
+        this.input.value = topic;
+        this.grow();
+        this.updateSend();
+        this.input.focus();
+      }
+    });
+
     this.find("[data-hilal-close]").addEventListener("click", () => this.closeChat({ ask: true }));
 
     this.form.addEventListener("submit", (event) => {

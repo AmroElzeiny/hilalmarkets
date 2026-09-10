@@ -2,8 +2,8 @@
 {% from "hilal/macros/payment_provider_badge.html" import payment_provider_badge %}
 {% from "hilal/macros/discount_code_box.html" import discount_code_box %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260905-inspector-left">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260905-inspector-left">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260910-pay-now">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260910-pay-now">
 {% endblock %}
 {% block content %}
 
@@ -38,18 +38,22 @@
     <div class="t-banner-body">
       <strong>You started paying and did not finish</strong>
       <p>{{ unfinished_payment.plan_name }}, {{ unfinished_payment.amount }}. Nothing has been charged yet.</p>
-      <a class="t-action" href="{{ unfinished_payment.resume_url }}">
-        <span data-icon="arrow" data-icon-class="icon-sm"></span>Finish paying
+      {% if unfinished_payment.next_step.kind == 'resume' %}
+      <a class="t-action" href="{{ unfinished_payment.next_step.url }}">
+        <span data-icon="arrow" data-icon-class="icon-sm"></span>{{ unfinished_payment.next_step.label }}
       </a>
+      {% else %}
+      <button
+        class="t-action is-primary"
+        type="button"
+        data-s-choose="{{ unfinished_payment.plan_code }}"
+        data-plan-name="{{ unfinished_payment.plan_name }}">
+        <span data-icon="arrow" data-icon-class="icon-sm"></span>{{ unfinished_payment.next_step.label }}
+      </button>
+      {% endif %}
     </div>
   </div>
   {% endif %}
-
-  <nav class="a-jump" aria-label="Jump to a part of this page" data-s-jump>
-    <a href="#s-now" data-s-jump-link><span data-icon="shield_check" data-icon-class="icon-sm"></span>What you have</a>
-    <a href="#s-plans" data-s-jump-link><span data-icon="layers" data-icon-class="icon-sm"></span>Other plans</a>
-    <a href="#s-payments" data-s-jump-link><span data-icon="history" data-icon-class="icon-sm"></span>Your payments</a>
-  </nav>
 
   {#- 1. What you have. ---------------------------------------------------- -#}
   <section class="a-section" id="s-now" data-hm-part="The plan you are on">
@@ -145,13 +149,9 @@
           {% endif %}
         </p>
 
-        {%- if plan.discount_code and plan.for_sale and not plan.is_free %}
-          {#- Why the number above is the lower one. Without the code the plan costs the
-              crossed-out figure, and this card is where somebody finds that out. -#}
-          <p class="price-code-note">
-            Using code <code class="hm-code-chip">{{ plan.discount_code }}</code>
-            <span>Without it the price is ${{ plan.full_price | int }} a month.</span>
-          </p>
+        {%- if plan.was_price and plan.for_sale and not plan.is_free %}
+          {#- The crossed-out price and timer already explain the temporary offer. -#}
+          <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" role="group" aria-label="Time left at this price" hidden></div>
         {%- endif %}
 
         {% if plan.highlight and plan.for_sale %}
@@ -274,8 +274,21 @@
           {{ payment.label }}
         </p>
         <span class="s-payment-amount">{{ payment.amount }}</span>
-        {% if payment.can_resume %}
-        <a class="t-action is-primary" href="{{ payment.resume_url }}"><span data-icon="arrow" data-icon-class="icon-sm"></span>Finish paying</a>
+        {% if payment.next_step %}
+          {% if payment.next_step.kind == 'resume' %}
+          <a class="t-action is-primary" href="{{ payment.next_step.url }}"><span data-icon="arrow" data-icon-class="icon-sm"></span>{{ payment.next_step.label }}</a>
+          {% else %}
+          <button
+            class="t-action is-primary"
+            type="button"
+            data-s-choose="{{ payment.plan_code }}"
+            data-plan-name="{{ payment.plan_name }}">
+            <span data-icon="arrow" data-icon-class="icon-sm"></span>{{ payment.next_step.label }}
+          </button>
+          {% endif %}
+        {% endif %}
+        {% if payment.blocked_reason %}
+        <p class="s-payment-blocked">{{ payment.blocked_reason }}</p>
         {% endif %}
       </li>
       {% endfor %}
@@ -334,7 +347,16 @@
             is one, so a full-price order shows one number and not two. -#}
         <s class="s-order-was" data-s-order-was hidden></s>
         <span class="s-order-total" data-s-order-total>—</span>
-        <p class="s-order-when" data-s-order-when></p>
+        {#- What paying does to somebody's money over time. The sentence belongs to the
+            payment company that will really take it, so it arrives with each way of
+            paying; this one is what is true before a way has been chosen. `{amount}` is
+            filled in by the script, because a discount code changes the number after the
+            server wrote the sentence. #}
+        <p
+          class="s-order-when"
+          data-s-order-when
+          data-s-order-when-default="{{ charge_story_before_choosing }}"
+        ></p>
       </div>
 
       <form id="s-checkout-form" method="post" action="/dashboard/billing/checkout" data-s-form>
@@ -433,7 +455,7 @@
               its own. A fourth step would ask everybody a question that only matters to
               the few who hold a code, and it appears the moment Crypto is picked, which
               is exactly where the reason for it is. -#}
-          {{ discount_code_box(discount_methods, '', 'USD', launch_discount_code, launch_discount_percent) }}
+          {{ discount_code_box(discount_methods, '', 'USD') }}
 
           <label class="s-agree" data-s-field>
             <input type="checkbox" name="terms_accepted" value="true" required data-s-agree>
@@ -464,6 +486,6 @@
 <script id="s-plan-facts" type="application/json">{{ plan_cards|tojson }}</script>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260905-inspector-left"></script>
-<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260905-inspector-left"></script>
+<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260910-pay-now"></script>
+<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260910-pay-now"></script>
 {% endblock %}

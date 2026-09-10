@@ -749,6 +749,13 @@ def _builder_category(capability: CapabilitySpec) -> str:
 
 PERIOD = CapabilityParameter("period", "integer", 20, False, "Indicator lookback period.")
 LOOKBACK = CapabilityParameter("lookback", "integer", 20, False, "Closed-candle lookback.")
+PRICE_ACTION_TOLERANCE = CapabilityParameter(
+    "tolerance_percent",
+    "number",
+    0.25,
+    False,
+    "Allowed distance from the reference level as a percentage.",
+)
 THRESHOLD = CapabilityParameter("threshold", "number", None, True, "Required threshold.")
 TIMEFRAME = CapabilityParameter("timeframe", "timeframe", "15m", False, "Evaluation timeframe.")
 def _pattern_parameter(
@@ -1573,7 +1580,8 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         "Current candle range and close location show impulse.",
         aliases=("impulse candle", "momentum candle", "strong candle"),
         operand_kind="price_action",
-        operand_name="wide_range_candle",
+        operand_name="impulse_candle",
+        direction_support=("bullish", "bearish"),
     ),
     _cap(
         "pullback_depth_percent",
@@ -1610,7 +1618,6 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
             "shoulder_tolerance_percent": 5.0,
             "head_prominence_percent": 1.0,
             "maximum_spacing_ratio": 3.0,
-            "breakout_buffer_percent": 0.0,
         },
         parameters=(
             PATTERN_LOOKBACK,
@@ -1618,7 +1625,6 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
             SHOULDER_TOLERANCE,
             HEAD_PROMINENCE,
             MAXIMUM_SPACING_RATIO,
-            BREAKOUT_BUFFER,
             TIMEFRAME,
         ),
         supported_comparators=("is_true", "is_false"),
@@ -1709,7 +1715,6 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
             "shoulder_tolerance_percent": 5.0,
             "head_prominence_percent": 1.0,
             "maximum_spacing_ratio": 3.0,
-            "breakout_buffer_percent": 0.0,
         },
         parameters=(
             PATTERN_LOOKBACK,
@@ -1717,7 +1722,6 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
             SHOULDER_TOLERANCE,
             HEAD_PROMINENCE,
             MAXIMUM_SPACING_RATIO,
-            BREAKOUT_BUFFER,
             TIMEFRAME,
         ),
         supported_comparators=("is_true", "is_false"),
@@ -2112,6 +2116,7 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         aliases=("daily high", "daily low"),
         operand_kind="price_action",
         operand_name="higher_high",
+        availability="planned",
     ),
     _cap(
         "previous_daily_low_sweep",
@@ -2258,6 +2263,7 @@ CAPABILITIES: tuple[CapabilitySpec, ...] = (
         aliases=("monthly high", "monthly low"),
         operand_kind="price_action",
         operand_name="higher_high",
+        availability="planned",
     ),
     _cap(
         "previous_session_high_low",
@@ -3375,20 +3381,36 @@ def _extended_indicator_capabilities() -> list[CapabilitySpec]:
             default_comparator=comparator,
             default_threshold=threshold,
             parameters=tuple(
-                CapabilityParameter(
-                    name,
-                    "number" if isinstance(value, float) else "integer",
-                    value,
-                    # Where the measure itself cannot be taken over a window this small,
-                    # the form must not offer one. See INDICATOR_MINIMUM_PERIOD.
-                    minimum=(
-                        INDICATOR_MINIMUM_PERIOD.get(operand)
-                        if name == "period" and operand in INDICATOR_MINIMUM_PERIOD
-                        else None
+                [
+                    *(
+                        CapabilityParameter(
+                            name,
+                            "number" if isinstance(value, float) else "integer",
+                            value,
+                            # Where the measure itself cannot be taken over a window this small,
+                            # the form must not offer one. See INDICATOR_MINIMUM_PERIOD.
+                            minimum=(
+                                INDICATOR_MINIMUM_PERIOD.get(operand)
+                                if name == "period" and operand in INDICATOR_MINIMUM_PERIOD
+                                else None
+                            ),
+                        )
+                        for name, value in parameters.items()
+                        if isinstance(value, (int, float))
                     ),
-                )
-                for name, value in parameters.items()
-                if isinstance(value, (int, float))
+                    *(
+                        (
+                            CapabilityParameter(
+                                "component",
+                                "choice",
+                                "r1",
+                                options=("pivot", "r1", "s1", "r2", "s2"),
+                            ),
+                        )
+                        if key == "pivot_points"
+                        else ()
+                    ),
+                ]
             ),
             warmup_candles=warmup,
             builder_category=builder_category,
@@ -3475,6 +3497,81 @@ def _candle_pattern_capabilities() -> list[CapabilitySpec]:
         for name in pattern_names()
         if name not in existing
     ]
+
+
+# The audited A-M price-action publication set. Keep older publication unchanged for
+# every capability outside this confirmed defect scope.
+_A_M_PRICE_ACTION_PARAMETER_KEYS: frozenset[str] = frozenset(
+    {
+        "above_range",
+        "all_time_high_breakout",
+        "auto_channel_breakdown",
+        "auto_channel_breakout",
+        "auto_channel_lower_touch",
+        "auto_channel_upper_touch",
+        "below_range",
+        "break_and_retest_confirmed",
+        "breakdown_from_consolidation",
+        "breakout_from_consolidation",
+        "breakout_with_volume_confirmation",
+        "breakout_without_volume_confirmation",
+        "breaks_n_candle_high",
+        "breaks_n_candle_low",
+        "close_above_previous_day_high",
+        "close_above_previous_week_high",
+        "close_below_previous_day_low",
+        "close_below_previous_week_low",
+        "closes_above_n_candle_high",
+        "closes_below_n_candle_low",
+        "compression_before_breakout",
+        "consecutive_inside_bars",
+        "correction_leg_detected",
+        "daily_high_swept",
+        "daily_low_swept",
+        "deep_pullback",
+        "displacement_candle_bearish",
+        "displacement_candle_bullish",
+        "dynamic_trendline",
+        "failed_breakdown",
+        "failed_breakout",
+        "impulse_leg_detected",
+        "inside_range",
+        "large_body_relative_to_atr",
+        "last_down_before_bullish_displacement",
+        "last_up_before_bearish_displacement",
+        "level_distance_percent",
+        "level_strength_score",
+        "linear_regression_channel_breakout",
+        "linear_regression_channel_touch",
+        "multiple_touches_of_level",
+    }
+)
+
+_PRICE_ACTION_WARMUP_ONLY_LOOKBACK: frozenset[str] = frozenset(
+    {
+        "all_time_high_breakout",
+        "close_above_previous_day_high",
+        "close_above_previous_week_high",
+        "close_below_previous_day_low",
+        "close_below_previous_week_low",
+        "consecutive_inside_bars",
+        "correction_leg_detected",
+        "daily_high_swept",
+        "daily_low_swept",
+        "displacement_candle_bearish",
+        "displacement_candle_bullish",
+        "impulse_leg_detected",
+        "large_body_relative_to_atr",
+    }
+)
+
+_PRICE_ACTION_TOLERANCE_CONSUMERS: frozenset[str] = frozenset(
+    {
+        "break_and_retest_confirmed",
+        "level_strength_score",
+        "multiple_touches_of_level",
+    }
+)
 
 
 def _price_action_capabilities() -> list[CapabilitySpec]:
@@ -3569,6 +3666,33 @@ def _price_action_capabilities() -> list[CapabilitySpec]:
         else:
             builder_category = "price_action"
         comparator, threshold = numeric.get(name, ("is_true", True))
+        if name in _A_M_PRICE_ACTION_PARAMETER_KEYS:
+            semantic_parameters = (
+                (() if name in _PRICE_ACTION_WARMUP_ONLY_LOOKBACK else (LOOKBACK,))
+                + (
+                    (PRICE_ACTION_TOLERANCE,)
+                    if name in _PRICE_ACTION_TOLERANCE_CONSUMERS
+                    else ()
+                )
+                + (TIMEFRAME,)
+            )
+            semantic_defaults = {
+                **(
+                    {}
+                    if name in _PRICE_ACTION_WARMUP_ONLY_LOOKBACK
+                    else {"lookback": 20}
+                ),
+                **(
+                    {"tolerance_percent": 0.25}
+                    if name in _PRICE_ACTION_TOLERANCE_CONSUMERS
+                    else {}
+                ),
+            }
+        else:
+            # Outside the confirmed A-M defect set, preserve the existing public
+            # contract exactly.
+            semantic_parameters = (LOOKBACK, TIMEFRAME)
+            semantic_defaults = {"lookback": 20, "tolerance_percent": 0.25}
         specs.append(
             _cap(
                 name,
@@ -3583,13 +3707,13 @@ def _price_action_capabilities() -> list[CapabilitySpec]:
                 ),
                 operand_kind="price_action",
                 operand_name=name,
-                default_parameters={"lookback": 20, "tolerance_percent": 0.25},
+                default_parameters=semantic_defaults,
                 default_comparator=comparator,
                 default_threshold=threshold,
                 supported_comparators=(
                     ("gt", "gte", "lt", "lte", "eq") if name in numeric else ("is_true", "is_false")
                 ),
-                parameters=(LOOKBACK, TIMEFRAME),
+                parameters=semantic_parameters,
                 warmup_candles=21,
                 builder_category=builder_category,
                 beginner_friendly=name in beginner,

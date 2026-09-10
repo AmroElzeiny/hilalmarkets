@@ -4,7 +4,13 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS, plan_offer_payload
+from ai_market_monitor.core.plans import (
+    PLAN_DEFINITIONS,
+    PUBLIC_PLAN_PRESENTATIONS,
+    PURCHASABLE_PLAN_CODES,
+    money_back_note,
+    plan_offer_payload,
+)
 from ai_market_monitor.core.site_content import (
     ACCOUNT_ONLY_PATH_PREFIXES,
     COOKIE_SETTINGS_PATH,
@@ -18,6 +24,12 @@ from ai_market_monitor.core.site_content import (
     WAITLIST_HIDDEN_PAGES,
     is_account_only_path,
 )
+from ai_market_monitor.services.plan_changes import (
+    SWITCH_LABEL_BUY,
+    SWITCH_LABEL_CURRENT,
+    switch_label_soon,
+)
+from tests.support.billing_config import configure_live_billing
 
 #: Every public address a visitor can reach, including the landing page, which is not a
 #: PUBLIC_PAGES entry. Tests loop over this so a page added later is covered the day it
@@ -487,39 +499,46 @@ async def test_public_sitemap_and_robots_exclude_private_surfaces(test_context):
 
 async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
     # The pricing page only exists once the product is open, so this is asserted with
-    # waitlist mode off: it is the launch-day page that must match the dashboard.
+    # waitlist mode off: it is the launch-day page that must match the dashboard. The
+    # payment companies are configured too — without them the dashboard honestly answers
+    # "coming soon" on every paid card, and the two surfaces have nothing to agree about.
     test_context["settings"].public_waitlist_mode = False
+    configure_live_billing(test_context["settings"])
     catalog = await test_context["client"].get("/api/v1/billing/plans")
     assert catalog.status_code == 200
     catalog_plans = {plan["code"]: plan for plan in catalog.json()["plans"]}
     assert set(catalog_plans) == {"demo", "trader", "pro"}
-    assert catalog_plans["trader"]["annual_price"] == "120.00"
-    assert catalog_plans["pro"]["monthly_price"] == "22.00"
-    assert catalog_plans["pro"]["annual_price"] == "220.00"
+    # Read from the catalog, never typed here: the page and this test must move together
+    # when a price changes, and Pro moved from $22 to $25 while this file still said $22.
+    for code in ("demo", "trader", "pro"):
+        assert catalog_plans[code]["monthly_price"] == (
+            f"{PLAN_DEFINITIONS[code].monthly_price:.2f}"
+        ), code
+        assert catalog_plans[code]["annual_price"] == (
+            f"{PUBLIC_PLAN_PRESENTATIONS[code].annual_price:.2f}"
+        ), code
 
     pricing = await test_context["client"].get("/pricing")
     assert pricing.status_code == 200
     assert PLAN_DEFINITIONS["demo"].name in pricing.text
     assert "$0" in pricing.text
-    # The launch offer. Both numbers come from `core.plans`, not from this file: a price
-    # changed there must show up here, and the assertion still holds on the day the
-    # offer ends, when there is no crossed-out price left to show.
-    trader_offer = plan_offer_payload("trader")
-    assert f"${int(trader_offer['monthlyPrice'])}" in pricing.text  # type: ignore[arg-type]
-    original = trader_offer["originalMonthlyPrice"]
-    if original:
-        assert f"${int(original)}" in pricing.text  # type: ignore[arg-type]
-        assert 'class="price-original"' in pricing.text
-        assert "data-offer-countdown" in pricing.text
-    # The Pro plan is not on sale yet, so it says "Soon" and carries no price at all.
-    assert "$22" not in pricing.text
-    assert "Pro is coming soon" in pricing.text
-    assert "$29" not in pricing.text
-    assert "Choose Monitor monthly" in pricing.text
-    assert "7-day money-back guarantee" in pricing.text
-    assert "Cancel within 7 days of payment for a full refund." in pricing.text
+    # The launch offer, on every plan that is on sale. Both numbers come from
+    # `core.plans`, not from this file: a price changed there must show up here, and the
+    # assertion still holds on the day the offer ends, when there is no crossed-out
+    # price left to show.
+    for code in PURCHASABLE_PLAN_CODES:
+        offer = plan_offer_payload(code)
+        assert f"${int(offer['monthlyPrice'])}" in pricing.text, code  # type: ignore[arg-type]
+        assert PUBLIC_PLAN_PRESENTATIONS[code].cta_label in pricing.text, code
+        original = offer["originalMonthlyPrice"]
+        if original:
+            assert f"${int(original)}" in pricing.text, code  # type: ignore[arg-type]
+            assert 'class="price-original"' in pricing.text
+            assert "data-offer-countdown" in pricing.text
+    # Every public plan is on sale, so nothing on the page says "coming soon".
+    assert "is coming soon" not in pricing.text
+    assert money_back_note("pro") in pricing.text
     assert "Choose Core" not in pricing.text
-    assert "Choose Pro" not in pricing.text
     for internal_code in ("creator", "community", "lifetime", "pro_trial"):
         assert PLAN_DEFINITIONS[internal_code].name not in pricing.text
 
@@ -532,23 +551,46 @@ async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
     assert "What billing changes" not in billing.text
     assert "Screening evidence stays the same on every plan" not in billing.text
     assert 'data-billing-page-interval' in billing.text
-    assert "Choose Monitor monthly" in billing.text
-    assert "7-day money-back guarantee" in billing.text
-    assert "5 active market monitors" in billing.text
+    # Every feature line the catalog holds for a visible plan has to be on the page.
+    # Reading them from `core.plans` is what stops the dashboard and the public pricing
+    # page describing the same plan in two different ways.
+    #
+    # The apostrophe in "Why wasn't I alerted?" reaches the browser as `&#39;`, which is
+    # the same character to a reader. Unescaped here so the comparison is about words.
+    billing_words = html.unescape(billing.text)
+    for code in ("demo", "trader", "pro"):
+        for feature in PUBLIC_PLAN_PRESENTATIONS[code].visible_features:
+            assert feature in billing_words, (code, feature)
+    # The buttons here are not the public page's. The public card invites a visitor to
+    # choose a plan; the dashboard card says what pressing it would *do* to the plan this
+    # person already holds, which the server decides in `plan_changes`. Signed in on the
+    # free plan that means: the free card is the current one, and each paid card can be
+    # paid for. The words are read from that one owner, never typed again here.
+    #
+    # Counted as button text, not as words anywhere on the page: "Pay" is also inside
+    # "Payment method" and "Paying here", and a plain substring count read ten of them.
+    buttons = re.findall(r">([^<>]+)</button>", billing.text)
+    assert buttons.count(SWITCH_LABEL_CURRENT) == 1
+    assert buttons.count(SWITCH_LABEL_BUY) == len(PURCHASABLE_PLAN_CODES)
+    for code in PURCHASABLE_PLAN_CODES:
+        assert switch_label_soon(PLAN_DEFINITIONS[code].name) not in billing.text, code
+    assert money_back_note("pro") in billing.text
     assert "No payment method needed" not in billing.text
-    assert "10 active market monitors" in billing.text
-    assert "Unlimited monitor alerts per day" in billing.text
     for code in ("trader", "pro"):
         assert f"/dashboard/billing/checkout?plan_code={code}" not in billing.text
     for internal_code in ("creator", "community", "lifetime", "pro_trial"):
         assert f"plan_code={internal_code}" not in billing.text
 
+    # An internal plan code typed into the address opens no checkout. The reason given is
+    # the true one: on a server that can take money, the plan is what is refused, not
+    # billing. It used to read `billing_disabled` here only because the test server could
+    # not take money at all, which hid whether the plan check worked.
     blocked = await test_context["client"].get(
         "/dashboard/billing/checkout?plan_code=lifetime",
         follow_redirects=False,
     )
     assert blocked.status_code == 303
-    assert blocked.headers["location"] == "/dashboard/billing?error=billing_disabled"
+    assert blocked.headers["location"] == "/dashboard/billing?error=plan_not_available"
 
 
 async def test_dashboard_navigation_matches_the_customer_information_architecture(

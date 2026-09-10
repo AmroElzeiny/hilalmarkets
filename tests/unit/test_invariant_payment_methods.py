@@ -21,6 +21,7 @@ re-states the rule cannot catch the rule being wrong.
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
@@ -43,6 +44,7 @@ from ai_market_monitor.services.billing import (
 )
 
 BILLING_CYCLES = ("monthly", "annual")
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: Every plan a page can ask about, not only the ones on sale. "demo" is the free plan —
 #: it reads as "available monthly" in the offer table, because it is, at no charge — and
@@ -397,3 +399,116 @@ def test_the_live_shape_offers_crypto_and_refuses_card() -> None:
     ) == (
         "Paying by card is switched off just now. You can pay with crypto instead."
     )
+
+
+# ── What the checkout promises about money that repeats ──────────────────────────
+#
+# The same rule as the rest of this file, one step further on. It is not enough that a way
+# of paying which is *offered* works; what the checkout says that way of paying will *do*
+# must be true of it as well.
+#
+# Both popups had one sentence for every method — "$17 today, then $17 every month until
+# you stop it" — written into their own JavaScript. NOWPayments takes one payment and
+# stops. So every crypto buyer was promised a monthly subscription that could not exist,
+# on the same screen where the landing page promises the checkout will show "whether it
+# renews by itself".
+
+
+#: Every checkout script that draws the sentence under the price.
+_CHECKOUT_SCRIPTS = (
+    "hm-subscription-test.js",
+    "hilalmarkets-billing.js",
+)
+
+#: Words that only belong in a promise about a charge that comes back on its own.
+_REPEAT_WORDS = ("every month", "every year", "until you stop it", "each month")
+
+
+@pytest.mark.parametrize("case", sorted(SETTINGS_CASES))
+@pytest.mark.parametrize("plan_code", EVERY_PLAN_CODE)
+def test_only_a_company_that_can_charge_again_promises_a_charge_again(
+    case: str, plan_code: str
+) -> None:
+    """A repeat is promised for exactly the companies that can take one.
+
+    Read from the capability contract rather than from a list of company names, so a
+    company added tomorrow is covered by this test on the day it is added.
+    """
+
+    settings = SETTINGS_CASES[case]
+    for cycle in BILLING_CYCLES:
+        for offer in payment_method_offers(
+            settings, plan_codes=(plan_code,), billing_cycle=cycle
+        ):
+            story = offer.charge_story.casefold()
+            promises_repeat = any(word in story for word in _REPEAT_WORDS)
+            assert promises_repeat == offer.renews_by_itself, (
+                f"{case}/{plan_code}/{cycle}/{offer.method}: the checkout sentence "
+                f"{offer.charge_story!r} does not match what "
+                f"{offer.provider!r} can really do"
+            )
+            if not offer.renews_by_itself and offer.provider is not None:
+                assert "does not renew by itself" in story, (
+                    "a one-off payment must say so out loud"
+                )
+
+
+@pytest.mark.parametrize("case", sorted(SETTINGS_CASES))
+@pytest.mark.parametrize("plan_code", EVERY_PLAN_CODE)
+def test_the_page_is_handed_the_sentence_and_the_amount_separately(
+    case: str, plan_code: str
+) -> None:
+    """The browser fills in a number. It never chooses which sentence.
+
+    ``{amount}`` stays a placeholder in the payload because a discount code changes the
+    figure after the server has written the words. Everything else — whether it repeats,
+    how often, and what to call that — is already decided here.
+    """
+
+    settings = SETTINGS_CASES[case]
+    payload = payment_method_payload(settings, plan_code=plan_code)
+    for cycle, methods in payload.items():
+        for method, decision in methods.items():
+            story = decision["story"]
+            assert isinstance(story, str) and story.strip()
+            assert isinstance(decision["terms"], str) and decision["terms"].strip()
+            assert isinstance(decision["renews"], bool)
+            offer = next(
+                item
+                for item in payment_method_offers(
+                    settings, plan_codes=(plan_code,), billing_cycle=cycle
+                )
+                if item.method == method
+            )
+            assert decision["renews"] == offer.renews_by_itself
+            if offer.provider is not None:
+                assert "{amount}" in story, (
+                    f"{case}/{plan_code}/{cycle}/{method}: the sentence carries no "
+                    "place for the amount, so the page cannot show what is charged"
+                )
+            # A figure baked in on the server is a figure a discount code cannot correct.
+            assert "$" not in story
+
+
+def test_no_checkout_script_writes_its_own_renewal_promise() -> None:
+    """The reported defect class: the same rule written a second time, in the browser.
+
+    A sentence about repeating money living in a script is a sentence nothing on the
+    server can correct and no test of the payment rules can see.
+    """
+
+    static = REPO_ROOT / "src" / "ai_market_monitor" / "static"
+    for name in _CHECKOUT_SCRIPTS:
+        source = (static / name).read_text(encoding="utf-8")
+        # Comments explain why the sentence left this file; only real code is checked.
+        code = "\n".join(
+            line
+            for line in source.splitlines()
+            if not line.lstrip().startswith(("*", "//", "/*"))
+        )
+        for word in _REPEAT_WORDS:
+            assert word not in code, (
+                f"{name} still writes its own promise about a repeating charge "
+                f"({word!r}). The sentence belongs to the payment company, and comes "
+                "from payment_method_payload."
+            )

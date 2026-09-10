@@ -53,6 +53,7 @@ from ai_market_monitor.services.monitor_canvas import (
 )
 from ai_market_monitor.services.monitor_test_alert import MonitorTestAlertService
 from ai_market_monitor.services.notification_preferences import alert_channel_choices
+from ai_market_monitor.services.plan_limits import plan_limit_for, plan_limit_notice
 from ai_market_monitor.services.risk_disclaimer import (
     DisclaimerIdentityMissing,
 )
@@ -458,11 +459,17 @@ async def activate_canvas_monitor(
         await strategy_service.activate(version, user_id=user.id, strategy_name=name)
     except (StrategyGateError, EntitlementError, VerifiedStrategyError) as exc:
         await session.rollback()
+        # The plan is read after the rollback, from a clean session, because a limit
+        # sentence has to name the plan somebody is really on. Reading it before would
+        # have meant loading it on every activation that succeeds.
+        entitlement = await EntitlementService(session).current(user.id)
         raise HTTPException(
             status_code=409,
             detail={
                 "code": getattr(exc, "code", "activation_refused"),
-                "message": _activation_message(getattr(exc, "code", "")),
+                "message": _activation_message(
+                    getattr(exc, "code", ""), plan_code=entitlement.plan.code
+                ),
             },
         ) from exc
     await session.commit()
@@ -510,10 +517,13 @@ _ACTIVATION_WORDS: dict[str, str] = {
         "This monitor clashes with one you already have. Look at your monitors and "
         "pause or change the other one first."
     ),
-    "plan_limit_reached": (
-        "Your plan does not allow another monitor running at once. Pause one, or look "
-        "at your plan."
-    ),
+    # Every real plan-limit code — `active_strategy_limit`, `strategy_approval_limit`,
+    # `symbol_limit`, `timeframe_not_allowed` — is deliberately absent from this table.
+    # `_activation_message` asks `services/plan_limits.py` for those, so the sentence
+    # names the plan, its actual number and what to do next. This table used to hold one
+    # invented code, `plan_limit_reached`, which nothing ever raises; every person who
+    # really reached a limit fell through to the generic sentence at the bottom and was
+    # told only that "the monitor could not be started".
     "preview_required": (
         "We could not check the market against your rules just now, so the monitor was "
         "not started. Nothing was saved. Please try again in a few minutes."
@@ -537,11 +547,23 @@ _ACTIVATION_WORDS: dict[str, str] = {
 }
 
 
-def _activation_message(code: str) -> str:
-    return _ACTIVATION_WORDS.get(
-        code,
+def _activation_message(code: str, *, plan_code: str) -> str:
+    """Why the monitor did not start, in words that name the next step.
+
+    A plan limit is answered by the one module that owns limits, so the sentence carries
+    the plan's real number and what to do about it. Everything else comes from the table
+    above, and anything neither of them knows falls back to a sentence that at least says
+    nothing was saved.
+    """
+
+    written = _ACTIVATION_WORDS.get(code)
+    if written is not None:
+        return written
+    if plan_limit_for(code) is not None:
+        return plan_limit_notice(code, plan_code=plan_code)
+    return (
         "The monitor could not be started, so nothing was saved. Your board is "
-        "untouched — please try again.",
+        "untouched — please try again."
     )
 
 

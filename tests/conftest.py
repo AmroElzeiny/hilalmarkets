@@ -68,6 +68,31 @@ def reset_provider_runtime_between_tests() -> Iterator[None]:
         asyncio.run(shutdown_provider_runtime())
 
 
+@pytest.fixture(autouse=True)
+def no_test_may_reach_a_payment_company(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[None]:
+    """A test run must never send a request to Creem, NOWPayments or Stripe.
+
+    Same shape of problem as the Chromium processes this file already closes: the offline
+    suite was quietly doing real outside work. Any test that switches billing on is
+    holding obviously fake keys, and the checkout code then sent those keys to the real
+    payment companies. They answered "wrong key" — 401 from Creem, 403 from NOWPayments —
+    and the test read that as *our* server refusing the customer. Four cases of
+    ``test_invariant_billing_offers`` failed that way while both the page and the server
+    rule were correct.
+
+    Autouse and repo-wide, because this is a fact about the whole product, not about the
+    four tests that happened to show it. A test that means to exercise the payment path
+    calls ``stub_payment_companies`` and gets in-process answers instead.
+    """
+
+    from tests.support.billing_config import refuse_payment_network
+
+    refuse_payment_network(monkeypatch)
+    yield
+
+
 class SuccessfulPreviewer:
     async def run(self, strategy) -> MarketPreviewResponse:
         return MarketPreviewResponse(
@@ -118,6 +143,14 @@ async def _build_context(**overrides: object) -> AsyncIterator[dict]:
         tracedge_market_data_mode="fixture",
         tracedge_fixture_market_data_enabled=True,
         allow_mock_providers=True,
+        # The offline suite never drives a real browser. Reading a page with Chromium is
+        # on by default in the product, and every test that builds a source-resolution
+        # service with a fake fetcher was quietly starting one: 61 Chromium processes and
+        # 20 driver processes were left behind by four test files alone, and the suite
+        # slowed to a crawl long before it finished. Nothing here is testing the browser —
+        # the tests that are switch it on themselves, and the test that proves the shipped
+        # default is "on" builds its own Settings and still sees True.
+        sharia_source_browser_render_enabled=False,
         sharia_default_methodology_code=None,
         openai_model="gpt-5.4-nano",
         openai_reasoning_effort="low",

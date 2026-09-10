@@ -46,6 +46,7 @@ from ai_market_monitor.db.models.enums import (
     UserRole,
     UserStatus,
 )
+from ai_market_monitor.services.affiliate_attribution import ReferralAttributionService
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
 
 ACCOUNT_PLAN_OPTIONS = (
@@ -228,6 +229,12 @@ class SystemBrainUserAdminService:
         user.status = UserStatus.SUSPENDED
         await self._revoke_sessions(target_user_id, now)
         await self._pause_strategies(target_user_id, now)
+        # A ban is one of the two things — the other is deletion — that end a permanent
+        # affiliate assignment. Everything the affiliate already earned from this person
+        # stays: the commission rows keep their own copy of the name and the amount.
+        released_from_affiliate = await ReferralAttributionService(self.session).release(
+            user_id=target_user_id
+        )
         return await self._complete_action(
             action,
             reason=reason,
@@ -235,6 +242,7 @@ class SystemBrainUserAdminService:
                 "previous_profile_status": previous_status,
                 "profile_status": "banned",
                 "identifiers_blocked": len(identities),
+                "affiliate_assignment_released": released_from_affiliate,
             },
             message="The profile is banned and its email cannot be used for another signup.",
         )
@@ -371,6 +379,11 @@ class SystemBrainUserAdminService:
         user.timezone = "UTC"
         user.onboarding_completed_at = None
         user.last_seen_at = None
+        # The other end of an affiliate assignment. The row goes; the earnings stay,
+        # because the affiliate really did earn them and a receipt does not disappear.
+        released_from_affiliate = await ReferralAttributionService(self.session).release(
+            user_id=target_user_id
+        )
         return await self._complete_action(
             action,
             reason=reason,
@@ -379,6 +392,7 @@ class SystemBrainUserAdminService:
                 "identities_released": len(released_emails),
                 "onboarding_data_removed": True,
                 "access_email_records_anonymized": len(access_deliveries),
+                "affiliate_assignment_released": released_from_affiliate,
                 "history_retained": True,
             },
             message=(

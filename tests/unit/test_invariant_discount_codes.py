@@ -22,21 +22,18 @@ import pytest
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.plans import (
-    LAUNCH_DISCOUNT_CODE,
     PLAN_DEFINITIONS,
-    PLAN_OFFERS,
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
     PURCHASABLE_PLAN_CODES,
-    PlanOffer,
-    coded_monthly_price,
+    RETIRED_DISCOUNT_CODES,
     effective_monthly_price,
-    launch_discount_percent,
     original_monthly_price,
     plan_offer,
     plan_offer_payload,
     price_after_percent,
     promotion_is_active,
+    promotional_monthly_price,
 )
 from ai_market_monitor.services.billing import (
     DISCOUNT_CODE_METHODS,
@@ -129,73 +126,114 @@ def test_a_thing_that_is_not_a_code_is_refused(typed: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The code is the only route to the launch price.
+# The launch price is the price. Nothing is typed to reach it.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("code", PUBLIC_PLAN_CODES)
 @pytest.mark.parametrize("when", [BEFORE_THE_END, AFTER_THE_END])
-def test_a_checkout_with_no_code_charges_the_normal_price(code: str, when: datetime) -> None:
-    """The whole point of a code-gated offer.
+def test_a_checkout_charges_exactly_what_the_card_shows(code: str, when: datetime) -> None:
+    """The whole point of an offer nobody has to type anything for.
 
-    `effective_monthly_price` is what a payment attempt is opened at, so if it ever
-    carried the launch price the offer would apply to everybody with nothing typed — and
-    the sentence on every pricing card would be false.
+    `effective_monthly_price` is what a payment attempt is opened at *and* what a pricing
+    card prints. One function, so the crypto invoice, the Creem product check and every
+    price on every page are the same number by construction.
     """
 
-    assert effective_monthly_price(code, now=when) == PLAN_DEFINITIONS[code].monthly_price
+    charged = effective_monthly_price(code, now=when)
+    promotional = promotional_monthly_price(code, now=when)
+    normal = PLAN_DEFINITIONS[code].monthly_price
+    assert charged == (promotional if promotional is not None else normal)
+    payload = plan_offer_payload(code, now=when)
+    if plan_offer(code).monthly_available:
+        assert payload["monthlyPrice"] == float(charged)
 
 
 @pytest.mark.parametrize("code", PUBLIC_PLAN_CODES)
-def test_the_coded_price_is_derived_from_the_percentage(code: str) -> None:
-    """One number describes the offer, so "25% off" and "$15" cannot drift apart."""
+def test_a_promotional_price_is_always_below_the_normal_one(code: str) -> None:
+    """An "offer" that is not cheaper is not an offer, and is refused rather than shown."""
 
-    percent = launch_discount_percent(code, now=BEFORE_THE_END)
-    coded = coded_monthly_price(code, now=BEFORE_THE_END)
-    if percent is None:
-        assert coded is None
+    promotional = promotional_monthly_price(code, now=BEFORE_THE_END)
+    if promotional is None:
         return
-    assert coded == price_after_percent(PLAN_DEFINITIONS[code].monthly_price, percent)
+    assert promotional < PLAN_DEFINITIONS[code].monthly_price
 
 
 @pytest.mark.parametrize("code", PUBLIC_PLAN_CODES)
 def test_the_offer_stops_with_the_clock(code: str) -> None:
-    """One deadline decides the code, the crossed-out price and the countdown."""
+    """One deadline decides the price, the crossed-out figure and the countdown."""
 
     assert promotion_is_active(BEFORE_THE_END) is True
     assert promotion_is_active(AFTER_THE_END) is False
-    assert launch_discount_percent(code, now=AFTER_THE_END) is None
-    assert coded_monthly_price(code, now=AFTER_THE_END) is None
+    assert promotional_monthly_price(code, now=AFTER_THE_END) is None
     assert original_monthly_price(code, now=AFTER_THE_END) is None
+    assert (
+        effective_monthly_price(code, now=AFTER_THE_END)
+        == PLAN_DEFINITIONS[code].monthly_price
+    )
 
 
 @pytest.mark.parametrize("code", PUBLIC_PLAN_CODES)
 @pytest.mark.parametrize("when", [BEFORE_THE_END, AFTER_THE_END])
 def test_the_card_payload_is_coherent(code: str, when: datetime) -> None:
-    """A crossed-out price, a code and a "without it" figure appear together or not at all.
+    """A crossed-out price and a running offer appear together or not at all.
 
-    Any one of them without the others is a card that either promises a discount nobody
-    is told how to get, or names a code that changes nothing.
+    Either without the other is a card that promises a saving nobody can get, or hides
+    one that is really running.
     """
 
     payload = plan_offer_payload(code, now=when)
     if not plan_offer(code).monthly_available:
-        # Nothing quotable for a plan nobody can buy — not even the code.
+        # Nothing quotable for a plan nobody can buy.
         assert payload["monthlyPrice"] is None
         assert payload["fullMonthlyPrice"] is None
-        assert payload["discountCode"] is None
+        assert payload["originalMonthlyPrice"] is None
         return
-    full = effective_monthly_price(code, now=when)
-    coded = coded_monthly_price(code, now=when)
-    assert payload["fullMonthlyPrice"] == float(full)
-    assert payload["monthlyPrice"] == float(coded if coded is not None else full)
-    has_code = payload["discountCode"] is not None
-    assert has_code is (coded is not None)
-    assert has_code is (payload["originalMonthlyPrice"] is not None)
-    assert has_code is (payload["discountPercent"] is not None)
-    if has_code:
-        assert payload["discountCode"] == LAUNCH_DISCOUNT_CODE
-        assert payload["monthlyPrice"] < payload["fullMonthlyPrice"]
+    charged = effective_monthly_price(code, now=when)
+    # The two fields are one number now. They stay separate only because three templates
+    # and the landing bundle read them by name.
+    assert payload["fullMonthlyPrice"] == float(charged)
+    assert payload["monthlyPrice"] == float(charged)
+    running = payload["originalMonthlyPrice"] is not None
+    assert running is (promotional_monthly_price(code, now=when) is not None)
+    assert payload["promotionRunning"] is running
+    if running:
+        assert payload["originalMonthlyPrice"] > payload["monthlyPrice"]
+
+
+@pytest.mark.parametrize("code", RETIRED_DISCOUNT_CODES)
+def test_a_retired_code_cannot_be_configured(code: str) -> None:
+    """The one guard that stands between a retired code and a payment nobody can confirm.
+
+    A retired code left in the env list would come off a price that is already the launch
+    price, so the customer pays less than every page shows and the confirmation is then
+    refused as underpaid. Refused at startup rather than ignored at runtime.
+    """
+
+    with pytest.raises(Exception) as raised:  # noqa: PT011 - pydantic wraps the message
+        _settings(billing_discount_codes=f"{code}=25")
+    assert code in str(raised.value)
+
+
+@pytest.mark.parametrize("code", RETIRED_DISCOUNT_CODES)
+@pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+@pytest.mark.anyio
+async def test_a_retired_code_is_refused_before_anything_is_asked(
+    code: str, plan_code: str
+) -> None:
+    """Defence in depth: the reader refuses it even if it reached a list somehow.
+
+    This refusal must not depend on Creem, because Creem may still hold the code as
+    active — that is exactly the case this guards against.
+    """
+
+    settings = _settings(creem_api_key=None, billing_discount_codes={})
+    settings.billing_discount_codes[code] = Decimal("25")
+    with pytest.raises(DiscountCodeError) as refusal:
+        await DiscountCodeService(settings).offer_for(
+            code, plan_code=plan_code, now=BEFORE_THE_END
+        )
+    assert refusal.value.code == "discount_code_expired"
 
 
 # ---------------------------------------------------------------------------
@@ -239,113 +277,15 @@ def _settings(**overrides: object) -> Settings:
     return Settings(**overrides)  # type: ignore[arg-type]
 
 
-@pytest.mark.anyio
-async def test_the_launch_code_works_without_being_written_into_an_env_file() -> None:
-    """`core/plans.py` owns the launch offer. A second number for it in an env file is
-    exactly the drift this module exists to stop."""
-
-    settings = _settings(creem_api_key=None, billing_discount_codes={})
-    service = DiscountCodeService(settings)
-    percent = launch_discount_percent("trader", now=BEFORE_THE_END)
-    assert percent is not None
-    offer = service.local_offer(
-        LAUNCH_DISCOUNT_CODE, plan_code="trader", now=BEFORE_THE_END
-    )
-    assert offer is not None
-    assert offer.percent == percent
-    assert offer.source == "launch"
-
-
-@pytest.mark.anyio
-async def test_the_launch_code_stops_working_when_the_offer_ends() -> None:
-    settings = _settings(creem_api_key=None, billing_discount_codes={})
-    service = DiscountCodeService(settings)
-    assert (
-        service.local_offer(LAUNCH_DISCOUNT_CODE, plan_code="trader", now=AFTER_THE_END)
-        is None
-    )
-
-
-@pytest.mark.parametrize("wrong", ["1", "10", "24", "26", "30", "50", "90", "100"])
-def test_an_env_file_cannot_give_the_launch_code_a_different_number(wrong: str) -> None:
-    """Two owners for one number is how a card advertises a discount checkout refuses.
-
-    The launch code *may* be written in the env list, so one line can name every code a
-    deployment honours. It may not be written there at a different percentage: the pricing
-    pages quote `core/plans.py` and the checkout would charge this list. Refused at
-    startup, across every wrong number rather than the one somebody happened to type.
-    """
-
-    with pytest.raises(Exception) as raised:  # noqa: PT011 - pydantic wraps the message
-        _settings(billing_discount_codes=f"{LAUNCH_DISCOUNT_CODE}={wrong}")
-    assert LAUNCH_DISCOUNT_CODE in str(raised.value)
-
-
-def test_retiring_the_launch_offer_hands_the_code_to_the_env_list(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The agreement check must not block the way the offer is meant to be retired.
-
-    Retiring means `core/plans.py` stops advertising the code and the env list keeps it
-    working, at whatever number is wanted. A check that refused any number once there was
-    no launch offer left would make the last step impossible — a guard that fires when
-    there is nothing left to disagree with.
-    """
-
-    import ai_market_monitor.core.config as config_module
-
-    retired = {
-        name: PlanOffer(
-            monthly_available=offer.monthly_available,
-            annual_available=offer.annual_available,
-            launch_discount_percent=None,
-        )
-        for name, offer in PLAN_OFFERS.items()
-    }
-    monkeypatch.setattr(config_module, "PLAN_OFFERS", retired)
-    settings = _settings(billing_discount_codes=f"{LAUNCH_DISCOUNT_CODE}=40")
-    assert settings.billing_discount_codes[LAUNCH_DISCOUNT_CODE] == Decimal("40")
-
-
-def test_the_launch_code_may_be_written_down_at_the_number_it_already_has() -> None:
-    """Restating it is allowed, so the env file can list every code in one place."""
-
-    percent = plan_offer("trader").launch_discount_percent
-    assert percent is not None
-    settings = _settings(billing_discount_codes=f"{LAUNCH_DISCOUNT_CODE}={percent}")
-    assert settings.billing_discount_codes[LAUNCH_DISCOUNT_CODE] == percent
-
-
-@pytest.mark.anyio
-async def test_the_launch_offer_still_wins_if_a_wrong_number_ever_reached_the_list() -> (
-    None
-):
-    """Defence in depth: the resolver prefers the launch offer on its own.
-
-    The check above stops a wrong number being written. This proves the reader does not
-    depend on that check having run — the two guards fail in the same direction.
-    """
-
-    settings = _settings(creem_api_key=None, billing_discount_codes={})
-    settings.billing_discount_codes[LAUNCH_DISCOUNT_CODE] = Decimal("90")
-    service = DiscountCodeService(settings)
-    offer = service.local_offer(
-        LAUNCH_DISCOUNT_CODE, plan_code="trader", now=BEFORE_THE_END
-    )
-    assert offer is not None
-    assert offer.percent == launch_discount_percent("trader", now=BEFORE_THE_END)
-    assert offer.source == "launch"
-
-
 @pytest.mark.parametrize(
     "written",
     [
-        "HILAL25=25,TINYTALES=30",
-        "hilal25=25, tinytales=30",
-        "HILAL25=25%,TINYTALES=30%",
-        "HILAL25:25;TINYTALES:30",
-        '{"HILAL25": 25, "TINYTALES": 30}',
-        "HILAL25=25\nTINYTALES=30",
+        "WELCOME10=10,TINYTALES=30",
+        "welcome10=10, tinytales=30",
+        "WELCOME10=10%,TINYTALES=30%",
+        "WELCOME10:10;TINYTALES:30",
+        '{"WELCOME10": 10, "TINYTALES": 30}',
+        "WELCOME10=10\nTINYTALES=30",
     ],
 )
 def test_every_way_of_writing_the_deployed_list_reads_the_same(written: str) -> None:
@@ -357,7 +297,7 @@ def test_every_way_of_writing_the_deployed_list_reads_the_same(written: str) -> 
 
     settings = _settings(billing_discount_codes=written)
     assert settings.billing_discount_codes == {
-        "HILAL25": Decimal("25"),
+        "WELCOME10": Decimal("10"),
         "TINYTALES": Decimal("30"),
     }
 
@@ -406,7 +346,7 @@ def test_a_code_nobody_could_type_cannot_be_configured(written: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "code", ["HILAL25", "TINYTALES", "AB", "A1", "WELCOME-10", "NEW_YEAR", "X" * 40]
+    "code", ["TINYTALES", "AB", "A1", "WELCOME-10", "NEW_YEAR", "X" * 40]
 )
 def test_a_configured_code_can_always_be_typed(code: str) -> None:
     """The other direction of the same rule: anything the settings accept, the box takes.
@@ -415,11 +355,7 @@ def test_a_configured_code_can_always_be_typed(code: str) -> None:
     merely *similar* in two places is the drift this pairing exists to remove.
     """
 
-    # The launch code is the one entry whose number is not free, so it is written at the
-    # number it already has. Shape is what is being tested here, not the percentage.
-    launch = plan_offer("trader").launch_discount_percent
-    percent = launch if code == LAUNCH_DISCOUNT_CODE else Decimal("10")
-    settings = _settings(billing_discount_codes=f"{code}={percent}")
+    settings = _settings(billing_discount_codes=f"{code}=10")
     assert code in settings.billing_discount_codes
     assert normalize_discount_code(code.lower()) == code
 

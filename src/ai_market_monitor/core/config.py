@@ -29,8 +29,7 @@ from ai_market_monitor.core.launch_stage import (
     resolve_launch_stage,
 )
 from ai_market_monitor.core.plans import (
-    LAUNCH_DISCOUNT_CODE,
-    PLAN_OFFERS,
+    RETIRED_DISCOUNT_CODES,
     is_discount_code_shaped,
 )
 from ai_market_monitor.observability.metrics import MetricRetentionPolicy
@@ -345,7 +344,7 @@ class Settings(BaseSettings):
     billing_allow_overpayment: bool = False
     #: Extra discount codes this deployment honours, as ``CODE=percent`` pairs.
     #:
-    #: Written as ``HILAL25=25,WELCOME10=10`` or as JSON. Codes are upper-cased on the
+    #: Written as ``SAVE10=10,WELCOME10=10`` or as JSON. Codes are upper-cased on the
     #: way in, so the case somebody types never matters.
     #:
     #: This is the **fallback** list. Codes are looked up in Creem first, because Creem is
@@ -1457,16 +1456,20 @@ class Settings(BaseSettings):
     @field_validator("billing_discount_codes", mode="before")
     @classmethod
     def read_discount_codes(cls, value: object) -> object:
-        """``HILAL25=25,WELCOME10=10`` — or JSON, for whoever prefers it.
+        """``SAVE10=10,WELCOME10=10`` — or JSON, for whoever prefers it.
 
         Written in the friendly form because this is a line somebody edits by hand in an
-        env file when they want to run an offer, and ``{"HILAL25": 25}`` is a shape that
+        env file when they want to run an offer, and ``{"SAVE10": 10}`` is a shape that
         is easy to get wrong at the end of a long file. Both forms are accepted and both
         arrive here as the same dictionary.
 
-        A percentage outside 0-100 is refused rather than clamped: "``HILAL250``" is a
-        typo somebody made, and clamping it to 100 would give away the product for free
-        while looking like it worked.
+        A percentage outside 0-100 is refused rather than clamped: "``SAVE100``" written
+        where ``SAVE10`` was meant is a typo somebody made, and clamping it would give
+        away the product for free while looking like it worked.
+
+        The examples name no real code on purpose. They used to say ``HILAL25``, which
+        was a live launch code and is now withdrawn — so an operator following the
+        example would have written a line the loader then refuses.
         """
 
         raw: dict[Any, Any]
@@ -1482,12 +1485,12 @@ class Settings(BaseSettings):
                 except ValueError as exc:
                     raise ValueError(
                         "BILLING_DISCOUNT_CODES looks like JSON but could not be read. "
-                        "Write it as HILAL25=25,WELCOME10=10 instead."
+                        "Write it as SAVE10=10,WELCOME10=10 instead."
                     ) from exc
                 if not isinstance(decoded, dict):
                     raise ValueError(
                         "BILLING_DISCOUNT_CODES as JSON must be an object like "
-                        '{"HILAL25": 25}.'
+                        '{"SAVE10": 10}.'
                     )
                 raw = decoded
             else:
@@ -1498,7 +1501,7 @@ class Settings(BaseSettings):
                         continue
                     if "=" not in entry and ":" not in entry:
                         raise ValueError(
-                            "BILLING_DISCOUNT_CODES needs pairs like HILAL25=25, "
+                            "BILLING_DISCOUNT_CODES needs pairs like SAVE10=10, "
                             f"but found {entry!r}."
                         )
                     separator = "=" if "=" in entry else ":"
@@ -1536,59 +1539,34 @@ class Settings(BaseSettings):
                     "A discount must be above 0 and at most 100."
                 )
             parsed[code] = percent
-        cls._launch_code_must_agree(parsed)
+        cls._retired_codes_must_not_be_listed(parsed)
         return parsed
 
     @staticmethod
-    def _launch_code_must_agree(parsed: dict[str, Decimal]) -> None:
-        """The launch code may be written here, but never with a different number.
+    def _retired_codes_must_not_be_listed(parsed: dict[str, Decimal]) -> None:
+        """A code the product has retired must not be kept alive by this list.
 
-        Two lists can name the same code: this one, and the launch offer that
-        ``core/plans.py`` owns. Listing it in both is useful — an operator reading the env
-        file sees every code the deployment honours in one place — but only while the two
-        say the same thing.
+        The launch price used to be reached by typing a code. It is not any more: it is
+        simply the price until the offer's timer runs out, and `core/plans.py` names the
+        codes that used to do that job in :data:`RETIRED_DISCOUNT_CODES`.
 
-        They are read by different things. The pricing cards, the sentence naming the code
-        and the crossed-out price all come from `core/plans.py`; this list is what answers
-        once the launch window has closed. So a disagreement would not look like a broken
-        setting. It would look like a page advertising one discount and a checkout applying
-        another, which is the failure this whole area is built to prevent.
-
-        Refused at startup rather than resolved by a precedence rule. A rule that quietly
-        picked a winner is how a wrong number survives for months: the deployment starts,
-        every page looks right, and only the amount charged is different.
+        Leaving one of them here would not look like a broken setting. It would look like
+        a working discount — taken off a price that is *already* the launch price — so a
+        buyer who still remembers the old code pays less than every page shows, and the
+        confirmation is then refused as underpaid. Refused at startup rather than ignored
+        at runtime, because a code that is quietly dropped is a code somebody will keep
+        writing into the file.
         """
 
-        written = parsed.get(LAUNCH_DISCOUNT_CODE)
-        if written is None:
+        still_listed = sorted(code for code in RETIRED_DISCOUNT_CODES if code in parsed)
+        if not still_listed:
             return
-        allowed = sorted(
-            {
-                offer.launch_discount_percent
-                for offer in PLAN_OFFERS.values()
-                if offer.launch_discount_percent is not None
-            }
-        )
-        if not allowed:
-            # No plan runs a launch offer any more, so nothing here can disagree with one.
-            # This is the way the offer is *retired*: `core/plans.py` stops advertising the
-            # code and this list keeps it working, at whatever number is wanted. Refusing
-            # here would block the one path that retirement needs.
-            return
-        if written in allowed:
-            return
-        expected = ", ".join(f"{value}%" for value in allowed)
-        fix = (
-            f"write {LAUNCH_DISCOUNT_CODE}={allowed[0]} here"
-            if len(allowed) == 1
-            else f"remove {LAUNCH_DISCOUNT_CODE} from here"
-        )
+        names = ", ".join(still_listed)
         raise ValueError(
-            f"BILLING_DISCOUNT_CODES gives {LAUNCH_DISCOUNT_CODE} {written}% off, but the "
-            f"application is built with {expected} for that code. The pricing pages show "
-            f"the application's number, so a visitor would be promised one discount and "
-            f"charged another. Make the two the same: either "
-            f"{fix}, or change launch_discount_percent in core/plans.py."
+            f"BILLING_DISCOUNT_CODES still holds {names}. That code was retired when the "
+            "launch price stopped needing a code, so it would now come off a price that "
+            "is already the launch price. Remove it from BILLING_DISCOUNT_CODES, and "
+            "switch it off in Creem as well."
         )
 
     @field_validator("api_rate_limits")

@@ -18,9 +18,35 @@ from sqlalchemy import select
 from ai_market_monitor.db.models import (
     AccountEmailDelivery,
     AffiliateApplication,
-    ReferralRelationship,
     User,
 )
+from ai_market_monitor.services.affiliate_attribution import (
+    CONTEXT_SIGNUP,
+    ReferralAttributionService,
+)
+
+
+async def _earned(session, *, application, customer, paid_usd: str) -> None:
+    """One customer who joined through an affiliate and paid, the product's own way.
+
+    Through the attribution service rather than by inserting rows. A journey test that
+    builds its own rows proves the page can draw a shape the running product may no
+    longer produce, which is the opposite of what a journey test is for.
+    """
+
+    attribution = ReferralAttributionService(session)
+    await attribution.assign(user_id=customer.id, link_code=application.discount_code)
+    await attribution.record_code_use(
+        code=application.discount_code,
+        user_id=customer.id,
+        context=CONTEXT_SIGNUP,
+        event_key=f"signup:{customer.id}",
+    )
+    await attribution.record_payment(
+        customer_user_id=customer.id,
+        event_key=f"payment:test:{customer.id}",
+        paid_amount_usd=Decimal(paid_usd),
+    )
 
 
 async def _signup(test_context, email: str, name: str = "Affiliate Tester") -> None:
@@ -284,12 +310,16 @@ async def test_the_system_brain_shows_the_application_with_the_applicants_addres
     # The share is not something they asked for, so it is not labelled as if it were.
     assert "Share asked for" not in page.text
     assert "Applied on" in page.text
-    # This screen is the only place the share can be moved, and the box is here...
+    # This screen is the only place either share can be moved, and both boxes are here...
     assert 'name="commission_percent"' in page.text
+    assert 'name="subsequent_commission_percent"' in page.text
     # ...while the applicant's own page offers no such control at all.
     assert "requested_commission_percent" not in page.text
-    # The default is stated on the label, so leaving the box alone is a decision.
+    # The default is stated on the label, so leaving the box alone is a decision. The
+    # second box says a different thing on purpose: empty there means "the same as the
+    # first share", never nothing.
     assert "Empty uses 25%." in page.text
+    assert "Empty uses the first share." in page.text
 
 
 async def test_an_administrator_approves_through_the_real_route(test_context) -> None:
@@ -314,6 +344,7 @@ async def test_an_administrator_approves_through_the_real_route(test_context) ->
                 "discount_code": "AMINA10",
                 "discount_percent": "15",
                 "commission_percent": "30",
+                "subsequent_commission_percent": "12",
             },
             headers=headers,
             follow_redirects=False,
@@ -327,6 +358,8 @@ async def test_an_administrator_approves_through_the_real_route(test_context) ->
         assert decided.discount_code == "AMINA10"
         assert decided.discount_percent == Decimal("15.00")
         assert decided.commission_percent == Decimal("30.00")
+        # Both rates travel the whole way: form → route → service → row.
+        assert decided.subsequent_commission_percent == Decimal("12.00")
         assert decided.decided_by_user_id == admin.id
         delivery = await session.scalar(
             select(AccountEmailDelivery).where(
@@ -337,6 +370,12 @@ async def test_an_administrator_approves_through_the_real_route(test_context) ->
         assert delivery.recipient == "approve-me@example.com"
         assert delivery.payload_redacted["discount_code"] == "AMINA10"
         assert delivery.payload_redacted["commission_percent"] == "30"
+        assert delivery.payload_redacted["subsequent_commission_percent"] == "12"
+
+    # And the affiliate's own page says both, in words rather than in a number alone.
+    page = await test_context["client"].get("/dashboard/affiliate")
+    assert "30% the first time they pay" in page.text
+    assert "12% every time after that" in page.text
 
 
 async def test_a_decision_without_a_form_token_is_refused(test_context) -> None:
@@ -384,20 +423,12 @@ async def test_a_payout_is_settled_through_the_real_route(test_context) -> None:
         customer = User(display_name="Buyer")
         session.add(customer)
         await session.flush()
-        await AffiliateService(session).approve(
+        approved = await AffiliateService(session).approve(
             application_id=application.id,
             admin_user_id=admin.id,
             discount_percent="10",
         )
-        session.add(
-            ReferralRelationship(
-                referrer_user_id=application.user_id,
-                referred_user_id=customer.id,
-                status="paid_converted",
-                reward_status="eligible_after_first_paid_month",
-                metadata_json={"paid_amount_usd": "100.00"},
-            )
-        )
+        await _earned(session, application=approved, customer=customer, paid_usd="100.00")
         await session.commit()
 
     await test_context["client"].post(
@@ -493,20 +524,12 @@ async def test_an_approved_affiliate_sees_names_and_can_ask_for_a_payout(
         customer = User(display_name="Karim Hassan")
         session.add_all([admin, customer])
         await session.flush()
-        await AffiliateService(session).approve(
+        approved = await AffiliateService(session).approve(
             application_id=application.id,
             admin_user_id=admin.id,
             discount_percent="10",
         )
-        session.add(
-            ReferralRelationship(
-                referrer_user_id=application.user_id,
-                referred_user_id=customer.id,
-                status="paid_converted",
-                reward_status="eligible_after_first_paid_month",
-                metadata_json={"paid_amount_usd": "100.00"},
-            )
-        )
+        await _earned(session, application=approved, customer=customer, paid_usd="100.00")
         await session.commit()
 
     page = await test_context["client"].get("/dashboard/affiliate")
@@ -577,20 +600,12 @@ async def test_the_payout_form_offers_only_coins_the_catalogue_holds(
         customer = User(display_name="Buyer")
         session.add_all([admin, customer])
         await session.flush()
-        await AffiliateService(session).approve(
+        approved = await AffiliateService(session).approve(
             application_id=application.id,
             admin_user_id=admin.id,
             discount_percent="10",
         )
-        session.add(
-            ReferralRelationship(
-                referrer_user_id=application.user_id,
-                referred_user_id=customer.id,
-                status="paid_converted",
-                reward_status="eligible_after_first_paid_month",
-                metadata_json={"paid_amount_usd": "100.00"},
-            )
-        )
+        await _earned(session, application=approved, customer=customer, paid_usd="100.00")
         await session.commit()
 
     page = await test_context["client"].get("/dashboard/affiliate")
@@ -598,3 +613,105 @@ async def test_the_payout_form_offers_only_coins_the_catalogue_holds(
         assert f'value="{currency.key}"' in page.text, f"{currency.key} is not offered"
     # And the way out for somebody who wants paying differently.
     assert "office@hilalmarkets.com" in page.text
+
+
+# ── The link, followed for real ─────────────────────────────────────────────────
+
+
+async def _approved_affiliate(test_context, *, email: str, code: str) -> AffiliateApplication:
+    """One approved affiliate with a live code, ready to be linked to."""
+
+    from ai_market_monitor.services.affiliate import AffiliateService
+
+    await _signup(test_context, email, name="Amina Yusuf")
+    await _apply(test_context, requested_discount_code=code)
+    async with test_context["session_factory"]() as session:
+        # The pending one, not "the first row". A test that makes two affiliates would
+        # otherwise try to approve the first one twice and fail for the wrong reason.
+        application = await session.scalar(
+            select(AffiliateApplication).where(AffiliateApplication.status == "pending")
+        )
+        admin = User(display_name="Owner")
+        session.add(admin)
+        await session.flush()
+        approved = await AffiliateService(session).approve(
+            application_id=application.id,
+            admin_user_id=admin.id,
+            discount_percent="10",
+        )
+        await session.commit()
+        await session.refresh(approved)
+    test_context["client"].cookies.clear()
+    return approved
+
+
+async def test_a_link_followed_on_the_landing_page_is_remembered_at_signup(
+    test_context,
+) -> None:
+    """The whole journey: open a link, wander off, sign up later, be credited.
+
+    This is the rule that pays people, and it crosses the middleware, a cookie and two
+    routes. Every one of those is a join, and a join that is not walked end to end is a
+    feature that quietly credits nobody.
+    """
+
+    affiliate = await _approved_affiliate(
+        test_context, email="linkowner@example.com", code="LINKONE"
+    )
+    client = test_context["client"]
+
+    # A visitor arrives on the affiliate's link — on the landing page, not on /signup.
+    arrival = await client.get("/?ref=LINKONE", follow_redirects=False)
+    assert arrival.status_code in {200, 301, 302, 303, 307, 308}
+    assert client.cookies.get("hm_affiliate_ref") == "LINKONE"
+
+    # They look at other pages and leave. The link is still remembered.
+    await client.get("/pricing", follow_redirects=False)
+    assert client.cookies.get("hm_affiliate_ref") == "LINKONE"
+
+    # Days later they come back and sign up, with no `ref` on the address at all.
+    await _signup(test_context, "brought-by-link@example.com", name="Karim Hassan")
+
+    async with test_context["session_factory"]() as session:
+        joined = await session.scalar(
+            select(User).where(User.display_name == "Karim Hassan")
+        )
+        attribution = ReferralAttributionService(session)
+        assignment = await attribution.assignment_for(joined.id)
+        assert assignment is not None, "the link was followed and credited nobody"
+        assert assignment.referrer_user_id == affiliate.user_id
+        assert assignment.assignment_source == "link"
+
+
+async def test_the_most_recent_link_is_the_one_that_counts(test_context) -> None:
+    """Two affiliates' links, one visitor. The second one brought them."""
+
+    first = await _approved_affiliate(
+        test_context, email="first-owner@example.com", code="FIRSTLINK"
+    )
+    client = test_context["client"]
+    await client.get("/?ref=FIRSTLINK", follow_redirects=False)
+
+    second = await _approved_affiliate(
+        test_context, email="second-owner@example.com", code="SECONDLINK"
+    )
+    await client.get("/?ref=SECONDLINK", follow_redirects=False)
+    assert client.cookies.get("hm_affiliate_ref") == "SECONDLINK"
+
+    await _signup(test_context, "two-links@example.com", name="Layla Nur")
+    async with test_context["session_factory"]() as session:
+        joined = await session.scalar(select(User).where(User.display_name == "Layla Nur"))
+        assignment = await ReferralAttributionService(session).assignment_for(joined.id)
+        assert assignment is not None
+        assert assignment.referrer_user_id == second.user_id
+        assert assignment.referrer_user_id != first.user_id
+
+
+async def test_the_link_is_forgotten_once_the_account_exists(test_context) -> None:
+    """It has done its job, and a shared computer must not keep crediting one person."""
+
+    await _approved_affiliate(test_context, email="spent-owner@example.com", code="SPENTLINK")
+    client = test_context["client"]
+    await client.get("/?ref=SPENTLINK", follow_redirects=False)
+    await _signup(test_context, "spent@example.com", name="Spent Visitor")
+    assert not client.cookies.get("hm_affiliate_ref")

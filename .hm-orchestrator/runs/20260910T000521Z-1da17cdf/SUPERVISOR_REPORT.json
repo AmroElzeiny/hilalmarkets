@@ -1,0 +1,295 @@
+{
+  "run_id": "20260910T000521Z-1da17cdf",
+  "status": "complete",
+  "mission_path": ".hm-orchestrator/runs/20260910T000521Z-1da17cdf/MISSION.md",
+  "mission_phase": "B of 3",
+  "baseline": {
+    "starting_commit": "145275f2",
+    "branch": "cloudflare-access-service-tokens",
+    "initial_git_status_porcelain_lines": 201
+  },
+  "supervisor_model": "opencode-go/glm-5.3-flash (hm-supervisor-deep)",
+  "models": [
+    {
+      "role": "independent logic reviewer",
+      "agent": "hm-reviewer-logic subagent (read-only)",
+      "model_family": "independent of the executing supervisor; underlying model not disclosed by the harness"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "B-R0",
+      "status": "PASS",
+      "evidence": [
+        "tests/integration/test_plan_change_journey.py read in full and checked line-by-line against services/plan_changes.py, api/routers/dashboard.py, core/plans.py, tests/support/billing_config.py",
+        "verdict: sound; no stubs, no pass-throughs, no always-true asserts; every refusal writes nothing and sends nothing",
+        "pytest tests/integration --collect-only -q succeeds",
+        "formatting-only cleanups applied to the untracked new file (imports order, unused imports, E501 wraps, one unused local); no assertion changed",
+        "file authorship unattributed (killed run); now judged, tested and owned by this run"
+      ]
+    },
+    {
+      "id": "B-R7",
+      "status": "PASS",
+      "evidence": [
+        "stated money rule located in services/plan_changes.py header table and customer-visible CONSENT_* sentences; no rule invented",
+        "upgrade Trader->Pro parametrised: timing immediate/period_end x holding monthly(30d)/annual(365d)",
+        "record SubscriptionPlanChange (kind, from/to, timing, status, effective_at) asserted",
+        "entitlement plan asserted: flips on immediate, stays until period end otherwise",
+        "Creem payload asserted: update_behavior proration-charge-immediately vs proration-none; product_id prod_test_pro_monthly",
+        "confirmation wording the customer sees asserted on the rendered page"
+      ]
+    },
+    {
+      "id": "B-R8",
+      "status": "PASS",
+      "evidence": [
+        "downgrade Pro->Trader: immediate refused (error=downgrade_is_period_end, no record, no provider call)",
+        "period-end downgrade: scheduled record with effective_at == paid period end; apply_due_changes moves entitlement one second after the end; excess monitors paused",
+        "downgrade to free: not sold by product; page shows Not available and server refuses plan_not_available; Cancel is the stated road back",
+        "the change takes effect only at the end of the period already paid for — proven, not assumed"
+      ]
+    },
+    {
+      "id": "B-R9",
+      "status": "PASS",
+      "evidence": [
+        "new test_every_plan_card_button_matches_the_server: switch buttons read from rendered page HTML, each of trader/pro/demo posted to the real route; offered==accepted, absent==refused",
+        "Phase A suite tests/unit/test_invariant_billing_offers.py (13) covers checkout offers vs server acceptance for every plan x method x cycle, with same-plan and other-plan holdings"
+      ]
+    },
+    {
+      "id": "B-R13",
+      "status": "PASS",
+      "evidence": [
+        "one independent logic reviewer read Phase A's six changed files (services/billing.py, api/routers/dashboard.py, api/routers/dashboard_test.py, static/hilalmarkets-billing.js, templates/hilal/dashboard/billing.html, templates/hilal/dashboard/checkout.html) plus Phase B files and Phase A's test evidence",
+        "reviewer attacked: right plan, right amount, double charge, offered-but-refused methods, paying-without-access, duplicate-rule leaks",
+        "reviewer verdict: Phase B stands as-is; Phase A blocked by B1",
+        "B1 and M1 fixed after reproduction; L1/L2/L3 reported as accepted-to-note"
+      ]
+    },
+    {
+      "id": "B-R14",
+      "status": "PASS",
+      "evidence": [
+        "services/billing.py plan_checkout_availability: duplicated empty-refusal branch (two identical strings) collapsed to one branch",
+        "same-plan refusal reworded from 'The change period may be managed from the billing page.' to 'You already have the {name} plan. You can change it or cancel it on this billing page.'",
+        "holds-other refusal reworded to 'Use the plan switch buttons on the billing page...'",
+        "Phase A assertions on refusal wording still pass unchanged"
+      ]
+    },
+    {
+      "id": "B-R12",
+      "status": "PASS",
+      "evidence": {
+        "test_deleted": false,
+        "test_skipped_or_xfail_added": false,
+        "assertion_weakened": false,
+        "expected_value_changed": false,
+        "test_only_hardcode": false,
+        "notes": "ruff --fix applied only to the untracked new test file (import order/unused imports/one unused local); no assertion touched; no other test file modified"
+      }
+    }
+  ],
+  "work_packages": [
+    {
+      "id": "WP-B-app-services",
+      "scope": "Phase B app-service work: the R# fixes and files below",
+      "files": [
+        "src/ai_market_monitor/services/billing.py (B-R14 refusal dedup + wording)",
+        "src/ai_market_monitor/api/routers/dashboard_test.py (B1 dedent fix)",
+        "src/ai_market_monitor/services/plan_changes.py (M1 timeout refusal translation)",
+        "src/ai_market_monitor/templates/hilal/base_dashboard.html (map new error code)",
+        "tests/integration/test_plan_change_journey.py (judged + extended (B-R9, M1 tests))"
+      ],
+      "status": "complete"
+    },
+    {
+      "id": "WP-B-independent-logic-review",
+      "assigned_model_family": "independent of the executing supervisor; underlying model not disclosed by the harness",
+      "file_scope": "one independent logic reviewer read Phase A's six changed files (services/billing.py, api/routers/dashboard.py, api/routers/dashboard_test.py, static/hilalmarkets-billing.js, templates/hilal/dashboard/billing.html, templates/hilal/dashboard/checkout.html) plus Phase B files and Phase A's test evidence",
+      "actions_completed": [
+        "reviewer attacked: right plan, right amount, double charge, offered-but-refused methods, paying-without-access, duplicate-rule leaks",
+        "B1 and M1 fixed after reproduction; L1/L2/L3 reported as accepted-to-note"
+      ],
+      "final_state": "reviewer verdict: Phase B stands as-is; Phase A blocked by B1",
+      "status": "complete"
+    }
+  ],
+  "changed_files": [
+    {
+      "path": "src/ai_market_monitor/services/billing.py",
+      "why": "B-R14 refusal dedup + wording",
+      "risk": "low",
+      "preexisting_changes_preserved": true
+    },
+    {
+      "path": "src/ai_market_monitor/api/routers/dashboard_test.py",
+      "why": "B1 dedent fix",
+      "risk": "low"
+    },
+    {
+      "path": "src/ai_market_monitor/services/plan_changes.py",
+      "why": "M1 timeout refusal translation",
+      "risk": "low",
+      "note": "file was untracked-but-present pre-run (mission runtime authority)"
+    },
+    {
+      "path": "src/ai_market_monitor/templates/hilal/base_dashboard.html",
+      "why": "map new error code",
+      "risk": "low",
+      "preexisting_changes_preserved": true
+    },
+    {
+      "path": "tests/integration/test_plan_change_journey.py",
+      "why": "judged + extended (B-R9, M1 tests)",
+      "risk": "low",
+      "untracked": true
+    }
+  ],
+  "tests": [
+    {
+      "command": "pytest tests/integration --collect-only -q",
+      "result": "succeeds"
+    },
+    {
+      "command": "pytest tests/integration/test_plan_change_journey.py -p no:randomly",
+      "result": "16/16 pass",
+      "artifact": "junit_journey.xml"
+    },
+    {
+      "command": "pytest tests/unit/test_invariant_billing_offers.py -p no:randomly",
+      "result": "13/13 pass",
+      "artifact": "junit_invariant_billing.xml"
+    },
+    {
+      "command": "pytest tests/integration/test_checkout_and_payment_email.py -p no:randomly",
+      "result": "21/21 pass",
+      "artifact": "junit_checkout.xml"
+    },
+    {
+      "command": "pytest tests/integration/test_dashboard_test_subscription.py -p no:randomly",
+      "result": "43 passed, 1 skipped after B1 fix (failed ~44 before)",
+      "artifact": "junit_dash_subscription.xml",
+      "note": "skip is test_a_plan_nobody_can_buy_shows_no_price[NOTSET]: its parameter list is empty because every plan is on sale today; it proves nothing now, undamaged by the fix"
+    },
+    {
+      "command": "pytest tests/integration/test_system_brain_payments.py -p no:randomly",
+      "result": "5/5 pass",
+      "artifact": "junit_sbp.xml"
+    },
+    {
+      "command": "pytest tests/integration/test_dashboard_web.py tests/integration/test_hilal_public_site.py -p no:randomly",
+      "result": "53/53 pass",
+      "artifact": "junit_dashweb.xml"
+    },
+    {
+      "command": ".venv/Scripts/python -m mypy src",
+      "result": "clean, 425 files"
+    },
+    {
+      "command": ".venv/Scripts/python -m ruff check src",
+      "result": "clean"
+    },
+    {
+      "command": ".venv/Scripts/python -m ruff check src tests",
+      "result": "11 pre-existing findings in untouched files (test_ask_ai_button.py, test_invariant_ask_ai_css.py, test_invariant_ask_ai_single_owner.py); confirmed no local diff on those files at HEAD"
+    }
+  ],
+  "test_integrity": {
+    "test_deleted": false,
+    "test_skipped_or_xfail_added": false,
+    "assertion_weakened": false,
+    "expected_value_changed": false,
+    "test_only_hardcode": false,
+    "notes": "ruff --fix applied only to the untracked new test file (import order/unused imports/one unused local); no assertion touched; no other test file modified"
+  },
+  "hidden_error_audit": {
+    "error_exception_paths": "dashboard_test.py 'cards = [' indented inside one branch: /dashboard/subscription UnboundLocalError for demo/trial/recurring customers; ~44 failing tests -> reproduced first (UnboundLocalError at dashboard_test.py:1785), then dedented the list to function-body level",
+    "timeout_retry_idempotency": "timeout on immediate upgrade may have charged; refusal invited 'Please try again' -> double-charge risk -> new refusal code billing_timeout_needs_check with non-retry wording; mapped in base_dashboard.html; failure bookkeeping (status failed) kept; new failing-first test added",
+    "billing_entitlements": "new test_every_plan_card_button_matches_the_server: switch buttons read from rendered page HTML, each of trader/pro/demo posted to the real route; offered==accepted, absent==refused",
+    "duplicated_rule": "services/billing.py plan_checkout_availability: duplicated empty-refusal branch (two identical strings) collapsed to one branch"
+  },
+  "diff_audit": {
+    "final_changed_files": [
+      "src/ai_market_monitor/services/billing.py",
+      "src/ai_market_monitor/api/routers/dashboard_test.py",
+      "src/ai_market_monitor/services/plan_changes.py",
+      "src/ai_market_monitor/templates/hilal/base_dashboard.html",
+      "tests/integration/test_plan_change_journey.py"
+    ],
+    "pre_existing_findings": "11 pre-existing findings in untouched files (test_ask_ai_button.py, test_invariant_ask_ai_css.py, test_invariant_ask_ai_single_owner.py); confirmed no local diff on those files at HEAD"
+  },
+  "reviews": [
+    {
+      "model_family": "independent of the executing supervisor; underlying model not disclosed by the harness",
+      "evidence_seen": "one independent logic reviewer read Phase A's six changed files (services/billing.py, api/routers/dashboard.py, api/routers/dashboard_test.py, static/hilalmarkets-billing.js, templates/hilal/dashboard/billing.html, templates/hilal/dashboard/checkout.html) plus Phase B files and Phase A's test evidence",
+      "findings": [
+        {
+          "id": "B1",
+          "severity": "BLOCKER",
+          "finding": "dashboard_test.py 'cards = [' indented inside one branch: /dashboard/subscription UnboundLocalError for demo/trial/recurring customers; ~44 failing tests",
+          "action": "reproduced first (UnboundLocalError at dashboard_test.py:1785), then dedented the list to function-body level",
+          "closed": true
+        },
+        {
+          "id": "M1",
+          "severity": "MEDIUM",
+          "finding": "timeout on immediate upgrade may have charged; refusal invited 'Please try again' -> double-charge risk",
+          "action": "new refusal code billing_timeout_needs_check with non-retry wording; mapped in base_dashboard.html; failure bookkeeping (status failed) kept; new failing-first test added",
+          "closed": true
+        },
+        {
+          "id": "L1",
+          "severity": "LOW",
+          "finding": "_retune_the_card hardcodes billing_cycle=monthly; correct today (annual not sold), latent when annual opens",
+          "action": "reported, left as-is (product currently sells monthly only; annual_available=False for all paid plans)",
+          "closed": true
+        },
+        {
+          "id": "L2",
+          "severity": "LOW",
+          "finding": "CONSENT_UPGRADE_NOW says 'days left in this month' (annual)",
+          "action": "reported; unreachable today",
+          "closed": true
+        },
+        {
+          "id": "L3",
+          "severity": "LOW",
+          "finding": "review page already_subscribed check catches same plan only; direct URL refuses with change_plan_instead, no charge",
+          "action": "reported; no customer impact",
+          "closed": true
+        }
+      ],
+      "verdict": "Phase B stands as-is; Phase A blocked by B1"
+    }
+  ],
+  "process_hygiene": "only OpenCode process present at end is this session's own parent runner (PID 15212); no OpenCode child processes were spawned by this supervisor",
+  "uncertainties": [
+    {
+      "statement": "Whether Creem can commit a charge and then lose the response is not provable offline; code handles unknown outcome defensively (mutation_committed=True, no auto-retry, failed record kept)",
+      "impact": "double-charge risk reduced, not eliminated; fix needs Creem idempotency key or sandbox/live confirmation",
+      "blocks_completion": false
+    },
+    {
+      "statement": "Journey test file authorship unattributed (killed run)",
+      "impact": "mitigated: file read in full, aligned with code, extended, all tests green",
+      "blocks_completion": false
+    },
+    {
+      "statement": "Pre-existing ruff findings in three unrelated test files left untouched (other session's uncommitted work)",
+      "impact": "reported; out of scope",
+      "blocks_completion": false
+    },
+    {
+      "statement": "skipped-but-real test gap: test_a_plan_nobody_can_buy_shows_no_price[NOTSET]: its parameter list is empty because every plan is on sale today; it proves nothing now, undamaged by the fix",
+      "impact": "the subscription dashboard run is 43 passed, 1 skipped; that skipped test currently proves nothing; not caused by the B1 fix",
+      "blocks_completion": false
+    }
+  ],
+  "final_verdict": "COMPLETE_VERIFIED",
+  "shape_repaired": {
+    "by_run": "20260910T010643Z-c3d54570",
+    "reason": "previous report used two-owner keys that disagree with supervisor-report.schema.json (requirements was an object with numeric keys); shape repaired here without changing any fact; 44/44 overstated number corrected to 43 passed 1 skipped"
+  }
+}

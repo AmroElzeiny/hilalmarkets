@@ -1,0 +1,189 @@
+﻿ M .env.example
+ M .env.production.example
+ M CLAUDE.md
+A  Hilal-Markets-Website/.env.example
+A  Hilal-Markets-Website/.figma/attachments/image-0.png
+A  Hilal-Markets-Website/.figma/make/site.json
+A  Hilal-Markets-Website/.gitignore
+A  Hilal-Markets-Website/README.md
+A  Hilal-Markets-Website/index.html
+A  Hilal-Markets-Website/package.json
+A  Hilal-Markets-Website/pnpm-lock.yaml
+A  Hilal-Markets-Website/public/favicon-dark.png
+A  Hilal-Markets-Website/public/fonts/Geometria-Bold.ttf
+A  Hilal-Markets-Website/public/fonts/Geometria-Medium.ttf
+A  Hilal-Markets-Website/public/fonts/Geometria-Regular.ttf
+A  Hilal-Markets-Website/public/fonts/Onest-Variable.ttf
+A  Hilal-Markets-Website/public/hilalmarkets-social-preview.png
+A  Hilal-Markets-Website/src/App.tsx
+A  Hilal-Markets-Website/src/analytics.ts
+A  Hilal-Markets-Website/src/components/Dialog.tsx
+A  Hilal-Markets-Website/src/components/HeroFlow.tsx
+A  Hilal-Markets-Website/src/components/Icon.tsx
+AM Hilal-Markets-Website/src/components/Pricing.tsx
+A  Hilal-Markets-Website/src/components/Reveal.tsx
+A  Hilal-Markets-Website/src/components/SiteChrome.tsx
+A  Hilal-Markets-Website/src/components/Tracking.tsx
+A  Hilal-Markets-Website/src/components/brand.tsx
+A  Hilal-Markets-Website/src/components/interactions.ts
+A  Hilal-Markets-Website/src/imports/03ProblemAndSolution-1/index.tsx
+A  Hilal-Markets-Website/src/imports/03ProblemAndSolution-1/svg-l9hlxlat43.ts
+A  Hilal-Markets-Website/src/imports/03ProblemAndSolution/index.tsx
+A  Hilal-Markets-Website/src/imports/03ProblemAndSolution/svg-yoyovc0nho.ts
+A  Hilal-Markets-Website/src/imports/04HowHilalMarketsWorks-1/index.tsx
+A  Hilal-Markets-Website/src/imports/04HowHilalMarketsWorks/index.tsx
+A  Hilal-Markets-Website/src/imports/06CoreFeatures-1/index.tsx
+A  Hilal-Markets-Website/src/imports/06CoreFeatures-1/svg-x3n5wkemla.ts
+A  Hilal-Markets-Website/src/imports/06CoreFeatures-1/svg-zx5dq.tsx
+A  Hilal-Markets-Website/src/imports/06CoreFeatures-2/index.tsx
+A  Hilal-Markets-Website/src/imports/06CoreFeatures-2/svg-8gh7ibw7d1.ts
+A  Hilal-Markets-Website/src/imports/06CoreFeatures-2/svg-wl9fe.tsx
+A  Hilal-Markets-Website/src/imports/06CoreFeatures/index.tsx
+A  Hilal-Markets-Website/src/imports/07TrustAndControl/index.tsx
+A  Hilal-Markets-Website/src/imports/10Footer-1/index.tsx
+A  Hilal-Markets-Website/src/imports/10Footer-1/svg-qp93h2wewm.ts
+A  Hilal-Markets-Website/src/imports/10Footer/index.tsx
+A  Hilal-Markets-Website/src/imports/10Footer/svg-nfwtsg6pkj.ts
+A  Hilal-Markets-Website/src/imports/Frame-1/index.tsx
+A  Hilal-Markets-Website/src/imports/Frame-1/svg-ypwh2xsu08.ts
+A  Hilal-Markets-Website/src/imports/Frame/index.tsx
+A  Hilal-Markets-Website/src/imports/Frame/svg-ewzmrla0b4.ts
+A  Hilal-Markets-Website/src/imports/Hilal_Markets_Brand_Rules.md
+A  Hilal-Markets-Website/src/imports/Hilal_Markets_Brandings_Guidelines.pdf
+A  Hilal-Markets-Website/src/imports/SectionMargin/index.tsx
+A  Hilal-Markets-Website/src/imports/SectionMargin/svg-io2ihosp47.ts
+A  Hilal-Markets-Website/src/imports/pasted_text/hilal-markets-content.md
+A  Hilal-Markets-Website/src/index.css
+A  Hilal-Markets-Website/src/legal/documents.tsx
+A  Hilal-Markets-Website/src/main.tsx
+A  Hilal-Markets-Website/src/motion.ts
+A  Hilal-Markets-Website/src/pages/ContactPage.tsx
+A  Hilal-Markets-Website/src/pages/FeaturesPage.tsx
+A  Hilal-Markets-Website/src/pages/HowItWorksPage.tsx
+A  Hilal-Markets-Website/src/pages/LegalPage.tsx
+A  Hilal-Markets-Website/src/pages/MethodologyPage.tsx
+A  Hilal-Markets-Website/src/publicForms.ts
+A  Hilal-Markets-Website/src/types/motion.d.ts
+A  Hilal-Markets-Website/src/vite-env.d.ts
+A  Hilal-Markets-Website/tsconfig.json
+A  Hilal-Markets-Website/vite.config.ts
+ M README.md
+ M docs/BILLING_SETUP.md
+ M scripts/check_creem_prices.py
+ M scripts/check_release_invariants.py
+ M src/ai_market_monitor/api/routers/billing.py
+ M src/ai_market_monitor/api/routers/dashboard.py
+ M src/ai_market_monitor/api/routers/dashboard_api.py
+ M src/ai_market_monitor/api/routers/dashboard_test.py
+ M src/ai_market_monitor/api/routers/investigations.py
+ M src/ai_market_monitor/api/routers/monitor_canvas.py
+ M src/ai_market_monitor/api/routers/public.py
+ M src/ai_market_monitor/api/routers/system_brain.py
+ M src/ai_market_monitor/api/template_env.py
+ M src/ai_market_monitor/core/config.py
+ M src/ai_market_monitor/core/plans.py
+ M src/ai_market_monitor/db/models/__init__.py
+ M src/ai_market_monitor/db/models/affiliate.py
+ M src/ai_market_monitor/db/models/commercial.py
+ M src/ai_market_monitor/engine/builder_contract.py
+ M src/ai_market_monitor/engine/capabilities.py
+ M src/ai_market_monitor/engine/capability_compatibility.py
+ M src/ai_market_monitor/engine/evaluator.py
+ M src/ai_market_monitor/main.py
+ M src/ai_market_monitor/services/account_admin.py
+ M src/ai_market_monitor/services/account_emails.py
+ M src/ai_market_monitor/services/admin_notifications.py
+ M src/ai_market_monitor/services/affiliate.py
+ M src/ai_market_monitor/services/billing.py
+ M src/ai_market_monitor/services/discount_codes.py
+ M src/ai_market_monitor/services/email_branding.py
+ M src/ai_market_monitor/services/entitlements.py
+ M src/ai_market_monitor/services/hilal_chat_knowledge.py
+ M src/ai_market_monitor/services/referrals.py
+ M src/ai_market_monitor/services/scanner.py
+ M src/ai_market_monitor/static/hilalmarkets-billing.js
+ M src/ai_market_monitor/static/hilalmarkets-dashboard-v2.css
+ M src/ai_market_monitor/static/hilalmarkets.css
+ M src/ai_market_monitor/static/hm-affiliate.css
+ M src/ai_market_monitor/static/hm-affiliate.js
+ M src/ai_market_monitor/static/hm-discount-code.js
+ M src/ai_market_monitor/static/landing/assets/landing.js
+ M src/ai_market_monitor/static/styles.css
+ M src/ai_market_monitor/static/system-brain.css
+ M src/ai_market_monitor/templates/auth.html
+ M src/ai_market_monitor/templates/billing_result.html
+ M src/ai_market_monitor/templates/dashboard_public.html
+ M src/ai_market_monitor/templates/hilal/base_dashboard.html
+ M src/ai_market_monitor/templates/hilal/base_public.html
+ M src/ai_market_monitor/templates/hilal/dashboard/activity.html
+ M src/ai_market_monitor/templates/hilal/dashboard/affiliate.html
+ M src/ai_market_monitor/templates/hilal/dashboard/alert_proof.html
+ M src/ai_market_monitor/templates/hilal/dashboard/billing.html
+ M src/ai_market_monitor/templates/hilal/dashboard/billing_portal.html
+ M src/ai_market_monitor/templates/hilal/dashboard/checkout.html
+ M src/ai_market_monitor/templates/hilal/dashboard/passport.html
+ M src/ai_market_monitor/templates/hilal/dashboard/strategy_detail.html
+ M src/ai_market_monitor/templates/hilal/dashboard/strategy_verify.html
+ M src/ai_market_monitor/templates/hilal/dashboard/strategy_versions.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/connections.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/market.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/monitor.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/opportunities.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/passport.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/report.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/research.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/research_detail.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/settings.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/subscription.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/support.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/watchlists.html
+ M src/ai_market_monitor/templates/hilal/macros/discount_code_box.html
+ M src/ai_market_monitor/templates/hilal/main/home.html
+ M src/ai_market_monitor/templates/hilal/public/help.html
+ M src/ai_market_monitor/templates/hilal/public/partials/pricing_cards.html
+ M src/ai_market_monitor/templates/hilal/public/pricing.html
+ M src/ai_market_monitor/templates/hilal/public/react_site.html
+ M src/ai_market_monitor/templates/system_brain.html
+ M src/ai_market_monitor/templates/system_brain_auth.html
+ M src/ai_market_monitor/worker.py
+ M tests/browser/conftest.py
+ M tests/browser/test_dashboard_e2e.py
+ M tests/browser/test_dashboard_test_account_e2e.py
+ M tests/browser/test_registry_publication_contract.py
+ M tests/integration/test_affiliate_journey.py
+ M tests/integration/test_checkout_and_payment_email.py
+ M tests/integration/test_dashboard_api.py
+ M tests/integration/test_dashboard_test_subscription.py
+ M tests/integration/test_dashboard_web.py
+ M tests/integration/test_hilal_public_site.py
+ M tests/integration/test_landing_page.py
+ M tests/integration/test_launch_offer_pricing.py
+ M tests/support/entitlements.py
+ M tests/unit/test_billing_entitlements.py
+ M tests/unit/test_capabilities.py
+ M tests/unit/test_condition_expansion_phase2.py
+ M tests/unit/test_invariant_affiliate_programme.py
+ M tests/unit/test_invariant_discount_codes.py
+ M tests/unit/test_invariant_dynamic_universe.py
+ M tests/unit/test_invariant_every_card_evaluates.py
+ M tests/unit/test_landing_analytics.py
+ M tests/unit/test_technical_patterns.py
+?? .claude/
+?? .hm-orchestrator/
+?? .opencode/
+?? alembic/versions/c9a13b7e4f28_affiliate_attribution_and_two_rates.py
+?? alembic/versions/d4f61a09c73b_subscription_plan_changes.py
+?? scripts/approve_affiliate_application.py
+?? src/ai_market_monitor/services/affiliate_attribution.py
+?? src/ai_market_monitor/services/plan_changes.py
+?? src/ai_market_monitor/services/plan_limits.py
+?? src/ai_market_monitor/services/system_brain_payments.py
+?? src/ai_market_monitor/static/hm-plan-change.js
+?? tests/browser/test_affiliate_page_e2e.py
+?? tests/engine/test_confirmed_capability_contracts.py
+?? tests/integration/test_confirmed_capability_round_trip.py
+?? tests/integration/test_system_brain_payments.py
+?? tests/support/billing_config.py
+?? tests/unit/test_invariant_affiliate_attribution.py
+?? tests/unit/test_invariant_plan_card_matches_comparison.py
+?? tools/hm-orchestrator/

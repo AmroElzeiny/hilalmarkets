@@ -1,6 +1,8 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from ai_market_monitor.engine.capabilities import capability_by_key
 from ai_market_monitor.engine.price_action import evaluate_price_action, supports_price_action
 from ai_market_monitor.services.interfaces import Candle
@@ -43,6 +45,46 @@ def test_head_and_shoulders_structure_and_neckline_break_are_separate_states():
     assert evaluate_price_action(
         "head_and_shoulders_neckline_break", confirmed, parameters
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "values", "close", "low", "high"),
+    (
+        (
+            "head_and_shoulders_neckline_break",
+            [95, 96, 98, 101, 105, 101, 97, 103, 112, 104, 98, 102, 105, 102, 100, 99],
+            98.5,
+            98.1,
+            99.4,
+        ),
+        (
+            "inverse_head_and_shoulders_neckline_break",
+            [105, 104, 102, 99, 95, 99, 103, 97, 88, 96, 102, 98, 95, 98, 100, 101],
+            101.5,
+            100.6,
+            101.9,
+        ),
+    ),
+)
+def test_head_and_shoulders_breakout_buffer_changes_confirmation_at_the_boundary(
+    name,
+    values,
+    close,
+    low,
+    high,
+):
+    candles = _candles(values)
+    candles[-1] = replace(candles[-1], close=close, low=low, high=high)
+    base = {
+        "lookback": 30,
+        "pivot_bars": 1,
+        "shoulder_tolerance_percent": 2,
+        "head_prominence_percent": 3,
+        "maximum_spacing_ratio": 2,
+    }
+
+    assert evaluate_price_action(name, candles, {**base, "breakout_buffer_percent": 0.0})
+    assert not evaluate_price_action(name, candles, {**base, "breakout_buffer_percent": 1.0})
 
 
 def test_double_bottom_requires_structure_and_close_above_neckline():

@@ -33,10 +33,25 @@
             <dd>{{ row.attempt.billing_cycle|replace('_', ' ')|replace('auto renewal', 'auto-renewal')|title }}</dd>
           </div>
         </dl>
-        {% if row.can_resume %}
-          <a class="btn btn-secondary billing-history-resume" href="{{ row.resume_url }}">
-            Continue payment
+        {% if row.next_step %}
+          {% if row.next_step.kind == 'resume' %}
+          <a class="btn btn-secondary billing-history-resume" href="{{ row.next_step.url }}">
+            {{ row.next_step.label }}
           </a>
+          {% else %}
+          <button
+            class="btn btn-secondary billing-history-resume"
+            type="button"
+            data-billing-dialog-trigger
+            data-plan-code="{{ row.plan_code }}"
+            data-billing-cycle="{{ row.billing_cycle }}"
+            data-plan-name="{{ row.plan_name }}">
+            {{ row.next_step.label }}
+          </button>
+          {% endif %}
+        {% endif %}
+        {% if row.blocked_reason %}
+        <p class="billing-history-blocked">{{ row.blocked_reason }}</p>
         {% endif %}
       </li>
     {% endfor %}

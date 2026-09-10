@@ -18,6 +18,7 @@ from ai_market_monitor.db.models import (
     BillingEvent,
     PaymentEmailDelivery,
     Plan,
+    PlanMoveMoneyOwed,
     Subscription,
     User,
     UserIdentity,
@@ -182,6 +183,68 @@ class PaymentEmailRenderer:
             ),
         )
 
+    def render_money_owed(
+        self,
+        *,
+        first_name: str,
+        from_plan_name: str,
+        to_plan_name: str,
+        amount: Decimal,
+        currency: str,
+        due_at: datetime,
+    ) -> RenderedPaymentEmail:
+        """Tell the customer what a person will return after their plan move."""
+
+        from ai_market_monitor.services.plan_replacements import (
+            manual_return_window_words,
+        )
+
+        display_name = first_name or "there"
+        window = manual_return_window_words()
+        amount_label = f"{amount:.2f} {currency.upper()}"
+        billing_url = f"{str(self.settings.public_base_url).rstrip('/')}/dashboard/billing"
+        lead_text = (
+            f"Your {to_plan_name} plan is active. Your old {from_plan_name} plan ended "
+            f"today. We worked out {amount_label} for the unused time. A person will "
+            f"send this money to you by hand {window}. Nothing was returned automatically."
+        )
+        rows: list[tuple[str, str | EmailLink]] = [
+            ("Old plan", from_plan_name),
+            ("New plan", to_plan_name),
+            ("Money to be sent", amount_label),
+            ("Send by", _utc_label(due_at)),
+        ]
+        content = (
+            greeting_line(f"Assalamu Alaikum {display_name},")
+            + lead(lead_text)
+            + fact_table(rows)
+            + button("Open billing", billing_url)
+            + note(
+                "You do not need to ask the payment company for this money. "
+                "If it has not arrived by the time shown above, write to Hilal Markets support."
+            )
+        )
+        text_body = (
+            f"Assalamu Alaikum {display_name},\n\n{lead_text}\n\n"
+            f"Old plan: {from_plan_name}\nNew plan: {to_plan_name}\n"
+            f"Money to be sent: {amount_label}\nSend by: {_utc_label(due_at)}\n\n"
+            "If it has not arrived by that time, write to Hilal Markets support."
+        )
+        return RenderedPaymentEmail(
+            subject=f"Money due after your move to {to_plan_name}",
+            text_body=text_body,
+            html_body=HilalMarketsEmailRenderer(self.settings).shell(
+                title="Money due after your plan move",
+                eyebrow="Plan payment update",
+                preheader=f"We will send {amount_label} {window}.",
+                content_html=content,
+                footer_reason=(
+                    "You are receiving this because a confirmed payment moved your "
+                    "Hilal Markets account to a different paid plan."
+                ),
+            ),
+        )
+
 
 class PaymentEmailOutboxService:
     def __init__(self, session: AsyncSession, settings: Settings):
@@ -242,6 +305,7 @@ class PaymentEmailOutboxService:
             user_id=subscription.user_id,
             billing_event_id=billing_event.id,
             event_key=event_key,
+            purpose="payment_success",
             recipient=identity.normalized_identifier,
             plan_code=plan.code,
             billing_frequency=billing_frequency,
@@ -255,6 +319,53 @@ class PaymentEmailOutboxService:
             attempt_count=0,
             next_retry_at=now,
             created_at=now,
+        )
+        self.session.add(delivery)
+        await self.session.flush()
+        return delivery
+
+    async def enqueue_money_owed(
+        self,
+        *,
+        billing_event: BillingEvent,
+        money_owed: PlanMoveMoneyOwed,
+    ) -> PaymentEmailDelivery | None:
+        identity = await self.session.scalar(
+            select(UserIdentity)
+            .where(
+                UserIdentity.user_id == money_owed.user_id,
+                UserIdentity.provider == IdentityProvider.EMAIL,
+                UserIdentity.is_primary.is_(True),
+                UserIdentity.is_verified.is_(True),
+            )
+            .limit(1)
+        )
+        if identity is None or not identity.normalized_identifier:
+            return None
+        event_key = f"plan-move-money-owed:{money_owed.idempotency_key}"
+        existing = await self.session.scalar(
+            select(PaymentEmailDelivery).where(PaymentEmailDelivery.event_key == event_key)
+        )
+        if existing is not None:
+            return existing
+        delivery = PaymentEmailDelivery(
+            user_id=money_owed.user_id,
+            billing_event_id=billing_event.id,
+            event_key=event_key,
+            purpose="plan_move_money_owed",
+            recipient=identity.normalized_identifier,
+            plan_code=money_owed.to_plan_code,
+            billing_frequency="plan move",
+            amount=money_owed.amount_owed,
+            currency=money_owed.currency,
+            payment_date=money_owed.ended_at,
+            renewal_date=money_owed.due_at,
+            receipt_url=None,
+            plan_limits={"from_plan_code": money_owed.from_plan_code},
+            status="pending",
+            attempt_count=0,
+            next_retry_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
         )
         self.session.add(delivery)
         await self.session.flush()
@@ -297,7 +408,7 @@ class PaymentEmailOutboxService:
                     text_body=rendered.text_body,
                     html_body=rendered.html_body,
                     idempotency_key=row.event_key,
-                    purpose="payment_success",
+                    purpose=row.purpose,
                 )
             except EmailDeliveryError as exc:
                 refreshed = await self.session.get(PaymentEmailDelivery, row.id)
@@ -352,6 +463,19 @@ class PaymentEmailOutboxService:
             billing_event=billing_event,
             user=user,
         )
+        if delivery.purpose == "plan_move_money_owed":
+            from_code = str(delivery.plan_limits.get("from_plan_code") or "")
+            from_plan = await self.session.scalar(select(Plan).where(Plan.code == from_code))
+            if from_plan is None or delivery.amount is None or delivery.renewal_date is None:
+                raise RuntimeError("Plan move email is missing its saved money details.")
+            return PaymentEmailRenderer(self.settings).render_money_owed(
+                first_name=first_name,
+                from_plan_name=from_plan.name,
+                to_plan_name=plan.name,
+                amount=delivery.amount,
+                currency=delivery.currency,
+                due_at=delivery.renewal_date,
+            )
         return PaymentEmailRenderer(self.settings).render(
             first_name=first_name,
             plan_name=plan.name,

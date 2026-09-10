@@ -11,7 +11,16 @@ from sqlalchemy import func, select
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
+    PROMOTION_ENDS_AT,
+    PURCHASABLE_PLAN_CODES,
+    STRATEGY_APPROVAL_LIMIT_KEY,
+    STRATEGY_APPROVAL_WINDOW_DAYS,
+    UNLIMITED_SYMBOL_CAP,
     effective_monthly_price,
+    original_monthly_price,
+    plan_name,
+    plan_offer_payload,
+    promotional_monthly_price,
 )
 from ai_market_monitor.db.models import (
     AdminOverride,
@@ -61,6 +70,7 @@ from ai_market_monitor.services.entitlements import (
     PlanCatalogService,
     UsageService,
 )
+from ai_market_monitor.services.plan_limits import plan_limit_notice
 from ai_market_monitor.services.referrals import ReferralError, ReferralService
 from ai_market_monitor.services.trials import TrialLifecycleService
 from tests.factories import load_strategy
@@ -117,14 +127,60 @@ def test_public_plan_limits_match_the_published_catalog():
     assert basic.limits["user_initiated_scans_per_week"] == 1
     assert basic.features["ai_assistant"] is True
     assert basic.features["missed_alert_investigations"] is False
-    assert monitor.limits["active_strategies"] == 5
-    assert monitor.limits["alerts_per_day"] == 50
+    assert monitor.limits["active_strategies"] == 3
+    assert monitor.limits["alerts_per_day"] == 20
+    assert monitor.limits["strategy_approvals_per_30_days"] == 20
     assert monitor.limits["on_demand_scans_per_month"] == 10
     assert monitor.limits["forensic_investigations_per_month"] == 100_000
-    assert pro.monthly_price == Decimal("22.00")
+    assert pro.monthly_price == Decimal("25.00")
     assert pro.limits["active_strategies"] == 10
     assert pro.limits["alerts_per_day"] == 100_000
+    assert pro.limits["strategy_approvals_per_30_days"] == UNLIMITED_SYMBOL_CAP
     assert pro.limits["on_demand_scans_per_month"] == 100
+
+
+def test_every_plan_carries_the_thirty_day_approval_limit():
+    """One window for every plan; only the number in it changes.
+
+    The approval allowance is counted over the same 30 days on every plan, so the
+    gate reads one key. A plan that omits the key would fall through to "no limit"
+    without anybody noticing, which is how a free account could approve for ever.
+    """
+
+    assert STRATEGY_APPROVAL_WINDOW_DAYS == 30
+    for code, plan in PLAN_DEFINITIONS.items():
+        assert STRATEGY_APPROVAL_LIMIT_KEY in plan.limits, code
+        assert isinstance(plan.limits[STRATEGY_APPROVAL_LIMIT_KEY], int), code
+        assert plan.limits[STRATEGY_APPROVAL_LIMIT_KEY] > 0, code
+
+
+def test_paid_plans_are_priced_and_promoted_the_way_the_pages_say():
+    """The launch price is the price everywhere until it ends - no code needed.
+
+    Every surface (dashboard, landing page, checkout, crypto invoice) asks the same
+    two functions, so a page can never print one number while checkout charges
+    another.
+    """
+
+    before_the_deadline = PROMOTION_ENDS_AT - timedelta(days=1)
+    after_the_deadline = PROMOTION_ENDS_AT + timedelta(days=1)
+
+    assert original_monthly_price("trader") == Decimal("15.00")
+    assert original_monthly_price("pro") == Decimal("25.00")
+    assert promotional_monthly_price("trader") == Decimal("9.00")
+    assert promotional_monthly_price("pro") == Decimal("17.00")
+
+    for code, promoted, normal in (
+        ("trader", Decimal("9.00"), Decimal("15.00")),
+        ("pro", Decimal("17.00"), Decimal("25.00")),
+    ):
+        assert effective_monthly_price(code, now=before_the_deadline) == promoted
+        assert effective_monthly_price(code, now=after_the_deadline) == normal
+        payload = plan_offer_payload(code, now=before_the_deadline)
+        assert payload["promotionRunning"] is True
+        assert payload["promotionEndsAt"] == PROMOTION_ENDS_AT.isoformat()
+        assert payload["monthlyAvailable"] is True
+        assert "discountCode" not in payload
 
 
 async def test_basic_approval_limit_counts_distinct_strategies_over_30_days(test_context):
@@ -375,7 +431,10 @@ async def test_entitlement_blocks_active_strategy_timeframe_symbol_and_discord_l
     async with test_context["session_factory"]() as session:
         user = await create_user(session)
         await activate_subscription(session, user.id, "trader")
-        for index in range(5):
+        # The catalog owns the number. Reading it here means a change to the plan
+        # never leaves this test asserting a limit the product no longer has.
+        allowed = int(PLAN_DEFINITIONS["trader"].limits["active_strategies"])
+        for index in range(allowed):
             session.add(
                 Strategy(
                     user_id=user.id,
@@ -386,8 +445,17 @@ async def test_entitlement_blocks_active_strategy_timeframe_symbol_and_discord_l
             )
         await session.flush()
         definition = load_strategy()
-        with pytest.raises(EntitlementError, match="Plan allows 5 active"):
+        with pytest.raises(EntitlementError) as active_error:
             await EntitlementService(session).enforce_strategy_activation(user.id, definition)
+        assert active_error.value.code == "active_strategy_limit"
+        notice = str(active_error.value)
+        assert notice == plan_limit_notice(
+            "active_strategy_limit", plan_code="trader", allowed=allowed
+        )
+        # A beginner has to be told the number, the plan they are on, and what to do.
+        assert str(allowed) in notice
+        assert plan_name("trader") in notice
+        assert plan_name("pro") in notice
 
         second_user = await create_user(session, "Symbol limit")
         await activate_subscription(session, second_user.id, "trader")
@@ -474,7 +542,11 @@ async def test_billing_webhook_is_idempotent_and_downgrade_pauses_excess_strateg
         assert event.payload_redacted["data"]["card"] == "[redacted]"
         assert await session.scalar(select(func.count(EntitlementSnapshot.id))) == 1
 
-        for index in range(7):
+        # Two more monitors than the smaller plan allows, so the downgrade has to
+        # pause exactly two of them - whatever the two plan limits happen to be.
+        smaller_plan_allows = int(PLAN_DEFINITIONS["trader"].limits["active_strategies"])
+        started = smaller_plan_allows + 2
+        for index in range(started):
             session.add(
                 Strategy(
                     user_id=user.id,
@@ -505,8 +577,8 @@ async def test_billing_webhook_is_idempotent_and_downgrade_pauses_excess_strateg
         paused_count = await session.scalar(
             select(func.count(Strategy.id)).where(Strategy.status == StrategyStatus.PAUSED)
         )
-        assert active_count == 5
-        assert paused_count == 2
+        assert active_count == smaller_plan_allows
+        assert paused_count == started - smaller_plan_allows
 
 
 async def test_webhook_signature_verification(test_context):
@@ -766,7 +838,13 @@ def test_billing_provider_capabilities_match_real_provider_semantics():
     assert creem.supports_refunds is True
 
 
-async def test_checkout_allows_only_monitor_monthly(test_context):
+async def test_checkout_allows_both_paid_plans_monthly_and_nothing_else(test_context):
+    """Every plan on sale can be bought monthly; nothing else can be bought at all.
+
+    The rule is asserted for every purchasable plan, not for one of them, so opening
+    or closing a plan cannot leave this test agreeing with the old shape of the shop.
+    """
+
     settings = Settings(
         app_env="test",
         app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
@@ -778,21 +856,29 @@ async def test_checkout_allows_only_monitor_monthly(test_context):
         user = await create_user(session, "Monthly only")
         service = BillingService(session, settings)
 
-        monthly = await service.prepare_checkout(
-            user_id=user.id,
-            plan_code="trader",
-            billing_cycle="monthly",
-            request_key="monitor-monthly",
-            terms_accepted=True,
-        )
-        assert monthly.attempt.billing_cycle == "one_time_30_day"
-        assert monthly.attempt.amount == MONITOR_CHECKOUT_AMOUNT
+        assert set(PURCHASABLE_PLAN_CODES) == {"trader", "pro"}
 
-        for plan_code, billing_cycle, expected_code in (
-            ("trader", "annual", "billing_cycle_not_available"),
-            ("trader", "trial_7_day", "billing_cycle_not_available"),
-            ("pro", "monthly", "plan_not_available"),
-        ):
+        for plan_code in PURCHASABLE_PLAN_CODES:
+            monthly = await service.prepare_checkout(
+                user_id=user.id,
+                plan_code=plan_code,
+                billing_cycle="monthly",
+                request_key=f"open-{plan_code}-monthly",
+                terms_accepted=True,
+            )
+            assert monthly.attempt.billing_cycle == "one_time_30_day"
+            assert monthly.attempt.amount == effective_monthly_price(plan_code)
+
+        closed: list[tuple[str, str, str]] = [
+            # A plan nobody is selling can never be paid for, by any route.
+            ("demo", "monthly", "plan_not_available"),
+            ("creator", "monthly", "plan_not_available"),
+        ]
+        for plan_code in PURCHASABLE_PLAN_CODES:
+            closed.append((plan_code, "annual", "billing_cycle_not_available"))
+            closed.append((plan_code, "trial_7_day", "billing_cycle_not_available"))
+
+        for plan_code, billing_cycle, expected_code in closed:
             with pytest.raises(BillingError) as error:
                 await service.prepare_checkout(
                     user_id=user.id,
@@ -801,7 +887,7 @@ async def test_checkout_allows_only_monitor_monthly(test_context):
                     request_key=f"closed-{plan_code}-{billing_cycle}",
                     terms_accepted=True,
                 )
-            assert error.value.code == expected_code
+            assert error.value.code == expected_code, (plan_code, billing_cycle)
 
 
 async def test_creem_creates_a_unique_server_bound_checkout(monkeypatch):
@@ -830,8 +916,8 @@ async def test_creem_creates_a_unique_server_bound_checkout(monkeypatch):
         user_id=user_id,
         checkout_attempt_id=first_attempt,
         plan_code="trader",
-        plan_name="Monitor",
-        amount=Decimal("12.00"),
+        plan_name=plan_name("trader"),
+        amount=effective_monthly_price("trader"),
         currency="USD",
         billing_cycle="monthly_auto_renewal",
         customer_email="verified@example.com",
@@ -842,8 +928,8 @@ async def test_creem_creates_a_unique_server_bound_checkout(monkeypatch):
         user_id=user_id,
         checkout_attempt_id=second_attempt,
         plan_code="trader",
-        plan_name="Monitor",
-        amount=Decimal("12.00"),
+        plan_name=plan_name("trader"),
+        amount=effective_monthly_price("trader"),
         currency="USD",
         billing_cycle="monthly_auto_renewal",
         customer_email="verified@example.com",

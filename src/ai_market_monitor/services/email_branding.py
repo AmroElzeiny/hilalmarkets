@@ -920,20 +920,27 @@ class HilalMarketsEmailRenderer:
         commission_percent: str,
         referral_url: str,
         minimum_payout: str,
+        subsequent_commission_percent: str | None = None,
     ) -> BrandedEmail:
-        """Yes — and immediately, the three numbers that decide everything after it.
+        """Yes — and immediately, the numbers that decide everything after it.
 
-        The code, what it saves the customer, and what the affiliate keeps. Those are the
-        only facts that change what somebody does next, so they are a table and not a
-        paragraph.
+        The code, what it saves the customer, and what the affiliate keeps — on a first
+        payment and on every payment after it. Those are the only facts that change what
+        somebody does next, so they are a table and not a paragraph.
+
+        The second rate is optional here only because an application approved before it
+        existed has nothing to say about it. When it is missing the email says the same
+        thing the programme does: the one rate applies to everything.
         """
 
         greeting = _greeting_for(first_name)
         base_url = str(self.settings.public_base_url).rstrip("/")
+        later = (subsequent_commission_percent or "").strip() or commission_percent
         rows: list[tuple[str, str | EmailLink]] = [
             ("Your code", discount_code),
             ("Your audience saves", f"{discount_percent}%"),
-            ("You keep", f"{commission_percent}% of what they pay"),
+            ("You keep the first time somebody pays", f"{commission_percent}%"),
+            ("You keep every time after that", f"{later}%"),
             ("Your link", EmailLink("Open your affiliate link", referral_url)),
         ]
         text_body = (

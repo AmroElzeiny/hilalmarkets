@@ -3,21 +3,26 @@ import json
 import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from urllib.parse import urlsplit
 
+import httpx
+import lxml.html
 import pytest
 from pydantic import SecretStr
 from sqlalchemy import func, select
 
 from ai_market_monitor.core.config import get_settings
+from ai_market_monitor.core.copy_rules import scan_text
 from ai_market_monitor.core.plans import (
-    LAUNCH_DISCOUNT_CODE,
     PURCHASABLE_PLAN_CODES,
-    coded_monthly_price,
+    RETIRED_DISCOUNT_CODES,
     effective_monthly_price,
-    launch_discount_percent,
+    original_monthly_price,
+    plan_name,
     plan_offer,
     price_after_percent,
+    promotion_is_active,
 )
 from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
@@ -28,9 +33,17 @@ from ai_market_monitor.db.models import (
     UserIdentity,
 )
 from ai_market_monitor.db.models.enums import SubscriptionStatus, UserRole
-from ai_market_monitor.services.billing import BillingError, BillingService, CreemBillingProvider
+from ai_market_monitor.services import billing as billing_module
+from ai_market_monitor.services.billing import (
+    PAYMENT_METHODS,
+    BillingError,
+    BillingService,
+    CreemBillingProvider,
+    plan_checkout_availability,
+)
 from ai_market_monitor.services.discount_codes import DiscountCodeService
-from ai_market_monitor.services.entitlements import PlanCatalogService
+from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
+from tests.support.billing_config import live_billing_overrides
 
 
 async def _signup(test_context, email: str = "checkout@example.com") -> None:
@@ -94,6 +107,121 @@ async def _make_admin(test_context, email: str) -> None:
         await session.commit()
 
 
+@pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+async def test_a_selected_paid_plan_opens_its_checkout_dialog(test_context, plan_code):
+    """Every paid plan selected before sign-in must still be selected after sign-in.
+
+    Pro used to reach the billing page and then disappear because the page's auto-open
+    state named the old sole paid plan rather than reading the paid-plan catalogue.
+    """
+
+    await _signup(test_context, f"selected-{plan_code}@example.com")
+    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+
+    selected = await test_context["client"].get(
+        f"/subscribe?plan_code={plan_code}&billing_interval=monthly",
+        follow_redirects=False,
+    )
+    assert selected.status_code == 303
+    billing = await test_context["client"].get(selected.headers["location"])
+    assert billing.status_code == 200
+    assert 'data-auto-open="true"' in billing.text
+    assert f'data-selected-plan="{plan_code}"' in billing.text
+
+
+@pytest.mark.parametrize(
+    ("plan_code", "payment_method"),
+    tuple(
+        (plan_code, payment_method)
+        for plan_code in PURCHASABLE_PLAN_CODES
+        for payment_method in PAYMENT_METHODS
+    ),
+)
+async def test_every_reported_payment_choice_opens_a_provider_page(
+    test_context,
+    monkeypatch,
+    plan_code,
+    payment_method,
+):
+    """Post the exact values rendered by the review page for each reported failure."""
+
+    await _signup(
+        test_context,
+        f"reported-{plan_code}-{payment_method}@example.com",
+    )
+    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+
+    async def fake_creem_post(self, path, payload):
+        assert path == "/v1/checkouts"
+        return {
+            "id": f"ch_{payload['request_id']}",
+            "checkout_url": f"https://checkout.creem.io/{payload['request_id']}",
+        }
+
+    async def fake_provider_request(*args, provider, json, **kwargs):
+        assert provider == "nowpayments"
+        return httpx.Response(
+            200,
+            json={
+                "id": f"inv_{json['order_id']}",
+                "invoice_url": f"https://nowpayments.io/payment/{json['order_id']}",
+            },
+        )
+
+    monkeypatch.setattr(CreemBillingProvider, "_post", fake_creem_post)
+    monkeypatch.setattr(billing_module, "provider_request", fake_provider_request)
+
+    review = await test_context["client"].get(
+        f"/dashboard/billing/checkout?plan_code={plan_code}"
+    )
+    assert review.status_code == 200, review.text
+
+    def hidden(name: str) -> str:
+        found = re.search(rf'name="{name}" value="([^"]*)"', review.text)
+        assert found is not None, name
+        return found.group(1)
+
+    checkout = await test_context["client"].post(
+        "/dashboard/billing/checkout",
+        data={
+            "plan_code": hidden("plan_code"),
+            "billing_cycle": hidden("billing_cycle"),
+            "payment_method": payment_method,
+            "checkout_request_id": hidden("checkout_request_id"),
+            "terms_accepted": "true",
+            "first_name": "Amina",
+            "last_name": "Tester",
+            "address_line1": "1 Market Street",
+            "city": "Cairo",
+            "country": "Egypt",
+            "csrf_token": hidden("csrf_token"),
+        },
+        headers={"accept": "application/json", "x-requested-with": "XMLHttpRequest"},
+    )
+    assert checkout.status_code == 200, checkout.text
+    expected_host = "checkout.creem.io" if payment_method == "card" else "nowpayments.io"
+    assert urlsplit(checkout.json()["checkout_url"]).hostname == expected_host
+
+
+async def test_review_page_shows_terms_for_each_available_payment_method(test_context):
+    """A crypto choice must not inherit the default card provider's renewal terms."""
+
+    await _signup(test_context, "method-terms@example.com")
+    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+
+    review = await test_context["client"].get(
+        "/dashboard/billing/checkout?plan_code=trader"
+    )
+    assert review.status_code == 200, review.text
+    assert "Card access" in review.text
+    assert "Monthly subscription. Renews monthly until cancelled." in review.text
+    assert "Crypto access" in review.text
+    assert "One-time 30-day access. No automatic renewal." in review.text
+
+
 async def test_checkout_uses_server_price_and_deduplicates_attempt(test_context):
     await _signup(test_context)
     form = await _review_form(test_context)
@@ -147,25 +275,26 @@ async def test_the_review_page_quotes_the_price_it_will_charge(test_context, pla
     assert response.status_code == 200, response.text
 
     body = response.text
-    # What the payment will really ask for if nobody types a code. The launch price is
-    # reached with a code now, so this page quotes the full price and names the code
-    # beside it rather than promising the lower number to everybody.
+    # What the payment will really ask for. Nothing has to be typed to reach the launch
+    # price now, so this one number is the price on the card, the number on this page and
+    # the amount the payment company is asked for.
     charged = effective_monthly_price(plan_code)
-    assert f"{charged} USD" in body
+    plan_offer_currency = "USD"
+    assert f"{charged} {plan_offer_currency}" in body
     # A page that quotes a price is a page for something on sale.
     assert plan_offer(plan_code).monthly_available is True
 
-    percent = launch_discount_percent(plan_code)
-    if percent is not None:
-        coded = coded_monthly_price(plan_code)
-        assert coded is not None and coded < charged
-        assert LAUNCH_DISCOUNT_CODE in body
-        assert f"{int(percent)}% off" in body
-        # And the box to type it into, drawn for the crypto choice only.
-        assert "data-discount" in body
-        assert 'data-discount-methods="crypto"' in body
-    else:
-        assert LAUNCH_DISCOUNT_CODE not in body
+    was = original_monthly_price(plan_code)
+    if promotion_is_active():
+        # The normal price is shown crossed out, so the customer can see what the offer
+        # is worth - but it is never the number they are asked to pay.
+        assert was is not None and was > charged
+        assert f"{was} {plan_offer_currency}" in body
+        assert 'class="price-original"' in body
+        assert "data-offer-countdown" in body
+    # A code that no longer works may never be named on a page that takes money.
+    for retired in RETIRED_DISCOUNT_CODES:
+        assert retired not in body
 
 
 async def test_a_discount_code_changes_the_amount_the_payment_is_created_for(test_context):
@@ -180,6 +309,13 @@ async def test_a_discount_code_changes_the_amount_the_payment_is_created_for(tes
         update={
             "billing_enabled": True,
             "billing_crypto_provider": "nowpayments",
+            # The key has to be here, not only the company name. A checkout is refused
+            # when the company could not confirm the payment afterwards, and a company
+            # with no key never can. Naming the company alone described a server that
+            # shows no crypto Pay button at all, so the test would have proved the
+            # discount on a screen no customer can reach.
+            "nowpayments_api_key": SecretStr("test-only-not-a-real-key-000000"),
+            "nowpayments_ipn_secret": SecretStr("test-only-not-a-real-key-000000"),
             "billing_discount_codes": {"TESTHALF": Decimal("50")},
         }
     )
@@ -332,7 +468,9 @@ async def test_verified_static_payment_activates_once_and_emails_once(test_conte
     assert len(payment_messages) == 1
     # "Hilal Markets" with the space: the name in prose, per `brand guide.md` section 4
     # and `core/copy_rules.py`, which enforces it.
-    assert payment_messages[0]["subject"] == "Your Hilal Markets Monitor plan is active"
+    assert payment_messages[0]["subject"] == (
+        f"Your Hilal Markets {plan_name('trader')} plan is active"
+    )
     assert "Create a Watchlist" in payment_messages[0]["body"]
     assert "Hilal Markets provides screening" in payment_messages[0]["body"]
 
@@ -434,7 +572,19 @@ async def test_creem_checkout_route_waits_for_signed_payment_before_activation(
     )
     assert pending.status_code == 200
     assert "Payment confirmation pending" in pending.text
-    assert "Only a verified provider webhook can change paid access." in pending.text
+    # Beginner-language repair (R29 sweep): this line used to read "Only a verified
+    # provider webhook can change paid access." The word "webhook" is machine talk, so
+    # the sentence was rewritten to say what really happens. The assertion stays strict:
+    # it pins the new sentence, and the replacement wording must still pass the product
+    # copy lint (`core/copy_rules.py`) and carry no machine word on the page.
+    assert (
+        "Paid access changes only when we receive the payment confirmation from "
+        "the payment company." in pending.text
+    )
+    assert "webhook" not in _visible_words(pending.text).casefold()
+    assert scan_text(
+        _visible_words(pending.text), Path("billing_result [pending]")
+    ) == ()
 
     payload = {
         "id": "evt_creem_route_paid",
@@ -490,7 +640,9 @@ async def test_creem_checkout_route_waits_for_signed_payment_before_activation(
     portal_page = await test_context["client"].get("/dashboard/billing/portal")
     assert portal_page.status_code == 200
     assert "Manage your subscription" in portal_page.text
-    assert "Monitor" in portal_page.text
+    # Named from the catalog. The plan was called "Monitor" here for weeks after it had
+    # been renamed to Plus, and this assertion happily agreed with the stale name.
+    assert plan_name("trader") in portal_page.text
     assert "Creem" in portal_page.text
     assert "Your payments and receipts" in portal_page.text
     portal_csrf = re.search(
@@ -618,6 +770,7 @@ async def test_only_matching_paid_plan_blocks_checkout_and_admin_access_does_not
         catalog = PlanCatalogService(session)
         trader = await catalog.get_or_sync("trader")
         lifetime = await catalog.get_or_sync("lifetime_partner")
+        paid_at = datetime.now(UTC)
         session.add(
             Subscription(
                 user_id=user.id,
@@ -647,6 +800,8 @@ async def test_only_matching_paid_plan_blocks_checkout_and_admin_access_does_not
             },
         )
         assert prepared.attempt.plan_id == trader.id
+        prepared.attempt.status = "completed"
+        prepared.attempt.completed_at = paid_at
 
         pro = await PlanCatalogService(session).get_or_sync("pro")
         session.add(
@@ -654,10 +809,10 @@ async def test_only_matching_paid_plan_blocks_checkout_and_admin_access_does_not
                 user_id=user.id,
                 plan_id=trader.id,
                 status=SubscriptionStatus.ACTIVE,
-                provider="creem",
-                provider_subscription_id=f"creem-monitor-{user.id}",
-                current_period_start=datetime.now(UTC),
-                current_period_end=datetime.now(UTC) + timedelta(days=30),
+                provider=prepared.attempt.provider,
+                provider_subscription_id=f"paid-trader-{user.id}",
+                current_period_start=paid_at,
+                current_period_end=paid_at + timedelta(days=30),
             )
         )
         await session.flush()
@@ -677,21 +832,382 @@ async def test_only_matching_paid_plan_blocks_checkout_and_admin_access_does_not
                 },
             )
 
-        with pytest.raises(BillingError) as error:
-            await BillingService(session, enabled).prepare_checkout(
+        moved = await BillingService(session, enabled).prepare_checkout(
+            user_id=user.id,
+            plan_code=pro.code,
+            billing_cycle="monthly",
+            request_key="paid-plan-buys-another-paid-plan",
+            terms_accepted=True,
+            billing_profile={
+                "first_name": "Billing",
+                "last_name": "Access",
+                "address_line1": "1 Market Street",
+                "country": "Egypt",
+            },
+        )
+        assert moved.attempt.amount == effective_monthly_price(pro.code)
+        assert moved.attempt.replaces_subscription_id is not None
+        assert moved.attempt.replaces_checkout_attempt_id == prepared.attempt.id
+
+
+async def _seed_paid_subscription(
+    test_context,
+    email: str,
+    plan_code: str,
+    *,
+    provider: str = "creem",
+) -> None:
+    """Hand the signed-up account one live provider-backed paid plan.
+
+    The provider is a real payment company's name on purpose: administrative grants, the
+    free plan and trials do not count as paid, so seeding with one of those would not
+    exercise the rule this file exists to prove.
+
+    Which company matters as much as the fact of paying. "creem" holds a card and can be
+    re-priced; "nowpayments" is a crypto invoice that holds nothing. The two lead to
+    opposite answers about buying another plan, and both are seeded here.
+    """
+
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(
+            select(User)
+            .join(UserIdentity, UserIdentity.user_id == User.id)
+            .where(UserIdentity.normalized_identifier == email)
+        )
+        assert user is not None
+        plan = await PlanCatalogService(session).get_or_sync(plan_code)
+        paid_at = datetime.now(UTC)
+        session.add(
+            BillingCheckoutAttempt(
                 user_id=user.id,
-                plan_code=pro.code,
-                billing_cycle="monthly",
-                request_key="pro-is-coming-soon",
-                terms_accepted=True,
-                billing_profile={
-                    "first_name": "Billing",
-                    "last_name": "Access",
-                    "address_line1": "1 Market Street",
-                    "country": "Egypt",
-                },
+                plan_id=plan.id,
+                billing_cycle=(
+                    "monthly_auto_renewal" if provider == "creem" else "one_time_30_day"
+                ),
+                provider=provider,
+                status="completed",
+                idempotency_key=f"seed-paid-{provider}-{user.id}-{plan_code}",
+                terms_version="test",
+                amount=effective_monthly_price(plan_code),
+                currency="USD",
+                terms_accepted_at=paid_at,
+                expires_at=paid_at + timedelta(hours=1),
+                completed_at=paid_at,
+                billing_profile={},
             )
-        assert error.value.code == "plan_not_available"
+        )
+        session.add(
+            Subscription(
+                user_id=user.id,
+                plan_id=plan.id,
+                status=SubscriptionStatus.ACTIVE,
+                provider=provider,
+                provider_subscription_id=f"{provider}-monitor-{user.id}",
+                current_period_start=paid_at,
+                current_period_end=paid_at + timedelta(days=30),
+            )
+        )
+        await session.commit()
+
+
+@pytest.mark.parametrize(
+    ("held_code", "target_code"),
+    [
+        (held, target)
+        for held in PURCHASABLE_PLAN_CODES
+        for target in PURCHASABLE_PLAN_CODES
+        if held != target
+    ],
+)
+async def test_the_review_page_allows_full_price_for_every_different_paid_plan(
+    test_context,
+    held_code,
+    target_code,
+):
+    """Every ordered pair agrees that the different plan is bought at full price."""
+
+    email = f"review-refusal-{held_code}-{target_code}@example.com"
+    await _signup(test_context, email)
+    await _seed_paid_subscription(test_context, email, held_code)
+    enabled = test_context["settings"].model_copy(update={"billing_enabled": True})
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+
+    response = await test_context["client"].get(
+        f"/dashboard/billing/checkout?plan_code={target_code}"
+    )
+    assert response.status_code == 200, response.text
+
+    expected = plan_checkout_availability(
+        enabled,
+        plan_code=target_code,
+        active_paid_plan_codes={held_code},
+    )
+    assert expected["purchasable"]
+    assert expected["refusal"] == ""
+    assert "checkout-confirm-form" in response.text
+    assert "First name" in response.text
+
+
+@pytest.mark.parametrize("code", PURCHASABLE_PLAN_CODES)
+async def test_the_review_page_shows_already_subscribed_for_the_held_plan(
+    test_context,
+    code,
+):
+    """Same-plan reversal: holding plan X and opening plan X shows the active-plan
+    notice, never a payment form. Asserted for every paid plan."""
+
+    email = f"review-self-{code}@example.com"
+    await _signup(test_context, email)
+    await _seed_paid_subscription(test_context, email, code)
+    enabled = test_context["settings"].model_copy(update={"billing_enabled": True})
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+
+    response = await test_context["client"].get(
+        f"/dashboard/billing/checkout?plan_code={code}"
+    )
+    assert response.status_code == 200, response.text
+    assert "notice notice-success" in response.text
+    assert "checkout-confirm-form" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("held_code", "target_code"),
+    [
+        (held, target)
+        for held in PURCHASABLE_PLAN_CODES
+        for target in PURCHASABLE_PLAN_CODES
+        if held != target
+    ],
+)
+async def test_crypto_access_can_be_replaced_by_buying_another_plan(
+    test_context,
+    held_code,
+    target_code,
+):
+    """A crypto customer really can buy a different plan, on the page and at the server.
+
+    Crypto access holds no card. Nothing can be re-priced and nothing can be charged
+    twice, so buying is the only route to another plan - and the billing page says so in
+    its own words. The purchase guard used to refuse it anyway, which turned that advice
+    into a Pay button nobody could press. Both halves are checked here, because a page
+    that offers a purchase the server refuses is the same dead end wearing a nicer face.
+    """
+
+    email = f"crypto-switch-{held_code}-{target_code}@example.com"
+    await _signup(test_context, email)
+    await _seed_paid_subscription(
+        test_context, email, held_code, provider="nowpayments"
+    )
+    enabled = test_context["settings"].model_copy(update={"billing_enabled": True})
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+
+    # The page: the payment form, not a refusal.
+    response = await test_context["client"].get(
+        f"/dashboard/billing/checkout?plan_code={target_code}"
+    )
+    assert response.status_code == 200, response.text
+    assert "checkout-confirm-form" in response.text
+    assert "You cannot buy this plan on this page" not in response.text
+
+    # The server: the checkout is really created, not refused at the last step.
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(
+            select(User)
+            .join(UserIdentity, UserIdentity.user_id == User.id)
+            .where(UserIdentity.normalized_identifier == email)
+        )
+        assert user is not None
+        target = await PlanCatalogService(session).get_or_sync(target_code)
+        prepared = await BillingService(session, enabled).prepare_checkout(
+            user_id=user.id,
+            plan_code=target_code,
+            billing_cycle="monthly",
+            request_key=f"crypto-holder-buys-{target_code}",
+            terms_accepted=True,
+            billing_profile={
+                "first_name": "Amina",
+                "last_name": "Yusuf",
+                "address_line1": "1 Market Street",
+                "country": "Malaysia",
+            },
+        )
+        assert prepared.attempt.plan_id == target.id
+
+
+@pytest.mark.parametrize(
+    ("held_code", "target_code"),
+    [
+        (held, target)
+        for held in PURCHASABLE_PLAN_CODES
+        for target in PURCHASABLE_PLAN_CODES
+        if held != target
+    ],
+)
+async def test_a_card_subscription_buys_the_different_plan_at_full_price(
+    test_context,
+    held_code,
+    target_code,
+):
+    """Card holders use the same full checkout for every different paid plan."""
+
+    email = f"card-switch-{held_code}-{target_code}@example.com"
+    await _signup(test_context, email)
+    await _seed_paid_subscription(test_context, email, held_code, provider="creem")
+    enabled = test_context["settings"].model_copy(update={"billing_enabled": True})
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+
+    response = await test_context["client"].get(
+        f"/dashboard/billing/checkout?plan_code={target_code}"
+    )
+    assert response.status_code == 200, response.text
+    assert "checkout-confirm-form" in response.text
+
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(
+            select(User)
+            .join(UserIdentity, UserIdentity.user_id == User.id)
+            .where(UserIdentity.normalized_identifier == email)
+        )
+        assert user is not None
+        prepared = await BillingService(session, enabled).prepare_checkout(
+            user_id=user.id,
+            plan_code=target_code,
+            billing_cycle="monthly",
+            request_key=f"card-holder-buys-{target_code}",
+            terms_accepted=True,
+            billing_profile={
+                "first_name": "Amina",
+                "last_name": "Yusuf",
+                "address_line1": "1 Market Street",
+                "country": "Malaysia",
+            },
+        )
+        assert prepared.attempt.amount == effective_monthly_price(target_code)
+        assert prepared.attempt.replaces_subscription_id is not None
+        assert prepared.attempt.replaces_checkout_attempt_id is not None
+
+
+async def test_an_old_payment_link_attaches_the_newly_held_plan_without_ending_it(
+    test_context,
+):
+    """The rule is asked again when a saved payment link is opened.
+
+    A checkout can be started while nothing is held, and a card subscription taken by
+    some other route before the link is opened again. The link used to send that person
+    straight to the payment company, which would charge them for a plan the rule says
+    they may not buy. Time passing between the two answers is exactly why the older one
+    may not be trusted.
+    """
+
+    email = "stale-payment-link@example.com"
+    await _signup(test_context, email)
+    enabled = test_context["settings"].model_copy(update={"billing_enabled": True})
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(
+            select(User)
+            .join(UserIdentity, UserIdentity.user_id == User.id)
+            .where(UserIdentity.normalized_identifier == email)
+        )
+        assert user is not None
+        prepared = await BillingService(session, enabled).prepare_checkout(
+            user_id=user.id,
+            plan_code="pro",
+            billing_cycle="monthly",
+            request_key="link-made-while-free",
+            terms_accepted=True,
+            billing_profile={
+                "first_name": "Amina",
+                "last_name": "Yusuf",
+                "address_line1": "1 Market Street",
+                "country": "Malaysia",
+            },
+        )
+        attempt = prepared.attempt
+        # A link that really would open the payment company's page, so the guard is what
+        # stops it rather than the link being unusable for some other reason.
+        attempt.status = "pending"
+        attempt.provider_session_id = "session-made-while-free"
+        attempt.checkout_url = "https://pay.example.com/session-made-while-free"
+        attempt_id = attempt.id
+        await session.commit()
+
+    # Still free: the link works.
+    works = await test_context["client"].get(
+        f"/dashboard/billing/checkout/{attempt_id}/resume", follow_redirects=False
+    )
+    assert works.status_code == 303
+    assert works.headers["location"].startswith("https://pay.example.com/")
+
+    # Now a card plan is held. The link may still be used, but merely opening it must not
+    # end that plan. The saved links make the later confirmed payment replace it safely.
+    await _seed_paid_subscription(test_context, email, "trader", provider="creem")
+    resumed = await test_context["client"].get(
+        f"/dashboard/billing/checkout/{attempt_id}/resume", follow_redirects=False
+    )
+    assert resumed.status_code == 303
+    assert resumed.headers["location"].startswith("https://pay.example.com/")
+    async with test_context["session_factory"]() as session:
+        attempt = await session.get(BillingCheckoutAttempt, attempt_id)
+        assert attempt is not None
+        old = await session.get(Subscription, attempt.replaces_subscription_id)
+        assert old is not None
+        assert old.status == SubscriptionStatus.ACTIVE
+        assert old.canceled_at is None
+        assert old.current_period_end is not None
+        assert old.current_period_end.replace(tzinfo=UTC) > datetime.now(UTC)
+
+
+async def test_the_plan_somebody_has_is_the_best_one_they_paid_for(test_context):
+    """Two live subscriptions at once: the better plan is the one that counts.
+
+    Buying a second plan while crypto access is still running is now the intended route,
+    so an account really can hold two at the same time for a while. Which one they get
+    used to be decided by whichever row was written to last - so any later touch on the
+    older subscription would have silently taken away the plan they had just paid for.
+    """
+
+    email = "two-live-subscriptions@example.com"
+    await _signup(test_context, email)
+    await _seed_paid_subscription(test_context, email, "trader", provider="nowpayments")
+
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(
+            select(User)
+            .join(UserIdentity, UserIdentity.user_id == User.id)
+            .where(UserIdentity.normalized_identifier == email)
+        )
+        assert user is not None
+        pro = await PlanCatalogService(session).get_or_sync("pro")
+        session.add(
+            Subscription(
+                user_id=user.id,
+                plan_id=pro.id,
+                status=SubscriptionStatus.ACTIVE,
+                provider="nowpayments",
+                provider_subscription_id=f"nowpayments-pro-{user.id}",
+                current_period_start=datetime.now(UTC),
+                current_period_end=datetime.now(UTC) + timedelta(days=30),
+            )
+        )
+        await session.commit()
+
+        # The older, smaller subscription is touched last on purpose: under the old rule
+        # that alone was enough to hand the person back the plan they had moved off.
+        older = await session.scalar(
+            select(Subscription).where(
+                Subscription.user_id == user.id,
+                Subscription.provider_subscription_id == f"nowpayments-monitor-{user.id}",
+            )
+        )
+        assert older is not None
+        older.cancel_at_period_end = False
+        older.updated_at = datetime.now(UTC) + timedelta(minutes=5)
+        await session.commit()
+
+        entitlement = await EntitlementService(session).current(user.id)
+        assert entitlement.plan.code == "pro"
 
 
 async def test_payment_email_preview_is_rendered_in_development(test_context):
@@ -724,3 +1240,192 @@ async def test_payment_email_preview_is_not_exposed_in_production(test_context):
     finally:
         test_context["settings"].app_env = original_environment
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Beginner language on the checkout and billing surfaces.
+#
+# A defect class, not one sentence: the checkout page used to tell a person
+# "The payment provider could not open a secure checkout", "No entitlement was
+# changed" and "creating a duplicate payment", and printed the stored state
+# itself as the heading — "Provider Unavailable". None of those words answer a
+# beginner's two questions: what happened to me, and what do I do now. Every
+# check below is parametrised over the whole family (every notice state, every
+# jargon term, every fixed surface), so a new page in the same shape fails too.
+# ---------------------------------------------------------------------------
+
+BEGINNER_JARGON: tuple[str, ...] = ("provider", "entitlement", "duplicate payment")
+
+CHECKOUT_NOTICE_STATES: tuple[str, ...] = (
+    "duplicate",
+    "billing_terms_required",
+    "provider_unavailable",
+    "already_subscribed",
+    "checkout_expired",
+    "plan_not_available",
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: (surface, phrases that must never appear in it, replacements that must).
+#:
+#: Phrases are checked against the whole file case-insensitively, so each one
+#: is deliberately a full customer-facing phrase, not a bare word a code
+#: comment or an import name could also contain. Comments and internal keys
+#: are allowed to keep their machine words; sentences a person reads are not.
+BILLING_COPY_SURFACES: tuple[tuple[Path, tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        REPO_ROOT / "src/ai_market_monitor/templates/hilal/dashboard/checkout.html",
+        ("payment provider", "no entitlement", "duplicate payment"),
+        (
+            "payment company did not answer",
+            "paying twice for the same thing",
+            "nothing was charged and your plan did not change",
+        ),
+    ),
+    (
+        REPO_ROOT
+        / "src/ai_market_monitor/templates/hilal/dashboard/billing_portal.html",
+        (
+            "payment provider",
+            "provider-managed",
+            "provider invoices",
+            "provider portal",
+        ),
+        ("payment company",),
+    ),
+    (
+        REPO_ROOT / "src/ai_market_monitor/templates/hilal/dashboard/billing.html",
+        ("selected provider",),
+        ("payment method you chose",),
+    ),
+    (
+        REPO_ROOT / "src/ai_market_monitor/api/routers/dashboard.py",
+        ('"payment provider unavailable"',),
+        ('"we could not reach the payment company"',),
+    ),
+    (
+        # The payment result page the buyer lands on. The pending/failed sentences and
+        # the security line used to say "payment provider", "signed confirmation",
+        # "No plan or entitlement was changed" and "verified provider webhook".
+        REPO_ROOT / "src/ai_market_monitor/templates/billing_result.html",
+        (
+            "payment provider",
+            "provider webhook",
+            "signed confirmation",
+            "no plan or entitlement",
+        ),
+        (
+            "payment company",
+            "payment confirmation",
+            "your plan did not change",
+        ),
+    ),
+    (
+        # The checkout popup's status line. "selected provider's secure page" named
+        # the machine; the payment company's name is what a beginner needs.
+        REPO_ROOT / "src/ai_market_monitor/static/hilalmarkets-billing.js",
+        ("selected provider's secure page",),
+        ("payment company's own secure page",),
+    ),
+)
+
+
+def _visible_words(markup: str) -> str:
+    """Only what a person actually reads, never the markup around it."""
+
+    document = lxml.html.fromstring(markup)
+    for node in document.xpath("//script | //style | //template"):
+        node.getparent().remove(node)
+    return " ".join(document.text_content().split())
+
+
+async def _checkout_page_with_state(test_context, email: str, state: str) -> str:
+    await _signup(test_context, email)
+    enabled = test_context["settings"].model_copy(update={"billing_enabled": True})
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+    response = await test_context["client"].get(
+        f"/dashboard/billing/checkout?plan_code=trader&state={state}"
+    )
+    assert response.status_code == 200, response.text
+    return response.text
+
+
+@pytest.mark.parametrize("jargon", BEGINNER_JARGON)
+@pytest.mark.parametrize("state", CHECKOUT_NOTICE_STATES)
+async def test_no_machine_word_reaches_the_checkout_page(test_context, state, jargon):
+    """Every notice the checkout page can show, against every term in the family.
+
+    "Provider", "entitlement" and "duplicate payment" are words from inside the
+    machine. A beginner reading them on the page that takes their money learns
+    nothing about what happened or what to do.
+    """
+
+    page = await _checkout_page_with_state(
+        test_context,
+        f"checkout-plain-{state}-{jargon.split()[0]}@example.com",
+        state,
+    )
+    words = _visible_words(page)
+    assert jargon not in words.casefold(), f"{jargon!r} on the {state} notice"
+
+
+@pytest.mark.parametrize(
+    ("state", "must_say"),
+    [
+        pytest.param(
+            "duplicate",
+            "Use it now instead of paying twice for the same thing",
+            id="duplicate-says-pay-twice",
+        ),
+        pytest.param(
+            "provider_unavailable",
+            "Nothing was charged and your plan did not change. "
+            "Please try again in a few minutes",
+            id="provider-unavailable-says-retry",
+        ),
+        pytest.param(
+            "checkout_expired",
+            "Nothing was charged and your plan did not change. "
+            "Check the details above, or go back to Plan and Billing to start again",
+            id="expired-says-start-again",
+        ),
+        pytest.param(
+            "plan_not_available",
+            "Nothing was charged and your plan did not change. "
+            "Check the details above, or go back to Plan and Billing to start again",
+            id="plan-not-available-says-start-again",
+        ),
+    ],
+)
+async def test_the_checkout_notice_says_what_happened_and_what_to_do(
+    test_context,
+    state,
+    must_say,
+):
+    """The replacement for each fixed sentence carries both halves: what happened,
+    and the action the person can take. And the words pass the same copy rules
+    the rest of the product is linted with — `core/copy_rules.py`."""
+
+    page = await _checkout_page_with_state(
+        test_context, f"checkout-action-{state}@example.com", state
+    )
+    words = _visible_words(page)
+    assert must_say in words, words
+    assert scan_text(words, Path(f"hilal/dashboard/checkout [{state}]")) == ()
+
+
+@pytest.mark.parametrize(
+    ("surface", "banned", "carried"),
+    BILLING_COPY_SURFACES,
+    ids=(surface.name for surface, _, _ in BILLING_COPY_SURFACES),
+)
+def test_customer_billing_surfaces_carry_no_engineer_speak(surface, banned, carried):
+    """The same sweep over every surface fixed for this defect class, so a later
+    edit can quietly bring one phrase back without any test noticing."""
+
+    text = surface.read_text(encoding="utf-8").casefold()
+    for phrase in banned:
+        assert phrase not in text, f"{phrase!r} back in {surface.name}"
+    for phrase in carried:
+        assert phrase in text, f"{phrase!r} missing from {surface.name}"

@@ -8,15 +8,20 @@ amount on the page stop agreeing, and neither is wrong enough to notice.
 The rules this service holds, in one place so no surface can disagree with another:
 
 * **Only an administrator sets money.** The applicant asks for a code; the discount, the
-  code and the commission share are all written at approval. The share is not even asked
-  for — everybody applies on `DEFAULT_COMMISSION_PERCENT`, the form has no box for it, and
-  `apply()` has no parameter for it. Somebody who wants more is pointed at a person, not
-  at a field.
-* **A payout can only be asked for out of what is actually eligible.** Eligible means the
-  referred person converted to a paid plan; anything else is not yet money.
+  code and *both* commission shares are written at approval. Neither share is asked for —
+  everybody applies on `DEFAULT_COMMISSION_PERCENT`, the form has no box for either, and
+  `apply()` has no parameter for them. Somebody who wants more is pointed at a person,
+  not at a field.
+* **A payout can only be asked for out of what was actually earned.** Earned means a row
+  in the commission ledger: a payment that really happened. Anything else is not money.
 * **Already-requested money is not available twice.** Pending and paid requests are
   subtracted from the balance, so pressing the button twice cannot pay twice.
 * **A refused payout returns the money to the balance.** It was never sent.
+
+Who a customer belongs to, and what each of their payments earns, is **not** here. That
+lives in :mod:`ai_market_monitor.services.affiliate_attribution`, which is the only writer
+of the commission ledger this module reads. Two modules deciding what a payment is worth
+is the exact shape this codebase keeps having to undo.
 """
 
 from __future__ import annotations
@@ -34,6 +39,8 @@ from ai_market_monitor.core.person_name import greeting_name
 from ai_market_monitor.db.models import (
     AccountEmailDelivery,
     AffiliateApplication,
+    AffiliateCodeUse,
+    AffiliateCommission,
     AffiliatePayoutRequest,
     AuditEvent,
     ReferralCode,
@@ -42,18 +49,44 @@ from ai_market_monitor.db.models import (
     UserIdentity,
 )
 from ai_market_monitor.db.models.enums import IdentityProvider
+from ai_market_monitor.services.affiliate_attribution import (
+    CONTEXT_CHECKOUT,
+    CONTEXT_SIGNUP,
+    DEFAULT_COMMISSION_PERCENT,
+    KIND_FIRST,
+    KIND_SUBSEQUENT,
+    SOURCE_LINK,
+    CommissionRates,
+    customer_display_name,
+    rates_for,
+)
 from ai_market_monitor.services.affiliate_payout_options import (
     MINIMUM_PAYOUT_USD,
     network_for,
 )
 
-#: The share everybody applies on, and what approval uses when nobody changes it.
-#:
-#: One constant and not two: the page shows this number as a fact, `apply()` stores it
-#: because the applicant is never asked, and `approve()` falls back to it when the
-#: administrator leaves the box alone. Anyone who wants more than this is sent to a person
-#: rather than to a form field — see `ALTERNATIVE_METHOD_EMAIL`.
-DEFAULT_COMMISSION_PERCENT = Decimal("25")
+#: Re-exported, not redefined. `affiliate_attribution` owns both rates and the share
+#: everybody applies on, because it is the module that turns a payment into money; this
+#: one only decides who is approved and what leaves. Every existing importer of
+#: `services.affiliate.DEFAULT_COMMISSION_PERCENT` keeps working, and there is still one
+#: definition of the number.
+__all__ = [
+    "DECISION_TARGET_HOURS",
+    "DEFAULT_COMMISSION_PERCENT",
+    "MAXIMUM_SOCIAL_LINKS",
+    "AffiliateError",
+    "AffiliateService",
+    "AffiliateStats",
+    "CommissionEntry",
+    "CommissionRates",
+    "ReferralEarning",
+    "enqueue_affiliate_email",
+    "first_name_of",
+    "normalize_discount_code",
+    "normalize_social_links",
+    "rates_for",
+    "try_sending_now",
+]
 
 #: How long an applicant is told to wait. Shown on the page and written into the email,
 #: from here, so the two can never promise different things.
@@ -75,7 +108,19 @@ _PAYOUT_PAID = "paid"
 _PAYOUT_REJECTED = "rejected"
 
 #: A referral that has become money. One name for it, because three surfaces ask.
+#:
+#: It is no longer what any *balance* is built from — a balance is the commission ledger,
+#: row by row — but it is still the word the relationship uses for where it stands, and
+#: the "Paid a plan" column on the affiliate's page reads it.
 ELIGIBLE_REWARD_STATUSES = frozenset({"eligible_after_first_paid_month", "granted"})
+
+#: What each place a code can be used is called on the affiliate's own log. Written in
+#: plain words here rather than in the template, so the log and any message about it can
+#: never describe the same row two different ways.
+CODE_USE_WORDS = {
+    CONTEXT_CHECKOUT: "On the payment page",
+    CONTEXT_SIGNUP: "When signing up",
+}
 
 
 async def enqueue_affiliate_email(
@@ -196,6 +241,41 @@ class ReferralEarning:
     converted_at: datetime | None
     commission_usd: Decimal
     is_paid_conversion: bool
+    #: ``True`` when this person arrived on the affiliate's link rather than typing the
+    #: code with no link behind them. It is the difference the two counters on the page
+    #: are about, and it is read off the stored assignment rather than guessed.
+    joined_through_link: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CommissionEntry:
+    """One line of a money log: when, who, and how much.
+
+    Every figure on the affiliate's page can be opened, and this is what is inside. A
+    total with nothing behind it is a number somebody is asked to trust; these rows are
+    what let them check it.
+    """
+
+    customer_name: str
+    earned_at: datetime
+    amount_usd: Decimal
+    paid_amount_usd: Decimal
+    commission_percent: Decimal
+    #: ``first`` or ``subsequent`` — which of the two rates this line was paid at.
+    sequence_kind: str
+
+    @property
+    def is_first(self) -> bool:
+        return self.sequence_kind == KIND_FIRST
+
+
+@dataclass(frozen=True, slots=True)
+class CodeUseEntry:
+    """One time somebody used the code: when, who, and where they used it."""
+
+    customer_name: str
+    used_at: datetime
+    where: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,9 +304,26 @@ class AdminPayoutRow:
 
 @dataclass(frozen=True, slots=True)
 class AffiliateStats:
-    uses: int
-    paid_conversions: int
+    """Every number the affiliate's own page shows, and the rows behind each of them.
+
+    Each total is handed over with its log, from the same query, so a card and the popup
+    that opens from it can never be counting two different things. That has cost this
+    product before: a figure worked out one way on the page and another way in the popup
+    is two answers to one question, and nobody can tell which is wrong.
+    """
+
+    #: How many times the affiliate's code was typed — by anyone, anywhere.
+    code_uses: int
+    code_use_log: tuple[CodeUseEntry, ...]
+
+    #: How many people signed up after using the affiliate's link at least once.
+    link_signups: int
+
     total_commission_usd: Decimal
+    first_commission_usd: Decimal
+    subsequent_commission_usd: Decimal
+    commission_log: tuple[CommissionEntry, ...]
+
     requested_or_paid_usd: Decimal
     available_usd: Decimal
     earnings: tuple[ReferralEarning, ...]
@@ -234,6 +331,22 @@ class AffiliateStats:
     @property
     def can_request_payout(self) -> bool:
         return self.available_usd >= MINIMUM_PAYOUT_USD
+
+    @property
+    def first_commission_log(self) -> tuple[CommissionEntry, ...]:
+        """The same rows, filtered — never a second query.
+
+        The three money logs are one list read three ways. Fetching them separately would
+        let the total and its own popup drift apart between two queries.
+        """
+
+        return tuple(row for row in self.commission_log if row.sequence_kind == KIND_FIRST)
+
+    @property
+    def subsequent_commission_log(self) -> tuple[CommissionEntry, ...]:
+        return tuple(
+            row for row in self.commission_log if row.sequence_kind == KIND_SUBSEQUENT
+        )
 
 
 def _decimal(value: object, *, field: str) -> Decimal:
@@ -484,14 +597,21 @@ class AffiliateService:
         discount_code: str | None = None,
         discount_percent: object = None,
         commission_percent: object = None,
+        subsequent_commission_percent: object = None,
         decision_note: str | None = None,
     ) -> AffiliateApplication:
         """Grant the application, and create the code a customer will type.
 
         Every money field left blank falls back to something stated rather than guessed:
-        the code the applicant asked for, and :data:`DEFAULT_COMMISSION_PERCENT`. The
-        discount has no such fallback — a discount nobody chose is a price change nobody
-        approved — so it must be filled in.
+        the code the applicant asked for, :data:`DEFAULT_COMMISSION_PERCENT` for the
+        first-payment share, and **the first-payment share itself** for the one on later
+        payments. The discount has no such fallback — a discount nobody chose is a price
+        change nobody approved — so it must be filled in.
+
+        The renewal share falling back to the first-payment share, rather than to zero,
+        is the safe direction: an administrator who fills in one box has said what this
+        affiliate earns, and reading the empty box as "nothing on renewals" would quietly
+        stop paying them.
         """
 
         application = await self._pending(application_id)
@@ -506,6 +626,12 @@ class AffiliateService:
             DEFAULT_COMMISSION_PERCENT
             if commission_percent is None or str(commission_percent).strip() == ""
             else _percent(commission_percent, field="Commission")
+        )
+        later_share = (
+            share
+            if subsequent_commission_percent is None
+            or str(subsequent_commission_percent).strip() == ""
+            else _percent(subsequent_commission_percent, field="Commission on later payments")
         )
 
         clash = await self.session.scalar(
@@ -535,6 +661,7 @@ class AffiliateService:
         application.discount_code = code
         application.discount_percent = discount
         application.commission_percent = share
+        application.subsequent_commission_percent = later_share
         application.referral_code_id = referral_code.id
         application.decided_by_user_id = admin_user_id
         application.decided_at = datetime.now(UTC)
@@ -549,6 +676,7 @@ class AffiliateService:
                 "code": code,
                 "discount_percent": str(discount),
                 "commission_percent": str(share),
+                "subsequent_commission_percent": str(later_share),
             },
         )
         await self.session.flush()
@@ -595,34 +723,39 @@ class AffiliateService:
 
     # ── What the affiliate has earned ───────────────────────────────────────────
 
-    async def stats(self, application: AffiliateApplication) -> AffiliateStats:
-        """Everything the affiliate's own page shows, from stored rows only."""
+    def rates_for(self, application: AffiliateApplication | None) -> CommissionRates:
+        """Both of this affiliate's rates, through the one resolver.
 
-        share = application.commission_percent or DEFAULT_COMMISSION_PERCENT
-        rows = await self.session.execute(
-            select(ReferralRelationship, User)
-            .join(User, User.id == ReferralRelationship.referred_user_id)
-            .where(ReferralRelationship.referrer_user_id == application.user_id)
-            .order_by(ReferralRelationship.created_at.desc())
+        Here so the routers and the page can ask a service they already hold, rather than
+        importing the attribution module to answer a question about an application. It is
+        the same function underneath — not a second reading of the two columns.
+        """
+
+        return rates_for(application)
+
+    async def stats(self, application: AffiliateApplication) -> AffiliateStats:
+        """Everything the affiliate's own page shows, from stored rows only.
+
+        **Money is read from the commission ledger and from nowhere else.** It used to be
+        recomputed from a field on each relationship, multiplied by the affiliate's
+        *current* share — so a rate changed today silently rewrote what last month's
+        referral had earned, and a total could be shown with no record behind it. Every
+        figure here is now a sum of rows a person can open and read.
+        """
+
+        earnings = await self._people_who_joined(application.user_id)
+        commission_log = await self._commission_log(application.user_id)
+        code_use_log = await self._code_use_log(application.user_id)
+
+        total = sum((row.amount_usd for row in commission_log), Decimal("0"))
+        first_total = sum(
+            (row.amount_usd for row in commission_log if row.sequence_kind == KIND_FIRST),
+            Decimal("0"),
         )
-        earnings: list[ReferralEarning] = []
-        total = Decimal("0")
-        paid_conversions = 0
-        for relationship, customer in rows:
-            eligible = relationship.reward_status in ELIGIBLE_REWARD_STATUSES
-            commission = self._commission_for(relationship, share) if eligible else Decimal("0")
-            if eligible:
-                paid_conversions += 1
-                total += commission
-            earnings.append(
-                ReferralEarning(
-                    customer_name=_display_name(customer),
-                    joined_at=relationship.created_at,
-                    converted_at=relationship.reward_granted_at,
-                    commission_usd=commission,
-                    is_paid_conversion=eligible,
-                )
-            )
+        later_total = sum(
+            (row.amount_usd for row in commission_log if row.sequence_kind == KIND_SUBSEQUENT),
+            Decimal("0"),
+        )
 
         held = await self.session.scalar(
             select(func.coalesce(func.sum(AffiliatePayoutRequest.amount_usd), 0)).where(
@@ -633,43 +766,95 @@ class AffiliateService:
         held_amount = Decimal(str(held or 0))
         available = total - held_amount
         return AffiliateStats(
-            uses=len(earnings),
-            paid_conversions=paid_conversions,
+            code_uses=len(code_use_log),
+            code_use_log=code_use_log,
+            link_signups=sum(1 for row in earnings if row.joined_through_link),
             total_commission_usd=total.quantize(Decimal("0.01")),
+            first_commission_usd=first_total.quantize(Decimal("0.01")),
+            subsequent_commission_usd=later_total.quantize(Decimal("0.01")),
+            commission_log=commission_log,
             requested_or_paid_usd=held_amount.quantize(Decimal("0.01")),
             available_usd=max(Decimal("0"), available).quantize(Decimal("0.01")),
-            earnings=tuple(earnings),
+            earnings=earnings,
         )
 
-    @staticmethod
-    def _commission_for(relationship: ReferralRelationship, share: Decimal) -> Decimal:
-        """What this referral earned, from what the customer actually paid.
+    async def _people_who_joined(self, affiliate_user_id: UUID) -> tuple[ReferralEarning, ...]:
+        """Everyone assigned to this affiliate, with what each of them has earned so far.
 
-        The paid amount is written onto the relationship when the conversion is recorded.
-        Without one there is nothing to take a share of, and the honest answer is zero —
-        never an assumed plan price, which would show an affiliate money that does not
-        exist and let them request a payout of it.
-
-        The share is the affiliate's current one, applied to every referral. That is safe
-        only because there is no way to change an approved affiliate's share: approval
-        happens once, and ``approve`` refuses an application that is not pending. **If a
-        route to change it is ever added, the share has to be frozen onto the
-        relationship at conversion the way the paid amount already is** — otherwise
-        changing it would silently rewrite what past referrals earned, including money an
-        affiliate has already been shown.
+        One query for the people and one for their money, joined in memory by customer.
+        A per-person lookup on a page listing a hundred customers is a hundred round
+        trips, and this database has already been brought to a stop once by a list view
+        that read a row at a time.
         """
 
-        metadata = relationship.metadata_json or {}
-        raw = metadata.get("paid_amount_usd")
-        if raw is None:
-            return Decimal("0")
-        try:
-            paid = Decimal(str(raw))
-        except (InvalidOperation, TypeError, ValueError):
-            return Decimal("0")
-        if paid <= 0:
-            return Decimal("0")
-        return (paid * share / Decimal("100")).quantize(Decimal("0.01"))
+        rows = await self.session.execute(
+            select(ReferralRelationship, User)
+            .join(User, User.id == ReferralRelationship.referred_user_id)
+            .where(ReferralRelationship.referrer_user_id == affiliate_user_id)
+            .order_by(ReferralRelationship.created_at.desc())
+        )
+        pairs = list(rows)
+        summed = await self.session.execute(
+            select(
+                AffiliateCommission.customer_user_id,
+                func.coalesce(func.sum(AffiliateCommission.commission_usd), 0),
+            )
+            .where(AffiliateCommission.affiliate_user_id == affiliate_user_id)
+            .group_by(AffiliateCommission.customer_user_id)
+        )
+        totals: dict[UUID | None, object] = {
+            customer_id: amount for customer_id, amount in summed
+        }
+        return tuple(
+            ReferralEarning(
+                customer_name=customer_display_name(customer),
+                joined_at=relationship.created_at,
+                converted_at=relationship.reward_granted_at,
+                commission_usd=Decimal(str(totals.get(customer.id, 0))).quantize(
+                    Decimal("0.01")
+                ),
+                is_paid_conversion=relationship.reward_status in ELIGIBLE_REWARD_STATUSES,
+                joined_through_link=relationship.assignment_source == SOURCE_LINK,
+            )
+            for relationship, customer in pairs
+        )
+
+    async def _commission_log(self, affiliate_user_id: UUID) -> tuple[CommissionEntry, ...]:
+        """Every earning, newest first. The one list all three money popups read."""
+
+        rows = await self.session.scalars(
+            select(AffiliateCommission)
+            .where(AffiliateCommission.affiliate_user_id == affiliate_user_id)
+            .order_by(AffiliateCommission.earned_at.desc())
+        )
+        return tuple(
+            CommissionEntry(
+                customer_name=row.customer_name,
+                earned_at=row.earned_at,
+                amount_usd=Decimal(str(row.commission_usd)),
+                paid_amount_usd=Decimal(str(row.paid_amount_usd)),
+                commission_percent=Decimal(str(row.commission_percent)),
+                sequence_kind=row.sequence_kind,
+            )
+            for row in rows
+        )
+
+    async def _code_use_log(self, affiliate_user_id: UUID) -> tuple[CodeUseEntry, ...]:
+        """Every time the code was typed, newest first."""
+
+        rows = await self.session.scalars(
+            select(AffiliateCodeUse)
+            .where(AffiliateCodeUse.affiliate_user_id == affiliate_user_id)
+            .order_by(AffiliateCodeUse.used_at.desc())
+        )
+        return tuple(
+            CodeUseEntry(
+                customer_name=row.customer_name,
+                used_at=row.used_at,
+                where=CODE_USE_WORDS.get(row.context, CODE_USE_WORDS[CONTEXT_SIGNUP]),
+            )
+            for row in rows
+        )
 
     # ── Payouts ─────────────────────────────────────────────────────────────────
 
@@ -838,14 +1023,3 @@ class AffiliateService:
 
 def chosen_currency(value: object) -> str:
     return str(value or "").upper()
-
-
-def _display_name(user: User) -> str:
-    """A customer's name for the affiliate to read, and never their email address."""
-
-    name = str(getattr(user, "display_name", "") or "").strip()
-    if name:
-        return name
-    # No name on the account. Better a plain placeholder than the local part of an email
-    # address, which is the address in all but punctuation.
-    return "A Hilal Markets member"

@@ -27,11 +27,21 @@ from fastapi.templating import Jinja2Templates
 
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.dashboard_paths import MONITOR_PATH, monitor_edit_path
-from ai_market_monitor.core.plans import DISCOUNT_CODE_PATTERN
+from ai_market_monitor.core.plans import (
+    DISCOUNT_CODE_PATTERN,
+    money_back_headline,
+    money_back_words,
+    plan_name,
+)
 from ai_market_monitor.services.billing import method_word, provider_method, provider_word
+from ai_market_monitor.services.discount_codes import (
+    DISCOUNT_CODE_EMPTY_MESSAGE,
+    DISCOUNT_CODE_SHAPE_MESSAGE,
+)
 from ai_market_monitor.services.hilal_methodology import (
     METHODOLOGY_PUBLIC_PATH as AUTOMATED_METHODOLOGY_PATH,
 )
+from ai_market_monitor.services.plan_changes import switch_label_soon
 from ai_market_monitor.services.sharia_automated_screen import (
     AUTOMATED_DISCLOSURE,
 )
@@ -54,6 +64,35 @@ def short_datetime(value: datetime | None, timezone_name: str = "UTC") -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return value.astimezone(timezone).strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def day_only(value: datetime | None, timezone_name: str = "UTC") -> str:
+    """A calendar day in the reader's own timezone: ``10 October 2026``.
+
+    For the facts that are about a *day* — when a plan ends, when the next charge is
+    taken, when a booked change starts. Those were printed as ``2026-10-10 07:07:46 UTC``,
+    which is a machine's timestamp: it offers a beginner three numbers they cannot use
+    (the seconds, and a timezone that is not theirs) beside the one they can. Nothing is
+    charged at a second, so nothing is gained by showing one.
+
+    The month is spelled out because ``10/09`` is the tenth of September to half the world
+    and the ninth of October to the other half, and a person reading their own billing
+    date must not have to guess which.
+
+    Moments keep :func:`short_datetime`. When something *happened* — an alert, a sign-in,
+    a payment record — the time of day is the fact, and this filter would delete it.
+    """
+
+    if value is None:
+        return "-"
+    try:
+        timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        timezone = ZoneInfo("UTC")
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    local = value.astimezone(timezone)
+    return f"{local.day} {local.strftime('%B %Y')}"
 
 
 def reward_amount(value: Decimal) -> str:
@@ -102,10 +141,25 @@ def payment_route(value: object) -> str:
     return f"{way.title()} via {company}" if way else company
 
 
+def hilal_chat_gate(chrome_flag: object, settings: object) -> bool:
+    """Whether the dashboard assistant chrome should render on this page.
+
+    The assistant is shown only when the route asked for it (``hilal_chat``) and the
+    server setting has it switched on. Both decisions live elsewhere; this function is
+    the one place that combines them, so templates and macros do not recompute the
+    expression differently.
+    """
+    return bool(chrome_flag) and bool(getattr(settings, "hilal_chat_enabled", False))
+
+
 def register(templates: Jinja2Templates) -> Jinja2Templates:
     """Give one template environment everything the product's templates expect."""
 
     templates.env.filters["short_dt"] = short_datetime
+    # A day, for the facts that are about a day rather than a moment. `short_dt` prints a
+    # full machine timestamp, which is right for "this alert fired" and wrong for "your
+    # plan ends", where the seconds are noise a beginner has to read past.
+    templates.env.filters["day_dt"] = day_only
     templates.env.filters["reward_amount"] = reward_amount
     templates.env.filters["plan_limit"] = plan_limit
     # The payment company's name, from the one place that owns it. Four pages used to
@@ -138,9 +192,30 @@ def register(templates: Jinja2Templates) -> Jinja2Templates:
     # that draw the notice — the failure this product has repeated most often is a page
     # holding its own copy of an address that later moved.
     templates.env.globals["automated_methodology_path"] = AUTOMATED_METHODOLOGY_PATH
+    # Whether Hilal assistant chrome should render. Computed once here so the base
+    # template, the assistant partial, and the Ask AI macro never hold their own copy.
+    templates.env.globals["hilal_chat_gate"] = hilal_chat_gate
     # What a discount code may look like, handed to the page so the browser refuses the
     # same shapes the server refuses. The Apply button used to carry its own copy of this
     # rule, written out by hand — a browser rule that is merely *similar* either sends
     # rubbish to the payment company or refuses a code the server would have taken.
     templates.env.globals["discount_code_pattern"] = DISCOUNT_CODE_PATTERN
+    # The two sentences that go with that rule, so the browser's instant answer and the
+    # server's answer are the same words. The script used to hold its own pair, and one
+    # of them named a discount code that no longer works.
+    templates.env.globals["discount_code_shape_message"] = DISCOUNT_CODE_SHAPE_MESSAGE
+    templates.env.globals["discount_code_empty_message"] = DISCOUNT_CODE_EMPTY_MESSAGE
+    # How long a plan's refund window is, and what each plan is called. Both were written
+    # into templates by hand — "7-day money-back guarantee" beside a plan code, and the
+    # plan names inside headings and captions — so renaming a plan or moving the refund
+    # promise left pages stating the old fact. `core/plans.py` owns both.
+    templates.env.globals["money_back_words"] = money_back_words
+    # The headline above the refund sentence. Its own function because a table cell says
+    # "7 days" and a headline says "7-day money-back guarantee"; the cards used the cell's
+    # words and read "7 days money-back guarantee" while the React card said "7-day".
+    templates.env.globals["money_back_headline"] = money_back_headline
+    templates.env.globals["plan_name"] = plan_name
+    # The sentence on a plan card that cannot be bought yet. The public pricing card and
+    # the dashboard card both draw it, and each used to write its own version.
+    templates.env.globals["switch_label_soon"] = switch_label_soon
     return templates

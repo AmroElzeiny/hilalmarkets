@@ -9,7 +9,6 @@
  */
 
 import { manageDialog, paintIcons } from "./hm-dialog.js";
-import { followSections } from "./hm-jump.js";
 import { animate, countTo, prefersReducedMotion, settleIn } from "./hm-motion.js";
 
 const root = document.querySelector("[data-subscription-root]");
@@ -50,14 +49,13 @@ function start(scope) {
   const banner = scope.querySelector("[data-s-banner]");
   if (banner) animate(banner, { opacity: [0, 1] }, { duration: 0.24 });
 
-  /* The jump links mark where the person actually is, rather than where they last
-     pressed. Shared with the Settings page, which needs the same bar. */
-  followSections(scope.querySelectorAll("[data-s-jump-link]"), scope);
-
   /* ── Choosing a plan ─────────────────────────────────────────────────────── */
 
   let step = 1;
   let plan = null;
+  /** What this order costs right now, after any code. Kept, so the sentence under the
+   *  price can be rewritten when the way of paying changes without re-reading the DOM. */
+  let orderAmount = 0;
 
   const stepOf = dialog?.querySelector("[data-s-step-of]");
   const steps = [...(dialog?.querySelectorAll("[data-s-step]") || [])];
@@ -152,6 +150,9 @@ function start(scope) {
     if (!pay) return;
     const method = methods.find((input) => input.checked && !input.disabled);
     const agreed = Boolean(agree?.checked);
+    // The way of paying decides what the sentence under the price says, so it is rewritten
+    // wherever that choice can have moved.
+    paintWhen(orderAmount);
     pay.disabled = step !== LAST_STEP || !method || !agreed;
     const label = pay.querySelector("[data-s-pay-label]");
     if (!label) return;
@@ -170,16 +171,19 @@ function start(scope) {
    */
   function paintOrder(amount, wasAmount) {
     if (!dialog || !plan) return;
+    orderAmount = Number(amount) || 0;
     const total = dialog.querySelector("[data-s-order-total]");
-    const when = dialog.querySelector("[data-s-order-when]");
     if (total) {
       total.textContent = money(amount);
       // The old price stays visible beside the new one, crossed out, so the discount is
       // something a person can see rather than something they have to remember.
-      const struck = wasAmount ? ` was ${money(wasAmount)}` : "";
+      //
+      // The spoken label is the amount and nothing else. It used to say "a month", which
+      // is the same promise the sentence below was making to everybody — untrue of a
+      // crypto invoice, and heard by exactly the people who cannot see the sentence.
       total.setAttribute(
         "aria-label",
-        wasAmount ? `${money(amount)} a month,${struck}` : `${money(amount)} a month`,
+        wasAmount ? `${money(amount)}, was ${money(wasAmount)}` : money(amount),
       );
     }
     const struckNode = dialog.querySelector("[data-s-order-was]");
@@ -187,11 +191,30 @@ function start(scope) {
       struckNode.textContent = wasAmount ? money(wasAmount) : "";
       struckNode.hidden = !wasAmount;
     }
-    if (when) {
-      when.textContent =
-        `${money(amount)} today, then ${money(amount)} every month until you stop it. ` +
-        "You can stop it whenever you like.";
-    }
+    paintWhen(amount);
+  }
+
+  /** What this order does to somebody's money over time, for the way they chose to pay.
+   *
+   * The sentence is the server's, one per way of paying, because whether a charge
+   * repeats is a fact about the payment company and not about this page. This line used
+   * to say "then $17 every month until you stop it" whichever method was ticked — so
+   * every crypto buyer was told they were signing up to a monthly subscription, on a
+   * payment route that cannot take a second payment at all.
+   *
+   * Only the number is filled in here. A discount code changes it after the server has
+   * written the sentence, which is why the amount arrives as a placeholder.
+   */
+  function paintWhen(amount) {
+    const when = dialog?.querySelector("[data-s-order-when]");
+    if (!when) return;
+    const chosen = methods.find((input) => input.checked && !input.disabled);
+    const decided = (plan && plan.pay_methods) || {};
+    const story =
+      (chosen && decided[chosen.value] && decided[chosen.value].story) ||
+      when.dataset.sOrderWhenDefault ||
+      "";
+    when.textContent = story.split("{amount}").join(money(amount));
   }
 
   /** Money as this product writes it: `$15`, and cents only when there are cents. */

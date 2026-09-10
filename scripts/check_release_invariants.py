@@ -170,8 +170,14 @@ def main() -> int:
     # the card says so, instead of the plan vanishing from the comparison.
     if visible_public_plan_codes(billing_enabled=False) != PUBLIC_PLAN_CODES:
         failures.append("Every public plan must stay visible with billing disabled")
-    if plan_offer("pro").monthly_available:
-        failures.append("The Pro plan is not on sale yet and must not offer checkout")
+    unavailable_paid_plans = [
+        code for code in PURCHASABLE_PLAN_CODES if not plan_offer(code).monthly_available
+    ]
+    if unavailable_paid_plans:
+        failures.append(
+            "Every purchasable paid plan must offer monthly checkout; unavailable: "
+            + ", ".join(unavailable_paid_plans)
+        )
     if any(plan_offer(code).annual_available for code in PUBLIC_PLAN_CODES):
         failures.append("Annual billing is not open yet and must not offer checkout")
 

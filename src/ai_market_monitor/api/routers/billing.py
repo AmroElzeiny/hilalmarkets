@@ -83,7 +83,10 @@ async def list_plans(
                 "monthly_price": str(plan.monthly_price),
                 "annual_price": str(PUBLIC_PLAN_PRESENTATIONS[code].annual_price),
                 "currency": plan.currency,
-                "description": PUBLIC_PLAN_PRESENTATIONS[code].description,
+                # The API keeps its description field for existing clients. Pricing
+                # cards no longer carry audience blurbs, so the stable plan definition
+                # supplies this general account description instead.
+                "description": plan.description,
                 "cta_label": PUBLIC_PLAN_PRESENTATIONS[code].cta_label,
                 "limits": plan.limits,
                 "features": plan.features,

@@ -1,3 +1,15 @@
+"""The older name for two things the attribution service now owns.
+
+This module used to decide who a referral belonged to and what a conversion was worth. It
+does neither now: both live in
+:mod:`ai_market_monitor.services.affiliate_attribution`, and everything here calls into it.
+
+That is deliberate rather than tidy-up. Two modules that each work out who a customer
+belongs to are two answers to one question, and this codebase has already paid for that
+several times over. The methods stay because other code and other tests call them by
+name, and because an admin action — granting a reward by hand — genuinely belongs here.
+"""
+
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -6,13 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.db.models import (
     AuditEvent,
-    BillingCheckoutAttempt,
-    Plan,
     ReferralCode,
     ReferralRelationship,
-    Subscription,
 )
-from ai_market_monitor.db.models.enums import SubscriptionStatus
+from ai_market_monitor.services.affiliate_attribution import (
+    ReferralAttributionService,
+    read_referral_code,
+)
 
 
 class ReferralError(ValueError):
@@ -24,112 +36,74 @@ class ReferralError(ValueError):
 class ReferralService:
     def __init__(self, session: AsyncSession):
         self.session = session
+        self.attribution = ReferralAttributionService(session)
 
     async def record_trial_referral(
         self, *, referred_user_id: UUID, referral_code: str
     ) -> ReferralRelationship | None:
-        code = await self.session.scalar(
-            select(ReferralCode).where(ReferralCode.code == referral_code, ReferralCode.is_active)
+        """Assign somebody to the affiliate whose code they typed.
+
+        A thin front door onto
+        :meth:`~ai_market_monitor.services.affiliate_attribution.ReferralAttributionService.assign`.
+        The one thing it adds is the loud refusal: somebody using their own code is a
+        mistake worth naming, where every other "nobody was credited" case is ordinary
+        and answered with ``None``.
+        """
+
+        code = read_referral_code(referral_code)
+        if code is not None:
+            owner = await self.attribution.code_owned_by(code)
+            if owner is not None and owner.owner_user_id == referred_user_id:
+                raise ReferralError("self_referral", "Users cannot refer themselves.")
+
+        before = await self.attribution.assignment_for(referred_user_id)
+        relationship = await self.attribution.assign(
+            user_id=referred_user_id,
+            typed_code=referral_code,
         )
-        if code is None:
-            return None
-        if code.owner_user_id is None:
-            return None
-        if code.owner_user_id == referred_user_id:
-            raise ReferralError("self_referral", "Users cannot refer themselves.")
-        existing = await self.session.scalar(
-            select(ReferralRelationship).where(
-                ReferralRelationship.referred_user_id == referred_user_id
+        if relationship is not None and before is None:
+            self._audit(
+                relationship.referrer_user_id,
+                "referral.trial_recorded",
+                "referral_relationship",
+                None,
+                {
+                    "referred_user_id": str(referred_user_id),
+                    "code": (relationship.metadata_json or {}).get("code", ""),
+                },
             )
-        )
-        if existing is not None:
-            return existing
-        if code.expires_at and code.expires_at <= datetime.now(UTC):
-            return None
-        if code.max_uses is not None and code.use_count >= code.max_uses:
-            return None
-        relationship = ReferralRelationship(
-            referrer_user_id=code.owner_user_id,
-            referred_user_id=referred_user_id,
-            referral_code_id=code.id,
-            status="trial_activated",
-            reward_status="pending_paid_conversion",
-            metadata_json={"code": referral_code},
-        )
-        code.use_count += 1
-        self.session.add(relationship)
-        self._audit(
-            code.owner_user_id,
-            "referral.trial_recorded",
-            "referral_relationship",
-            None,
-            {"referred_user_id": str(referred_user_id), "code": referral_code},
-        )
-        await self.session.flush()
+            await self.session.flush()
         return relationship
 
     async def grant_conversion_rewards(
         self, *, referred_user_id: UUID
     ) -> ReferralRelationship | None:
-        relationship = await self.session.scalar(
-            select(ReferralRelationship).where(
-                ReferralRelationship.referred_user_id == referred_user_id
-            )
+        """Record what this customer's active subscription earns their affiliate.
+
+        The money itself is written by the attribution service, into the commission
+        ledger, at the rate that matches whether this is the customer's first payment or
+        a later one. Nothing is worked out here — a second place deciding what a payment
+        is worth is exactly what this module stopped being.
+        """
+
+        relationship = await self.attribution.assignment_for(referred_user_id)
+        if relationship is None:
+            return None
+        commission = await self.attribution.record_payment_for_active_subscription(
+            customer_user_id=referred_user_id,
+            # Keyed on the customer's first conversion, so calling this twice for the
+            # same person records one earning rather than two.
+            event_key=f"conversion:{referred_user_id}",
         )
-        if relationship is None or relationship.reward_status == "granted":
-            return relationship
-        paid = (
-            await self.session.execute(
-                select(Subscription.id, Plan.price_monthly, Plan.code, Plan.id)
-                .join(Plan, Plan.id == Subscription.plan_id)
-                .where(
-                    Subscription.user_id == referred_user_id,
-                    Subscription.status == SubscriptionStatus.ACTIVE,
-                )
+        if commission is not None:
+            self._audit(
+                relationship.referrer_user_id,
+                "referral.reward_eligible",
+                "referral_relationship",
+                relationship.id,
+                {"referred_user_id": str(referred_user_id)},
             )
-        ).first()
-        if paid is None:
-            return relationship
-        subscription_id, price_monthly, plan_code, plan_id = paid
-        # What the customer actually paid, written down at the moment it became true.
-        # An affiliate's commission is a share of this, and nothing else: without it the
-        # share would have to be taken of an assumed plan price, which is how a balance
-        # comes to show money that was never received.
-        #
-        # The number therefore comes from the completed checkout — the row the payment
-        # itself wrote — and not from the plan's list price. Those are two different
-        # numbers whenever a launch offer is running: this used to credit an affiliate
-        # $20 for somebody who paid $7.
-        charged = await self.session.scalar(
-            select(BillingCheckoutAttempt.amount)
-            .where(
-                BillingCheckoutAttempt.user_id == referred_user_id,
-                BillingCheckoutAttempt.plan_id == plan_id,
-                BillingCheckoutAttempt.status == "completed",
-            )
-            .order_by(BillingCheckoutAttempt.completed_at.desc())
-            .limit(1)
-        )
-        relationship.status = "paid_converted"
-        relationship.reward_status = "eligible_after_first_paid_month"
-        relationship.metadata_json = {
-            **relationship.metadata_json,
-            "paid_subscription_id": str(subscription_id),
-            "paid_amount_usd": str(charged if charged is not None else price_monthly),
-            # Which of the two the number came from, so a payout can never be argued
-            # about later. "checkout" is money that really moved; "plan_price" is a
-            # subscription granted by hand, with no payment row behind it.
-            "paid_amount_source": "checkout" if charged is not None else "plan_price",
-            "paid_plan_code": plan_code,
-        }
-        self._audit(
-            relationship.referrer_user_id,
-            "referral.reward_eligible",
-            "referral_relationship",
-            relationship.id,
-            {"referred_user_id": str(referred_user_id)},
-        )
-        await self.session.flush()
+            await self.session.flush()
         return relationship
 
     async def mark_reward_granted(
@@ -156,6 +130,16 @@ class ReferralService:
         )
         await self.session.flush()
         return relationship
+
+    async def code_for(self, code: str) -> ReferralCode | None:
+        """The live code row, through the one reader. Kept for callers that ask."""
+
+        reading = read_referral_code(code)
+        if reading is None:
+            return None
+        return await self.session.scalar(
+            select(ReferralCode).where(ReferralCode.code == reading)
+        )
 
     def _audit(
         self,

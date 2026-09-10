@@ -1,9 +1,10 @@
 """One way for a test to give its user a paid plan.
 
-Several dashboard features are Monitor-plan features. `missed_alert_investigations` is
-the one that bites most often: the free "basic" plan has it switched off in
-`core/plans.py`, and every investigation route refuses a free account with HTTP 403. A
-test that signs up and then calls such a route is measuring the paywall, not the route.
+Several dashboard features need a paid plan. `missed_alert_investigations` — the thing a
+customer sees as "Why wasn't I alerted?" — is the one that bites most often: the free plan
+has it switched off in `core/plans.py`, and every investigation route refuses a free
+account with HTTP 403. A test that signs up and then calls such a route is measuring the
+paywall, not the route.
 
 The fix is a plan, not a looser assertion, and the plan is granted here so the three test
 files that need it cannot drift into three slightly different Subscription rows.
@@ -20,12 +21,14 @@ from ai_market_monitor.db.models import Subscription, UserIdentity
 from ai_market_monitor.db.models.enums import IdentityProvider, SubscriptionStatus
 from ai_market_monitor.services.entitlements import PlanCatalogService
 
-#: The plan whose code is "trader" is presented to customers as "Monitor".
+#: The first paid plan. Its stored code is "trader"; what customers see it called comes
+#: from `core/plans.plan_name` and is not written down here — it was "Monitor" when this
+#: file was made and is "Plus" now, and a name copied into a comment goes stale silently.
 MONITOR_PLAN_CODE = "trader"
 
 
 async def grant_monitor_plan(session_factory, *, user_id: UUID | None = None) -> UUID:
-    """Give one user an active Monitor subscription.
+    """Give one user an active subscription to the first paid plan.
 
     With no `user_id` the account created by the test's own sign-up is used, which is the
     only email identity in a fresh test database. Tests that build a `User` row directly,

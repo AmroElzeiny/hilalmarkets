@@ -12,10 +12,21 @@ server-created checkout attempt before a subscription or receipt email is create
 ## Creem Card Subscriptions
 
 1. Create separate Creem products for:
-   - `trader_monthly` (customer-facing **Monitor**, monthly)
-   - `trader_annual` (customer-facing **Monitor**, annual)
-   - `pro_monthly`
-   - `pro_annual`
+   - `trader_monthly` (customer-facing **Plus**, monthly)
+   - `trader_annual` (customer-facing **Plus**, annual)
+   - `pro_monthly` (customer-facing **Pro**, monthly)
+   - `pro_annual` (customer-facing **Pro**, annual)
+
+   Only the two monthly products are needed today: nothing is sold by the year, so both
+   annual keys may be left out. Plan names come from `core/plans.py` — check them there
+   rather than trusting this list, which said "Monitor" for months after the rename.
+
+   **Each Creem product's price must equal what `core/plans.py` charges today.** While
+   the launch offer runs that is the launch price, not the normal one, because the offer
+   no longer needs a code: the lower figure simply *is* the price until
+   `PROMOTION_ENDS_AT`. When that date passes, the two Creem products have to be
+   re-priced to the normal figures by hand, or the site will show one price and Creem
+   will charge another.
 2. Optionally configure `trader_trial` in Creem as a seven-day recurring trial. The application
    does not invent or override provider product terms, and leaves the trial CTA unavailable until
    that exact product is configured.
@@ -58,9 +69,17 @@ Official references:
 
 ## Discount codes
 
-The plan costs its normal price. A **code** brings it down — the launch code and its
-percentage live in `core/plans.py` (`LAUNCH_DISCOUNT_CODE`), which every pricing card and
-every checkout reads.
+**The launch price needs no code.** It used to: a customer typed `HILAL25` to reach the
+lower figure. That code is withdrawn — it is listed in `RETIRED_DISCOUNT_CODES` in
+`core/plans.py`, and tests refuse to let it appear on any page. The launch price is now
+simply the price until `PROMOTION_ENDS_AT`, on the card, at checkout and on the crypto
+invoice alike.
+
+Codes still exist for partners and campaigns. They are listed per deployment:
+
+```env
+BILLING_DISCOUNT_CODES=TINYTALES=30
+```
 
 The two routes apply a code in two different places, and both have to be set up:
 
@@ -69,15 +88,9 @@ The two routes apply a code in two different places, and both have to be set up:
 | Crypto (NOWPayments) | the box on our own checkout screens | this application, before the invoice is created |
 | Card (Creem) | the discount box on Creem's hosted page | Creem |
 
-So **the same code must exist in Creem, at the same percentage**, or a card buyer is shown
-an offer they cannot get. Create it in the Creem dashboard as a *percentage* discount named
-exactly as `LAUNCH_DISCOUNT_CODE`, applying to the product in `CREEM_PRODUCT_IDS`.
-
-Codes that only apply to crypto are listed per deployment instead:
-
-```env
-BILLING_DISCOUNT_CODES=HILAL25=25,TINYTALES=30
-```
+So **a code offered on a card route must also exist in Creem, at the same percentage**, or
+a card buyer is shown an offer they cannot get. Create it in the Creem dashboard as a
+*percentage* discount, applying to the products in `CREEM_PRODUCT_IDS`.
 
 Codes are looked up in Creem first and in that list second. A code Creem *refuses* —
 expired, switched off, used up, fixed-amount, or for another product — is refused here too
@@ -85,15 +98,11 @@ and never falls through to the list.
 
 Two rules govern that line:
 
-- **The launch code may be listed, but only at the number it already has.** `core/plans.py`
-  owns what `LAUNCH_DISCOUNT_CODE` is worth, because the pricing cards derive the lower
-  price from it. A different number here refuses to start, naming the code and both
-  figures — a page promising one discount while checkout applies another is the exact
-  fault this list is fenced against.
-- **Listing it also outlives the launch window.** `core/plans.py` stops offering the launch
-  code at `PROMOTION_ENDS_AT`; this list has no end date, so a code written here keeps
-  working after the pricing cards stop advertising it. Leave it out of the list if it
-  should stop on that date instead.
+- **No withdrawn code may be listed.** Anything in `RETIRED_DISCOUNT_CODES` is refused at
+  start-up. A code a page no longer advertises but the list still honours is money given
+  away by accident.
+- **The list has no end date.** A code written here keeps working until it is removed by
+  hand. If a campaign should stop on a date, take it out of the list on that date.
 
 The two example files ship this blank on purpose. A real code belongs in `.env` and
 `.env.production`, which are not in git.

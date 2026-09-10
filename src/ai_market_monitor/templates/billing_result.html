@@ -8,13 +8,13 @@
     <span class="kicker">Plan and billing</span>
     <h1 id="billing-result-title">{{ title }}</h1>
     {% if message == 'payment_successful' %}
-      <p>Your payment is verified and your {{ plan.name if plan else 'selected' }} access is active. A branded receipt has been queued for your account email.</p>
+      <p>Your payment is verified and your {{ plan.name if plan else 'selected' }} access is active. A receipt is on its way to your account email.</p>
     {% elif message == 'trial_started' %}
       <p>Your existing seven-day Monitor trial is active until the access end date shown in Billing.</p>
     {% elif message %}
-      <p>You returned from the payment provider, but its signed confirmation has not arrived yet. Your access stays unchanged until it does.</p>
+      <p>You came back from the payment company, but we have not received its payment confirmation yet. Your plan stays unchanged until it arrives.</p>
     {% else %}
-      <p>The checkout did not complete. No plan or entitlement was changed.</p>
+      <p>The checkout did not complete. Your plan did not change.</p>
     {% endif %}
     {% if entitlement and message in ['payment_successful', 'trial_started'] %}
       <span class="billing-result-plan"><span data-icon="shield" data-icon-class="icon-sm"></span>Active access: {{ entitlement.plan.name }}</span>
@@ -41,7 +41,7 @@
     <a class="btn btn-secondary" href="/dashboard/billing">Open Plan and Billing</a>
     {% if not message %}<a class="btn btn-secondary" href="/dashboard/support">Contact support</a>{% endif %}
   </nav>
-  <p class="billing-result-security"><span data-icon="shield" data-icon-class="icon-sm"></span>Only a verified provider webhook can change paid access.</p>
+  <p class="billing-result-security"><span data-icon="shield" data-icon-class="icon-sm"></span>Paid access changes only when we receive the payment confirmation from the payment company. If you are still waiting, open Plan and Billing after a few minutes.</p>
 </main>
 {% endblock %}
 {% block page_scripts %}
@@ -54,6 +54,6 @@
   data-event-scope="{{ checkout_attempt.id if checkout_attempt else page }}"
   hidden
 ></div>
-<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260905-inspector-left"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260910-pay-now"></script>
 {% endif %}
 {% endblock %}

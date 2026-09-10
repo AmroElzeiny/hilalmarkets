@@ -1,0 +1,4 @@
+﻿[0m
+> hm-supervisor-deep · glm-5.3-flash
+[0m
+[91m[1mError: [0mError from provider (Console Go): Upstream request failed: [invalid_request_error] invalid request body: json: unknown field "permissions"

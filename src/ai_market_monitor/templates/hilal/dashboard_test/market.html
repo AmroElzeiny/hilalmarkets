@@ -1,5 +1,5 @@
 {% extends "hilal/base_dashboard.html" %}
-{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260905-inspector-left">{% endblock %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260910-pay-now">{% endblock %}
 {% block content %}
 
 <div
@@ -134,6 +134,13 @@
     </button>
 
     <p class="t-control-note" data-result-note aria-live="polite" data-hm-guide-target="market-live-status">Loading the list...</p>
+
+    {#- R1: the Ask AI button must stay the LAST child of `div.t-controls`, after the
+        other filters. The result note sits above it on purpose — anything placed after
+        the button breaks that rule, and `test_ask_ai_button_is_the_last_child_of_its_bar`
+        in tests/integration/test_ask_ai_button.py fails if it happens. -#}
+    {% from "hilal/macros/ask_ai.html" import ask_ai with context %}
+    {{ ask_ai("Ask AI about this list of screened coins") }}
   </div>
 
   {#- A full-width block about the list as a whole, so it sits after the control row
@@ -236,4 +243,4 @@
 {% include "hilal/dashboard_test/partials/favorites_dialog.html" %}
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20260905-inspector-left"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20260910-pay-now"></script>{% endblock %}

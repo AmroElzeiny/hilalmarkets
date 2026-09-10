@@ -267,6 +267,16 @@ class BrowserPageRenderer:
                     f"({type(exc).__name__}). Run `python -m playwright install chromium`."
                 )
                 self._browser = None
+                # Starting is two steps, and the first one starts a **separate process**
+                # that drives the browser. When only the second step fails, that driver is
+                # already running and nothing else will ever ask this renderer again — so
+                # without this it stays alive for the life of the worker. One is a few
+                # hundred megabytes on a server with 3.9 GB and no swap, and a sweep that
+                # meets the same failure on every coin leaves one behind each time.
+                driver, self._playwright = self._playwright, None
+                if driver is not None:
+                    with contextlib.suppress(Exception):  # shutting down is best effort
+                        await driver.stop()
                 return None
             return self._browser
 

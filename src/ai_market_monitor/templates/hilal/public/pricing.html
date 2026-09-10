@@ -5,19 +5,20 @@
     <div>
       <span class="eyebrow">Pricing</span>
       <h1>Choose how deeply you want to monitor the market.</h1>
-      <p>Start with methodology-screened assets, then add market monitors, quick scans, alerts, and delivery options when you need them.</p>
+      <p>Start with methodology-screened assets, then add market monitors, alerts, and delivery options when you need them.</p>
       <div class="hero-actions">
         <a class="btn btn-primary" href="/subscribe?plan_code=demo&amp;billing_interval=monthly">Start free</a>
         <a class="btn btn-secondary" href="/#pricing">Compare on the home page</a>
       </div>
     </div>
-    <div class="hero-art"><img src="{{ url_for('static', path='/hilal/watch-plan-journey.svg') }}" alt="Basic, Monitor, and Pro access levels"></div>
+    {% set plan_words = plan_comparison_headers|join(', ') %}
+    <div class="hero-art"><img src="{{ url_for('static', path='/hilal/watch-plan-journey.svg') }}" alt="{{ plan_words }} access levels"></div>
   </div>
 </header>
 <section class="section">
   <div class="container">
     <div class="section-heading center">
-      <span class="eyebrow">Basic, Monitor, and Pro</span>
+      <span class="eyebrow">{{ plan_comparison_headers|join(', ') }}</span>
       <h2>Pay for capacity, never for greater religious certainty.</h2>
       <p>The methodology, evidence sources, version, review date, and qualifications remain visible on every plan.</p>
     </div>
@@ -29,11 +30,11 @@
     <div class="section-heading"><span class="eyebrow">Compare</span><h2>Plan details at a glance.</h2></div>
     <div class="comparison-table-wrap">
       <table class="comparison-table">
-        <caption class="sr-only">Basic, Monitor, and Pro plan comparison</caption>
+        <caption class="sr-only">{{ plan_comparison_headers|join(', ') }} plan comparison</caption>
         <thead><tr><th scope="col">Capability</th>{% for header in plan_comparison_headers %}<th scope="col">{{ header }}</th>{% endfor %}</tr></thead>
         <tbody>
           {% for row in plan_comparison %}
-            <tr><th scope="row">{{ row[0] }}</th>{% for header in plan_comparison_headers %}<td>{{ 'Included' if row[0] == 'WhatsApp' and header == 'Pro' and whatsapp_operational else row[loop.index] }}</td>{% endfor %}</tr>
+            <tr><th scope="row">{{ row[0] }}</th>{% for header in plan_comparison_headers %}<td>{{ row[loop.index] }}</td>{% endfor %}</tr>
           {% endfor %}
         </tbody>
       </table>

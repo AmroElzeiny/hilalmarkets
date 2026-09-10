@@ -10,8 +10,8 @@ from ai_market_monitor.engine.builder_templates import condition_template
 from ai_market_monitor.engine.candle_patterns import pattern_names
 from ai_market_monitor.engine.capabilities import CapabilitySpec, all_capabilities
 from ai_market_monitor.engine.context_conditions import TIME_CONDITION_NAMES
+from ai_market_monitor.engine.evaluator import evaluator_supports_price_action
 from ai_market_monitor.engine.indicators import IndicatorRegistry
-from ai_market_monitor.engine.price_action import PRICE_ACTION_NAMES
 from ai_market_monitor.engine.provider_families import (
     ProviderAvailability,
     runtime_availability,
@@ -123,16 +123,13 @@ def _check_capability(
         if operand.kind.value == "indicator" and not indicators.supports(operand.name or ""):
             evaluator_supported = False
             notes.append(f"unsupported_indicator:{operand.name}")
-        evaluator_special_price_actions = {
-            "bollinger_reentry",
-            "percent_change_up",
-            "percent_change_down",
-            "time_window",
-        }
-        if (
-            operand.kind.value == "price_action"
-            and operand.name not in PRICE_ACTION_NAMES
-            and operand.name not in evaluator_special_price_actions
+        # Asked of the runtime, never re-listed here. This used to be
+        # `PRICE_ACTION_NAMES` plus a five-name "special cases" set written out by
+        # hand, and the runtime answers twenty-five names it did not know about. Every
+        # capability built on one of the missing twenty was published as unsupported
+        # while working perfectly - "Pivot high/low" is the one that proved it.
+        if operand.kind.value == "price_action" and not evaluator_supports_price_action(
+            operand.name
         ):
             evaluator_supported = False
             notes.append(f"unsupported_price_action:{operand.name}")

@@ -36,6 +36,7 @@ from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.logging import configure_logging
 from ai_market_monitor.core.startup import validate_runtime_configuration
 from ai_market_monitor.observability.asgi import record_http_request
+from ai_market_monitor.services.affiliate_attribution import capture_referral_link
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 
@@ -144,6 +145,12 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
             )
             return guarded
         response = await call_next(request)
+        # An affiliate's link is remembered here, on the one middleware every request
+        # already passes through, rather than on a list of pages somebody has to keep
+        # adding to. A link works wherever it points — the landing page, an article, the
+        # pricing section, the sign-up form — and the visit is remembered for ninety
+        # days, so leaving and signing up next month still credits the right person.
+        capture_referral_link(request, response, secure=settings.is_deployed)
         elapsed_ms = (perf_counter() - started) * 1000
         response.headers["X-Process-Time-Ms"] = f"{elapsed_ms:.3f}"
         record_http_request(

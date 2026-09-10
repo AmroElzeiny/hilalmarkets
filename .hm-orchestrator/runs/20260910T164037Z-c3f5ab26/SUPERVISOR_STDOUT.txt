@@ -1,0 +1,321 @@
+﻿
+> hm-supervisor-deep · glm-5.3-flash
+
+→ Read .hm-orchestrator/policy/ROUTING_POLICY.md
+→ Read .hm-orchestrator/policy/SUPERVISOR_REPORT_CONTRACT.md
+I'll start by reading the required policy and context files, plus the current tree state.
+
+$ git status --short | Select-Object -First 80; git log --oneline -3
+M .env.example
+ M .env.production.example
+ M CLAUDE.md
+A  Hilal-Markets-Website/.env.example
+A  Hilal-Markets-Website/.figma/attachments/image-0.png
+A  Hilal-Markets-Website/.figma/make/site.json
+A  Hilal-Markets-Website/.gitignore
+A  Hilal-Markets-Website/README.md
+A  Hilal-Markets-Website/index.html
+A  Hilal-Markets-Website/package.json
+A  Hilal-Markets-Website/pnpm-lock.yaml
+A  Hilal-Markets-Website/public/favicon-dark.png
+A  Hilal-Markets-Website/public/fonts/Geometria-Bold.ttf
+A  Hilal-Markets-Website/public/fonts/Geometria-Medium.ttf
+A  Hilal-Markets-Website/public/fonts/Geometria-Regular.ttf
+A  Hilal-Markets-Website/public/fonts/Onest-Variable.ttf
+A  Hilal-Markets-Website/public/hilalmarkets-social-preview.png
+A  Hilal-Markets-Website/src/App.tsx
+A  Hilal-Markets-Website/src/analytics.ts
+A  Hilal-Markets-Website/src/components/Dialog.tsx
+A  Hilal-Markets-Website/src/components/HeroFlow.tsx
+A  Hilal-Markets-Website/src/components/Icon.tsx
+AM Hilal-Markets-Website/src/components/Pricing.tsx
+A  Hilal-Markets-Website/src/components/Reveal.tsx
+A  Hilal-Markets-Website/src/components/SiteChrome.tsx
+A  Hilal-Markets-Website/src/components/Tracking.tsx
+A  Hilal-Markets-Website/src/components/brand.tsx
+A  Hilal-Markets-Website/src/components/interactions.ts
+A  Hilal-Markets-Website/src/imports/03ProblemAndSolution-1/index.tsx
+A  Hilal-Markets-Website/src/imports/03ProblemAndSolution-1/svg-l9hlxlat43.ts
+A  Hilal-Markets-Website/src/imports/03ProblemAndSolution/index.tsx
+A  Hilal-Markets-Website/src/imports/03ProblemAndSolution/svg-yoyovc0nho.ts
+A  Hilal-Markets-Website/src/imports/04HowHilalMarketsWorks-1/index.tsx
+A  Hilal-Markets-Website/src/imports/04HowHilalMarketsWorks/index.tsx
+A  Hilal-Markets-Website/src/imports/06CoreFeatures-1/index.tsx
+A  Hilal-Markets-Website/src/imports/06CoreFeatures-1/svg-x3n5wkemla.ts
+A  Hilal-Markets-Website/src/imports/06CoreFeatures-1/svg-zx5dq.tsx
+A  Hilal-Markets-Website/src/imports/06CoreFeatures-2/index.tsx
+A  Hilal-Markets-Website/src/imports/06CoreFeatures-2/svg-8gh7ibw7d1.ts
+A  Hilal-Markets-Website/src/imports/06CoreFeatures-2/svg-wl9fe.tsx
+A  Hilal-Markets-Website/src/imports/06CoreFeatures/index.tsx
+A  Hilal-Markets-Website/src/imports/07TrustAndControl/index.tsx
+A  Hilal-Markets-Website/src/imports/10Footer-1/index.tsx
+A  Hilal-Markets-Website/src/imports/10Footer-1/svg-qp93h2wewm.ts
+A  Hilal-Markets-Website/src/imports/10Footer/index.tsx
+A  Hilal-Markets-Website/src/imports/10Footer/svg-nfwtsg6pkj.ts
+A  Hilal-Markets-Website/src/imports/Frame-1/index.tsx
+A  Hilal-Markets-Website/src/imports/Frame-1/svg-ypwh2xsu08.ts
+A  Hilal-Markets-Website/src/imports/Frame/index.tsx
+A  Hilal-Markets-Website/src/imports/Frame/svg-ewzmrla0b4.ts
+A  Hilal-Markets-Website/src/imports/Hilal_Markets_Brand_Rules.md
+A  Hilal-Markets-Website/src/imports/Hilal_Markets_Brandings_Guidelines.pdf
+A  Hilal-Markets-Website/src/imports/SectionMargin/index.tsx
+A  Hilal-Markets-Website/src/imports/SectionMargin/svg-io2ihosp47.ts
+A  Hilal-Markets-Website/src/imports/pasted_text/hilal-markets-content.md
+A  Hilal-Markets-Website/src/index.css
+A  Hilal-Markets-Website/src/legal/documents.tsx
+A  Hilal-Markets-Website/src/main.tsx
+A  Hilal-Markets-Website/src/motion.ts
+A  Hilal-Markets-Website/src/pages/ContactPage.tsx
+A  Hilal-Markets-Website/src/pages/FeaturesPage.tsx
+A  Hilal-Markets-Website/src/pages/HowItWorksPage.tsx
+A  Hilal-Markets-Website/src/pages/LegalPage.tsx
+A  Hilal-Markets-Website/src/pages/MethodologyPage.tsx
+A  Hilal-Markets-Website/src/publicForms.ts
+A  Hilal-Markets-Website/src/types/motion.d.ts
+A  Hilal-Markets-Website/src/vite-env.d.ts
+A  Hilal-Markets-Website/tsconfig.json
+A  Hilal-Markets-Website/vite.config.ts
+ M README.md
+ M docs/BILLING_SETUP.md
+ M scripts/check_creem_prices.py
+ M scripts/check_release_invariants.py
+ M src/ai_market_monitor/api/routers/billing.py
+ M src/ai_market_monitor/api/routers/dashboard.py
+ M src/ai_market_monitor/api/routers/dashboard_api.py
+ M src/ai_market_monitor/api/routers/dashboard_test.py
+ M src/ai_market_monitor/api/routers/investigations.py
+ M src/ai_market_monitor/api/routers/monitor_canvas.py
+ M src/ai_market_monitor/api/routers/public.py
+145275f2 Launch Y6.97
+c023d474 Launch Y6.967
+a32bafb3 Separate research from the review decision, and aim its link scan
+
+→ Read .hm-orchestrator/models/LIVE_MODELS.md
+→ Read .hm-orchestrator/current/VISUAL_CONTRACT.md
+
+$ Test-Path .hm-orchestrator/current/CLAUDE_DECISION.md; git status --short | Measure-Object -Line; git status --short | Select-String "dashboard|billing|subscription|checkout|templates|static" | Select-Object -First 60
+True
+System.Management.Automation.RemoteException
+Lines Words Characters Property
+----- ----- ---------- --------
+  208
+
+→ Read .hm-orchestrator/current/CLAUDE_DECISION.md
+
+$ Get-Content CLAUDE.md -TotalCount 80
+# HilalMarkets �?" working rules
+System.Management.Automation.RemoteException
+## What this product is
+System.Management.Automation.RemoteException
+A **Halal** crypto-monitoring product built for **beginners and Muslims**. Both halves
+of that constrain the work:
+System.Management.Automation.RemoteException
+- *Halal* �?" Sharia status is governed, evidence-backed, and assigned only through the
+  platform's own review process. Never assign, infer, or imply a Sharia/halal/haram
+  status from chat, from a model, or from a heuristic. No leverage, no buy/sell advice,
+  no guaranteed returns, no automatic trading.
+- *For beginners* �?" a user will not know what "close-to-close" or "gte" means. Explain
+  in plain language, ask one concrete question at a time, and never answer a beginner's
+  question with jargon or an internal field name.
+System.Management.Automation.RemoteException
+### Where the context lives
+System.Management.Automation.RemoteException
+| What | Where |
+|---|---|
+| Brand rules �?" colors, type, tone, voice | `brand guide.md` (project root) �?" the master. `Hilal-Markets-Website/src/imports/Hilal_Markets_Brand_Rules.md` is a copy; the root file wins. |
+| Business goals, audience, positioning, Sharia governance, roadmap | `Notion/HilalMarkets_Notion_Workspace/` (numbered folders `00_`�?"`10_`) |
+| Landing page �?" the visual source of truth | `Hilal-Markets-Website/src/` |
+| Dashboard �?" the authenticated source of truth | `src/ai_market_monitor/templates/`, `src/ai_market_monitor/static/` |
+System.Management.Automation.RemoteException
+**Read the brand rules and the relevant Notion folder before any UI, copy, color, or
+product-decision work.** Colors, structure, text, UX and UI come **from the existing
+landing page and dashboard** �?" match what is already shipped rather than inventing a
+new visual language. If something is missing there, follow `brand guide.md`.
+System.Management.Automation.RemoteException
+Three of its rules are enforced by `core/copy_rules.py`, not left to review: the name in
+prose is **Hilal Markets** (section 4), technical usage says **Shariah** (section 16), and
+the forbidden claims list is section 17. Identifiers are exempt by construction �?" the
+patterns only match the word standing alone in prose.
+System.Management.Automation.RemoteException
+## Fix the defect class, not the reported instance
+System.Management.Automation.RemoteException
+A bug report names one example. The example is a **symptom**; the scope of the fix is
+every code path that can produce that class of error.
+System.Management.Automation.RemoteException
+> "Bot read the RSI value as 15 while it should be 17" does **not** mean "make this
+> read 17". It means: find *why* a value was read that way, fix that cause, and make
+> the same mistake impossible for RSI, for every other indicator, and for every other
+> value the same reader touches. Prove it with tests across the whole family.
+System.Management.Automation.RemoteException
+Think past the literal wording of the report. If you find related problems on the way,
+fix them too �?" do not stop to ask �?" and list them in the final report.
+System.Management.Automation.RemoteException
+Before fixing anything, search for other implementations of the same reading or
+decision. The recurring root cause in this codebase is **duplicate parsers that
+disagree** �?" two modules independently decided what a word means and each understood a
+different subset. Confirmed instances: three movement-direction word lists, two
+percent-move implementations, two reversion regexes, a comparator table parallel to the
+turn classifier's, and a fragment-classification heuristic parallel to
+`turn_fragments.classify_fragment`.
+System.Management.Automation.RemoteException
+The fix is extraction, not patching: one vocabulary, one resolution rule, every caller
+importing it.
+System.Management.Automation.RemoteException
+| Concept | Owner | Never re-implement |
+|---|---|---|
+| comparison operators | `engine/comparators.py` | operator tables, `>=`/`at least` phrase lists |
+| movement direction | `engine/price_movement.py` | up/down word lists |
+| operator + level in a clause | `engine/numeric_clause.py` | window scans around a number |
+| fragment kind | `engine/turn_fragments.py` | keyword heuristics for "is this a trading instruction" |
+| AI value grounding | `engine/grounded_patch.py` | confidence thresholds as a safety check |
+System.Management.Automation.RemoteException
+Each exposes its regex alternation so callers share the exact vocabulary rather than
+hand-writing a subset that drifts.
+System.Management.Automation.RemoteException
+**Resolution rule for values:** the operator or direction that governs a number is the
+one **nearest to its left**, inside the clause that owns it. Scanning a character
+window let `(close < open) AND (bearish % change >= 1.0%)` read the `<` and compile a
+minimum move as a maximum.
+System.Management.Automation.RemoteException
+## A setting lives in four files, and they are edited together
+System.Management.Automation.RemoteException
+Adding, renaming or changing the default of a setting means editing **all four**, in the
+same piece of work:
+System.Management.Automation.RemoteException
+| File | What it is | In git? |
+
+$ git status --porcelain > .hm-orchestrator/runs/20260910T164037Z-c3f5ab26/baseline_status.txt; (Get-Item .hm-orchestrator/runs/20260910T164037Z-c3f5ab26/baseline_status.txt).FullName; Get-WmiObject OS -Property FreePhysicalMemory,TotalVisibleMemorySize | Format-List; git branch --show-current
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T164037Z-c3f5ab26\baseline_status.txt
+Get-WmiObject : Invalid class "OS"
+At line:1 char:184
++ ... ).FullName; Get-WmiObject OS -Property FreePhysicalMemory,TotalVisibl ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidType: (:) [Get-WmiObject], ManagementException
+    + FullyQualifiedErrorId : GetWMIManagementException,Microsoft.PowerShell.Commands.GetWmiObjectCommand
+ 
+cloudflare-access-service-tokens
+
+I have the mission and the contested-state context. Now I'll capture the baseline and inspect the current state of the key areas before delegating any work.
+$ git diff --stat -- src/ai_market_monitor/services/billing.py src/ai_market_monitor/api/routers/dashboard.py src/ai_market_monitor/templates/hilal/dashboard/checkout.html | Select-Object -Last 10
+src/ai_market_monitor/api/routers/dashboard.py     | 464 +++++++++++++++----
+ src/ai_market_monitor/services/billing.py          | 512 +++++++++++++++++++--
+ .../templates/hilal/dashboard/checkout.html        |  65 +--
+ 3 files changed, 893 insertions(+), 148 deletions(-)
+
+$ rg -n "already_subscribed|plan_checkout_availability" src/ai_market_monitor/api/routers/dashboard.py | Select-Object -First 20
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:1
++ rg -n "already_subscribed|plan_checkout_availability" src/ai_market_m ...
++ ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+
+$ rg -n "must_switch_instead|holds_other|def plan_checkout_availability" src/ai_market_monitor/services/billing.py | Select-Object -First 20; rg -n "a-jump" src/ai_market_monitor/templates/hilal/dashboard_test/subscription.html; rg -n "data-s-jump" src/ai_market_monitor/static/hm-subscription-test.js | Select-Object -First 5
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:1
++ rg -n "must_switch_instead|holds_other|def plan_checkout_availability ...
++ ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:141
++ ... ket_monitor/services/billing.py | Select-Object -First 20; rg -n "a-j ...
++                                                                ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:228
++ ... _monitor/templates/hilal/dashboard_test/subscription.html; rg -n "dat ...
++                                                                ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+
+$ Get-CimInstance Win32_OperatingSystem | ForEach-Object { "FreeGB: " + [math]::Round($_.FreePhysicalMemory/1MB,1) + " TotalGB: " + [math]::Round($_.TotalVisibleMemorySize/1MB,1) }
+FreeGB: 2 TotalGB: 15.4
+
+✱ Grep "plan_checkout_availability|already_subscribed" in src/ai_market_monitor/api/routers/dashboard.py · 9 matches
+✱ Grep "must_switch_instead|holds_other|def plan_checkout_availability" in src/ai_market_monitor/services/billing.py · 7 matches
+✱ Grep "a-jump|s-jump" in src/ai_market_monitor/templates/hilal/dashboard_test/subscription.html · 5 matches
+→ Read src/ai_market_monitor/services/billing.py [offset=600, limit=160]
+The other session's extraction has landed — `billing_checkout_review` now reads `plan_checkout_availability` (dashboard.py:3899). WP4 is confirmed not done. Now inspecting WP8's core areas.
+
+$ $m = Select-String -Path src/ai_market_monitor/services/plan_changes.py -Pattern "TIMING_IMMEDIATE|proration-charge-immediately" ; $m | ForEach-Object { "$($_.LineNumber): $($_.Line)" }; Get-Content src/ai_market_monitor/services/plan_changes.py -TotalCount 200 | Select-Object -Skip 140 -First 60
+96:     "TIMING_IMMEDIATE",
+168: TIMING_IMMEDIATE: Final[str] = "immediate"
+175:     TIMING_IMMEDIATE: "proration-charge-immediately",
+477:         if timing not in (TIMING_IMMEDIATE, TIMING_PERIOD_END):
+479:         if kind == PLAN_CHANGE_DOWNGRADE and timing == TIMING_IMMEDIATE:
+499:                 if timing == TIMING_IMMEDIATE
+518:         if timing == TIMING_IMMEDIATE and change.status == "applied":
+618:                 now if timing == TIMING_IMMEDIATE else subscription.current_period_end
+718:             if exc.code == "billing_timeout" and change.timing == TIMING_IMMEDIATE:
+733:         change.status = "applied" if change.timing == TIMING_IMMEDIATE else "scheduled"
+        if value == code:
+            return words
+    return code.replace("_", " ").capitalize()
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+#: Exactly what somebody agrees to. Stored word for word on the change, because a tick box
+#: records that a person agreed and only the sentence records what they agreed to.
+CONSENT_CANCEL: Final[str] = (
+    "I want to cancel. My card will not be charged again, and my plan keeps working "
+    "until the end of the period I have already paid for."
+)
+CONSENT_DOWNGRADE: Final[str] = (
+    "I understand I keep my Pro limits until the end of the period I have already paid "
+    "for. After that my limits become Plus limits, and from that day I am charged the "
+    "Plus price instead of the Pro price."
+)
+CONSENT_UPGRADE_NOW: Final[str] = (
+    "I want Pro straight away. I am charged only the difference for the days left in "
+    "this month, and from my next renewal date I am charged the Pro price."
+)
+CONSENT_UPGRADE_PERIOD_END: Final[str] = (
+    "I want Pro from the end of the period I have already paid for. Nothing is charged "
+    "today. On my renewal date I am charged the Pro price instead of the Plus price, and "
+    "my Pro limits start the same day."
+)
+System.Management.Automation.RemoteException
+#: When a change takes effect.
+TIMING_IMMEDIATE: Final[str] = "immediate"
+TIMING_PERIOD_END: Final[str] = "period_end"
+System.Management.Automation.RemoteException
+#: How Creem is asked to behave, per timing. ``proration-none`` is the behaviour the
+#: product's money promise depends on: change the product, charge nothing today, and take
+#: the new plan's price on the renewal date.
+_CREEM_UPDATE_BEHAVIOUR: Final[dict[str, str]] = {
+    TIMING_IMMEDIATE: "proration-charge-immediately",
+    TIMING_PERIOD_END: "proration-none",
+}
+System.Management.Automation.RemoteException
+#: Providers that hold a card and can be asked to charge it again. Anything else �?" a
+#: crypto invoice, an administrator's grant, a free plan �?" has nothing to re-price.
+#:
+#: Imported, not written out again. This file used to keep its own copy of the list while
+#: `services/billing.py` decided who may buy a plan without it, so the two modules
+#: disagreed: this one said "buying is the only route" and that one refused the purchase.
+_RECURRING_PROVIDERS: Final[frozenset[str]] = RECURRING_PROVIDERS
+System.Management.Automation.RemoteException
+#: The words on a plan card's button. Named here because they are the only words a page
+#: may print on that button, and because a test that checks the page has to read the same
+#: words rather than keep its own copy. A copy is how "Choose Monitor monthly" outlived
+#: both the plan name and the button that said it.
+SWITCH_LABEL_CURRENT: Final[str] = "Current plan"
+SWITCH_LABEL_UNAVAILABLE: Final[str] = "Not available"
+SWITCH_LABEL_BUY: Final[str] = "Pay"
+#: The same button after the page's monthly/yearly switch is moved to yearly. The page
+#: swaps the word without asking the server again, so it needs both words up front �?" but
+#: it is given them, it does not know them.
+SWITCH_LABEL_BUY_ANNUAL: Final[str] = "Pay for a year"
+SWITCH_LABEL_UPGRADE: Final[str] = "Upgrade"
+SWITCH_LABEL_DOWNGRADE: Final[str] = "Downgrade"
+
+◈ Parallel Web Search "Creem API update subscription update_behavior proration-charge-immediately proration-none documentation 2026"
+• Verify WP1-WP3 shipped state Explore Agent
+Now I understand the crux. WP8's card path depends on whether Creem supports a "charge full price and restart period" update behavior. I'll research that in parallel with verifying the existing WP1–WP3 work.

@@ -66,6 +66,61 @@ from ai_market_monitor.schemas.strategy import (
 from ai_market_monitor.schemas.strategy_draft_v2 import measurement_for
 from ai_market_monitor.services.interfaces import Candle
 
+#: Price-action readings this module answers itself, before handing the rest to
+#: ``price_action.evaluate_price_action``.
+#:
+#: One owner, exported, because three modules used to decide separately which
+#: price-action names the runtime can really evaluate: ``PRICE_ACTION_NAMES``, the
+#: branches inside :meth:`StrategyRuleEngine._price_action` below, and a hand-written
+#: "special cases" list in ``capability_compatibility``. The third one listed five of
+#: these twenty-two, so capabilities the runtime evaluates perfectly well - "Pivot
+#: high/low" among them - were published to users as *unsupported*, and the Builder
+#: refused to offer them with no reason a person could act on.
+#:
+#: Every name below must have a branch in ``_price_action``; nothing else may be added
+#: here. ``tests/unit/test_invariant_every_card_evaluates.py`` checks both directions.
+EVALUATOR_PRICE_ACTION_NAMES: frozenset[str] = frozenset(
+    {
+        "bullish_liquidity_sweep",
+        "bearish_liquidity_sweep",
+        "previous_low_sweep",
+        "previous_high_sweep",
+        "range_breakout",
+        "break_of_structure_bullish",
+        "change_of_character_bullish",
+        "pivot_break",
+        "range_breakdown",
+        "break_of_structure_bearish",
+        "change_of_character_bearish",
+        "breakout_retest",
+        "support_retest",
+        "resistance_retest",
+        "equal_highs",
+        "equal_lows",
+        "consolidation_range",
+        "impulse_candle",
+        "ma_retest",
+        "vwap_retest",
+        "bollinger_squeeze",
+        "bollinger_reentry",
+        "percent_change_up",
+        "percent_change_down",
+        "time_window",
+    }
+)
+
+
+def evaluator_supports_price_action(name: str | None) -> bool:
+    """Whether the runtime can really evaluate this price-action name.
+
+    The single question every other module should ask. It answers for both halves of
+    the runtime: the branches in this file, and the shared price-action module.
+    """
+
+    if not name:
+        return False
+    return name in EVALUATOR_PRICE_ACTION_NAMES or supports_price_action(name)
+
 
 def strategy_evaluation_directions(
     strategy: StrategyDefinition,
@@ -1343,7 +1398,11 @@ class StrategyRuleEngine:
             candle_range = current.high - current.low
             close_position = (current.close - current.low) / candle_range if candle_range > 0 else 0
             direction = str(operand.parameters.get("direction", "long"))
-            closes_well = close_position >= 0.7 if direction != "short" else close_position <= 0.3
+            closes_well = (
+                close_position <= 0.3
+                if direction in {"down", "short"}
+                else close_position >= 0.7
+            )
             return candle_range >= average_range * multiplier and closes_well
         if operand.name == "ma_retest":
             average = str(operand.parameters.get("average", "ema"))

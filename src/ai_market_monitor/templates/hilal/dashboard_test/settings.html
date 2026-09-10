@@ -1,7 +1,8 @@
 {% extends "hilal/base_dashboard.html" %}
+{% from "hilal/macros/ask_ai.html" import ask_ai with context %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260905-inspector-left">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260905-inspector-left">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260910-pay-now">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260910-pay-now">
 {% endblock %}
 {% block content %}
 
@@ -38,27 +39,56 @@
   </div>
   <p class="sr-only" role="status" aria-live="polite" data-g-said></p>
 
+  {% set groups = [
+    ('g-where', 'bell', 'Where', 'Where we tell you', 'Where we tell you', 'accent'),
+    ('g-when', 'clock', 'When', 'Timing', 'When we tell you', ''),
+    ('g-howmuch', 'sliders', 'How much', 'How much we send', 'How much we send', ''),
+    ('g-about', 'radar', 'About what', 'What we tell you about', 'What we tell you about', ''),
+    ('g-screen', 'dashboard', 'On this screen', 'On this screen', 'On this screen', ''),
+    ('g-evidence', 'compliance', 'Shariah updates', "When a coin's Shariah status changes", 'Shariah updates', 'warning'),
+    ('g-market', 'market', 'Exchanges', 'Which exchanges we watch', 'Which exchanges', ''),
+    ('g-data', 'shield', 'Your data', 'Your data', 'Your data', ''),
+  ] %}
+
+  {% macro group_open(id) %}
+    {%- for gid, icon, link_text, heading, part, tone in groups %}
+      {%- if gid == id %}
+  <section class="g-group" id="{{ gid }}" data-g-group data-hm-part="{{ part }}"
+           {%- if gid == 'g-screen' %} data-hm-guide-target="settings-notification-preferences"{% elif gid == 'g-evidence' %} data-hm-guide-target="settings-compliance-behaviour"{% endif %}>
+    <div class="g-group-head">
+      <span class="a-mark"{% if tone %} data-tone="{{ tone }}"{% endif %} aria-hidden="true"><span data-icon="{{ icon }}" data-icon-class="icon"></span></span>
+      <div>
+        {% if gid == 'g-when' %}
+        <h2 class="g-group-title">
+          {{ heading }}
+          <span class="t-info">
+            <span class="t-info-icon" aria-hidden="true"><span data-icon="info" data-icon-class="icon-sm"></span></span>
+            <span class="t-info-box">Your days and hours, in your own time. Outside these, a message waits for you here instead.</span>
+          </span>
+        </h2>
+        {% elif gid == 'g-where' %}
+        <h2>{{ heading }}</h2>
+        <p>A notice always waits for you here in the dashboard. These are the extra places we can reach you.</p>
+        {% else %}
+        <h2>{{ heading }}</h2>
+        {% endif %}
+      </div>
+      {% if gid == 'g-where' %}{{ ask_ai("Ask AI about where we tell you", compact=true) }}{% elif gid == 'g-when' %}{{ ask_ai("Ask AI about Timing", compact=true) }}{% elif gid == 'g-howmuch' %}{{ ask_ai("Ask AI about how much we send", compact=true) }}{% elif gid == 'g-about' %}{{ ask_ai("Ask AI about what we tell you about", compact=true) }}{% elif gid == 'g-screen' %}{{ ask_ai("Ask AI about on this screen", compact=true) }}{% elif gid == 'g-evidence' %}{{ ask_ai("Ask AI about when a coin's Shariah status changes", compact=true) }}{% elif gid == 'g-market' %}{{ ask_ai("Ask AI about which exchanges we watch", compact=true) }}{% elif gid == 'g-data' %}{{ ask_ai("Ask AI about your data", compact=true) }}{% endif %}
+    </div>
+      {%- endif %}
+    {%- endfor %}
+  {% endmacro %}
+
   <nav class="a-jump" aria-label="Jump to a group of settings">
-    <a href="#g-where" data-g-jump-link><span data-icon="bell" data-icon-class="icon-sm"></span>Where</a>
-    <a href="#g-when" data-g-jump-link><span data-icon="clock" data-icon-class="icon-sm"></span>When</a>
-    <a href="#g-howmuch" data-g-jump-link><span data-icon="sliders" data-icon-class="icon-sm"></span>How much</a>
-    <a href="#g-about" data-g-jump-link><span data-icon="radar" data-icon-class="icon-sm"></span>About what</a>
-    <a href="#g-screen" data-g-jump-link><span data-icon="dashboard" data-icon-class="icon-sm"></span>On this screen</a>
-    <a href="#g-evidence" data-g-jump-link><span data-icon="compliance" data-icon-class="icon-sm"></span>Shariah updates</a>
-    <a href="#g-market" data-g-jump-link><span data-icon="market" data-icon-class="icon-sm"></span>Exchanges</a>
+    {%- for _gid, _icon, link_text, _heading, _part, _tone in groups %}
+    <a href="#{{ _gid }}" data-g-jump-link><span data-icon="{{ _icon }}" data-icon-class="icon-sm"></span>{{ link_text }}</a>
+    {%- endfor %}
   </nav>
 
   <div class="g-groups">
 
     {#- 1. Where -------------------------------------------------------------- -#}
-    <section class="g-group" id="g-where" data-g-group data-hm-part="Where we tell you">
-      <div class="g-group-head">
-        <span class="a-mark" data-tone="accent" aria-hidden="true"><span data-icon="bell" data-icon-class="icon"></span></span>
-        <div>
-          <h2>Where we tell you</h2>
-          <p>A notice always waits for you here in the dashboard. These are the extra places we can reach you.</p>
-        </div>
-      </div>
+    {{ group_open('g-where') }}
 
       <div class="g-row is-stacked">
         <div class="g-choices" role="group" aria-label="Where we send you messages">
@@ -85,19 +115,7 @@
     </section>
 
     {#- 2. When --------------------------------------------------------------- -#}
-    <section class="g-group" id="g-when" data-g-group data-hm-part="When we tell you">
-      <div class="g-group-head">
-        <span class="a-mark" aria-hidden="true"><span data-icon="clock" data-icon-class="icon"></span></span>
-        <div>
-          <h2 class="g-group-title">
-            Timing
-            <span class="t-info">
-              <span class="t-info-icon" aria-hidden="true"><span data-icon="info" data-icon-class="icon-sm"></span></span>
-              <span class="t-info-box">Your days and hours, in your own time. Outside these, a message waits for you here instead.</span>
-            </span>
-          </h2>
-        </div>
-      </div>
+    {{ group_open('g-when') }}
 
       <div class="g-row">
         <div class="g-row-copy">
@@ -182,12 +200,7 @@
     </section>
 
     {#- 3. How much ----------------------------------------------------------- -#}
-    <section class="g-group" id="g-howmuch" data-g-group data-hm-part="How much we send">
-      <div class="g-group-head">
-        <span class="a-mark" aria-hidden="true"><span data-icon="sliders" data-icon-class="icon"></span></span>
-        <div>
-          <h2>How much we send</h2>
-        </div>
+    {{ group_open('g-howmuch') }}
       </div>
 
       <div class="g-row">
@@ -223,13 +236,7 @@
     </section>
 
     {#- 4. About what --------------------------------------------------------- -#}
-    <section class="g-group" id="g-about" data-g-group data-hm-part="What we tell you about">
-      <div class="g-group-head">
-        <span class="a-mark" aria-hidden="true"><span data-icon="radar" data-icon-class="icon"></span></span>
-        <div>
-          <h2>What we tell you about</h2>
-        </div>
-      </div>
+    {{ group_open('g-about') }}
 
       <div class="g-row is-stacked">
         <div class="g-switches">
@@ -301,13 +308,7 @@
     </section>
 
     {#- 5. On this screen ----------------------------------------------------- -#}
-    <section class="g-group" id="g-screen" data-g-group data-hm-part="On this screen" data-hm-guide-target="settings-notification-preferences">
-      <div class="g-group-head">
-        <span class="a-mark" aria-hidden="true"><span data-icon="dashboard" data-icon-class="icon"></span></span>
-        <div>
-          <h2>On this screen</h2>
-        </div>
-      </div>
+    {{ group_open('g-screen') }}
 
       <div class="g-row is-stacked">
         <div class="g-switches">
@@ -378,13 +379,7 @@
     </section>
 
     {#- 6. Shariah updates ---------------------------------------------------- -#}
-    <section class="g-group" id="g-evidence" data-g-group data-hm-part="Shariah updates" data-hm-guide-target="settings-compliance-behaviour">
-      <div class="g-group-head">
-        <span class="a-mark" data-tone="warning" aria-hidden="true"><span data-icon="compliance" data-icon-class="icon"></span></span>
-        <div>
-          <h2>When a coin's Shariah status changes</h2>
-        </div>
-      </div>
+    {{ group_open('g-evidence') }}
 
       <div class="g-row">
         <div class="g-row-copy">
@@ -462,13 +457,7 @@
     </section>
 
     {#- 7. Exchanges ---------------------------------------------------------- -#}
-    <section class="g-group" id="g-market" data-g-group data-hm-part="Which exchanges">
-      <div class="g-group-head">
-        <span class="a-mark" aria-hidden="true"><span data-icon="market" data-icon-class="icon"></span></span>
-        <div>
-          <h2>Which exchanges we watch</h2>
-        </div>
-      </div>
+    {{ group_open('g-market') }}
 
       <div class="g-row is-stacked">
         <div class="g-choices" role="group" aria-label="Which exchanges to watch">
@@ -497,13 +486,7 @@
     </section>
 
     {#- 8. Your data ---------------------------------------------------------- -#}
-    <section class="g-group" id="g-data" data-g-group data-hm-part="Your data">
-      <div class="g-group-head">
-        <span class="a-mark" aria-hidden="true"><span data-icon="shield" data-icon-class="icon"></span></span>
-        <div>
-          <h2>Your data</h2>
-        </div>
-      </div>
+    {{ group_open('g-data') }}
       <div class="g-choices">
         <a class="g-choice" href="/cookies?settings=1">
           <span class="g-choice-icon" aria-hidden="true"><span data-icon="cookie" data-icon-class="icon"></span></span>
@@ -558,5 +541,5 @@
 </dialog>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-settings-test.js') }}?v=20260905-inspector-left"></script>
+<script type="module" src="{{ url_for('static', path='/hm-settings-test.js') }}?v=20260910-pay-now"></script>
 {% endblock %}

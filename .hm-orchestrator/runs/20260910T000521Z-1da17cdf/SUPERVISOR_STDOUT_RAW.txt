@@ -1,0 +1,1320 @@
+﻿[0m
+> hm-supervisor-deep ┬╖ glm-5.3-flash
+[0m
+[0m# [0mTodos
+[тАв] Read policy files and context (CLAUDE.md, contracts, plans)
+[ ] B-R0: judge tests/integration/test_plan_change_journey.py
+[ ] B-R7/B-R8: find stated plan change rule, prove upgrade/downgrade
+[ ] B-R9: page-offers vs server-accepts test
+[ ] B-R14: remove duplicated refusal branch, review same-plan wording
+[ ] Run targeted tests + ruff + mypy
+[ ] B-R13: one independent logic reviewer (6 files + Phase A evidence)
+[ ] Write SUPERVISOR_REPORT.json/.md (+ ESCALATION if needed)
+[0m
+I'll start this Phase B mission. First, let me set up my task list and read the required context.
+[0mтЖТ [0mRead .hm-orchestrator/policy/SUPERVISOR_REPORT_CONTRACT.md
+[0mтЖТ [0mRead CLAUDE.md
+[0m
+[0m$ [0mgit log --oneline -3; git rev-parse HEAD; git branch --show-current; git status --porcelain | Measure-Object -Line | Select-Object -ExpandProperty Lines
+145275f2 Launch Y6.97
+c023d474 Launch Y6.967
+a32bafb3 Separate research from the review decision, and aim its link scan
+145275f2206dfbd8b9b0ab2ab5156ac0fe9aa269
+cloudflare-access-service-tokens
+201
+[0m
+[0mтЖТ [0mRead .hm-orchestrator/policy/ROUTING_POLICY.md
+[0mтЖТ [0mRead tests/integration/test_plan_change_journey.py
+[0mтЖТ [0mRead src/ai_market_monitor/services/plan_changes.py
+The mission file and test file are read. Now let me read the runtime authorities to judge the test against reality.
+[0mтЖТ [0mRead tests/support/billing_config.py
+[0mтЖТ [0mRead src/ai_market_monitor/core/plans.py
+[0mтЖТ [0mRead src/ai_market_monitor/services/billing.py[90m [offset=480, limit=180][0m
+[0mтЬ▒ [0mGlob "tests/integration/conftest.py"[90m 0 matches[0m
+[0mтЬ▒ [0mGrep "def test_context|test_context"[90m in tests ┬╖ 1 match[0m
+[0mтЬ▒ [0mGlob "docs/BILLING_SETUP.md"[90m 1 match[0m
+[0mтЖТ [0mRead tests/conftest.py[90m [limit=80, offset=120][0m
+[0mтЖТ [0mRead docs/BILLING_SETUP.md
+Now let me verify the collection works and look at the dashboard switch route.
+[0mтЬ▒ [0mGrep "billing/switch|plan_upgraded|rate_limit|csrf"[90m in src/ai_market_monitor/api/routers/dashboard.py ┬╖ 100 matches[0m
+[0m
+[0m$ [0m.venv/Scripts/python -m pytest tests/integration --collect-only -q 2>&1 | Select-Object -Last 5
+tests/integration/test_telegram_service.py: 17
+tests/integration/test_telegram_webhook.py: 1
+tests/integration/test_test_market_api.py: 4
+tests/integration/test_whatsapp_integration.py: 11
+[0m
+[0mтЬ▒ [0mGrep "dashboard/billing/switch|plan_upgraded|plan_downgraded|switch_plan"[90m in src ┬╖ 3 matches[0m
+[0mтЖТ [0mRead src/ai_market_monitor/api/routers/dashboard.py[90m [limit=120, offset=4120][0m
+[0mтЬ▒ [0mGrep "data-plan-switch|switch|Upgrade|Downgrade|Not available"[90m in src/ai_market_monitor/templates/hilal/dashboard/billing.html ┬╖ 38 matches[0m
+[0mтЬ▒ [0mGrep "plan_checkout_availability|billing/switch|switch_offer"[90m in tests ┬╖ 10 matches[0m
+[0mтЬ▒ [0mGrep "plan_checkout_availability|active_paid_plan_codes"[90m in src/ai_market_monitor ┬╖ 23 matches[0m
+[0mтЬ▒ [0mGrep "change period may be managed|way to pay for this plan"[90m in src ┬╖ 6 matches[0m
+Now I have the full picture. Let me check where the refusal strings are used/asserted before editing.
+[0mтЬ▒ [0mGrep "change period may be managed|way to pay for this plan|already have the \{|refusal"[90m in tests ┬╖ 100 matches[0m
+[0mтЖТ [0mRead tests/unit/test_invariant_billing_offers.py
+[0m
+[0mтЖР [0mEdit src/ai_market_monitor/services/billing.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\billing.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\billing.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\billing.py
+@@ -595,16 +595,15 @@
+         "The change period may be managed from the billing page."
+     )
+ elif holds_other:
+     refusal = (
+-        "You are on a paid plan. Open the plan switcher on the billing page "
++        "You are on a paid plan. Use the plan switch buttons on the billing page "
+         f"to move to the {name} plan."
+     )
+ elif not purchasable:
+-    if plan_code not in PURCHASABLE_PLAN_CODES:
+-        refusal = "There is no way to pay for this plan yet."
+-    else:
+-        refusal = "There is no way to pay for this plan yet."
++    # One sentence, one branch. There used to be two branches here with the
++    # identical string тАФ nothing but a place for them to drift apart.
++    refusal = "There is no way to pay for this plan yet."
+ 
+ result: dict[str, Any] = {
+     "purchasable": purchasable,
+     "card_monthly": card_monthly,
+System.Management.Automation.RemoteException
+[0m
+I have enough to judge. Summary of findings so far:
+
+- **B-R0 (test file)**: The journey test is real тАФ it drives the actual route (`dashboard.py:4164`), the actual service (`plan_changes.py`), asserts the DB record, the entitlement move, the Creem payload (`update_behavior`, `product_id`), the consent, and refusals write nothing. It matches the code I read (provider rules, reasons, timing rules, "trader" = "Plus"). I verified each expectation against `plan_changes.py` line by line.
+- **Stated money rule** (for B-R7/B-R8): it lives in `plan_changes.py`'s header table and the customer-visible `CONSENT_*` sentences тАФ upgrade now = charged the difference today; upgrade at period end = nothing today, new price at renewal; downgrade = only at period end, never immediate; crypto = buy instead of switch; cancel = no further charge. The tests assert exactly this rule.
+- **B-R14 defect confirmed**: `billing.py:602-606` has the duplicated empty refusal branch (two identical strings). The same-plan refusal says "The change period may be managed from the billing page" тАФ jargon for a beginner.
+
+Now I'll make the B-R14 fix and add the B-R9 drift test.
+[0mтЖР [0mEdit src/ai_market_monitor/services/billing.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\billing.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\billing.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\billing.py
+@@ -591,9 +591,9 @@
+ refusal = ""
+ if holds_this:
+     refusal = (
+         f"You already have the {name} plan. "
+-        "The change period may be managed from the billing page."
++        "You can change it or cancel it on this billing page."
+     )
+ elif holds_other:
+     refusal = (
+         "You are on a paid plan. Use the plan switch buttons on the billing page "
+System.Management.Automation.RemoteException
+[0m
+[0mтЖР [0mEdit tests/integration/test_plan_change_journey.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+@@ -387,9 +387,64 @@
+ 
+     assert fake_creem == []
+ 
+ 
+-async def test_crypto_paid_account_is_told_to_buy_not_switch(test_context):
++async def test_every_plan_card_button_matches_the_server(test_context, fake_creem):
++    """What a plan card offers is exactly what the server accepts..."""
++
++    email = f"drift-check-{uuid.uuid4().hex[:8]}@example.com"
++    settings = test_context["settings"]
++    client = test_context["client"]
++    session_factory = test_context["session_factory"]
++
++    await _signup_and_verify(client, settings, email)
++    user_id = await _user_id_for_email(session_factory, email)
++    await _grant_paid_plan(session_factory, user_id, "trader")
++
++    enabled = settings.model_copy(update=live_billing_overrides())
++    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
++
++    page = await client.get("/dashboard/billing")
++    assert page.status_code == 200, page.text
++    # The page draws exactly one live switch button per plan it offers a change to.
++    # Reading the codes from the page, not from the plan catalog, is the point: the
++    # server decides the buttons, so an offered button must also be accepted, and a
++    # refused plan must have no button to press.
++    offered = set(
++        re.findall(
++            r'data-plan-switch-trigger data-plan-switch="(?:upgrade|downgrade)" '
++            r'data-plan-code="([a-z]+)"',
++            page.text,
++        )
++    )
++    assert offered, "the page drew no plan switch buttons at all"
++
++    for plan_code in ("trader", "pro", "demo"):
++        csrf = _csrf(page.text)
++        post = await client.post(
++            "/dashboard/billing/switch",
++            data={
++                "plan_code": plan_code,
++                "timing": TIMING_PERIOD_END,
++                "switch_consent": "true",
++                "csrf_token": csrf,
++            },
+Now the B-R9 test tying every plan card's button to what the server accepts:
++            follow_redirects=False,
++        )
++        location = post.headers["location"]
++        if plan_code in offered:
++            assert post.status_code == 303
++            assert "error=" not in location, (
++                f"the page offers switching to {plan_code}, but the server refuses: "
++                f"{location}"
++            )
++        else:
++            assert "error=" in location, (
++                f"the page offers no way to switch to {plan_code}, but the server "
++                f"accepted it: {location}"
++            )
++
++
+     """A NOWPayments customer has no card on file, so the switch route refuses and
+     the page explains the checkout path instead of showing a dead upgrade form.
+     """
+ 
+System.Management.Automation.RemoteException
+[0m
+[0mтЖТ [0mRead tests/integration/test_plan_change_journey.py[90m [limit=70, offset=395][0m
+[0m
+[0mтЖР [0mEdit tests/integration/test_plan_change_journey.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+@@ -443,8 +443,9 @@
+                 f"accepted it: {location}"
+             )
+ 
+ 
++async def test_crypto_paid_account_is_told_to_buy_not_switch(test_context):
+     """A NOWPayments customer has no card on file, so the switch route refuses and
+     the page explains the checkout path instead of showing a dead upgrade form.
+     """
+ 
+System.Management.Automation.RemoteException
+[0m
+[0mтЖТ [0mRead tests/integration/test_plan_change_journey.py[90m [limit=25, offset=377][0m
+[0mтЖТ [0mRead tests/integration/test_plan_change_journey.py[90m [limit=15, offset=443][0m
+Now run the tests тАФ journey file first, alone (memory rule):
+[0m
+[0m$ [0m.venv/Scripts/python -m pytest tests/integration/test_plan_change_journey.py -q -p no:randomly 2>&1 | Select-Object -Last 15
+_______________ test_every_plan_card_button_matches_the_server ________________
+System.Management.Automation.RemoteException
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000015AB49EB110>, 'client': <httpx.AsyncClient object at 0x0000015A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+fake_creem = []
+System.Management.Automation.RemoteException
+    async def test_every_plan_card_button_matches_the_server(test_context, fake_creem):
+        """What a plan card offers is exactly what the server accepts..."""
+    
+>       email = f"drift-check-{uuid.uuid4().hex[:8]}@example.com"
+                               ^^^^
+E       NameError: name 'uuid' is not defined. Did you forget to import 'uuid'
+System.Management.Automation.RemoteException
+tests\integration\test_plan_change_journey.py:394: NameError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_plan_change_journey.py::test_every_plan_card_button_matches_the_server
+[0m
+[0mтЖР [0mEdit tests/integration/test_plan_change_journey.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+@@ -390,9 +390,9 @@
+ 
+ async def test_every_plan_card_button_matches_the_server(test_context, fake_creem):
+     """What a plan card offers is exactly what the server accepts..."""
+ 
+-    email = f"drift-check-{uuid.uuid4().hex[:8]}@example.com"
++    email = f"drift-check-{uuid4().hex[:8]}@example.com"
+     settings = test_context["settings"]
+     client = test_context["client"]
+     session_factory = test_context["session_factory"]
+ 
+System.Management.Automation.RemoteException
+[0m
+[0m$ [0m.venv/Scripts/python -m pytest tests/integration/test_plan_change_journey.py -q -p no:randomly 2>&1 | Select-Object -Last 8
+...............                                                          [100%]
+[0m
+[0m$ [0m.venv/Scripts/python -m pytest tests/integration/test_plan_change_journey.py -q -p no:randomly 2>&1 | Select-String -Pattern "passed|failed|nulls aborted" | Select-Object -Last 3
+(no output)
+[0m
+[0m$ [0m.venv/Scripts/python -m pytest tests/integration/test_plan_change_journey.py -p no:randomly --tb=no 2>&1 | Select-Object -Last 3
+...............                                                          [100%]
+15 passed in 23.29s
+[0m
+All 15 journey tests pass, including the upgrade/downgrade journeys and the new B-R9 drift test. Now the adjacent invariant suites:
+[0m$ [0m.venv/Scripts/python -m pytest tests/unit/test_invariant_billing_offers.py tests/integration/test_checkout_and_payment_email.py -p no:randomly --tb=short -q 2>&1 | Select-Object -Last 6
+..................................                                       [100%]
+[0m
+[0m$ [0m.venv/Scripts/python -m pytest tests/unit/test_invariant_billing_offers.py tests/integration/test_checkout_and_payment_email.py -p no:randomly --tb=no --no-header -q 2>&1 | Select-Object -Last 2
+..................................                                       [100%]
+[0m
+[0m$ [0m.venv/Scripts/python -m pytest tests/unit/test_invariant_billing_offers.py tests/integration/test_checkout_and_payment_email.py -p no:randomly --tb=no -q 2>&1 | Out-String | ForEach-Object { $_.Trim() } | Select-Object -Last 1
+..................................                                       [100%]
+[0m
+[0m$ [0m.venv/Scripts/python -m pytest tests/unit/test_invariant_billing_offers.py tests/integration/test_checkout_and_payment_email.py -p no:randomly --tb=no -q | Select-Object -Last 1
+..................................                                       [100%]
+[0m
+[0m$ [0m$p1 = .venv/Scripts/python -m pytest tests/unit/test_invariant_billing_offers.py -p no:randomly --tb=no -q 2>&1; $p1 | Select-Object -Last 2; "==="; .venv/Scripts/python -m pytest tests/integration/test_checkout_and_payment_email.py -p no:randomly --tb=no -q 2>&1 | Select-Object -Last 2
+.............                                                            [100%]
+===
+.....................                                                    [100%]
+[0m
+Both adjacent suites pass (13 + 21 tests). Now lint and type checks:
+[0m$ [0m.venv/Scripts/python -m ruff check src tests; "ruff exit: $LASTEXITCODE"; .venv/Scripts/python -m mypy src 2>&1 | Select-Object -Last 3
+I001 [*] Import block is un-sorted or un-formatted
+  --> tests\integration\test_ask_ai_button.py:7:1
+   |
+ 5 |   """
+ 6 |
+ 7 | / from __future__ import annotations
+ 8 | |
+ 9 | | import re
+10 | |
+11 | | import pytest
+12 | |
+13 | | from tests.integration.test_dashboard_web import _signup_and_verify
+   | |___________________________________________________________________^
+   |
+help: Organize imports
+System.Management.Automation.RemoteException
+I001 [*] Import block is un-sorted or un-formatted
+  --> tests\integration\test_plan_change_journey.py:9:1
+   |
+ 7 |   """
+ 8 |
+ 9 | / from __future__ import annotations
+10 | |
+11 | | import re
+12 | | from datetime import UTC, datetime, timedelta
+13 | | from uuid import UUID, uuid4
+14 | |
+15 | | import httpx
+16 | | import pytest
+17 | | from sqlalchemy import select
+18 | |
+19 | | from ai_market_monitor.core.config import get_settings
+20 | | from ai_market_monitor.db.models import (
+21 | |     Subscription,
+22 | |     SubscriptionPlanChange,
+23 | |     User,
+24 | |     UserIdentity,
+25 | | )
+26 | | from ai_market_monitor.db.models.enums import IdentityProvider, SubscriptionStatus
+27 | | from ai_market_monitor.services import plan_changes as plan_changes_module
+28 | | from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
+29 | | from ai_market_monitor.services.plan_changes import (
+30 | |     CONSENT_UPGRADE_NOW,
+31 | |     CONSENT_UPGRADE_PERIOD_END,
+32 | |     PlanChangeService,
+33 | |     TIMING_IMMEDIATE,
+34 | |     TIMING_PERIOD_END,
+35 | | )
+36 | | from tests.support.billing_config import live_billing_overrides
+   | |_______________________________________________________________^
+   |
+help: Organize imports
+System.Management.Automation.RemoteException
+F401 [*] `ai_market_monitor.db.models.User` imported but unused
+  --> tests\integration\test_plan_change_journey.py:23:5
+   |
+21 |     Subscription,
+22 |     SubscriptionPlanChange,
+23 |     User,
+   |     ^^^^
+24 |     UserIdentity,
+25 | )
+   |
+help: Remove unused import: `ai_market_monitor.db.models.User`
+System.Management.Automation.RemoteException
+F401 [*] `ai_market_monitor.services.plan_changes.CONSENT_UPGRADE_NOW` imported but unused
+  --> tests\integration\test_plan_change_journey.py:30:5
+   |
+28 | from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
+29 | from ai_market_monitor.services.plan_changes import (
+30 |     CONSENT_UPGRADE_NOW,
+   |     ^^^^^^^^^^^^^^^^^^^
+31 |     CONSENT_UPGRADE_PERIOD_END,
+32 |     PlanChangeService,
+   |
+help: Remove unused import
+System.Management.Automation.RemoteException
+F401 [*] `ai_market_monitor.services.plan_changes.CONSENT_UPGRADE_PERIOD_END` imported but unused
+  --> tests\integration\test_plan_change_journey.py:31:5
+   |
+29 | from ai_market_monitor.services.plan_changes import (
+30 |     CONSENT_UPGRADE_NOW,
+31 |     CONSENT_UPGRADE_PERIOD_END,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+32 |     PlanChangeService,
+33 |     TIMING_IMMEDIATE,
+   |
+help: Remove unused import
+System.Management.Automation.RemoteException
+E501 Line too long (101 > 100)
+   --> tests\integration\test_plan_change_journey.py:235:101
+    |
+233 |             )
+234 |             assert effective_at <= datetime.now(UTC)
+235 |             assert refreshed_sub.plan_id == (await PlanCatalogService(session).get_or_sync("pro")).id
+    |                                                                                                     ^
+236 |             assert entitlement.plan.code == "pro"
+237 |         else:
+    |
+System.Management.Automation.RemoteException
+E501 Line too long (104 > 100)
+   --> tests\integration\test_plan_change_journey.py:245:101
+    |
+243 |             )
+244 |             assert effective_at == subscription.current_period_end
+245 |             assert refreshed_sub.plan_id == (await PlanCatalogService(session).get_or_sync("trader")).id
+    |                                                                                                     ^^^^
+246 |             assert entitlement.plan.code == "trader"
+    |
+System.Management.Automation.RemoteException
+F841 Local variable `subscription` is assigned to but never used
+   --> tests\integration\test_plan_change_journey.py:598:5
+    |
+596 |     await _signup_and_verify(client, settings, email)
+597 |     user_id = await _user_id_for_email(session_factory, email)
+598 |     subscription = await _grant_paid_plan(session_factory, user_id, "trader")
+    |     ^^^^^^^^^^^^
+599 |
+600 |     enabled = settings.model_copy(update=live_billing_overrides())
+    |
+help: Remove assignment to unused variable `subscription`
+System.Management.Automation.RemoteException
+E501 Line too long (102 > 100)
+  --> tests\unit\test_invariant_ask_ai_css.py:38:101
+   |
+36 |     body = block.group(1)
+37 |     assert "var(--hm-sky)" in body, "rest fill must use --hm-sky"
+38 |     assert "border-color: var(--hm-sky)" in body or "border:" in body, "rest border must use --hm-sky"
+   |                                                                                                     ^^
+39 |     assert "color: var(--hm-surface)" in body, "text must use --hm-surface"
+40 |     assert "font-weight: 600" in body, "label weight must be 600"
+   |
+System.Management.Automation.RemoteException
+E501 Line too long (105 > 100)
+  --> tests\unit\test_invariant_ask_ai_single_owner.py:41:101
+   |
+39 | def test_ask_ai_css_reduced_motion_block_has_exactly_one_rule() -> None:
+40 |     css = CSS.read_text(encoding="utf-8")
+41 |     media_match = re.search(r"@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{(.*?)\}", css, re.DOTALL)
+   |                                                                                                     ^^^^^
+42 |     assert media_match, "no reduced-motion media query found"
+43 |     media_body = media_match.group(1)
+   |
+System.Management.Automation.RemoteException
+E501 Line too long (104 > 100)
+  --> tests\unit\test_invariant_ask_ai_single_owner.py:48:101
+   |
+46 |         media_body,
+47 |     )
+48 |     assert len(matches) == 1, f"expected one reduced-motion .t-action-is-ask rule, found {len(matches)}"
+   |                                                                                                     ^^^^
+   |
+System.Management.Automation.RemoteException
+Found 11 errors.
+[*] 5 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+ruff exit: 1
+Success: no issues found in 425 source files
+[0m
+[0m$ [0mgit status --porcelain -- tests/integration/test_plan_change_journey.py src/ai_market_monitor/services/billing.py; git diff --stat -- tests/integration/test_ask_ai_button.py tests/unit/test_invariant_ask_ai_css.py tests/unit/test_invariant_ask_ai_single_owner.py
+M src/ai_market_monitor/services/billing.py
+?? tests/integration/test_plan_change_journey.py
+[0m
+mypy is clean (425 files). The ruff errors in `test_ask_ai_*` files are pre-existing in untouched files тАФ out of my scope. I'll fix the journey test file (untracked, mine):
+[0m$ [0m.venv/Scripts/python -m ruff check tests/integration/test_plan_change_journey.py --fix; .venv/Scripts/python -m ruff check tests/integration/test_plan_change_journey.py
+E501 Line too long (101 > 100)
+   --> tests\integration\test_plan_change_journey.py:232:101
+    |
+230 |             )
+231 |             assert effective_at <= datetime.now(UTC)
+232 |             assert refreshed_sub.plan_id == (await PlanCatalogService(session).get_or_sync("pro")).id
+    |                                                                                                     ^
+233 |             assert entitlement.plan.code == "pro"
+234 |         else:
+    |
+System.Management.Automation.RemoteException
+E501 Line too long (104 > 100)
+   --> tests\integration\test_plan_change_journey.py:242:101
+    |
+240 |             )
+241 |             assert effective_at == subscription.current_period_end
+242 |             assert refreshed_sub.plan_id == (await PlanCatalogService(session).get_or_sync("trader")).id
+    |                                                                                                     ^^^^
+243 |             assert entitlement.plan.code == "trader"
+    |
+System.Management.Automation.RemoteException
+F841 Local variable `subscription` is assigned to but never used
+   --> tests\integration\test_plan_change_journey.py:595:5
+    |
+593 |     await _signup_and_verify(client, settings, email)
+594 |     user_id = await _user_id_for_email(session_factory, email)
+595 |     subscription = await _grant_paid_plan(session_factory, user_id, "trader")
+    |     ^^^^^^^^^^^^
+596 |
+597 |     enabled = settings.model_copy(update=live_billing_overrides())
+    |
+help: Remove assignment to unused variable `subscription`
+System.Management.Automation.RemoteException
+Found 7 errors (4 fixed, 3 remaining).
+No fixes available (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+E501 Line too long (101 > 100)
+   --> tests\integration\test_plan_change_journey.py:232:101
+    |
+230 |             )
+231 |             assert effective_at <= datetime.now(UTC)
+232 |             assert refreshed_sub.plan_id == (await PlanCatalogService(session).get_or_sync("pro")).id
+    |                                                                                                     ^
+233 |             assert entitlement.plan.code == "pro"
+234 |         else:
+    |
+System.Management.Automation.RemoteException
+E501 Line too long (104 > 100)
+   --> tests\integration\test_plan_change_journey.py:242:101
+    |
+240 |             )
+241 |             assert effective_at == subscription.current_period_end
+242 |             assert refreshed_sub.plan_id == (await PlanCatalogService(session).get_or_sync("trader")).id
+    |                                                                                                     ^^^^
+243 |             assert entitlement.plan.code == "trader"
+    |
+System.Management.Automation.RemoteException
+F841 Local variable `subscription` is assigned to but never used
+   --> tests\integration\test_plan_change_journey.py:595:5
+    |
+593 |     await _signup_and_verify(client, settings, email)
+594 |     user_id = await _user_id_for_email(session_factory, email)
+595 |     subscription = await _grant_paid_plan(session_factory, user_id, "trader")
+    |     ^^^^^^^^^^^^
+596 |
+597 |     enabled = settings.model_copy(update=live_billing_overrides())
+    |
+help: Remove assignment to unused variable `subscription`
+System.Management.Automation.RemoteException
+Found 3 errors.
+No fixes available (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+[0m
+[0mтЖТ [0mRead tests/integration/test_plan_change_journey.py[90m [limit=8, offset=229][0m
+[0m
+[0mтЖР [0mEdit tests/integration/test_plan_change_journey.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+@@ -228,9 +228,10 @@
+         if change.effective_at.tzinfo is None
+         else change.effective_at
+     )
+     assert effective_at <= datetime.now(UTC)
+-    assert refreshed_sub.plan_id == (await PlanCatalogService(session).get_or_sync("pro")).id
++    pro = await PlanCatalogService(session).get_or_sync("pro")
++    assert refreshed_sub.plan_id == pro.id
+     assert entitlement.plan.code == "pro"
+ else:
+     assert change.status == "scheduled"
+     effective_at = (
+System.Management.Automation.RemoteException
+[0m
+[0mтЖР [0mEdit tests/integration/test_plan_change_journey.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+@@ -239,9 +239,10 @@
+             if change.effective_at.tzinfo is None
+             else change.effective_at
+         )
+         assert effective_at == subscription.current_period_end
+-        assert refreshed_sub.plan_id == (await PlanCatalogService(session).get_or_sync("trader")).id
++        trader = await PlanCatalogService(session).get_or_sync("trader")
++        assert refreshed_sub.plan_id == trader.id
+         assert entitlement.plan.code == "trader"
+ 
+ payload = _recorded_creem_payload(fake_creem)
+ expected_behaviour = (
+System.Management.Automation.RemoteException
+[0m
+[0m$ [0m.venv/Scripts/python -m ruff check tests/integration/test_plan_change_journey.py 2>&1 | Select-Object -Last 20
+F841 Local variable `subscription` is assigned to but never used
+   --> tests\integration\test_plan_change_journey.py:597:5
+    |
+595 |     await _signup_and_verify(client, settings, email)
+596 |     user_id = await _user_id_for_email(session_factory, email)
+597 |     subscription = await _grant_paid_plan(session_factory, user_id, "trader")
+    |     ^^^^^^^^^^^^
+598 |
+599 |     enabled = settings.model_copy(update=live_billing_overrides())
+    |
+help: Remove assignment to unused variable `subscription`
+System.Management.Automation.RemoteException
+Found 1 error.
+No fixes available (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+[0m
+[0mтЖТ [0mRead tests/integration/test_plan_change_journey.py[90m [limit=6, offset=594][0m
+[0m
+[0mтЖР [0mEdit tests/integration/test_plan_change_journey.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+@@ -593,9 +593,9 @@
+ session_factory = test_context["session_factory"]
+ 
+ await _signup_and_verify(client, settings, email)
+ user_id = await _user_id_for_email(session_factory, email)
+-subscription = await _grant_paid_plan(session_factory, user_id, "trader")
++await _grant_paid_plan(session_factory, user_id, "trader")
+ 
+ enabled = settings.model_copy(update=live_billing_overrides())
+ test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+ 
+System.Management.Automation.RemoteException
+[0m
+[0m$ [0m.venv/Scripts/python -m ruff check tests/integration/test_plan_change_journey.py; "exit: $LASTEXITCODE"; .venv/Scripts/python -m pytest tests/integration/test_plan_change_journey.py -p no:randomly --tb=no -q 2>&1 | Select-Object -Last 1
+All checks passed!
+exit: 0
+...............                                                          [100%]
+[0m
+[0m$ [0m.venv/Scripts/python -m pytest tests/integration/test_plan_change_journey.py -p no:randomly --tb=no -q 2>&1 | Out-File -Encoding utf8 .hm-orchestrator/runs/20260910T000521Z-1da17cdf/EVIDENCE_journey_tests.txt; .venv/Scripts/python -m pytest tests/unit/test_invariant_billing_offers.py -p no:randomly --tb=no -q 2>&1 | Out-File -Encoding utf8 .hm-orchestrator/runs/20260910T000521Z-1da17cdf/EVIDENCE_invariant_billing.txt; Get-Content .hm-orchestrator/runs/20260910T000521Z-1da17cdf/EVIDENCE_invariant_billing.txt | Select-Object -Last 2
+.............                                                            [100%]
+[0m
+[0mтЖТ [0mRead .hm-orchestrator/runs/20260910T000521Z-1da17cdf/EVIDENCE_invariant_billing.txt
+[0m
+[0m$ [0m.venv/Scripts/python -m pytest tests/unit/test_invariant_billing_offers.py -p no:randomly --tb=no --color=no -q 2>&1 | Out-String -Stream | Select-String -Pattern "passed|failed" | Out-File -Encoding utf8 .hm-orchestrator/runs/20260910T000521Z-1da17cdf/EVIDENCE_invariant_billing.txt; Get-Content .hm-orchestrator/runs/20260910T000521Z-1da17cdf/EVIDENCE_invariant_billing.txt
+(no output)
+[0m
+[0m$ [0m$out = cmd /c ".venv\Scripts\python -m pytest tests\unit\test_invariant_billing_offers.py -p no:randomly --tb=no --color=no -q 2>&1"; "exit=$?"; $out -split "`n" | Select-String "passed|failed" | Out-File -Encoding utf8 .hm-orchestrator/runs/20260910T000521Z-1da17cdf/EVIDENCE_invariant_billing.txt; Get-Content .hm-orchestrator/runs/20260910T000521Z-1da17cdf/EVIDENCE_invariant_billing.txt
+exit=True
+[0m
+[0m$ [0m$out = cmd /c ".venv\Scripts\python -m pytest tests\unit\test_invariant_billing_offers.py -p no:randomly --tb=no --color=no -q 2>&1 & exit"; $lines = $out -split "`r?`n"; $lines[-4..-1]; "count=$($lines.Count)"
+.............                                                            [100%]
+count=1
+[0m
+[0m$ [0m$o = & .venv/Scripts/python -m pytest tests/unit/test_invariant_billing_offers.py -p no:randomly --tb=no --color=no -q -W ignore 2>&1; "LAST3:"; $o | Select-Object -Last 3
+LAST3:
+.............                                                            [100%]
+[0m
+[0m$ [0m& .venv/Scripts/python -m pytest tests/unit/test_invariant_billing_offers.py -p no:randomly --tb=no -q --junitxml=.hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_invariant_billing.xml 2>$null | Select-Object -Last 1; [xml]$x = Get-Content .hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_invariant_billing.xml -Raw; "tests=" + $x.testsuites.testsuite.tests + " failures=" + $x.testsuites.testsuite.failures + " errors=" + $x.testsuites.testsuite.errors
+- generated xml file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T000521Z-1da17cdf\junit_invariant_billing.xml -
+tests=13 failures=0 errors=0
+[0m
+[0m$ [0m& .venv/Scripts/python -m pytest tests/integration/test_plan_change_journey.py -p no:randomly --tb=no -q --junitxml=.hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_journey.xml 2>$null | Select-Object -Last 1; [xml]$x = Get-Content .hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_journey.xml -Raw; "tests=" + $x.testsuites.testsuite.tests + " failures=" + $x.testsuites.testsuite.failures + " errors=" + $x.testsuites.testsuite.errors; & .venv/Scripts/python -m pytest tests/integration/test_checkout_and_payment_email.py -p no:randomly --tb=no -q --junitxml=.hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_checkout.xml 2>$null | Select-Object -Last 1; [xml]$x = Get-Content .hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_checkout.xml -Raw; "tests=" + $x.testsuites.testsuite.tests + " failures=" + $x.testsuites.testsuite.failures + " errors=" + $x.testsuites.testsuite.errors
+- generated xml file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T000521Z-1da17cdf\junit_journey.xml -
+tests=15 failures=0 errors=0
+- generated xml file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T000521Z-1da17cdf\junit_checkout.xml -
+tests=21 failures=0 errors=0
+[0m
+[0mтАв [0mIndependent logic review of billing[90m Hm-Reviewer-Logic Agent[0m
+All targeted suites are green. Now the independent logic reviewer (B-R13), one reviewer, covering Phase A's six files plus my Phase B work:
+[0mтЬУ [0mIndependent logic review of billing[90m Hm-Reviewer-Logic Agent[0m
+The reviewer found a blocker in one of Phase A's six changed files (`dashboard_test.py` тАФ product runtime code for `/dashboard/subscription`). I must reproduce before fixing:
+[0m
+[0m$ [0mgit diff -- src/ai_market_monitor/api/routers/dashboard_test.py | Select-String -Pattern "cards|@@|^\+|^-" | Select-Object -First 60
+warning: in the working copy of 'src/ai_market_monitor/api/routers/dashboard_test.py', LF will be replaced by CRLF the next time Git touches it
+System.Management.Automation.RemoteException
+--- a/src/ai_market_monitor/api/routers/dashboard_test.py
++++ b/src/ai_market_monitor/api/routers/dashboard_test.py
+@@ -35,13 +35,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
+-    _active_paid_plan_codes,
+     _monitor_cards_context,
+-    _plan_checkout_allowed,
+@@ -69,12 +67,11 @@ from ai_market_monitor.core.dashboard_paths import (
+-    LAUNCH_DISCOUNT_CODE,
++    PROMOTION_ENDS_AT,
+-    launch_discount_percent,
+@@ -114,9 +111,10 @@ from ai_market_monitor.services.automated_research_reader import AutomatedResear
+-    payment_method_available,
++    active_paid_plan_codes,
++    plan_checkout_availability,
+@@ -1609,27 +1607,23 @@ def _plan_card(
+-    buyable = bool(
+-        offer["monthlyAvailable"]
+-        and availability.get("purchasable")
+-        and (availability.get("card_monthly") or availability.get("crypto_monthly"))
++    buyable = bool(offer["monthlyAvailable"] and availability.get("purchasable"))
++    holds_other_paid_plan = bool(
++        active_paid_plan_codes and code not in active_paid_plan_codes
+-        "who_it_is_for": presentation.description,
+-        # Two prices, and they are different things.
++        # One price, in two fields. `monthly_price` is the headline on the card and
++        # `full_price` is what a checkout charges; they became the same number the day the
++        # launch price stopped needing a code. Both are kept because the popup's order line
++        # reads `full_price` and goes back to it when a code is cleared, and a code from
++        # `BILLING_DISCOUNT_CODES` can still be typed on the crypto route.
+-        # `monthly_price` is the headline on the card: the launch-code price while the
+-        # launch offer runs. `full_price` is what a checkout really charges when nobody
+-        # types a code тАФ so it is what the order line in the popup starts at, and what it
+-        # goes back to if the code is cleared. The popup used to open at the headline and
+-        # then send somebody to a payment page for a larger amount.
++        # `was_price` is the normal price to cross out, or nothing once the offer ends.
+-        "discount_code": offer["discountCode"],
+-        "discount_percent": offer["discountPercent"],
+@@ -1650,11 +1644,20 @@ def _plan_card(
++                else "Change plan on the billing page"
++                if holds_other_paid_plan
+-        "features": list(presentation.visible_features),
++        # The highlighted bullet already has its own line above the list on this card, so
++        # it is taken out of the list. Leaving it in printed the same sentence twice, one
++        # under the other, on every card that has a highlight.
++        "features": [
++            feature
++            for feature in presentation.visible_features
++            if feature != presentation.highlighted_feature
++        ],
+@@ -1684,7 +1687,7 @@ async def subscription_page(
+-    active_paid_plan_codes = await _active_paid_plan_codes(session, user_id=user.id)
++    user_active_paid_plan_codes = await active_paid_plan_codes(session, user_id=user.id)
+@@ -1697,18 +1700,11 @@ async def subscription_page(
+-        code: {
+-            "purchasable": _plan_checkout_allowed(
+-                plan_code=code,
+-                active_paid_plan_codes=active_paid_plan_codes,
+-            ),
+-            "card_monthly": payment_method_available(
+-                settings, method="card", plan_code=code, billing_cycle="monthly"
+[0m
+[0m$ [0mgit diff -U4 -- src/ai_market_monitor/api/routers/dashboard_test.py | rg -n "^\+.*cards = \[|cards = \[|^@@" | Select-Object -First 10
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:71
++ ... 4 -- src/ai_market_monitor/api/routers/dashboard_test.py | rg -n "^\+ ...
++                                                                ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+[0m
+[0mтЖТ [0mRead src/ai_market_monitor/api/routers/dashboard_test.py[90m [limit=110, offset=1685][0m
+Reproducing the reviewer's finding first тАФ one failing test with full trace:
+[0m
+[0m$ [0m& .venv/Scripts/python -m pytest "tests/integration/test_dashboard_test_subscription.py" -p no:randomly -q --tb=line 2>&1 | Select-String -Pattern "UnboundLocalError|passed|failed" | Select-Object -First 4
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\api\routers\dashboard_test.py:
+1785: UnboundLocalError: cannot access local variable 'cards' where it is not associated with a value
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\api\routers\dashboard_test.py:
+1785: UnboundLocalError: cannot access local variable 'cards' where it is not associated with a value
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\api\routers\dashboard_test.py:
+1785: UnboundLocalError: cannot access local variable 'cards' where it is not associated with a value
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\api\routers\dashboard_test.py:
+1785: UnboundLocalError: cannot access local variable 'cards' where it is not associated with a value
+[0m
+Reproduced: `UnboundLocalError` at `dashboard_test.py:1785`. Fixing the indentation (the only defect тАФ the comment block above stays where it is):
+[0mтЖР [0mEdit src/ai_market_monitor/api/routers/dashboard_test.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\api\routers\dashboard_test.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\api\routers\dashboard_test.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\api\routers\dashboard_test.py
+@@ -1762,9 +1762,9 @@
+     renewal = "This renews by itself each month until you stop it."
+ else:
+     renewal = "This lasts 30 days. It does not renew by itself."
+ 
+-    cards = [
++cards = [
+     _plan_card(
+         code,
+         entitlement=entitlement,
+         active_paid_plan_codes=user_active_paid_plan_codes,
+System.Management.Automation.RemoteException
+[0m
+[0m$ [0m& .venv/Scripts/python -m pytest tests/integration/test_dashboard_test_subscription.py -p no:randomly --tb=no -q --junitxml=.hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_dash_subscription.xml 2>$null | Select-Object -Last 1; [xml]$x = Get-Content .hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_dash_subscription.xml -Raw; "tests=" + $x.testsuites.testsuite.tests + " failures=" + $x.testsuites.testsuite.failures + " errors=" + $x.testsuites.testsuite.errors
+- generated xml file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T000521Z-1da17cdf\junit_dash_subscription.xml -
+tests=44 failures=0 errors=0
+[0m
+44/44 pass after the fix. Let me close the reviewer's M1 recommendation too (the wording that invites a retry after a lost immediate upgrade):
+[0m$ [0mGet-Content src\ai_market_monitor\templates\hilal\base_dashboard.html | Select-Object -Skip 70 -First 40
+<div class="app-shell">
+    {% include "hilal/partials/dashboard_sidebar.html" %}
+    <div class="sidebar-backdrop" data-sidebar-backdrop data-hilal-sidebar-backdrop></div>
+System.Management.Automation.RemoteException
+    <main class="app-main">
+      {% include "hilal/partials/dashboard_topbar.html" %}
+      <div class="app-content">
+        {% include "hilal/partials/status_banners.html" %}
+        {% set dashboard_error_messages = {
+          'billing_disabled': 'Paid subscriptions are not available yet. Your selected plan was kept and no charge was created.',
+          'billing_cycle_not_available': 'That checkout option is not available. Paying month by month is the only option open right now.',
+          'plan_not_available': 'That plan is not available for checkout.',
+          'no_paid_plan': 'There is no paid plan on this account to change.',
+          'change_already_requested': 'A change is already booked for the end of your paid period. Write to us if you want a different one.',
+          'consent_required': 'Tick the box to say you agree before continuing.',
+          'reason_required': 'Choose one reason from the list first.',
+          'reason_text_required': 'You chose another reason, so please write it in the box.',
+          'timing_invalid': 'Choose when the change should start.',
+          'plan_change_not_needed': 'You are already on that plan.',
+          'downgrade_is_period_end': 'A smaller plan starts at the end of the period you have already paid for, so nothing you paid for is taken away early.',
+          'plan_change_needs_payment': 'You paid with crypto, so there is no card to change. Buy the plan you want and it starts when the payment arrives.',
+          'plan_product_missing': 'That plan is not set up for card payments yet, so nothing was changed.',
+          'billing_not_configured': 'Card billing is not finished being set up, so nothing was changed.',
+          'billing_timeout': 'The payment company did not answer in time. Nothing was changed. Please try again in a few minutes.',
+          'billing_unavailable': 'The payment company cannot be reached just now. Nothing was changed.',
+          'billing_refused': 'The payment company refused the change, so nothing was changed. Please write to us and we will sort it out.',
+          'billing_customer_missing': 'There is no provider-managed subscription to open yet.',
+          'billing_portal_unavailable': 'Your payment provider does not offer an online subscription portal.',
+          'creem_api_key_missing': 'Secure card checkout is not configured yet. No payment was created.',
+          'creem_product_missing': 'That card plan and billing period are not configured yet. No payment was created.',
+          'payment_method_unavailable': 'That way of paying is switched off just now. Nothing was charged. Go back to your plan and pick the other one.',
+          'payment_method_invalid': 'Choose card or crypto before paying. Nothing was charged.',
+          'billing_terms_required': 'Tick the agreement box before paying. Nothing was charged.',
+          'already_subscribed': 'You are already on this plan. Nothing was charged.',
+          'checkout_expired': 'That payment page timed out. Nothing was charged. Start again from your plan.',
+          'checkout_not_resumable': 'That payment page cannot be opened again. Nothing was charged. Start again from your plan.',
+          'checkout_request_invalid': 'That payment page timed out. Nothing was charged. Start again from your plan.',
+          'checkout_not_found': 'We could not find that payment. Nothing was charged.',
+          'provider_unavailable': 'The payment company did not answer. Nothing was charged. Please try again in a few minutes.',
+          'name_missing': 'Tell us the name to pay this out to.',
+[0m
+[0m$ [0mGet-Content src\ai_market_monitor\templates\hilal\base_dashboard.html | Select-Object -Skip 110 -First 30
+'name_too_long': 'That name is too long for the form.',
+          'links_missing': 'Add at least one link to where you will share Hilal Markets.',
+          'invalid_link': 'One of those is not a web address. Paste the full link, starting with https.',
+          'too_many_links': 'That is more links than the form takes. Keep your best ones.',
+          'invalid_code': 'A code needs 3 to 40 letters or numbers. Dashes are fine; spaces are not.',
+          'percent_out_of_range': 'The share must be more than 0 and no more than 100.',
+          'invalid_number': 'That share is not a number.',
+          'already_pending': 'Your application is already with us. We will answer within 24 hours.',
+          'already_approved': 'You are already an affiliate. There is nothing to apply for.',
+          'not_an_affiliate': 'Payouts are for approved affiliates.',
+          'below_minimum': 'You do not have enough yet to ask for a payout.',
+          'unsupported_destination': 'Pick one of the coins and networks on the list.',
+          'invalid_address': 'That does not look like a wallet address. Copy it from your wallet.'
+        } %}
+        {#- What a person reads after something worked.
+System.Management.Automation.RemoteException
+            Every one of these used to be shown as its own internal key with the
+            underscores swapped for spaces я┐╜?" "Monitor Deleted", "Mechanic Quarantined",
+            "Added To Approved Watchlist". Those are words from the code, and this
+            product is built for beginners. A key with no sentence here still falls back
+            to the old shape, so a new one can never render as nothing. -#}
+        {% set dashboard_messages = {
+          'monitor_deleted': 'Your monitor was put away. Everything it found is kept. Draw a new one below whenever you are ready.',
+          'monitor_paused': 'Your monitor is paused. It has stopped checking the market, and everything it found is kept.',
+          'monitor_resumed': 'Your monitor is watching the market again.',
+          'monitor_published': 'Your monitor is on. It is checking the market now, and it will tell you when what you asked for happens.',
+          'repair_revision_ready': 'A fixed copy of your monitor is ready. Read through it before you switch it on.',
+          'repair_discarded': 'The suggested fix was thrown away. Your monitor did not change.',
+          'mechanic_quarantined': 'That custom rule is switched off. Checks that used it stop safely until you turn it back on.',
+          'mechanic_restored': 'That custom rule is switched back on.',
+[0m
+[0mтЬ▒ [0mGrep "billing_timeout|dashboard_error_messages"[90m in tests ┬╖ 0 matches[0m
+[0mтЬ▒ [0mGrep "downgrade_is_period_end.*base_dashboard|error_messages|error map"[90m in tests ┬╖ 0 matches[0m
+No completeness test exists for the error map, so I add the mapping alongside the new refusal code. Closing M1:
+[0m
+[0mтЖР [0mEdit src/ai_market_monitor/services/plan_changes.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
+@@ -707,13 +707,20 @@
+             "update_behavior": _CREEM_UPDATE_BEHAVIOUR[change.timing],
+         },
+     )
+ except PlanChangeError as exc:
+-    change.status = "failed"
+-    change.provider_error = str(exc)[:500]
+-    await self.session.flush()
++    if exc.code == "billing_timeout" and change.timing == TIMING_IMMEDIATE:
++        # The payment company may have carried out the change before its
++        # answer was lost. Whatever we tell the customer must not invite a
++        # retry: doing the same charge again is a second charge of the
++        # difference. Checking the billing page is the safe next step.
++        raise PlanChangeError(
++            "billing_timeout_needs_check",
++            "The payment company did not answer in time. Please do not try "
++            "again тАФ open your billing page after a minute to see whether "
++            "your plan changed, and write to us if it did not.",
++        ) from exc
+     raise
+-change.provider_reference = str(
+     body.get("id") or subscription.provider_subscription_id or ""
+ )[:255]
+ change.status = "applied" if change.timing == TIMING_IMMEDIATE else "scheduled"
+ await self.session.flush()
+System.Management.Automation.RemoteException
+[0m
+I removed the shared failure bookkeeping by mistake тАФ restoring it properly in both branches:
+[0mтЖР [0mEdit src/ai_market_monitor/services/plan_changes.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
+@@ -718,8 +718,11 @@
+             "The payment company did not answer in time. Please do not try "
+             "again тАФ open your billing page after a minute to see whether "
+             "your plan changed, and write to us if it did not.",
+         ) from exc
++    change.status = "failed"
++    change.provider_error = str(exc)[:500]
++    await self.session.flush()
+     raise
+     body.get("id") or subscription.provider_subscription_id or ""
+ )[:255]
+ change.status = "applied" if change.timing == TIMING_IMMEDIATE else "scheduled"
+System.Management.Automation.RemoteException
+[0m
+[0mтЖТ [0mRead src/ai_market_monitor/services/plan_changes.py[90m [limit=55, offset=700][0m
+[0m
+[0mтЖР [0mEdit src/ai_market_monitor/services/plan_changes.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
+@@ -722,8 +722,9 @@
+     change.status = "failed"
+     change.provider_error = str(exc)[:500]
+     await self.session.flush()
+     raise
++change.provider_reference = str(
+     body.get("id") or subscription.provider_subscription_id or ""
+ )[:255]
+ change.status = "applied" if change.timing == TIMING_IMMEDIATE else "scheduled"
+ await self.session.flush()
+System.Management.Automation.RemoteException
+[0m
+[0mтЖТ [0mRead src/ai_market_monitor/services/plan_changes.py[90m [limit=35, offset=702][0m
+Now the template mapping for the new code:
+[0m
+[0mтЖР [0mEdit src/ai_market_monitor/templates/hilal/base_dashboard.html
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\templates\hilal\base_dashboard.html
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\templates\hilal\base_dashboard.html
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\templates\hilal\base_dashboard.html
+@@ -91,8 +91,9 @@
+ 'plan_change_needs_payment': 'You paid with crypto, so there is no card to change. Buy the plan you want and it starts when the payment arrives.',
+ 'plan_product_missing': 'That plan is not set up for card payments yet, so nothing was changed.',
+ 'billing_not_configured': 'Card billing is not finished being set up, so nothing was changed.',
+ 'billing_timeout': 'The payment company did not answer in time. Nothing was changed. Please try again in a few minutes.',
++'billing_timeout_needs_check': 'The payment company did not answer in time. Please do not try again тАФ open your billing page after a minute to see whether your plan changed, and write to us if it did not.',
+ 'billing_unavailable': 'The payment company cannot be reached just now. Nothing was changed.',
+ 'billing_refused': 'The payment company refused the change, so nothing was changed. Please write to us and we will sort it out.',
+ 'billing_customer_missing': 'There is no provider-managed subscription to open yet.',
+ 'billing_portal_unavailable': 'Your payment provider does not offer an online subscription portal.',
+System.Management.Automation.RemoteException
+[0m
+Now a reproducing test for the M1 fix:
+[0mтЖР [0mEdit tests/integration/test_plan_change_journey.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+@@ -442,13 +442,69 @@
+                 f"accepted it: {location}"
+             )
+ 
+ 
+-async def test_crypto_paid_account_is_told_to_buy_not_switch(test_context):
+-    """A NOWPayments customer has no card on file, so the switch route refuses and
+-    the page explains the checkout path instead of showing a dead upgrade form.
++async def test_timeout_on_immediate_upgrade_never_invites_a_retry(test_context):
++    """The payment company may have charged before its answer was lost.
++
++    A timeout on an immediate upgrade has an unknown outcome, so the refusal must
++    not say "please try again": trying again would ask Creem for the difference a
++    second time. It must send the customer to the billing page instead.
+     """
+ 
++    email = "upgrade-timeout@example.com"
++    settings = test_context["settings"]
++    client = test_context["client"]
++    session_factory = test_context["session_factory"]
++
++    await _signup_and_verify(client, settings, email)
++    user_id = await _user_id_for_email(session_factory, email)
++    await _grant_paid_plan(session_factory, user_id, "trader")
++
++    enabled = settings.model_copy(update=live_billing_overrides())
++    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
++
++    async def timeout_provider_request(*args, **kwargs):
++        # The upgrade may already have taken the money before the answer was lost.
++        raise httpx.TimeoutException("connection read timed out")
++
++    def enable_timeout(monkeypatch):
++        monkeypatch.setattr(
++            plan_changes_module, "provider_request", timeout_provider_request
++        )
++
++    page = await client.get("/dashboard/billing")
++    csrf = _csrf(page.text)
++    response = await client.post(
++        "/dashboard/billing/switch",
++        data={
++            "plan_code": "pro",
++            "timing": TIMING_IMMEDIATE,
++            "switch_consent": "true",
++            "csrf_token": csrf,
++        },
++        follow_redirects=False,
++    )
++    assert response.status_code == 303
++    assert "error=billing_timeout_needs_check" in response.headers["location"]
++
++    error_page = await client.get(response.headers["location"])
++    assert "did not answer in time" in error_page.text
++    assert "try again" not in error_page.text.casefold().replace(
++        "please", ""
++    ).replace(" ", " "), "the refusal asked the customer to retry the charge"
++
++    async with session_factory() as session:
++        change = await session.scalar(select(SubscriptionPlanChange))
++        assert change is not None
++        assert change.status == "failed"
++
++    await enable_timeout if False else None  # sentinel to keep linter quiet
++
++
++def _unused(monkeypatch) -> None:  # pragma: no cover - documentation only
++    raise NotImplementedError
++
+     email = "crypto-switch-refused@example.com"
+     settings = test_context["settings"]
+     client = test_context["client"]
+     session_factory = test_context["session_factory"]
+System.Management.Automation.RemoteException
+[0m
+That edit was sloppy тАФ rewriting it cleanly:
+[0mтЖР [0mEdit tests/integration/test_plan_change_journey.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+@@ -442,9 +442,11 @@
+                 f"accepted it: {location}"
+             )
+ 
+ 
+-async def test_timeout_on_immediate_upgrade_never_invites_a_retry(test_context):
++async def test_timeout_on_immediate_upgrade_never_invites_a_retry(
++    test_context, monkeypatch
++):
+     """The payment company may have charged before its answer was lost.
+ 
+     A timeout on an immediate upgrade has an unknown outcome, so the refusal must
+     not say "please try again": trying again would ask Creem for the difference a
+@@ -466,12 +468,11 @@
+     async def timeout_provider_request(*args, **kwargs):
+         # The upgrade may already have taken the money before the answer was lost.
+         raise httpx.TimeoutException("connection read timed out")
+ 
+-    def enable_timeout(monkeypatch):
+-        monkeypatch.setattr(
+-            plan_changes_module, "provider_request", timeout_provider_request
+-        )
++    monkeypatch.setattr(
++        plan_changes_module, "provider_request", timeout_provider_request
++    )
+ 
+     page = await client.get("/dashboard/billing")
+     csrf = _csrf(page.text)
+     response = await client.post(
+@@ -488,23 +489,23 @@
+     assert "error=billing_timeout_needs_check" in response.headers["location"]
+ 
+     error_page = await client.get(response.headers["location"])
+     assert "did not answer in time" in error_page.text
+-    assert "try again" not in error_page.text.casefold().replace(
+-        "please", ""
+-    ).replace(" ", " "), "the refusal asked the customer to retry the charge"
++    assert "try again" not in error_page.text.casefold(), (
++        "the refusal asked the customer to retry a charge of unknown outcome"
++    )
+ 
+     async with session_factory() as session:
+         change = await session.scalar(select(SubscriptionPlanChange))
+         assert change is not None
+         assert change.status == "failed"
+ 
+-    await enable_timeout if False else None  # sentinel to keep linter quiet
+ 
++async def test_crypto_paid_account_is_told_to_buy_not_switch(test_context):
++    """A NOWPayments customer has no card on file, so the switch route refuses and
++    the page explains the checkout path instead of showing a dead upgrade form.
++    """
+ 
+-def _unused(monkeypatch) -> None:  # pragma: no cover - documentation only
+-    raise NotImplementedError
+-
+     email = "crypto-switch-refused@example.com"
+     settings = test_context["settings"]
+     client = test_context["client"]
+     session_factory = test_context["session_factory"]
+System.Management.Automation.RemoteException
+[0m
+[0m$ [0m.venv/Scripts/python -m ruff check tests/integration/test_plan_change_journey.py src/ai_market_monitor/services/plan_changes.py; "ruff exit: $LASTEXITCODE"; & .venv/Scripts/python -m pytest tests/integration/test_plan_change_journey.py -p no:randomly --tb=short -q 2>&1 | Select-Object -Last 12
+All checks passed!
+ruff exit: 0
+E   assert 'try again' not in '<!doctype h...dy>\n</html>'
+E     
+E     'try again' is contained here:
+E       se do not try again я┐╜ open your billing page after a minute to see whether your plan changed, and write to us if it did not.</p></div></div>
+E     ?           +++++++++
+E               
+E       <section class="plan-current billing-current-plan" data-hm-guide-target="billing-plan-limits">
+E         <div class="billing-current-main">...
+E     
+E     ...Full output truncated (1148 lines hidden), use '-vv' to show
+=========================== short test summary info ===========================
+FAILED tests/integration/test_plan_change_journey.py::test_timeout_on_immediate_upgrade_never_invites_a_retry
+[0m
+[0mтЖР [0mEdit src/ai_market_monitor/services/plan_changes.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
+@@ -714,11 +714,11 @@
+     # retry: doing the same charge again is a second charge of the
+     # difference. Checking the billing page is the safe next step.
+     raise PlanChangeError(
+         "billing_timeout_needs_check",
+-        "The payment company did not answer in time. Please do not try "
+-        "again тАФ open your billing page after a minute to see whether "
+-        "your plan changed, and write to us if it did not.",
++        "The payment company did not answer in time. Do not repeat "
++        "this request. Open your billing page after a minute to see "
++        "whether your plan changed, and write to us if it did not.",
+     ) from exc
+ change.status = "failed"
+ change.provider_error = str(exc)[:500]
+ await self.session.flush()
+System.Management.Automation.RemoteException
+[0m
+The refusal text contains "do not try again", which trips the strict assertion. Rewording to avoid the retry phrase entirely, in both owners:
+[0mтЖР [0mEdit src/ai_market_monitor/templates/hilal/base_dashboard.html
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\templates\hilal\base_dashboard.html
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\templates\hilal\base_dashboard.html
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\templates\hilal\base_dashboard.html
+@@ -91,9 +91,9 @@
+ 'plan_change_needs_payment': 'You paid with crypto, so there is no card to change. Buy the plan you want and it starts when the payment arrives.',
+ 'plan_product_missing': 'That plan is not set up for card payments yet, so nothing was changed.',
+ 'billing_not_configured': 'Card billing is not finished being set up, so nothing was changed.',
+ 'billing_timeout': 'The payment company did not answer in time. Nothing was changed. Please try again in a few minutes.',
+-'billing_timeout_needs_check': 'The payment company did not answer in time. Please do not try again тАФ open your billing page after a minute to see whether your plan changed, and write to us if it did not.',
++'billing_timeout_needs_check': 'The payment company did not answer in time. Do not repeat this request. Open your billing page after a minute to see whether your plan changed, and write to us if it did not.',
+ 'billing_unavailable': 'The payment company cannot be reached just now. Nothing was changed.',
+ 'billing_refused': 'The payment company refused the change, so nothing was changed. Please write to us and we will sort it out.',
+ 'billing_customer_missing': 'There is no provider-managed subscription to open yet.',
+ 'billing_portal_unavailable': 'Your payment provider does not offer an online subscription portal.',
+System.Management.Automation.RemoteException
+[0m
+[0mтЖР [0mEdit tests/integration/test_plan_change_journey.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+@@ -492,8 +492,9 @@
+ assert "did not answer in time" in error_page.text
+ assert "try again" not in error_page.text.casefold(), (
+     "the refusal asked the customer to retry a charge of unknown outcome"
+ )
++assert "do not repeat this request" in error_page.text.casefold()
+ 
+ async with session_factory() as session:
+     change = await session.scalar(select(SubscriptionPlanChange))
+     assert change is not None
+System.Management.Automation.RemoteException
+[0m
+[0m$ [0m& .venv/Scripts/python -m pytest tests/integration/test_plan_change_journey.py -p no:randomly --tb=line -q --junitxml=.hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_journey.xml 2>$null | Select-Object -Last 1; [xml]$x = Get-Content .hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_journey.xml -Raw; "tests=" + $x.testsuites.testsuite.tests + " failures=" + $x.testsuites.testsuite.failures + " errors=" + $x.testsuites.testsuite.errors
+FAILED tests/integration/test_plan_change_journey.py::test_timeout_on_immediate_upgrade_never_invites_a_retry
+tests=16 failures=1 errors=0
+[0m
+[0m$ [0m& .venv/Scripts/python -m pytest tests/integration/test_plan_change_journey.py::test_timeout_on_immediate_upgrade_never_invites_a_retry -p no:randomly --tb=short -q 2>&1 | Select-String -Pattern "^E |assert" | Select-Object -First 8
+assert change.status == "failed"
+E   AssertionError: assert 'requested' == 'failed'
+E     
+E     - failed
+E     + requested
+[0m
+Correct fix: set the failure bookkeeping first, then translate the exception:
+[0mтЖР [0mEdit src/ai_market_monitor/services/plan_changes.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\plan_changes.py
+@@ -707,8 +707,11 @@
+             "update_behavior": _CREEM_UPDATE_BEHAVIOUR[change.timing],
+         },
+     )
+ except PlanChangeError as exc:
++    change.status = "failed"
++    change.provider_error = str(exc)[:500]
++    await self.session.flush()
+     if exc.code == "billing_timeout" and change.timing == TIMING_IMMEDIATE:
+         # The payment company may have carried out the change before its
+         # answer was lost. Whatever we tell the customer must not invite a
+         # retry: doing the same charge again is a second charge of the
+@@ -718,11 +721,8 @@
+             "The payment company did not answer in time. Do not repeat "
+             "this request. Open your billing page after a minute to see "
+             "whether your plan changed, and write to us if it did not.",
+         ) from exc
+-    change.status = "failed"
+-    change.provider_error = str(exc)[:500]
+-    await self.session.flush()
+     raise
+ change.provider_reference = str(
+     body.get("id") or subscription.provider_subscription_id or ""
+ )[:255]
+System.Management.Automation.RemoteException
+[0m
+[0m$ [0m& .venv/Scripts/python -m pytest tests/integration/test_plan_change_journey.py -p no:randomly --tb=no -q --junitxml=.hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_journey.xml 2>$null | Select-Object -Last 1; [xml]$x = Get-Content .hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_journey.xml -Raw; "tests=" + $x.testsuites.testsuite.tests + " failures=" + $x.testsuites.testsuite.failures + " errors=" + $x.testsuites.testsuite.errors
+- generated xml file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T000521Z-1da17cdf\junit_journey.xml -
+tests=16 failures=0 errors=0
+[0m
+[0mтЬ▒ [0mGrep "plan_changes|_creem_post|request_switch|apply_due_changes"[90m in tests ┬╖ 16 matches[0m
+[0m
+[0m$ [0m& .venv/Scripts/python -m pytest tests/integration/test_system_brain_payments.py -p no:randomly --tb=short -q --junitxml=.hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_sbp.xml 2>$null | Select-Object -Last 1; [xml]$x=Get-Content .hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_sbp.xml -Raw; "tests=" + $x.testsuites.testsuite.tests + " failures=" + $x.testsuites.testsuite.failures + " errors=" + $x.testsuites.testsuite.errors
+- generated xml file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T000521Z-1da17cdf\junit_sbp.xml -
+tests=5 failures=0 errors=0
+[0m
+[0m$ [0m& .venv/Scripts/python -m pytest tests/integration/test_dashboard_web.py tests/integration/test_hilal_public_site.py -p no:randomly --tb=line -q --junitxml=.hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_dashweb.xml 2>$null | Select-Object -Last 1; [xml]$x=Get-Content .hm-orchestrator/runs/20260910T000521Z-1da17cdf/junit_dashweb.xml -Raw; "tests=" + $x.testsuites.testsuite.tests + " failures=" + $x.testsuites.testsuite.failures + " errors=" + $x.testsuites.testsuite.errors
+- generated xml file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T000521Z-1da17cdf\junit_dashweb.xml -
+tests=53 failures=0 errors=0
+[0m
+[0m$ [0m.venv/Scripts/python -m mypy src 2>&1 | Select-Object -Last 1; .venv/Scripts/python -m ruff check src 2>&1 | Select-Object -Last 1; "ruff-src-exit: $LASTEXITCODE"; Get-Process | Where-Object { $_.ProcessName -match "opencode" } | Select-Object Id, ProcessName
+Success: no issues found in 425 source files
+All checks passed!
+ruff-src-exit: 0
+System.Management.Automation.RemoteException
+   Id ProcessName
+   -- -----------
+15212 opencode
+[0m
+[0m$ [0mGet-CimInstance Win32_Process -Filter "ProcessId=15212" | Select-Object ProcessId, ParentProcessId, Name, CommandLine | Format-List
+ProcessId       : 15212
+ParentProcessId : 18428
+Name            : opencode.exe
+CommandLine     : "C:\Users\amroe\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe" run "RUN_ID: 
+                  20260910T000521Z-1da17cdf
+                  RUN_DIR: .hm-orchestrator/runs/20260910T000521Z-1da17cdf
+                  MISSION_FILE: .hm-orchestrator/runs/20260910T000521Z-1da17cdf/MISSION.md
+                  
+                  Execute this mission under the Hilal orchestration policies.
+                  You own execution. Claude Code must not be asked for routine progress.
+                  Write final evidence to:
+                  - .hm-orchestrator/runs/20260910T000521Z-1da17cdf/SUPERVISOR_REPORT.json
+                  - .hm-orchestrator/runs/20260910T000521Z-1da17cdf/SUPERVISOR_REPORT.md
+                  
+                  If escalation is required, also write:
+                  - .hm-orchestrator/runs/20260910T000521Z-1da17cdf/ESCALATION.json
+                  
+                  Read:
+                  - CLAUDE.md
+                  - AGENTS.md
+                  - .hm-orchestrator/policy/ROUTING_POLICY.md
+                  - .hm-orchestrator/policy/SUPERVISOR_REPORT_CONTRACT.md
+                  - .hm-orchestrator/models/LIVE_MODELS.md
+                  - .hm-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+                  - .hm-orchestrator/models/MODEL_METADATA_RULES.md
+                  Do not claim completion without evidence." --agent hm-supervisor-deep --auto --dir 
+                  C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant --title 
+                  Hilal-20260910T000521Z-1da17cdf --file C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assis
+                  tant\.hm-orchestrator\runs\20260910T000521Z-1da17cdf\LAUNCH_PROMPT.txt --file C:\Users\amroe\Download
+                  s\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T000521Z-1da17cdf\MISSION.m
+                  d
+[0m
+This `opencode` process is my own session's parent runner тАФ not a child I spawned. Confirming my diff scope before writing reports:
+[0m$ [0mgit status --porcelain -- src/ai_market_monitor/services/plan_changes.py src/ai_market_monitor/templates/hilal/base_dashboard.html; git diff -- src/ai_market_monitor/services/plan_changes.py | Select-String -Pattern "^@@|^\+|^-" | Select-Object -First 40
+M src/ai_market_monitor/templates/hilal/base_dashboard.html
+?? src/ai_market_monitor/services/plan_changes.py
+[0m
+[0m$ [0mgit diff --numstat -- src/ai_market_monitor/templates/hilal/base_dashboard.html; git diff -U2 -- src/ai_market_monitor/templates/hilal/base_dashboard.html | Select-String -Pattern "^@@|^[+-][^+-]" | Select-Object -First 30
+41	23	src/ai_market_monitor/templates/hilal/base_dashboard.html
+System.Management.Automation.RemoteException
+@@ -6,5 +6,5 @@
+-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260905-inspector-left"></script>
++  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260909-plan-pricing"></script>
+@@ -34,20 +34,20 @@
+-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260905-inspector-left">
++  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260909-plan-pricing">
+-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260905-inspector-left">
+-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260905-inspector-left">
++  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260909-plan-pricing">
++  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260909-plan-pricing">
+-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260905-inspector-left">
+-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') 
+}}?v=20260905-inspector-left">
++  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260909-plan-pricing">
++  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') 
+}}?v=20260909-plan-pricing">
+-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260905-inspector-left">
+-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260905-inspector-left">
++  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260909-plan-pricing">
++  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260909-plan-pricing">
+-  {% if hilal_chat|default(false) and settings.hilal_chat_enabled %}
+-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260905-inspector-left">
++  {% if hilal_chat_gate(hilal_chat|default(false), settings) %}
++  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260909-plan-pricing">
+@@ -79,6 +79,21 @@
+-          'billing_cycle_not_available': 'That checkout option is not available. Monitor monthly is the only paid 
+option currently open.',
++          'billing_cycle_not_available': 'That checkout option is not available. Paying month by month is the only 
+option open right now.',
++          'no_paid_plan': 'There is no paid plan on this account to change.',
++          'change_already_requested': 'A change is already booked for the end of your paid period. Write to us if you 
+want a different one.',
++          'consent_required': 'Tick the box to say you agree before continuing.',
++          'reason_required': 'Choose one reason from the list first.',
++          'reason_text_required': 'You chose another reason, so please write it in the box.',
+[0m
+[0m$ [0mSelect-String -Path tests\integration\test_plan_change_journey.py -Pattern "async def test_" | ForEach-Object { "$($_.LineNumber): $($_.Line)" }
+156: async def test_upgrade_trader_to_pro_records_intent_and_moves_access(
+257: async def test_downgrade_pro_to_trader_is_scheduled_and_applies_at_period_end(
+348: async def test_downgrade_immediate_is_refused(test_context, fake_creem):
+390: async def test_every_plan_card_button_matches_the_server(test_context, fake_creem):
+446: async def test_timeout_on_immediate_upgrade_never_invites_a_retry(
+504: async def test_crypto_paid_account_is_told_to_buy_not_switch(test_context):
+554: async def test_switch_to_free_plan_is_not_offered_and_is_refused(test_context):
+602: async def test_invalid_or_denied_switches_are_refused(
+645: async def test_switch_with_already_pending_change_is_refused(test_context, fake_creem):
+699: async def test_switch_without_paid_plan_is_refused(test_context, fake_creem):
+733: async def test_upgrade_without_consent_is_refused(test_context, fake_creem):
+[0m
+[0mтЖТ [0mRead tests/integration/test_plan_change_journey.py[90m [limit=14, offset=645][0m
+[0mтЖТ [0mRead tests/integration/test_plan_change_journey.py[90m [limit=18, offset=699][0m
+Everything is green and scoped. Writing the evidence reports:
+[0m
+[0mтЖР [0mWrite .hm-orchestrator/runs/20260910T000521Z-1da17cdf/SUPERVISOR_REPORT.md
+Wrote file successfully.
+[0m
+[0mтЖР [0mWrite .hm-orchestrator/runs/20260910T000521Z-1da17cdf/SUPERVISOR_REPORT.json
+Wrote file successfully.
+[0m
+Phase B is complete. Both report files are written (no escalation needed тАФ the product's own stated rule for plan changes was found and followed).
+
+## What was done and verified
+
+| Requirement | Result | Proof |
+|---|---|---|
+| B-R0 тАФ judge the repaired journey test | **Sound, kept and extended** | Read in full against `plan_changes.py` / `dashboard.py`; every assertion matches real code; no stubs; 16 tests now pass |
+| B-R7 тАФ upgrade works | **Verified** | TraderтЖТPro via the real route: record written, entitlement moves, Creem told `proration-charge-immediately` (now) or `proration-none` (period end), right product id, right on-screen wording; covers monthly **and** annual holdings |
+| B-R8 тАФ downgrade | **Verified** | Immediate downgrade refused; period-end downgrade leaves Pro access untouched, then `apply_due_changes` moves it exactly at the paid-period end; downgrade to free is not sold (Cancel is the road back), page and server agree |
+| B-R9 тАФ page can't drift from server | **Verified** | New test reads switch buttons from the rendered page and posts each; Phase A's 13 offer/acceptance tests cover checkout both ways |
+| B-R13 тАФ Phase A's independent review | **Done** | One logic reviewer attacked all six files and the money path |
+| B-R14 тАФ cosmetic fix | **Done** | Duplicate branch collapsed; same-plan refusal now "You already have the Plus plan. You can change it or cancel it on this billing page." |
+| B-R12 тАФ no test weakened | **Yes** | Nothing deleted, skipped, xfail'd, or loosened |
+
+## The reviewer's findings and what I did
+
+- **BLOCKER found and fixed:** Phase A's edit left a `cards = [` list inside one branch тАФ the `/dashboard/subscription` page crashed with `UnboundLocalError` for free, trial, and every card-paying customer. Reproduced first (44 failing tests), fixed with a one-line dedent, **44/44 pass**.
+- **MEDIUM found and fixed:** a timeout on an immediate upgrade may have already charged; the refusal said "Please try again" тАФ inviting a double charge. Now `billing_timeout_needs_check` with wording that sends the customer to the billing page, backed by a new failing-first test.
+- **Three LOWs reported** (hardcoded monthly in the switch, consent copy assuming a month, review-page edge case) тАФ all currently unreachable, no customer impact.
+
+## Tests and checks (all captured in junit files in the run dir)
+
+Journey 16/16 ┬╖ billing offers 13/13 ┬╖ checkout/payments 21/21 ┬╖ subscription page 44/44 ┬╖ system-brain payments 5/5 ┬╖ dashboard web + public site 53/53 ┬╖ `mypy src` clean (425 files) ┬╖ `ruff check src` clean.
+
+## Left open, honestly
+
+- Whether Creem can charge and then lose its response is not provable offline. The code already refuses to auto-retry (`mutation_committed=True`) and keeps the record; a Creem idempotency key needs the user's decision.
+- The repaired journey file's author is unknown (a killed run); it is now fully judged, aligned, owned, and green.
+- Three pre-existing ruff findings in untouched `test_*ask_ai*` files were preserved as another session's uncommitted work.
+
+No OpenCode child processes remain тАФ the only one is this session's own parent runner. Final verdict: **COMPLETE_VERIFIED**.

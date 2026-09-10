@@ -18,7 +18,10 @@ import re
 import pytest
 from playwright.sync_api import Page, expect
 
+from ai_market_monitor.core.plans import PURCHASABLE_PLAN_CODES
+from ai_market_monitor.services.billing import PAYMENT_METHODS
 from tests.browser.conftest import (
+    BROWSER_DISCOUNT_CODE,
     assert_contrast,
     assert_no_horizontal_overflow,
     assert_no_raw_traceback,
@@ -182,20 +185,25 @@ def test_every_control_on_the_plan_page_is_big_enough_to_press(
 ) -> None:
     _open(page, base_url, SUBSCRIPTION, ".s-now")
 
-    assert _too_small(page, ".hm-s .t-action, .hm-s .a-jump a") == []
+    assert _too_small(page, ".hm-s .t-action") == []
 
 
 # ── Subscription: the checkout popup, on a server that can really sell ───────
 
 
-def _open_checkout(page: Page, paid_base_url: str) -> None:
+def _open_checkout(
+    page: Page,
+    paid_base_url: str,
+    plan_code: str = "trader",
+) -> None:
     email = unique_email("paid-e2e")
     signup(page, paid_base_url, email)
     close_any_open_guide(page)
     page.goto(f"{paid_base_url}{SUBSCRIPTION}", wait_until="domcontentloaded")
     close_any_open_guide(page)
-    expect(page.locator("[data-s-choose]").first).to_be_visible(timeout=15_000)
-    page.locator("[data-s-choose]").first.click()
+    choose = page.locator(f'[data-s-choose="{plan_code}"]')
+    expect(choose).to_be_visible(timeout=15_000)
+    choose.click()
     expect(page.locator("[data-s-dialog]")).to_be_visible()
 
 
@@ -286,10 +294,14 @@ def test_the_last_button_stays_shut_until_the_person_has_agreed(
     expect(page.locator("[data-s-pay-label]")).to_contain_text("card payment page")
 
 
-def _reach_the_paying_step(page: Page, base_url: str) -> None:
+def _reach_the_paying_step(
+    page: Page,
+    base_url: str,
+    plan_code: str = "trader",
+) -> None:
     """Walk to step three, the way a person does, and stop where the choice is made."""
 
-    _open_checkout(page, base_url)
+    _open_checkout(page, base_url, plan_code)
     page.locator("[data-s-next]").click()
     for name, value in [
         ("first_name", "Amina"),
@@ -330,6 +342,51 @@ def test_each_way_of_paying_names_the_company_that_takes_the_money(
         [[".hm-pay-secured-label", "color"], [".hm-pay-secured-name", "color"]],
         at_least=4.5,
     )
+
+
+@pytest.mark.parametrize(
+    ("plan_code", "payment_method"),
+    tuple(
+        (plan_code, payment_method)
+        for plan_code in PURCHASABLE_PLAN_CODES
+        for payment_method in PAYMENT_METHODS
+    ),
+)
+def test_every_paid_plan_and_payment_button_opens_the_provider_page(
+    page: Page,
+    live_shape_base_url: str,
+    plan_code: str,
+    payment_method: str,
+) -> None:
+    """Drive every sale through the last click and observe the browser leaving.
+
+    The provider call itself is covered by the integration test. This browser boundary
+    stands in for its answer so no fake credential can escape to a payment company.
+    """
+
+    provider_page = (
+        f"{live_shape_base_url}/terms"
+        f"?plan_code={plan_code}&payment_method={payment_method}"
+    )
+    posted: dict[str, str] = {}
+
+    def answer_checkout(route) -> None:
+        posted["body"] = route.request.post_data or ""
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=f'{{"checkout_url": "{provider_page}"}}',
+        )
+
+    page.route("**/dashboard/billing/checkout", answer_checkout)
+    _reach_the_paying_step(page, live_shape_base_url, plan_code)
+    page.locator(f'[data-s-method="{payment_method}"] input').check()
+    page.locator("[data-s-agree]").check()
+    page.locator("[data-s-pay]").click()
+
+    expect(page).to_have_url(provider_page)
+    assert f'\r\n\r\n{plan_code}\r\n' in posted["body"]
+    assert f'\r\n\r\n{payment_method}\r\n' in posted["body"]
 
 
 def test_the_two_ways_of_paying_stay_the_same_size_beside_each_other(
@@ -875,8 +932,11 @@ def test_the_code_box_appears_only_for_crypto(page: Page, live_shape_base_url: s
 
     page.locator('[data-s-method="crypto"] input').check()
     expect(box).to_be_visible()
-    # And it names the code, so nobody has to already know one exists.
-    expect(box).to_contain_text("HILAL25")
+    # It invites a code without naming one. It used to name the launch code, because the
+    # lower price needed one typed in. It does not any more — the launch price is simply
+    # the price — so naming a code here would offer a discount on top of a discount.
+    expect(box).to_contain_text("Have a discount code?")
+    expect(box).to_contain_text("You do not need one")
 
 
 def test_a_code_changes_the_price_on_screen_and_crosses_out_the_old_one(
@@ -896,18 +956,24 @@ def test_a_code_changes_the_price_on_screen_and_crosses_out_the_old_one(
     before = total.inner_text()
     expect(was).to_be_hidden()
 
-    page.locator("[data-discount-input]").fill("hilal25")
+    # Typed in lower case, to prove one reading of what somebody wrote.
+    page.locator("[data-discount-input]").fill(BROWSER_DISCOUNT_CODE.lower())
     page.locator("[data-discount-apply]").click()
 
     # The answer is said in words, where it is both seen and heard.
-    expect(page.locator("[data-discount-said]")).to_contain_text("HILAL25", timeout=15_000)
+    expect(page.locator("[data-discount-said]")).to_contain_text(
+        BROWSER_DISCOUNT_CODE, timeout=15_000
+    )
     expect(page.locator("[data-discount-said]")).to_have_attribute("data-tone", "good")
     # The old price is crossed out and the new one stands where the old one was.
     expect(was).to_be_visible()
     expect(was).to_have_text(before)
     assert total.inner_text() != before, "the price did not move"
     # And the code travels with the payment, so the server prices it again.
-    assert page.locator('input[name="discount_code"]').input_value() == "HILAL25"
+    assert (
+        page.locator('input[name="discount_code"]').input_value()
+        == BROWSER_DISCOUNT_CODE
+    )
 
     # Removing it puts the full price back, rather than leaving a discount nobody chose.
     page.locator("[data-discount-clear]").click()
@@ -984,7 +1050,7 @@ def test_switching_back_to_card_drops_a_code_that_cannot_be_used(
     page.locator('[data-s-method="crypto"] input').check()
     total = page.locator("[data-s-order-total]")
     before = total.inner_text()
-    page.locator("[data-discount-input]").fill("HILAL25")
+    page.locator("[data-discount-input]").fill(BROWSER_DISCOUNT_CODE)
     page.locator("[data-discount-apply]").click()
     expect(page.locator("[data-s-order-was]")).to_be_visible(timeout=15_000)
 
@@ -1051,7 +1117,7 @@ def test_the_review_page_code_box_rewrites_both_prices_in_its_own_wording(
     page.locator('input[name="payment_method"][value="crypto"]').check()
     expect(box).to_be_visible()
 
-    page.locator("[data-discount-input]").fill("HILAL25")
+    page.locator("[data-discount-input]").fill(BROWSER_DISCOUNT_CODE)
     page.locator("[data-discount-apply]").click()
     expect(page.locator("[data-discount-said]")).to_have_attribute(
         "data-tone", "good", timeout=15_000

@@ -1,0 +1,39 @@
+{
+  "run_id": "20260910T164746Z-f76e4f88",
+  "work_package": "WP8",
+  "severity": "blocker",
+  "summary": "The owner's rule for paying early on the card path cannot be implemented with Creem's live subscription API. R18-R27 for card are blocked; per the mission's own escalation trigger, implementation stopped rather than approximated.",
+  "what_the_owner_rule_requires": [
+    "Card change from paid plan X to different paid plan Y charges the FULL price of Y today",
+    "The new plan's period starts today (not extended by X's remainder)",
+    "The unused- days value on X is emailed back, never charged as 'the difference'"
+  ],
+  "what_creem_actually_offers": {
+    "endpoint": "POST /v1/subscriptions/{id}/upgrade (docs.creem.io/api-reference/endpoint/upgrade-subscription, checked 2026-09-10 public docs)",
+    "update_behavior_values": {
+      "proration-charge-immediately": "Access changes now; only the PRORATED DIFFERENCE is charged immediately. This is precisely the behaviour the owner ruled out (mission WP8 note 1).",
+      "proration-charge": "Deprecated; behaves identically to proration-charge-immediately.",
+      "proration-none": "Access changes now; NOTHING is charged today. Rule violated (customer pays nothing today, not the full price)."
+    },
+    "period_reset": "None of the three resets current_period_start_date to today; Creem's own example charges the difference now and the new plan price on the EXISTING next billing date, i.e. the period end does not move to today.",
+    "conclusion": "No Creem mechanism is known to us that charges the full new price today and restarts the period."
+  },
+  "why_we_stop": {
+    "mission_authorisation": "MISSION.md WP8 escalation triggers: 'Neither means charge the full new price today and restart the period... If nothing does, say so and stop - do not approximate with proration-charge-immediately... and do not cancel and re-create a live subscription on your own judgement. That is a decision for the owner.'",
+    "forbidden_approximations": [
+      "Charging the difference (the exact failure mode the owner excluded)",
+      "Cancelling the live Creem subscription and creating a new one on our own judgement (risks the card double-charge trap / two live subscriptions; owner decision required)"
+    ]
+  },
+  "what_is_needed_to_unblock": [
+    "Either confirm with Creem (paid plan/limit vary) whether full-price restart exists beyond the three documented update_behavior values, or",
+    "The product owner decides the card mechanism: e.g. owner-approved cancel-and-recreate, a one-time charge on top of the old subscription (with its own double-subscription tradeoff), or keeping the current must_switch_instead refusal for card",
+    "Only after the owner decides: open the must_switch_instead refusal in plan_checkout_availability (billing.py:689), the second site at billing.py:1604, and the consent sentence at plan_changes.py:157-160 (currently a false promise: 'I am charged only the difference')"
+  ],
+  "not_blocked_and_status": [
+    "WP5 (unfinished payments) is implemented separately and does not depend on WP8",
+    "R13 (plan_is_on_sale refusal) is inside WP5 and lands with it",
+    "R28 page-vs-server agreement holds under the status quo because plan_checkout_availability was NOT changed (the review-page refusal C2-R1 landed and stays consistent)"
+  ],
+  "test_integrity_note": "No test was changed, skipped or deleted because of this escalation. The tests that assert the old card refusal (tests/integration/test_checkout_and_payment_email.py:881,1017 family) remain valid because WP8 did not land."
+}

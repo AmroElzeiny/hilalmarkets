@@ -1951,13 +1951,27 @@ async def _cleanup_public_chat_data() -> dict:
 
 
 async def _expire_ended_paid_access() -> dict:
+    """The two things that happen when a paid period ends, in the order they must happen.
+
+    A booked plan change is applied **first**. Somebody who asked to move to a smaller
+    plan at the end of their month has not cancelled anything: their access moves down,
+    and their card is charged the smaller price. Expiring first would take their access
+    away entirely for the minute between the two passes.
+
+    Cancellations are the other half, and they are untouched by this: a cancelled
+    subscription carries no plan change, so the first pass finds nothing to move.
+    """
+
     from ai_market_monitor.core.database import SessionFactory
     from ai_market_monitor.services.billing import BillingService
+    from ai_market_monitor.services.plan_changes import PlanChangeService
 
     async with SessionFactory() as session:
+        moved = await PlanChangeService(session, settings).apply_due_changes()
+        await session.commit()
         expired = await BillingService(session, settings).expire_ended_access()
         await session.commit()
-        return {"expired": expired}
+        return {"expired": expired, "plan_changes_applied": moved}
 
 
 async def _monitor_published_sharia_sources() -> dict:

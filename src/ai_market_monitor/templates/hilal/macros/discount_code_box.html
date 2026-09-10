@@ -22,6 +22,11 @@
   {# The shape rule, from the server, so the Apply button refuses exactly what the server
      refuses. It used to be written out again inside the script. #}
   data-discount-pattern="{{ discount_code_pattern }}"
+  {# And the sentence that goes with it. The script held its own wording, which named a
+     code that has since been withdrawn — so the refusal invited people to type something
+     the checkout would then refuse again for a different reason. #}
+  data-discount-shape-message="{{ discount_code_shape_message }}"
+  data-discount-empty-message="{{ discount_code_empty_message }}"
   data-discount-state="empty"
   hidden
 >

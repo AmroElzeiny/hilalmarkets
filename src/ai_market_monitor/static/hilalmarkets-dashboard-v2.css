@@ -2188,13 +2188,6 @@ body.hilal-dashboard .current-plan-label {
   font-weight: 800;
 }
 
-body.hilal-dashboard .dashboard-price-card .plan-description {
-  min-height: 86px;
-  margin: 14px 0 0;
-  color: var(--hm-ink);
-  line-height: 1.55;
-}
-
 body.hilal-dashboard .dashboard-plan-price {
   display: flex;
   min-height: 82px;
@@ -2454,6 +2447,19 @@ body.hilal-dashboard .billing-dialog-order {
 body.hilal-dashboard .billing-dialog-order > div {
   display: grid;
   gap: 4px;
+}
+
+/* A whole sentence, not a figure, so it takes the width of the box rather than half of
+   it. On the narrow layout below every row is already full width and this one changes
+   nothing. */
+body.hilal-dashboard .billing-dialog-order-wide {
+  grid-column: 1 / -1;
+}
+
+body.hilal-dashboard .billing-dialog-order-wide strong {
+  font-weight: 500;
+  font-size: .82rem;
+  line-height: 1.45;
 }
 
 body.hilal-dashboard .billing-dialog-order span {
@@ -3249,10 +3255,6 @@ html[dir="rtl"] body.hilal-dashboard .guided-builder-heading-actions {
     grid-column: auto;
   }
 
-  body.hilal-dashboard .dashboard-price-card .plan-description {
-    min-height: 0;
-  }
-
   body.hilal-dashboard .dashboard-comparison-desktop {
     display: none;
   }
@@ -3704,8 +3706,6 @@ body.hilal-dashboard {
   --code-chip-bg: var(--hm-apple-soft);
   --code-chip-line: var(--hm-apple-pale);
   --code-chip-ink: var(--hm-ink-strong);
-  --code-note-ink: var(--hm-copy);
-  --code-note-quiet: var(--hm-muted);
 }
 
 /* The price a code replaced, in the subscription popup's order line. */
@@ -3717,3 +3717,124 @@ body.hilal-dashboard .s-order-was {
 }
 
 body.hilal-dashboard .s-order-was[hidden] { display: none; }
+
+/* ── Changing a plan somebody is already paying for ───────────────────────────
+   Cancelling, moving up and moving down. Three forms, one look, and no colour used
+   alone: every state changes the words and the icon as well (brand rules, section 10).
+   Only palette tokens here - the file is held to the approved colours by
+   `test_final_authenticated_styles_use_only_approved_brand_hex_colors`. */
+
+body.hilal-dashboard .billing-pending-change {
+  margin: 0 0 24px;
+}
+
+/* The quiet way out of a plan. It sits under the Current plan button and must be
+   readable and reachable, never a grey word hiding in a corner: WCAG 1.4.11 asks 3:1 of
+   any boundary a person has to see, which is what --hm-control-line is for. */
+body.hilal-dashboard .dashboard-cancel-plan {
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid var(--hm-control-line);
+  background: transparent;
+  color: var(--hm-muted);
+}
+
+body.hilal-dashboard .dashboard-cancel-plan:hover {
+  border-color: var(--hm-danger-line);
+  background: var(--hm-danger-bg);
+  color: var(--hm-danger);
+}
+
+body.hilal-dashboard .plan-reason-options,
+body.hilal-dashboard .plan-timing-options {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
+}
+
+body.hilal-dashboard .plan-reason-options legend,
+body.hilal-dashboard .plan-timing-options legend {
+  margin-bottom: 10px;
+  padding: 0;
+  color: var(--hm-ink);
+  font-family: var(--hm-font-display);
+  font-size: .95rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .plan-reason-option,
+body.hilal-dashboard .plan-timing-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid var(--hm-control-line);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+  cursor: pointer;
+  font-size: .86rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .plan-reason-option:hover,
+body.hilal-dashboard .plan-timing-option:hover {
+  background: var(--hm-surface-soft);
+}
+
+body.hilal-dashboard .plan-reason-option input,
+body.hilal-dashboard .plan-timing-option input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--hm-apple-deep);
+}
+
+/* The chosen row is marked by its edge and its fill, not by colour alone. */
+body.hilal-dashboard .plan-reason-option:has(input:checked),
+body.hilal-dashboard .plan-timing-option:has(input:checked) {
+  border-color: var(--hm-apple-deep);
+  background: var(--hm-apple-soft);
+}
+
+body.hilal-dashboard .plan-timing-option strong {
+  display: block;
+  color: var(--hm-ink);
+  font-family: var(--hm-font-display);
+  font-size: .95rem;
+  font-weight: 500;
+}
+
+body.hilal-dashboard .plan-timing-option small {
+  display: block;
+  margin-top: 4px;
+  color: var(--hm-muted);
+  font-size: .8rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .plan-reason-text {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 18px;
+  color: var(--hm-ink);
+  font-size: .86rem;
+}
+
+body.hilal-dashboard .plan-reason-text textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--hm-control-line);
+  border-radius: var(--hm-radius-sm);
+  background: var(--hm-surface);
+  color: var(--hm-ink);
+  font: inherit;
+  resize: vertical;
+}
+
+body.hilal-dashboard .plan-reason-text[hidden],
+body.hilal-dashboard .plan-reason-options[hidden],
+body.hilal-dashboard .plan-timing-options[hidden] { display: none; }

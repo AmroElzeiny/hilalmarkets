@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 
 import lxml.html
 import pytest
@@ -20,9 +21,12 @@ from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PLAN_OFFERS,
+    PUBLIC_PLAN_PRESENTATIONS,
+    PURCHASABLE_PLAN_CODES,
     visible_public_plan_codes,
 )
 from tests.integration.test_dashboard_web import _signup_and_verify
+from tests.support.billing_config import stub_payment_companies
 
 SUBSCRIPTION = "/dashboard/subscription"
 
@@ -49,6 +53,17 @@ async def test_the_page_renders(test_context):
     assert "hm-subscription-test.js" in page
     assert "hm-account-test.css" in page
     assert "Your plan" in page
+
+
+async def test_the_subscription_page_has_no_jump_bar(test_context):
+    """The jump bar was removed; nothing of it must be left in the markup."""
+
+    page = await _page(test_context, "sub-no-jump@example.com")
+    document = lxml.html.fromstring(page)
+
+    assert not document.xpath("//nav[contains(@class, 'a-jump')]")
+    assert not document.xpath("//*[@data-s-jump-link]")
+    assert not document.xpath("//*[@data-s-jump]")
 
 
 async def test_the_first_thing_is_what_you_have_not_what_you_could_buy(test_context):
@@ -129,14 +144,55 @@ async def test_every_visible_plan_has_a_card(test_context, code):
 
 @pytest.mark.parametrize(
     "code",
-    [code for code, offer in PLAN_OFFERS.items() if not offer.monthly_available],
+    [code for code in visible_public_plan_codes(billing_enabled=True)],
 )
-async def test_a_plan_nobody_can_buy_shows_no_price(test_context, code):
+async def test_card_feature_lists_use_the_shared_comparison_copy(test_context, code):
+    """The short list and its disclosure render only the shared plan catalog.
+
+    The comparison table and the cards both read that catalog. This check covers the
+    ``s-features`` and ``t-more`` split so moving a feature between the two cannot drop,
+    duplicate, or rewrite it.
+    """
+
+    page = await _page(test_context, f"sub-features-{code}@example.com")
+    document = lxml.html.fromstring(page)
+    (card,) = document.xpath(f'//li[@data-plan="{code}"]')
+    presentation = PUBLIC_PLAN_PRESENTATIONS[code]
+
+    highlight = card.xpath('.//p[contains(@class,"s-plan-highlight")]//span[last()]')
+    assert [node.text_content().strip() for node in highlight] == [
+        presentation.highlighted_feature
+    ]
+
+    feature_words = [
+        " ".join(node.text_content().split())
+        for node in card.xpath('.//ul[contains(@class,"s-features")]/li/span[last()]')
+    ]
+    expected = [
+        feature
+        for feature in presentation.visible_features
+        if feature != presentation.highlighted_feature
+    ] + list(presentation.additional_features)
+    assert feature_words == expected
+
+
+@pytest.mark.parametrize("code", PURCHASABLE_PLAN_CODES)
+async def test_a_plan_nobody_can_buy_shows_no_price(test_context, monkeypatch, code):
     """Rule G2. A number beside "Soon" reads as a charge somebody is about to face.
 
     The figure is not merely hidden by CSS — it is never rendered, so it is not in the
     page source for anyone to read either.
+
+    This used to be parametrised over "whichever plans are closed today". Every plan
+    opened, the list became empty, and pytest skipped the test without a word of
+    complaint: a test that proves nothing while reporting green. The rule is about the
+    page, not about which plans happen to be on sale this month — so the closed plan is
+    **made** here rather than waited for, and every paid plan is checked in turn.
     """
+
+    monkeypatch.setitem(
+        PLAN_OFFERS, code, replace(PLAN_OFFERS[code], monthly_available=False)
+    )
 
     page = await _page(test_context, f"sub-soon-{code}@example.com")
     document = lxml.html.fromstring(page)
@@ -363,8 +419,12 @@ async def test_each_plan_carries_the_ways_of_paying_that_really_work_for_it(test
     for card in cards:
         methods = card["pay_methods"]
         assert methods["card"]["available"] is False
-        # Only a plan that is really on sale can be paid for at all.
-        assert methods["crypto"]["available"] is (card["code"] == "trader")
+        # Only a plan that is really on sale can be paid for at all. Which plans those are
+        # is read from the catalog, not named here: this line said `== "trader"` and so
+        # failed the day Pro went on sale, while the page was behaving correctly.
+        assert methods["crypto"]["available"] is (
+            card["code"] in PURCHASABLE_PLAN_CODES
+        ), card["code"]
         # A plan that offers a Pay button must have some way of paying behind it.
         if card["buyable"]:
             assert any(choice["available"] for choice in methods.values()), card["code"]
@@ -411,11 +471,14 @@ async def test_choosing_a_switched_off_way_of_paying_says_what_to_use_instead(te
     )
 
 
-async def test_the_way_of_paying_that_is_open_can_still_be_chosen(test_context):
+async def test_the_way_of_paying_that_is_open_can_still_be_chosen(
+    test_context, monkeypatch
+):
     """The fix must not close the door that works."""
 
     await _signup_and_verify(test_context, email="sub-methods-crypto@example.com")
     _crypto_only(test_context)
+    stub_payment_companies(monkeypatch)
 
     page = await test_context["client"].get(SUBSCRIPTION)
     csrf = re.search(r'name="csrf_token" value="([a-f0-9]+)"', page.text)
@@ -440,11 +503,13 @@ async def test_the_way_of_paying_that_is_open_can_still_be_chosen(test_context):
         headers={"accept": "application/json", "x-requested-with": "XMLHttpRequest"},
     )
 
-    # The payment company itself is not reachable from a test, so the only thing proved
-    # here is that this way of paying was never refused as unavailable.
-    assert accepted.status_code in {200, 400}
-    if accepted.status_code == 400:
-        assert accepted.json()["error"]["code"] != "payment_method_unavailable"
+    # The payment company answers in process, so this proves the whole route: not merely
+    # that crypto was not refused, but that a real invoice page came back. It used to
+    # accept a 400 as well, because the request went out to the live NOWPayments with a
+    # fake key and came back refused — so the test passed whether our own rule was right
+    # or wrong, and would have gone on passing if the door had closed again.
+    assert accepted.status_code == 200, accepted.text
+    assert "nowpayments.io" in accepted.json()["checkout_url"]
 
 
 def _both_ways_open(test_context):

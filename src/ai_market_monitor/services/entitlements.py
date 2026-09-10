@@ -5,7 +5,14 @@ from uuid import UUID
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PlanDefinition, timeframe_to_minutes
+from ai_market_monitor.core.plans import (
+    PLAN_DEFINITIONS,
+    STRATEGY_APPROVAL_LIMIT_KEY,
+    STRATEGY_APPROVAL_WINDOW_DAYS,
+    PlanDefinition,
+    plan_rank,
+    timeframe_to_minutes,
+)
 from ai_market_monitor.db.models import (
     AuditEvent,
     EntitlementSnapshot,
@@ -19,6 +26,7 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import StrategyStatus, SubscriptionStatus, TrialStatus
 from ai_market_monitor.schemas.strategy import StrategyDefinition
+from ai_market_monitor.services.plan_limits import plan_limit_notice
 
 
 class EntitlementError(ValueError):
@@ -91,18 +99,46 @@ class EntitlementService:
 
     async def current(self, user_id: UUID) -> EntitlementContext:
         now = datetime.now(UTC)
-        subscription = await self.session.scalar(
-            select(Subscription)
-            .where(
-                Subscription.user_id == user_id,
-                Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
-                (Subscription.current_period_end.is_(None))
-                | (Subscription.current_period_end > now),
-            )
-            .order_by(Subscription.updated_at.desc())
+        # Every live subscription, not only the newest row. An account can hold more than
+        # one at a time: crypto access buys a fixed period and cannot be re-priced, so
+        # somebody moving to another plan buys it while the old period is still running.
+        #
+        # Which one they get is decided by the plan order, never by which row was written
+        # to last. "Most recently updated" is not the same question: any later touch on
+        # the older subscription — a webhook, a status sweep — would have silently taken
+        # away the plan the person had just paid for.
+        live = list(
+            (
+                await self.session.execute(
+                    select(Subscription, Plan)
+                    .join(Plan, Subscription.plan_id == Plan.id)
+                    .where(
+                        Subscription.user_id == user_id,
+                        Subscription.status.in_(
+                            [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]
+                        ),
+                        (Subscription.current_period_end.is_(None))
+                        | (Subscription.current_period_end > now),
+                    )
+                )
+            ).all()
         )
-        if subscription:
-            plan = await self.session.get(Plan, subscription.plan_id)
+        if live:
+
+            def _written_at(subscription: Subscription) -> datetime:
+                # Only a tie-break between two rows on the same plan. SQLite hands back a
+                # datetime with no time zone on it, and comparing one of those with an
+                # aware datetime raises - so both sides are made aware here rather than
+                # trusted to match.
+                stamp = subscription.updated_at
+                if stamp is None:
+                    return datetime.min.replace(tzinfo=UTC)
+                return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+
+            subscription, plan = max(
+                live,
+                key=lambda row: (plan_rank(row[1].code), _written_at(row[0])),
+            )
             code = plan.code if plan else "demo"
             return EntitlementContext(
                 plan=PLAN_DEFINITIONS.get(code, PLAN_DEFINITIONS["demo"]),
@@ -188,7 +224,9 @@ class EntitlementService:
         if active_count is not None and active_count >= limit:
             raise EntitlementError(
                 "active_strategy_limit",
-                f"Plan allows {limit} active monitor(s). Pause one before activating another.",
+                plan_limit_notice(
+                    "active_strategy_limit", plan_code=context.plan.code, allowed=limit
+                ),
             )
         symbol_limit = int(context.limit("symbols_per_strategy") or 0)
         requested_symbols = len(_unique_symbols(definition.universe.include_symbols)) or (
@@ -197,14 +235,20 @@ class EntitlementService:
         if requested_symbols > symbol_limit:
             raise EntitlementError(
                 "symbol_limit",
-                f"Plan allows up to {symbol_limit} symbols per strategy.",
+                plan_limit_notice(
+                    "symbol_limit", plan_code=context.plan.code, allowed=symbol_limit
+                ),
             )
         minimum_minutes = int(context.limit("minimum_timeframe_minutes") or 1)
         all_timeframes = [definition.base_timeframe, *definition.supporting_timeframes]
         if any(timeframe_to_minutes(timeframe) < minimum_minutes for timeframe in all_timeframes):
             raise EntitlementError(
                 "timeframe_not_allowed",
-                f"Plan supports {minimum_minutes}-minute timeframe or higher.",
+                plan_limit_notice(
+                    "timeframe_not_allowed",
+                    plan_code=context.plan.code,
+                    allowed=minimum_minutes,
+                ),
             )
         if "discord" in definition.alerts.channels:
             raise EntitlementError(
@@ -221,15 +265,20 @@ class EntitlementService:
     ) -> EntitlementContext:
         """Enforce the rolling approval allowance without blocking revisions.
 
-        The allowance counts distinct strategies first approved during the last 30 days.
-        A corrected version of one of those strategies remains approvable because it does
+        The allowance counts distinct strategies first approved during the window. A
+        corrected version of one of those strategies remains approvable because it does
         not consume another strategy slot.
+
+        The window is the same length on every plan — only the count differs — and both
+        the length and the key holding the count come from ``core/plans.py``. They were
+        written out here as ``30`` and as a string literal, so the pricing table saying
+        "per 30 days" and this gate counting 30 days agreed only by coincidence.
         """
         await self.session.scalar(
             select(User.id).where(User.id == user_id).with_for_update()
         )
         context = await self.current(user_id)
-        raw_limit = context.limit("strategy_approvals_per_30_days")
+        raw_limit = context.limit(STRATEGY_APPROVAL_LIMIT_KEY)
         if raw_limit is None:
             return context
         limit = int(raw_limit)
@@ -239,13 +288,16 @@ class EntitlementService:
             .where(
                 Strategy.user_id == user_id,
                 Strategy.id != strategy_id,
-                StrategyVersion.approved_at >= datetime.now(UTC) - timedelta(days=30),
+                StrategyVersion.approved_at
+                >= datetime.now(UTC) - timedelta(days=STRATEGY_APPROVAL_WINDOW_DAYS),
             )
         )
         if int(approved_count or 0) >= limit:
             raise EntitlementError(
                 "strategy_approval_limit",
-                f"Plan allows approval of {limit} strategies per 30 days.",
+                plan_limit_notice(
+                    "strategy_approval_limit", plan_code=context.plan.code, allowed=limit
+                ),
             )
         return context
 

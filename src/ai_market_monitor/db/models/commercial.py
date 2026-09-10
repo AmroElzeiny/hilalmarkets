@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -61,6 +62,69 @@ class Subscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SubscriptionPlanChange(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """One request by a customer to cancel, move up a plan, or move down a plan.
+
+    Written the moment the person presses the button in their own dashboard, before
+    anything is asked of the payment company. That order matters: the payment company can
+    be slow or unreachable, and a request that only existed inside a failed API call is a
+    request nobody can see afterwards — including the person who made it.
+
+    So this row is the record, and ``status`` says how far it got:
+
+    ``requested``
+        Written down. Nothing has been asked of the payment company yet.
+    ``scheduled``
+        The payment company has agreed to make the change when the paid period ends.
+    ``applied``
+        The change is in force.
+    ``failed``
+        The payment company refused. ``provider_error`` says what it said. The customer's
+        access is untouched, and somebody has to look.
+
+    ``consent_text`` is the exact sentence the person ticked, stored word for word rather
+    than as a flag. A tick box records that somebody agreed; only the sentence records
+    *what* they agreed to, and the wording of these two boxes — that the card will not be
+    charged again, and that the plan runs to the end of the period already paid for — is
+    the whole promise being made.
+    """
+
+    __tablename__ = "subscription_plan_changes"
+    __table_args__ = (
+        Index("ix_plan_change_user_created", "user_id", "created_at"),
+        Index("ix_plan_change_due", "status", "effective_at"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    subscription_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("subscriptions.id", ondelete="SET NULL")
+    )
+    #: ``cancel``, ``upgrade`` or ``downgrade``.
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    from_plan_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    #: ``None`` for a cancellation, because there is no plan to move to.
+    to_plan_code: Mapped[str | None] = mapped_column(String(50))
+    #: ``immediate`` or ``period_end``.
+    timing: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="requested", nullable=False)
+    #: The reason picked from the list, and the free typing when ``other`` was picked.
+    #: Both are kept: a chosen reason can be counted, and typed words explain it.
+    reason_code: Mapped[str | None] = mapped_column(String(40))
+    reason_text: Mapped[str | None] = mapped_column(String(500))
+    consent_text: Mapped[str] = mapped_column(String(500), nullable=False)
+    consented_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: When the change takes effect. For a change at the end of the period this is the end
+    #: of the period already paid for, which is also when the next charge would have been.
+    effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider: Mapped[str | None] = mapped_column(String(40))
+    provider_reference: Mapped[str | None] = mapped_column(String(255))
+    provider_error: Mapped[str | None] = mapped_column(String(500))
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
 
 class Trial(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -187,6 +251,58 @@ class BillingCheckoutAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(String(500))
     billing_profile: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    #: Filled only when this checkout replaces a different paid plan. These links freeze
+    #: the exact paid period and payment record before the customer leaves for payment.
+    replaces_subscription_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("subscriptions.id", ondelete="RESTRICT")
+    )
+    replaces_checkout_attempt_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("billing_checkout_attempts.id", ondelete="RESTRICT")
+    )
+
+
+class PlanMoveMoneyOwed(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Money a person must send after a paid plan was replaced."""
+
+    __tablename__ = "plan_move_money_owed"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_plan_move_money_owed_key"),
+        Index("ix_plan_move_money_owed_due", "status", "due_at"),
+        Index("ix_plan_move_money_owed_user", "user_id", "created_at"),
+        CheckConstraint("paid_amount >= 0", name="ck_plan_move_paid_nonnegative"),
+        CheckConstraint("amount_owed > 0", name="ck_plan_move_owed_positive"),
+        CheckConstraint("amount_owed <= paid_amount", name="ck_plan_move_owed_not_more_paid"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    ended_subscription_id: Mapped[UUID] = mapped_column(
+        ForeignKey("subscriptions.id", ondelete="RESTRICT"), nullable=False
+    )
+    replacement_subscription_id: Mapped[UUID] = mapped_column(
+        ForeignKey("subscriptions.id", ondelete="RESTRICT"), nullable=False
+    )
+    source_checkout_attempt_id: Mapped[UUID] = mapped_column(
+        ForeignKey("billing_checkout_attempts.id", ondelete="RESTRICT"), nullable=False
+    )
+    billing_event_id: Mapped[UUID] = mapped_column(
+        ForeignKey("billing_events.id", ondelete="RESTRICT"), nullable=False
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    from_plan_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    to_plan_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    original_period_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    paid_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    amount_owed: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending_manual", nullable=False)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class PaymentEmailDelivery(UUIDPrimaryKeyMixin, Base):
@@ -203,6 +319,9 @@ class PaymentEmailDelivery(UUIDPrimaryKeyMixin, Base):
         ForeignKey("billing_events.id", ondelete="CASCADE"), nullable=False
     )
     event_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str] = mapped_column(
+        String(40), default="payment_success", nullable=False
+    )
     recipient: Mapped[str] = mapped_column(String(320), nullable=False)
     plan_code: Mapped[str] = mapped_column(String(50), nullable=False)
     billing_frequency: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -266,6 +385,17 @@ class UsageRecord(UUIDPrimaryKeyMixin, Base):
 
 
 class ReferralRelationship(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Which affiliate a customer belongs to. One row per customer, and it does not move.
+
+    The unique key on ``referred_user_id`` is the whole rule: a person belongs to one
+    affiliate, decided the first time they arrive, and cancelling a subscription and
+    starting a new one later changes nothing here. The only things that end it are the
+    account being deleted — the foreign key takes the row with it — and the account being
+    banned, which
+    :meth:`~ai_market_monitor.services.referral_attribution.ReferralAttributionService.release`
+    does deliberately.
+    """
+
     __tablename__ = "referral_relationships"
     __table_args__ = (
         UniqueConstraint("referred_user_id", name="uq_referral_referred_user"),
@@ -281,6 +411,13 @@ class ReferralRelationship(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     referral_code_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("referral_codes.id", ondelete="SET NULL")
     )
+    #: How this customer came to belong to this affiliate: ``link`` — they arrived on the
+    #: affiliate's link — or ``code``, they typed the code and had arrived on no link.
+    #:
+    #: It is stored because the affiliate's page counts the two separately and because it
+    #: is the evidence behind a payment. Working it out afterwards is impossible: the link
+    #: and the code are the same code, so nothing in the row would say which door was used.
+    assignment_source: Mapped[str | None] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(32), default="trial_activated", nullable=False)
     reward_status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
     reward_granted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

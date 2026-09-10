@@ -194,11 +194,90 @@
   border-color: var(--emerald-700);
 }
 
+/* ── The time logs ──────────────────────────────────────────────────────────────
+ *
+ * A popup for each figure the page shows, opened from the card itself. Layout only,
+ * exactly like the rest of this sheet: the surface, the line and the shadow are the
+ * shared tokens, so these windows look like the product's other popups without a single
+ * colour being written here.
+ *
+ * The backdrop is the one thing a <dialog> cannot inherit — it is painted by the browser
+ * and is transparent unless a rule says otherwise — so it takes the same dark wash the
+ * dashboard's other dialogs use, through the shared shadow token's own family. */
+/* Six figures, not four. The shared `.stat-grid` is a fixed four-column track, which
+ * leaves this page's last row two-thirds empty; auto-fit lets the six cards use the width
+ * they have at every size. Scoped to this page so no other stat row changes shape. */
+.hm-aff-stats {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.hm-aff-log-open {
+  margin-top: 12px;
+}
+
+.hm-aff-log {
+  width: min(760px, calc(100% - 28px));
+  max-height: min(90vh, 860px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--hm-surface);
+  color: var(--ink);
+  box-shadow: var(--hm-shadow-popover);
+}
+
+.hm-aff-log::backdrop {
+  /* The one place this sheet reaches for a colour, and it reaches for a token rather
+     than a value. `color-mix` keeps it a wash over the brand's own ink instead of an
+     invented grey. */
+  background: color-mix(in srgb, var(--hm-ink) 52%, transparent);
+}
+
+.hm-aff-log-shell {
+  display: flex;
+  flex-direction: column;
+  max-height: inherit;
+  min-width: 0;
+}
+
+.hm-aff-log-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px clamp(16px, 4vw, 26px);
+  border-bottom: 1px solid var(--line);
+}
+.hm-aff-log-head h2 {
+  margin: 4px 0 0;
+  font-size: clamp(1.1rem, 3vw, 1.4rem);
+}
+.hm-aff-log-head p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.hm-aff-log-head .btn {
+  flex: none;
+}
+
+/* The rows scroll, the heading does not. A log with sixty payments in it is the normal
+ * case for somebody doing well, and losing the title while scrolling loses which of the
+ * four windows is open. */
+.hm-aff-log-body {
+  overflow: auto;
+  padding: clamp(14px, 3vw, 22px);
+}
+
 @media (max-width: 720px) {
   .hm-aff-code-row {
     align-items: stretch;
   }
   .hm-aff-code-row .btn {
     justify-content: center;
+  }
+  .hm-aff-log {
+    max-height: 92vh;
   }
 }

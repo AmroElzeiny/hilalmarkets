@@ -13,8 +13,63 @@
 {% extends "hilal/base_dashboard.html" %}
 
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-affiliate.css') }}?v=20260905-inspector-left">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-affiliate.css') }}?v=20260910-pay-now">
 {% endblock %}
+
+{#- Every money figure on this page can be opened. A total nobody can look inside is a
+    number an affiliate is asked to trust; these show the moment, the person and the
+    amount behind each one.
+
+    One macro draws all four popups, so they cannot drift into four slightly different
+    windows. The browser's own <dialog> gives the focus trap, the Escape key and the
+    inert background; `hm-affiliate.js` adds the three things it does not — returning the
+    keyboard to the button that opened it, closing on a click outside, and the movement.
+    That last part is `hm-dialog.js`, shared with every other popup in the product. -#}
+{% macro log_dialog(dialog_id, kicker, title, lede, is_empty, empty_words) %}
+<dialog class="hm-aff-log" id="{{ dialog_id }}" aria-labelledby="{{ dialog_id }}-title" data-hm-aff-log>
+  {#- `t-dialog-shell` is not a style here — this page does not load the sheet that
+      defines it. It is the element `hm-dialog.js` animates, and naming it the way every
+      other popup in the product names it is what lets one shared helper drive them all.
+      The layout is `hm-aff-log-shell`, in this page's own sheet. -#}
+  <div class="hm-aff-log-shell t-dialog-shell">
+    <header class="hm-aff-log-head">
+      <div>
+        <span class="kicker">{{ kicker }}</span>
+        <h2 id="{{ dialog_id }}-title">{{ title }}</h2>
+        <p>{{ lede }}</p>
+      </div>
+      <button class="btn btn-secondary btn-icon" type="button" data-hm-aff-log-close
+              aria-label="Close this list">
+        <span data-icon="close" data-icon-class="icon"></span>
+      </button>
+    </header>
+    <div class="hm-aff-log-body">
+      {% if is_empty %}
+      <div class="empty-state">
+        <div class="icon-box"><span data-icon="history" data-icon-class="icon"></span></div>
+        <h3>Nothing here yet</h3>
+        <p>{{ empty_words }}</p>
+      </div>
+      {% else %}
+      {{ caller() }}
+      {% endif %}
+    </div>
+  </div>
+</dialog>
+{% endmacro %}
+
+{#- The button that opens one. A button and not a link: it goes nowhere, and a link that
+    goes nowhere is announced to a screen reader as somewhere to go.
+
+    Each one says a different thing on purpose. Four buttons all reading "See who" are
+    four controls a screen reader announces identically, and a person listening to the
+    page cannot tell which figure they are about to open. -#}
+{% macro log_button(dialog_id, words) %}
+<button class="btn btn-secondary btn-sm hm-aff-log-open" type="button"
+        data-hm-aff-log-open="{{ dialog_id }}">
+  <span data-icon="history" data-icon-class="icon-sm"></span>{{ words }}
+</button>
+{% endmacro %}
 
 {% block content %}
 {%- set state = application.status if application else 'none' -%}
@@ -23,8 +78,8 @@
   <div>
     <span class="kicker">Affiliate programme</span>
     <h1>Earn by sharing Hilal Markets</h1>
-    <p>Share a discount code with your audience. When somebody joins with it and pays,
-      you keep a share of what they pay.</p>
+    <p>Share your link or your code with your audience. When somebody joins through you
+      and pays, you keep a share — the first time, and every time they pay again.</p>
   </div>
 </div>
 
@@ -54,7 +109,8 @@
   <div class="hm-aff-summary">
     <div><small>Name</small><strong>{{ application.display_name }}</strong></div>
     <div><small>Code you asked for</small><strong>{{ application.requested_discount_code }}</strong></div>
-    <div><small>Your share</small><strong>{{ '%.0f'|format(application.requested_commission_percent) }}%</strong></div>
+    <div><small>Your share, first payment</small><strong>{{ '%.0f'|format(application.requested_commission_percent) }}%</strong></div>
+    <div><small>Your share, later payments</small><strong>{{ '%.0f'|format(application.requested_commission_percent) }}%</strong></div>
     <div><small>Sent</small><strong>{{ application.submitted_at.strftime('%d %b %Y, %H:%M UTC') }}</strong></div>
   </div>
   <div class="hm-aff-links">
@@ -81,20 +137,21 @@
 
 {# ══ Approved — the numbers, the link, and the money ═════════════════════════ #}
 {% if state == 'approved' %}
-<section class="stat-grid">
+<section class="stat-grid hm-aff-stats">
   <article class="stat-card">
     <div class="stat-head">
-      <div class="icon-box"><span data-icon="user" data-icon-class="icon"></span></div>
+      <div class="icon-box"><span data-icon="copy" data-icon-class="icon"></span></div>
     </div>
-    <div class="value">{{ stats.uses }}</div>
-    <div class="caption">People who used your code</div>
+    <div class="value">{{ stats.code_uses }}</div>
+    <div class="caption">Times your code was used</div>
+    {{ log_button('hm-aff-log-codes', 'See every use') }}
   </article>
   <article class="stat-card">
     <div class="stat-head">
-      <div class="icon-box is-gold"><span data-icon="check" data-icon-class="icon"></span></div>
+      <div class="icon-box is-gold"><span data-icon="user" data-icon-class="icon"></span></div>
     </div>
-    <div class="value">{{ stats.paid_conversions }}</div>
-    <div class="caption">Of those, paid a plan</div>
+    <div class="value">{{ stats.link_signups }}</div>
+    <div class="caption">People signed up through your link</div>
   </article>
   <article class="stat-card">
     <div class="stat-head">
@@ -102,6 +159,23 @@
     </div>
     <div class="value">${{ '%.2f'|format(stats.total_commission_usd) }}</div>
     <div class="caption">Earned in total</div>
+    {{ log_button('hm-aff-log-all', 'See every payment') }}
+  </article>
+  <article class="stat-card">
+    <div class="stat-head">
+      <div class="icon-box"><span data-icon="spark" data-icon-class="icon"></span></div>
+    </div>
+    <div class="value">${{ '%.2f'|format(stats.first_commission_usd) }}</div>
+    <div class="caption">Earned the first time people paid</div>
+    {{ log_button('hm-aff-log-first', 'See first payments') }}
+  </article>
+  <article class="stat-card">
+    <div class="stat-head">
+      <div class="icon-box"><span data-icon="refresh" data-icon-class="icon"></span></div>
+    </div>
+    <div class="value">${{ '%.2f'|format(stats.subsequent_commission_usd) }}</div>
+    <div class="caption">Earned every time after that</div>
+    {{ log_button('hm-aff-log-later', 'See later payments') }}
   </article>
   <article class="stat-card hm-aff-balance">
     <div class="stat-head">
@@ -113,6 +187,83 @@
   </article>
 </section>
 
+{# ── The four time logs ─────────────────────────────────────────────────────── #}
+{% call log_dialog(
+  'hm-aff-log-codes',
+  'Time log',
+  'Every time your code was used',
+  'Someone typed your code, or arrived on your link and made an account.',
+  not stats.code_use_log,
+  'Nobody has used your code yet. Share your link where your audience already is.'
+) %}
+<div class="table-wrap">
+  <table class="data-table hm-aff-table">
+    <caption class="sr-only">Every time your code was used, with the person and the moment</caption>
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">When</th>
+        <th scope="col">Where</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for use in stats.code_use_log %}
+      <tr>
+        <td>{{ use.customer_name }}</td>
+        <td>{{ use.used_at.strftime('%d %b %Y, %H:%M UTC') }}</td>
+        <td>{{ use.where }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endcall %}
+
+{#- The three money logs are one shape, so they are drawn from one loop rather than
+    written out three times. Three copies is three places for the same column to be
+    fixed twice and missed once. -#}
+{% set money_logs = [
+  ('hm-aff-log-all', 'Every payment', 'Everything you have earned',
+   'Every payment that earned you money, newest first.', stats.commission_log),
+  ('hm-aff-log-first', 'First payments', 'Earned the first time people paid',
+   'The first payment from each person who joined through you.', stats.first_commission_log),
+  ('hm-aff-log-later', 'Later payments', 'Earned every time after that',
+   'Every payment after somebody’s first one — renewals, and anyone who came back.',
+   stats.subsequent_commission_log)
+] %}
+{% for dialog_id, kicker, title, lede, rows in money_logs %}
+{% call log_dialog(dialog_id, kicker, title, lede, not rows,
+                   'Nothing has been paid yet. This fills in as people you brought pay.') %}
+<div class="table-wrap">
+  <table class="data-table hm-aff-table">
+    <caption class="sr-only">{{ title }}, with the person, the moment and the amount</caption>
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">When</th>
+        <th scope="col">They paid</th>
+        <th scope="col">Your share</th>
+        <th scope="col">You earned</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.customer_name }}</td>
+        <td>{{ row.earned_at.strftime('%d %b %Y, %H:%M UTC') }}</td>
+        <td class="hm-aff-amount">${{ '%.2f'|format(row.paid_amount_usd) }}</td>
+        <td>{{ '%.0f'|format(row.commission_percent) }}%
+          <small class="muted hm-aff-sub">{{ 'First time' if row.is_first else 'A later payment' }}</small>
+        </td>
+        <td class="hm-aff-amount">${{ '%.2f'|format(row.amount_usd) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endcall %}
+{% endfor %}
+
 <section class="panel">
   <div class="panel-head">
     <div>
@@ -120,7 +271,8 @@
       <h2>Share this and you get paid</h2>
       <p>Anyone who joins with your code saves
         {{ '%.0f'|format(application.discount_percent) }}%. You keep
-        {{ '%.0f'|format(application.commission_percent) }}% of what they pay.</p>
+        {{ '%.0f'|format(rates.first_percent) }}% the first time they pay, and
+        {{ '%.0f'|format(rates.subsequent_percent) }}% every time after that.</p>
     </div>
     <span class="badge badge-eligible"><span data-icon="shield_check" data-icon-class="icon-sm"></span>Approved</span>
   </div>
@@ -143,7 +295,9 @@
         <span data-icon="copy" data-icon-class="icon-sm"></span>Copy link
       </button>
     </div>
-    <p class="field-help">The link fills the code in for them, so nobody has to type it.</p>
+    <p class="field-help">The link fills the code in for them, so nobody has to type it.
+      Anyone who opens it becomes yours when they make an account — even if they come
+      back days later, and even if they close the page first.</p>
   </div>
 </section>
 
@@ -152,18 +306,20 @@
   <div class="panel-head">
     <div>
       <span class="kicker">Your people</span>
-      <h2>Who joined with your code</h2>
-      <p>Names and dates only. We never show you anybody's email address.</p>
+      <h2>Who joined through you</h2>
+      <p>Names and dates only. We never show you anybody's email address. These people
+        stay yours — if they stop paying and come back later, you still earn.</p>
     </div>
   </div>
   {% if stats.earnings %}
   <div class="table-wrap">
     <table class="data-table hm-aff-table">
-      <caption class="sr-only">People who joined with your code, and what each one earned you</caption>
+      <caption class="sr-only">People who joined through you, and what each one earned you</caption>
       <thead>
         <tr>
           <th scope="col">Name</th>
           <th scope="col">Joined</th>
+          <th scope="col">Came from</th>
           <th scope="col">Paid a plan</th>
           <th scope="col">You earned</th>
         </tr>
@@ -173,6 +329,7 @@
         <tr>
           <td>{{ earning.customer_name }}</td>
           <td>{{ earning.joined_at.strftime('%d %b %Y') }}</td>
+          <td>{{ 'Your link' if earning.joined_through_link else 'Your code' }}</td>
           <td>
             {% if earning.is_paid_conversion %}
             <span class="badge badge-eligible"><span data-icon="check" data-icon-class="icon-sm"></span>Yes</span>
@@ -353,15 +510,21 @@
       <p class="field-help">Letters, numbers and dashes. Short is easier to say out loud.</p>
     </div>
 
-    {# The share is a fact, not a question. There is no box for it — a box nobody can use
-       still sends its number with the form, and it invites a person to try. #}
+    {# Both shares are facts, not questions. There is no box for either — a box nobody can
+       use still sends its number with the form, and it invites a person to try. #}
     <div class="hm-aff-share">
       <div class="hm-aff-share-value">
-        <small>Your share</small>
+        <small>First time they pay</small>
+        <strong>{{ default_commission }}%</strong>
+      </div>
+      <div class="hm-aff-share-value">
+        <small>Every time after that</small>
         <strong>{{ default_commission }}%</strong>
       </div>
       <p>Everybody starts here. You keep {{ default_commission }}% of what the people you
-        bring pay. We set this one, so there is nothing to fill in.
+        bring pay — the first time, and every time they pay again. They do not have to use
+        your link or your code again; once somebody is yours, they stay yours.
+        We set these, so there is nothing to fill in.
         <strong>Want a bigger share than {{ default_commission }}%?</strong> Write to
         <a href="mailto:{{ alternative_method_email }}">{{ alternative_method_email }}</a>
         and tell us about your audience. A person will read it and answer.</p>
@@ -395,5 +558,5 @@
 {% endblock %}
 
 {% block page_scripts %}
-<script src="{{ url_for('static', path='/hm-affiliate.js') }}?v=20260905-inspector-left" defer></script>
+<script type="module" src="{{ url_for('static', path='/hm-affiliate.js') }}?v=20260910-pay-now"></script>
 {% endblock %}

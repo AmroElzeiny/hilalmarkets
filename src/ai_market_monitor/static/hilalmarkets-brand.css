@@ -51,6 +51,15 @@
   --hm-on-ink-soft: #aeb4bd;
   --hm-on-ink-line: #767b83;
   --hm-blue: #2a8fc3;
+  /* The "ask the assistant" button. `--hm-sky` is the deepest-legible member of the
+     sky-blue family: white text on it measures 4.86:1 (WCAG AA text) and the fill on
+     the canvas measures 4.56:1 (WCAG 1.4.11 non-text). */
+  --hm-sky: #0e78af;
+  /* Hover / active state for the Ask AI button. White on it measures 6.93:1. */
+  --hm-sky-strong: #0a6086;
+  /* Soft tint for the assistant's own plates and flashes. Must never sit behind white
+     text: `--hm-ink` on it measures 12.10:1. */
+  --hm-sky-soft: #e6f4fb;
   --hm-warning: #8a6316;
   --hm-warning-bg: #fdf2df;
   --hm-danger: #8d3029;

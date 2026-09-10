@@ -395,6 +395,15 @@ class SourceResolutionService:
         #: Chromiums, two page budgets, and only one of them ever shut down; on a 3.9 GB
         #: server the second one is the largest thing running.
         self.renderer = renderer or BrowserPageRenderer(settings)
+        #: True only while one of the sweep methods is walking a list of coins. They own
+        #: the browser for the whole list and shut it down at the end, which is the point
+        #: of having one browser rather than one per coin.
+        #:
+        #: `resolve_asset` is also called on its own, and outside a sweep nobody was left
+        #: to close what it started — so a single coin resolved by itself left a Chromium
+        #: and its driver process running for the life of the worker. See the flag read in
+        #: :meth:`resolve_asset`.
+        self._sweeping = False
         self.discovery = discovery or WebSourceDiscovery(
             settings, fetcher=self.fetcher, renderer=self.renderer
         )
@@ -485,10 +494,12 @@ class SourceResolutionService:
         # ``preload_provider_links``: the endpoint carries up to a hundred symbols, so a
         # 100-coin sweep costs about one credit here and about a hundred without it.
         await self.preload_provider_links([asset.symbol for asset in assets])
+        self._sweeping = True
         try:
             for asset in assets:
                 sweep.assets.append(await self.resolve_asset(asset, deep=deep))
         finally:
+            self._sweeping = False
             # One browser for the whole sweep, and it has to be shut down whatever
             # happened — a Chromium left running is the largest thing on a 3.9 GB server.
             await self.renderer.aclose()
@@ -554,10 +565,12 @@ class SourceResolutionService:
         # whole button exists to run again, and asking for 157 coins one at a time spends
         # 157 credits and 157 round trips before the first page is even fetched.
         await self.preload_provider_links([asset.symbol for asset in assets])
+        self._sweeping = True
         try:
             for asset in assets:
                 sweep.assets.append(await self.resolve_asset(asset, deep=True))
         finally:
+            self._sweeping = False
             # One browser for the whole sweep, and it has to be shut down whatever
             # happened — a Chromium left running is the largest thing on a 3.9 GB server.
             await self.renderer.aclose()
@@ -627,7 +640,25 @@ class SourceResolutionService:
         channels and ask a search engine, even when the coin already has a working link
         in every category. The scheduled sweep does not, because both cost somebody
         else's server a request; the operator's re-check does.
+
+        **Whoever starts a browser closes it.** Inside a sweep that is the sweep, which
+        owns one browser for the whole list of coins. Called on its own, this is the only
+        owner there is — and it used to start a Chromium and walk away from it, so a
+        single coin resolved by itself left the largest process on the server running with
+        nobody to stop it.
         """
+
+        if self._sweeping:
+            return await self._resolve_asset(asset, deep=deep)
+        try:
+            return await self._resolve_asset(asset, deep=deep)
+        finally:
+            await self.renderer.aclose()
+
+    async def _resolve_asset(
+        self, asset: CanonicalAsset, *, deep: bool = False
+    ) -> AssetSourceOutcome:
+        """One asset's links, without deciding who closes the browser."""
 
         outcome = AssetSourceOutcome(asset_id=asset.id, symbol=asset.symbol)
         rows = await self._existing_rows(asset.id)

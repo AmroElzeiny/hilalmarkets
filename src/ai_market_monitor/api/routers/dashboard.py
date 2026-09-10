@@ -43,17 +43,17 @@ from ai_market_monitor.core.dashboard_paths import (
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     COMING_SOON_LABEL,
-    LAUNCH_DISCOUNT_CODE,
+    PLAN_CHANGE_UPGRADE,
     PLAN_DEFINITIONS,
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
     effective_monthly_price,
-    launch_discount_percent,
     maximum_annual_saving,
+    original_monthly_price,
+    plan_name,
     plan_offer,
-    plan_offer_payload,
     promotion_is_active,
     visible_plan_comparison,
     visible_plan_comparison_headers,
@@ -86,6 +86,7 @@ from ai_market_monitor.db.models import (
     StrategyUniverse,
     StrategyVersion,
     Subscription,
+    SubscriptionPlanChange,
     TelegramConnection,
     Trial,
     User,
@@ -99,7 +100,6 @@ from ai_market_monitor.db.models.enums import (
     MonitorShariaAssetStatus,
     ShariaAssetStatus,
     StrategyStatus,
-    SubscriptionStatus,
     UserRole,
 )
 from ai_market_monitor.engine.quality import alert_trust_score_from_proof
@@ -123,26 +123,42 @@ from ai_market_monitor.services.affiliate import (
     first_name_of,
     try_sending_now,
 )
+from ai_market_monitor.services.affiliate_attribution import (
+    CONTEXT_CHECKOUT,
+    CONTEXT_SIGNUP,
+    REFERRAL_LINK_QUERY_KEY,
+    ReferralAttributionService,
+    forget_link_code,
+    link_code_in_cookies,
+    link_code_in_query,
+)
 from ai_market_monitor.services.affiliate_payout_options import (
     ALTERNATIVE_METHOD_EMAIL,
     MINIMUM_PAYOUT_USD,
     payout_options_payload,
 )
 from ai_market_monitor.services.billing import (
+    CHARGE_STORY_BEFORE_CHOOSING,
     DISCOUNT_CODE_METHODS,
     PAYMENT_METHODS,
     BillingError,
     BillingService,
+    active_paid_plan_codes,
     billing_method_provider,
     billing_provider_capabilities,
     configured_billing_provider,
     creem_product_id_for,
     method_takes_discount_code,
+    paid_access_can_be_repriced,
     payment_method_available,
     payment_method_offers,
     payment_method_offers_by_method,
     payment_method_payload,
     payment_method_refusal,
+    plan_checkout_availability,
+    plan_is_on_sale,
+    plan_sale_payload,
+    provider_method,
 )
 from ai_market_monitor.services.capability_extensions import CapabilityExtensionService
 from ai_market_monitor.services.coverage import market_coverage_for_user
@@ -163,6 +179,22 @@ from ai_market_monitor.services.monitor_operations import (
 )
 from ai_market_monitor.services.monitor_scan_state import scan_state_for_version
 from ai_market_monitor.services.payment_emails import PaymentEmailRenderer
+from ai_market_monitor.services.plan_changes import (
+    CANCELLATION_REASONS,
+    CONSENT_CANCEL,
+    CONSENT_DOWNGRADE,
+    CONSENT_UPGRADE_NOW,
+    CONSENT_UPGRADE_PERIOD_END,
+    DOWNGRADE_REASONS,
+    OTHER_REASON_CODE,
+    SWITCH_LABEL_BUY,
+    SWITCH_LABEL_BUY_ANNUAL,
+    TIMING_IMMEDIATE,
+    TIMING_PERIOD_END,
+    PlanChangeError,
+    PlanChangeService,
+    reason_words,
+)
 from ai_market_monitor.services.product_language import (
     checking_message_overrides,
     freshness_words,
@@ -345,69 +377,137 @@ def _optional_uuid(value: str | None, *, label: str) -> UUID | None:
         raise HTTPException(status_code=422, detail=f"Choose a valid {label}.") from exc
 
 
-async def _active_paid_plan_codes(
-    session: AsyncSession,
-    *,
-    user_id: UUID,
-) -> frozenset[str]:
-    """Return provider-backed active plans, never administrative access."""
-    active_codes = list(
-        (
-            await session.scalars(
-                select(Plan.code)
-                .join(Subscription, Subscription.plan_id == Plan.id)
-                .where(
-                    Subscription.user_id == user_id,
-                    Subscription.provider.notin_(("admin", "free", "trial")),
-                    Subscription.status.in_(
-                        (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
-                    ),
-                    (Subscription.current_period_end.is_(None))
-                    | (Subscription.current_period_end > datetime.now(UTC)),
-                )
-                .order_by(Subscription.updated_at.desc())
-            )
-        ).all()
+async def _primary_email(session: AsyncSession, user_id: UUID) -> str | None:
+    """The address on the account, or ``None``.
+
+    One reading. Three places asked this question with the same four-line query written
+    out again each time, and each one is a chance to forget the ``is_verified`` half — a
+    notice sent to an unverified address goes to somebody who may not own it.
+    """
+
+    return await session.scalar(
+        select(UserIdentity.normalized_identifier)
+        .where(
+            UserIdentity.user_id == user_id,
+            UserIdentity.provider == IdentityProvider.EMAIL,
+            UserIdentity.is_primary.is_(True),
+            UserIdentity.is_verified.is_(True),
+        )
+        .limit(1)
     )
-    return frozenset(active_codes)
 
 
-def _plan_checkout_allowed(
-    *, plan_code: str, active_paid_plan_codes: frozenset[str]
-) -> bool:
-    offer = plan_offer(plan_code)
-    return (
-        plan_code not in active_paid_plan_codes
-        and (offer.monthly_available or offer.annual_available)
-    )
+#: The one plain reason shown when a plan can no longer be bought. It must be a
+#: sentence a beginner can act on, with no internal field names.
+_NOT_ON_SALE_REASON = "That plan is not on sale right now. Choose another plan or ask us."
 
 
 def _billing_history_rows(
     attempts: list[BillingCheckoutAttempt],
     plans: dict[UUID, Plan],
+    settings: Settings,
     *,
     now: datetime,
 ) -> list[dict[str, Any]]:
+    """One owner for "what may this person do next about an unfinished payment".
+
+    Every surface that renders a payment row reads the answer from here. The templates
+    never re-derive it, because two surfaces deciding the same thing is how an offer
+    appears on one page and disappears on another.
+    """
+
     rows: list[dict[str, Any]] = []
     for attempt in attempts:
+        plan = plans.get(attempt.plan_id)
+        plan_code = plan.code if plan is not None else None
+        billing_cycle = attempt.billing_cycle or "monthly"
+        # Stored attempts keep the provider-normalised name (e.g. ``monthly_auto_renewal``
+        # for a Creem subscription, ``one_time_30_day`` for a crypto invoice). The sale
+        # question is only about monthly vs annual, so ask it in the catalog's own words.
+        offer_cycle = {
+            "monthly": "monthly",
+            "monthly_auto_renewal": "monthly",
+            "one_time_30_day": "monthly",
+            "annual": "annual",
+            "annual_auto_renewal": "annual",
+        }.get(billing_cycle, billing_cycle)
+
         expires_at = attempt.expires_at
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=UTC)
-        can_resume = (
-            attempt.status == "pending"
+
+        status = (attempt.status or "").lower()
+        live_url = (
+            status == "pending"
             and bool(attempt.checkout_url)
             and bool(attempt.provider_session_id)
             and expires_at > now
         )
-        plan = plans.get(attempt.plan_id)
+
+        next_step: dict[str, Any] | None = None
+        blocked_reason: str | None = None
+
+        if status in {"completed", "refunded", "processing", "creating"}:
+            # Settled or in flight: never offer a second attempt.
+            pass
+        elif status == "pending":
+            if live_url:
+                if plan_code and plan_is_on_sale(
+                    settings, plan_code, billing_cycle=offer_cycle
+                ):
+                    next_step = {
+                        "kind": "resume",
+                        "label": "Finish paying",
+                        "url": f"/dashboard/billing/checkout/{attempt.id}/resume",
+                        "reason": None,
+                    }
+                else:
+                    blocked_reason = _NOT_ON_SALE_REASON
+            else:
+                if plan_code and plan_is_on_sale(
+                    settings, plan_code, billing_cycle=offer_cycle
+                ):
+                    next_step = {
+                        "kind": "retry",
+                        "label": "Try again",
+                        "url": None,
+                        "reason": None,
+                    }
+                else:
+                    blocked_reason = _NOT_ON_SALE_REASON
+        elif status in {"failed", "expired", "cancelled", "provider_unavailable"}:
+            if plan_code and plan_is_on_sale(
+                settings, plan_code, billing_cycle=offer_cycle
+            ):
+                next_step = {
+                    "kind": "retry",
+                    "label": "Try again",
+                    "url": None,
+                    "reason": None,
+                }
+            else:
+                blocked_reason = _NOT_ON_SALE_REASON
+        else:
+            # Unrecognised status: the row still explains it, but offers nothing.
+            pass
+
+        resume_url = (
+            next_step["url"]
+            if next_step is not None and next_step["kind"] == "resume"
+            else None
+        )
         rows.append(
             {
                 "attempt": attempt,
                 "plan_name": plan.name if plan is not None else "Unavailable plan",
-                "can_resume": can_resume,
-                "resume_url": f"/dashboard/billing/checkout/{attempt.id}/resume"
-                if can_resume
-                else None,
+                "plan_code": plan_code or "",
+                "billing_cycle": billing_cycle,
+                "next_step": next_step,
+                "blocked_reason": blocked_reason,
+                # Kept for any existing consumers until they migrate to next_step.
+                "can_resume": next_step is not None
+                and next_step["kind"] == "resume",
+                "resume_url": resume_url,
             }
         )
     return rows
@@ -1117,6 +1217,47 @@ async def subscribe(
     )
 
 
+async def _attach_new_account_to_its_affiliate(
+    request: Request,
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+) -> None:
+    """Give a brand-new account to whichever affiliate brought it, once and for good.
+
+    Both sign-up doors call this — the six-digit email one and the Google one — because
+    an account is an account however the person arrived, and a door that did not do this
+    would silently pay nobody for half the sign-ups.
+
+    Everything about *which* affiliate is decided in
+    :mod:`ai_market_monitor.services.affiliate_attribution`. This reads the link off the
+    request and hands it over; it makes no judgement of its own, so the two doors cannot
+    come to different answers.
+
+    The link is looked for in the address first and in the cookie second. Both are the
+    same thing — the most recent affiliate link this browser followed — and the address
+    is preferred only because somebody who has just this second arrived on a link has not
+    had the cookie written yet on this very request.
+    """
+
+    link_code = link_code_in_query(request.query_params) or link_code_in_cookies(
+        request.cookies
+    )
+    if link_code is None:
+        return
+    attribution = ReferralAttributionService(session)
+    await attribution.assign(user_id=user_id, link_code=link_code)
+    # Logged whether or not it assigned anybody. Somebody who already belongs to another
+    # affiliate still followed this link, and the affiliate whose link it was is entitled
+    # to see that it was used.
+    await attribution.record_code_use(
+        code=link_code,
+        user_id=user_id,
+        context=CONTEXT_SIGNUP,
+        event_key=f"signup:{user_id}",
+    )
+
+
 @router.get("/signup", response_class=HTMLResponse, include_in_schema=False)
 async def signup_page(
     request: Request,
@@ -1365,6 +1506,7 @@ async def signup_verify_submit(
             user_agent=request.headers.get("user-agent", ""),
             context={"door": "dashboard", "plan_code": plan_code or ""},
         )
+        await _attach_new_account_to_its_affiliate(request, session, user_id=user.id)
         await session.commit()
     except (WebAuthError, TelegramAccountLinkError) as exc:
         await session.rollback()
@@ -1397,6 +1539,10 @@ async def signup_verify_submit(
         samesite="lax",
         max_age=30 * 24 * 60 * 60,
     )
+    # The remembered link has done its whole job: the account it brought is now attached
+    # to that affiliate permanently. Keeping it would let one link go on claiming every
+    # later sign-up from a shared computer for three months.
+    forget_link_code(response)
     return response
 
 
@@ -1828,6 +1974,7 @@ async def google_callback(
                 user_agent=request.headers.get("user-agent", ""),
                 context={"door": "google", "plan_code": plan_code or ""},
             )
+            await _attach_new_account_to_its_affiliate(request, session, user_id=user.id)
         await session.commit()
     except (GoogleOAuthError, WebAuthError, TelegramAccountLinkError) as exc:
         await session.rollback()
@@ -1861,6 +2008,10 @@ async def google_callback(
         samesite="lax",
         max_age=30 * 24 * 60 * 60,
     )
+    if created:
+        # Same rule as the six-digit door above: the link has been used, and the
+        # assignment it produced does not need it any more.
+        forget_link_code(response)
     return response
 
 
@@ -3277,26 +3428,45 @@ async def billing_page(
     billing = BillingService(session, settings)
     card_provider = billing_method_provider(settings, "card")
     crypto_provider = billing_method_provider(settings, "crypto")
-    active_paid_plan_codes = await _active_paid_plan_codes(session, user_id=user.id)
+    user_active_paid_plan_codes = await active_paid_plan_codes(session, user_id=user.id)
+    # Whether the paid access they hold sits on a card. It decides which route to another
+    # plan exists at all: a re-price through the switch buttons, or a purchase.
+    held_access_repriceable = await paid_access_can_be_repriced(session, user_id=user.id)
     display_name_parts = (user.display_name or "").strip().split(maxsplit=1)
     billing_selection_availability = {
-        code: {
-            "purchasable": _plan_checkout_allowed(
-                plan_code=code,
-                active_paid_plan_codes=active_paid_plan_codes,
-            ),
-            "card_monthly": payment_method_available(
-                settings, method="card", plan_code=code, billing_cycle="monthly"
-            ),
-            "card_annual": payment_method_available(
-                settings, method="card", plan_code=code, billing_cycle="annual"
-            ),
-            "crypto_monthly": payment_method_available(
-                settings, method="crypto", plan_code=code, billing_cycle="monthly"
-            ),
-            "trial": False,
-        }
+        code: plan_checkout_availability(
+            settings,
+            plan_code=code,
+            active_paid_plan_codes=user_active_paid_plan_codes,
+            held_access_can_be_repriced=held_access_repriceable,
+        )
         for code in PURCHASABLE_PLAN_CODES
+    }
+    # What each plan card's button does for this person. One answer per plan, decided by
+    # the service that also carries out the change, so the button and the route it posts
+    # to can never disagree about whether this is a purchase, a step up or a step down.
+    plan_changes = PlanChangeService(session, settings)
+    plan_switch_offers = await plan_changes.switch_offers(
+        user.id,
+        purchasable={
+            code: plan_is_on_sale(settings, code) for code in PURCHASABLE_PLAN_CODES
+        },
+    )
+    plan_change_pending = await plan_changes.pending_change(user.id)
+    held_plan = await plan_changes.paid_subscription(user.id)
+    current_paid_plan_code = held_plan[1].code if held_plan else None
+    selected_checkout_plan = str(request.query_params.get("selected_plan") or "")
+    if selected_checkout_plan not in PURCHASABLE_PLAN_CODES or not plan_is_on_sale(
+        settings,
+        selected_checkout_plan,
+        billing_cycle="monthly",
+    ):
+        selected_checkout_plan = ""
+    # The page swaps the buy button's word when the monthly/yearly switch moves, so it is
+    # handed both words rather than keeping its own copy of them in the template.
+    switch_buy_labels = {
+        "monthly": SWITCH_LABEL_BUY,
+        "annual": SWITCH_LABEL_BUY_ANNUAL,
     }
     attempts = list(
         (
@@ -3350,7 +3520,7 @@ async def billing_page(
             # What each plan costs today and whether it can be bought, from the same
             # `core/plans` definition the landing page reads. One offer, three surfaces.
             plan_offer_values={
-                code: plan_offer_payload(code)
+                code: plan_sale_payload(settings, code)
                 for code in visible_public_plan_codes(
                     billing_enabled=settings.billing_enabled
                 )
@@ -3368,19 +3538,16 @@ async def billing_page(
                 billing_enabled=settings.billing_enabled
             ),
             trial_claimable=False,
-            active_paid_plan_codes=active_paid_plan_codes,
             whatsapp_operational=settings.whatsapp_enabled,
             billing_enabled=settings.billing_enabled,
             billing_provider=billing.provider.provider_name,
             billing_capabilities=billing.provider_capabilities,
             billing_cycle_code=billing.billing_cycle_code,
-            checkout_selected_plan=(
-                "trader" if request.query_params.get("selected_plan") == "trader" else None
-            ),
+            checkout_selected_plan=selected_checkout_plan or None,
             checkout_selected_interval="monthly",
             checkout_auto_open=(
                 request.query_params.get("checkout") == "1"
-                and request.query_params.get("selected_plan") == "trader"
+                and bool(selected_checkout_plan)
             ),
             checkout_trial_selected=False,
             billing_profile_defaults={
@@ -3410,13 +3577,35 @@ async def billing_page(
                 )
             ),
             billing_selection_availability=billing_selection_availability,
-            # Which ways of paying take a code, and the code worth naming, decided by the
-            # server for the same reason every other payment fact on this page is.
+            # Which ways of paying take a code, decided by the server for the same reason
+            # every other payment fact on this page is.
             discount_methods=list(DISCOUNT_CODE_METHODS),
-            launch_discount_code=(
-                LAUNCH_DISCOUNT_CODE if launch_discount_percent("trader") else ""
+            # What the popup says about the charge before a way of paying has been ticked.
+            # Each method carries its own sentence, because whether a charge repeats is a
+            # fact about the payment company; this is the one that is true while none of
+            # them has been chosen.
+            charge_story_before_choosing=CHARGE_STORY_BEFORE_CHOOSING,
+            # What each plan card's button should say and do for *this* person: their own
+            # plan, one above it, one below it, or one they cannot have. Decided here so a
+            # page can never draw a button the routes refuse.
+            plan_switch_offers=plan_switch_offers,
+            switch_buy_labels=switch_buy_labels,
+            plan_change_pending=plan_change_pending,
+            plan_change_reason=(
+                reason_words(plan_change_pending.kind, plan_change_pending.reason_code)
+                if plan_change_pending
+                else ""
             ),
-            launch_discount_percent=int(launch_discount_percent("trader") or 0),
+            current_paid_plan_code=current_paid_plan_code,
+            cancellation_reasons=CANCELLATION_REASONS,
+            downgrade_reasons=DOWNGRADE_REASONS,
+            other_reason_code=OTHER_REASON_CODE,
+            consent_cancel=CONSENT_CANCEL,
+            consent_downgrade=CONSENT_DOWNGRADE,
+            consent_upgrade_now=CONSENT_UPGRADE_NOW,
+            consent_upgrade_period_end=CONSENT_UPGRADE_PERIOD_END,
+            timing_immediate=TIMING_IMMEDIATE,
+            timing_period_end=TIMING_PERIOD_END,
             billing_plan_data={
                 "plans": {
                     code: {
@@ -3428,13 +3617,25 @@ async def billing_page(
                         "monthly": str(effective_monthly_price(code)),
                         "annual": str(PUBLIC_PLAN_PRESENTATIONS[code].annual_price),
                         "availability": billing_selection_availability[code],
+                        # The sentence the server owns for why this plan cannot be bought,
+                        # surfaced at the top level so the dialog script shows it instead
+                        # of inventing its own fallback reason in the browser.
+                        "refusal": (
+                            billing_selection_availability.get(code, {}).get("refusal")
+                            or ""
+                        ),
                         # Decided here, per period, so the script draws an answer rather
                         # than working one out from flags a second time.
                         "methods": payment_method_payload(settings, plan_code=code),
                         # The launch code, so the popup can name it beside the crypto
                         # choice. `null` once the launch offer has finished.
-                        "discountCode": plan_offer_payload(code)["discountCode"],
-                        "discountPercent": plan_offer_payload(code)["discountPercent"],
+                        # What it normally costs, so the popup can cross the old price out
+                        # beside the launch one. `null` once the offer has finished.
+                        "originalMonthly": (
+                            str(original_monthly_price(code))
+                            if original_monthly_price(code) is not None
+                            else None
+                        ),
                     }
                     for code in PURCHASABLE_PLAN_CODES
                 },
@@ -3447,6 +3648,7 @@ async def billing_page(
             billing_history=_billing_history_rows(
                 attempts,
                 history_plans,
+                settings,
                 now=datetime.now(UTC),
             ),
             payment_receipts=receipts,
@@ -3540,6 +3742,7 @@ async def dashboard_billing_portal_page(
             billing_history=_billing_history_rows(
                 attempts,
                 history_plans,
+                settings,
                 now=datetime.now(UTC),
             ),
             payment_receipts=receipts,
@@ -3578,11 +3781,46 @@ async def resume_billing_checkout(
     attempt_id: UUID,
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
 ) -> Response:
     """Resume only the authenticated user's still-valid provider checkout."""
     attempt = await session.get(BillingCheckoutAttempt, attempt_id)
     if attempt is None or attempt.user_id != user.id:
         raise HTTPException(status_code=404, detail="Checkout not found")
+
+    # A checkout was allowed when it was created. It is asked again here, because time
+    # passes in between: somebody can start a checkout, take a card subscription by some
+    # other route, and then come back to this link. Sending them on would charge them
+    # for a plan the rule says they may not buy - the same question, on a third surface,
+    # answered by the same owner rather than assumed from the older answer.
+    resume_plan = await session.get(Plan, attempt.plan_id)
+    if resume_plan is not None:
+        resume_availability = plan_checkout_availability(
+            settings,
+            plan_code=resume_plan.code,
+            active_paid_plan_codes=await active_paid_plan_codes(session, user_id=user.id),
+            held_access_can_be_repriced=await paid_access_can_be_repriced(
+                session, user_id=user.id
+            ),
+            billing_cycle=attempt.billing_cycle,
+            payment_method=provider_method(attempt.provider),
+        )
+        if not resume_availability["requested_purchasable"]:
+            return _redirect("/dashboard/billing?error=change_plan_instead")
+        from ai_market_monitor.services.plan_replacements import (
+            PaidPlanReplacementService,
+            PlanReplacementError,
+        )
+
+        try:
+            await PaidPlanReplacementService(session, settings).attach_source(
+                attempt=attempt, target_plan_code=resume_plan.code
+            )
+        except PlanReplacementError as exc:
+            return _redirect(f"/dashboard/billing?error={exc.code}")
+        # Only the link between two records is saved here. The old plan and its next
+        # charge stay untouched until a confirmed payment arrives.
+        await session.commit()
 
     expires_at = attempt.expires_at
     if expires_at.tzinfo is None:
@@ -3755,18 +3993,23 @@ async def billing_checkout_review(
         checkout_attempt = await session.get(BillingCheckoutAttempt, attempt_id)
         if checkout_attempt is None or checkout_attempt.user_id != user.id:
             raise HTTPException(status_code=404, detail="Checkout not found")
-    active_paid_plan_codes = await _active_paid_plan_codes(session, user_id=user.id)
-    billing = BillingService(session, settings)
-    primary_email = await session.scalar(
-        select(UserIdentity.normalized_identifier)
-        .where(
-            UserIdentity.user_id == user.id,
-            UserIdentity.provider == IdentityProvider.EMAIL,
-            UserIdentity.is_primary.is_(True),
-            UserIdentity.is_verified.is_(True),
-        )
-        .limit(1)
+    review_active_paid_plan_codes = await active_paid_plan_codes(session, user_id=user.id)
+    # Whether *this account* may buy this plan today, by which method - the one owner of
+    # that question. This page used to work it out for itself from "do they hold this
+    # very plan", so a trader holder opening the Pro review page was handed the full
+    # payment form, typed their name and address, and was refused at POST time with
+    # `change_plan_instead`. The popup already reads `plan_checkout_availability`; now
+    # this page reads the same answer, so no second copy of the rule can drift.
+    checkout_availability = plan_checkout_availability(
+        settings,
+        plan_code=plan.code,
+        active_paid_plan_codes=review_active_paid_plan_codes,
+        held_access_can_be_repriced=await paid_access_can_be_repriced(
+            session, user_id=user.id
+        ),
     )
+    billing = BillingService(session, settings)
+    primary_email = await _primary_email(session, user.id)
     display_name_parts = (user.display_name or "").strip().split(maxsplit=1)
     await session.commit()
     features = dict(plan.features or {})
@@ -3776,13 +4019,10 @@ async def billing_checkout_review(
     checkout_price = billing.checkout_amount(
         plan.code, plan.price_monthly, billing.billing_cycle_code
     )
-    # There is nothing to cross out before a code is applied: this page opens at the
-    # price a checkout charges with no code, and the box below replaces it live when one
-    # is accepted. The old "crossed-out launch price" is gone with the automatic offer.
-    #
-    # The launch code is named on the page so nobody has to already know it exists. It is
-    # a hint only: the box accepts any code, and the server decides what each is worth.
-    launch_percent = launch_discount_percent(plan.code)
+    # What the plan costs when the launch offer is not running, so the page can cross that
+    # figure out beside the price above. `None` once the offer has finished, and then the
+    # page shows one price with nothing struck through.
+    promotion_original = original_monthly_price(plan.code)
     response = templates.TemplateResponse(
         request,
         "hilal/dashboard/checkout.html",
@@ -3797,17 +4037,20 @@ async def billing_checkout_review(
             plan_limits=dict(features.get("limits") or {}),
             plan_features=dict(features.get("features") or {}),
             checkout_price=checkout_price,
-            launch_discount_code=LAUNCH_DISCOUNT_CODE if launch_percent else "",
-            launch_discount_percent=int(launch_percent) if launch_percent else 0,
+            promotion_original_price=promotion_original,
             discount_methods=list(DISCOUNT_CODE_METHODS),
             promotion_ends_at=PROMOTION_ENDS_AT.isoformat(),
-            billing_cycle=billing.billing_cycle_code,
+            # The customer chooses the payment method on this page. Keep the submitted
+            # period neutral here; the selected provider converts it to recurring card
+            # billing or one-time 30-day crypto access in one authoritative place.
+            billing_cycle="monthly",
             billing_provider=billing.provider.provider_name,
             billing_capabilities=billing.provider_capabilities,
             checkout_request_id=uuid4().hex,
             checkout_attempt=checkout_attempt,
             checkout_state=state,
-            already_subscribed=plan.code in active_paid_plan_codes,
+            already_subscribed=checkout_availability["holds_this"],
+            checkout_availability=checkout_availability,
             billing_profile_defaults={
                 "first_name": display_name_parts[0] if display_name_parts else "",
                 "last_name": display_name_parts[1] if len(display_name_parts) > 1 else "",
@@ -3938,6 +4181,23 @@ async def billing_checkout(
             billing_profile=profile,
             discount=discount,
         )
+        if discount is not None:
+            # Typing an affiliate's code is the second way of belonging to them, and it
+            # counts whether or not this checkout is ever paid: the rule is "signed up
+            # through the link, **or** used the code at least once".
+            #
+            # `assign` leaves an existing assignment exactly as it is, which is what makes
+            # the link beat the code — somebody who arrived on one affiliate's link and
+            # then pasted another's code stays with the affiliate whose link brought them.
+            # The code is not passed as a link here for the same reason.
+            attribution = ReferralAttributionService(session)
+            await attribution.assign(user_id=user.id, typed_code=discount.code)
+            await attribution.record_code_use(
+                code=discount.code,
+                user_id=user.id,
+                context=CONTEXT_CHECKOUT,
+                event_key=f"checkout:{prepared.attempt.id}",
+            )
         await session.commit()
         if prepared.duplicate and prepared.attempt.checkout_url:
             if wants_json:
@@ -3982,6 +4242,118 @@ async def billing_checkout(
                 }
             )
         )
+
+
+async def _finish_plan_change(
+    *,
+    session: AsyncSession,
+    settings: Settings,
+    user: User,
+    change: SubscriptionPlanChange,
+    message: str,
+) -> RedirectResponse:
+    """Save one plan change, then tell whoever runs the product that it happened.
+
+    The commit comes first. A notification that could not be sent must never undo a
+    cancellation the customer has already been shown — a diagnostic must not become the
+    failure.
+    """
+
+    await session.commit()
+    await AdminNotificationService(settings).send_plan_change(
+        user_id=user.id,
+        email=await _primary_email(session, user.id),
+        kind=change.kind,
+        # `plan_name` rather than the dictionary itself: a stored code for a plan the
+        # catalog no longer holds would raise here, and a notice that crashes turns a
+        # finished cancellation into an error page for the customer.
+        from_plan=plan_name(change.from_plan_code),
+        to_plan=(plan_name(change.to_plan_code) if change.to_plan_code else None),
+        timing=change.timing,
+        reason=reason_words(change.kind, change.reason_code)
+        + (f" — {change.reason_text}" if change.reason_text else ""),
+    )
+    return _redirect(f"/dashboard/billing?message={message}")
+
+
+@router.post("/dashboard/billing/cancel", include_in_schema=False)
+async def billing_cancel_plan(
+    reason_code: str = Form(default=""),
+    reason_text: str = Form(default=""),
+    cancel_consent: str | None = Form(default=None),
+    csrf_token_value: str = Form(..., alias="csrf_token"),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Stop a paid plan renewing. Access runs to the end of the period already paid for."""
+
+    if not csrf_token_matches(settings, user.id, csrf_token_value):
+        raise HTTPException(status_code=403, detail="Invalid form token")
+    try:
+        change = await PlanChangeService(session, settings).request_cancellation(
+            user_id=user.id,
+            reason_code=reason_code,
+            reason_text=reason_text,
+            consented=cancel_consent == "true",
+        )
+    except PlanChangeError as exc:
+        await session.commit()
+        return _redirect(f"/dashboard/billing?error={exc.code}")
+    return await _finish_plan_change(
+        session=session,
+        settings=settings,
+        user=user,
+        change=change,
+        message="plan_cancelled",
+    )
+
+
+@router.post("/dashboard/billing/switch", include_in_schema=False)
+async def billing_switch_plan(
+    plan_code: str = Form(...),
+    timing: str = Form(default=TIMING_PERIOD_END),
+    reason_code: str = Form(default=""),
+    reason_text: str = Form(default=""),
+    switch_consent: str | None = Form(default=None),
+    csrf_token_value: str = Form(..., alias="csrf_token"),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Move up or down a plan. One route, because it is one decision with a direction.
+
+    Which way it goes is read from the plan somebody is already on, never from the form.
+    A form field saying "this is an upgrade" is a field anybody can edit, and believing it
+    would let a downgrade be sent through the immediate path — taking away limits that
+    have already been paid for.
+    """
+
+    if not csrf_token_matches(settings, user.id, csrf_token_value):
+        raise HTTPException(status_code=403, detail="Invalid form token")
+    try:
+        change = await PlanChangeService(session, settings).request_switch(
+            user_id=user.id,
+            to_plan_code=plan_code,
+            timing=timing,
+            reason_code=reason_code or None,
+            reason_text=reason_text,
+            consented=switch_consent == "true",
+        )
+    except PlanChangeError as exc:
+        await session.commit()
+        return _redirect(
+            "/dashboard/billing?" + urlencode({"selected_plan": plan_code, "error": exc.code})
+        )
+    return await _finish_plan_change(
+        session=session,
+        settings=settings,
+        user=user,
+        change=change,
+        message=(
+            "plan_upgraded" if change.kind == PLAN_CHANGE_UPGRADE else "plan_downgraded"
+        ),
+    )
 
 
 @router.get("/billing/success", response_class=HTMLResponse, include_in_schema=False)
@@ -4050,7 +4422,7 @@ async def billing_success(
         "failed": ("Payment failed", "payment_failed"),
         "cancelled": ("Payment cancelled", "payment_canceled"),
         "expired": ("Checkout expired", "checkout_expired"),
-        "provider_unavailable": ("Payment provider unavailable", "provider_unavailable"),
+        "provider_unavailable": ("We could not reach the payment company", "provider_unavailable"),
     }
     title, state_message = state_content.get(
         status,
@@ -4252,11 +4624,14 @@ async def affiliate_page(
     stats = None
     payouts: list[AffiliatePayoutRequest] = []
     referral_url = None
+    rates = service.rates_for(application)
     if application is not None and application.status == "approved":
         stats = await service.stats(application)
         payouts = await service.payout_requests(user.id)
         base = str(settings.public_base_url).rstrip("/")
-        referral_url = f"{base}/signup?ref={application.discount_code}"
+        referral_url = (
+            f"{base}/signup?{REFERRAL_LINK_QUERY_KEY}={application.discount_code}"
+        )
     return templates.TemplateResponse(
         request,
         "hilal/dashboard/affiliate.html",
@@ -4271,6 +4646,10 @@ async def affiliate_page(
             stats=stats,
             payouts=payouts,
             referral_url=referral_url,
+            # Both rates, resolved once. The page never reads the two columns itself, so
+            # an application approved before the second rate existed shows the first rate
+            # in both places rather than promising nothing on renewals.
+            rates=rates,
             default_commission=DEFAULT_COMMISSION_PERCENT,
             decision_hours=DECISION_TARGET_HOURS,
             minimum_payout=MINIMUM_PAYOUT_USD,
@@ -4327,6 +4706,15 @@ async def affiliate_apply(
     )
     await session.commit()
     await try_sending_now(session, settings, delivery)
+    # An application waits for a person to decide it, so a person has to be told it is
+    # there. The applicant already gets an email; nothing used to reach us at all, and an
+    # application nobody sees is an application nobody answers.
+    await AdminNotificationService(settings).send_affiliate_application(
+        user_id=user.id,
+        email=await _primary_email(session, user.id),
+        display_name=application.display_name,
+        requested_code=application.requested_discount_code,
+    )
     return _redirect(f"{AFFILIATE_PATH}?message=affiliate_application_sent")
 
 

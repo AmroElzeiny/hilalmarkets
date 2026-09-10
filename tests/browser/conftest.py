@@ -29,6 +29,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ai_market_monitor.core.dashboard_paths import HOME_PATH, LEGACY_HOME_PATH
+from ai_market_monitor.core.plans import PURCHASABLE_PLAN_CODES
+
+#: The discount code the live-shape browser server honours, and what it takes off. Named
+#: here so the tests that type it read it from the same place the server is given it.
+BROWSER_DISCOUNT_CODE = "BROWSERTEST25"
+BROWSER_DISCOUNT_PERCENT = 25
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 TEST_PASSWORD = "TraceEdge1!"
@@ -495,9 +501,25 @@ def live_shape_browser_app(
             "BILLING_CRYPTO_PROVIDER": "nowpayments",
             "CREEM_API_KEY": "browser-e2e-creem-key",
             "CREEM_WEBHOOK_SECRET": "browser-e2e-creem-webhook",
-            "CREEM_PRODUCT_IDS": '{"trader_monthly": "prod_browser_e2e"}',
+            # A product id for every plan on sale, built from the catalog rather than
+            # typed out. It held only `trader_monthly`, so this "live shape" server could
+            # not sell Pro — and every Pro card on it said "coming soon" while the live
+            # server sold it. Opening a new plan for sale now needs no edit here.
+            "CREEM_PRODUCT_IDS": json.dumps(
+                {
+                    f"{code}_monthly": f"prod_browser_e2e_{code}"
+                    for code in PURCHASABLE_PLAN_CODES
+                }
+            ),
             "NOWPAYMENTS_API_KEY": "browser-e2e-nowpayments-key",
             "NOWPAYMENTS_IPN_SECRET": "browser-e2e-nowpayments-ipn",
+            # A code the browser tests can really apply. It used to be `HILAL25`, typed
+            # into five tests — the launch code, which has since been withdrawn and is now
+            # refused by the settings loader itself. A code that only exists for the tests
+            # cannot be withdrawn out from under them.
+            "BILLING_DISCOUNT_CODES": (
+                f"{BROWSER_DISCOUNT_CODE}={BROWSER_DISCOUNT_PERCENT}"
+            ),
         },
         report_as_main=False,
     )
@@ -869,6 +891,13 @@ def assert_hilal_brand_palette(page: Page) -> None:
         "188,220,236",  # --hm-info-line
         "118,123,131",  # --hm-on-ink-line
         "174,180,189",  # --hm-on-ink-soft
+        # The Ask AI button sky-blue family. `--hm-sky` is the fill, `--hm-sky-strong`
+        # the hover/active state, and `--hm-sky-soft` a tint that must never carry white
+        # text. Added together so `test_the_approved_palette_holds_every_brand_token`
+        # keeps the brand file and this list in step.
+        "14,120,175",  # --hm-sky
+        "10,96,134",  # --hm-sky-strong
+        "230,244,251",  # --hm-sky-soft
     }
     unexpected = page.evaluate(
         """approvedValues => {
@@ -1253,7 +1282,14 @@ def seed_telegram_connection(database_url: str, email: str) -> None:
     _run_async_in_thread(_seed)
 
 
-def seed_paid_monitor_access(database_url: str, email: str) -> None:
+def seed_paid_monitor_access(
+    database_url: str, email: str, provider: str = "browser_test"
+) -> None:
+    """Seed a paid plan subscription for the given email.
+
+    The provider parameter lets a test hand the account a card subscription;
+    creem or stripe are the recurring kinds plan_changes.py:181 knows.
+    """
     if not database_url:
         pytest.skip("Paid-plan browser coverage requires the auto-started database URL.")
 
@@ -1285,7 +1321,7 @@ def seed_paid_monitor_access(database_url: str, email: str) -> None:
                     user_id=identity.user_id,
                     plan_id=plan.id,
                     status=SubscriptionStatus.ACTIVE,
-                    provider="browser_test",
+                    provider=provider,
                     provider_subscription_id=f"browser-monitor-{uuid4()}",
                     current_period_start=now,
                     current_period_end=now + timedelta(days=30),

@@ -10,6 +10,7 @@ from ai_market_monitor.engine.forensics import AlertEvidence, ForensicInvestigat
 from ai_market_monitor.schemas.investigation import WhyNoAlertRequest, WhyNoAlertResponse
 from ai_market_monitor.services.entitlements import EntitlementError, EntitlementService
 from ai_market_monitor.services.interfaces import Candle
+from ai_market_monitor.services.plan_limits import feature_needs_a_bigger_plan
 
 router = APIRouter(prefix="/investigations", tags=["investigations"])
 
@@ -26,9 +27,12 @@ async def why_no_alert(
             "missed_alert_investigations",
         )
     except EntitlementError as exc:
+        # Built from the catalog. See `services/plan_limits.feature_needs_a_bigger_plan`:
+        # this sentence used to be typed out here and in `dashboard_api`, and both went
+        # on naming a plan the product had renamed.
         raise HTTPException(
             status_code=403,
-            detail="Why wasn't I alerted? is available on the Monitor plan.",
+            detail=feature_needs_a_bigger_plan("missed_alert_investigations"),
         ) from exc
     candle_sets = {
         timeframe: [

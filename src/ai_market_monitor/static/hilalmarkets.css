@@ -996,8 +996,6 @@ html[dir="rtl"] body.hilal-dashboard .readiness-candidate.state-invalidated{bord
   --code-chip-bg: var(--gold-2);
   --code-chip-line: var(--gold);
   --code-chip-ink: var(--ink);
-  --code-note-ink: var(--ink);
-  --code-note-quiet: var(--muted);
 }
 
 .hm-code-chip {
@@ -1014,20 +1012,3 @@ html[dir="rtl"] body.hilal-dashboard .readiness-candidate.state-invalidated{bord
   white-space: nowrap;
 }
 
-.price-code-note {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 6px 0 0;
-  color: var(--code-note-ink);
-  font-size: .82rem;
-}
-
-.price-code-note[hidden] { display: none; }
-
-.price-code-note > span {
-  flex-basis: 100%;
-  color: var(--code-note-quiet);
-  font-size: .76rem;
-}

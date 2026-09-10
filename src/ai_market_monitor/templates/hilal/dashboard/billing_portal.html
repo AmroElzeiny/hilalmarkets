@@ -5,7 +5,7 @@
     <div>
       <span class="kicker">Billing portal</span>
       <h1>Manage your subscription</h1>
-      <p>See your current access, renewal details, payments, and provider-managed controls.</p>
+      <p>See your current access, renewal details and payments here. To change card details or cancel, open the payment company's own page below.</p>
     </div>
     <a class="btn btn-secondary" href="/dashboard/billing">
       <span data-icon="arrow" data-icon-class="icon-sm billing-back-icon"></span>
@@ -28,14 +28,16 @@
         <dd>{{ subscription.status.value|replace('_', ' ')|title if subscription else entitlement.source|replace('_', ' ')|title }}</dd>
       </div>
       <div>
-        <dt>Payment provider</dt>
+        <dt>Payment company</dt>
         {# The company's name comes from the billing service, which owns it. This line
            kept its own copy of that list and had to be edited every time one changed. #}
-        <dd>{{ provider_name|payment_company if provider_name else 'No provider-managed subscription' }}</dd>
+        <dd>{{ provider_name|payment_company if provider_name else 'No payment company holds your subscription yet' }}</dd>
       </div>
       <div>
         <dt>Next billing date</dt>
-        <dd>{{ subscription.current_period_end|short_dt(user.timezone) if subscription and subscription.current_period_end and not subscription.cancel_at_period_end else 'No upcoming automatic charge' }}</dd>
+        {# A day, not a machine timestamp. It is the day money leaves an account; the
+           seconds were noise, and the timezone printed beside them was not the reader's. #}
+        <dd>{{ subscription.current_period_end|day_dt(user.timezone) if subscription and subscription.current_period_end and not subscription.cancel_at_period_end else 'No upcoming automatic charge' }}</dd>
       </div>
       <div>
         <dt>Renewal</dt>
@@ -50,7 +52,7 @@
       <div>
         <span class="kicker">Secure controls</span>
         <h2 id="billing-portal-controls-title">Subscription and payment details</h2>
-        <p>Card details, cancellation, and provider invoices stay on the payment provider's secure portal.</p>
+        <p>Your card details, cancellation and payment receipts stay on your payment company's own secure page.</p>
       </div>
     </div>
     {% if portal_available %}
@@ -73,7 +75,7 @@
       <div class="notice notice-warning">
         <span data-icon="info" data-icon-class="icon"></span>
         <div>
-          <strong>Provider portal is not ready yet</strong>
+          <strong>The payment company's page is not ready yet</strong>
           <p>Your subscription remains visible here. Contact support if you need help managing it.</p>
         </div>
       </div>
@@ -82,7 +84,10 @@
         <span data-icon="info" data-icon-class="icon"></span>
         <div>
           <strong>No paid subscription to manage</strong>
-          <p>Choose Monitor monthly when you are ready. Your Basic access remains available.</p>
+          {# Both plan names come from `core/plans.py`. Written out by hand they went stale
+             the day the plans were renamed, and this sentence still said "Monitor" and
+             "Basic" — two names the product no longer uses anywhere else. #}
+          <p>Pick a paid plan when you are ready. Your {{ plan_name('demo') }} access stays available.</p>
         </div>
       </div>
     {% endif %}

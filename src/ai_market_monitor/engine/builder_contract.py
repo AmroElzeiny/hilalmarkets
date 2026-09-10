@@ -39,8 +39,10 @@ from ai_market_monitor.engine.capabilities import (
     parameter_semantic_unit,
     parameter_value_range,
 )
+from ai_market_monitor.engine.capability_compatibility import compatibility_by_key
 from ai_market_monitor.engine.provider_families import (
     PROVIDER_FAMILIES,
+    ProviderAvailability,
     plain_feed_name,
     runtime_availability,
 )
@@ -690,6 +692,7 @@ def _capability_mechanic(
     *,
     configured_providers: frozenset[str] = frozenset(),
     disabled_capabilities: frozenset[str] = frozenset(),
+    evaluator_supported: bool = True,
 ) -> BuilderMechanic:
     providers = spec.provider_requirements or (
         (spec.provider_required,) if spec.provider_required else ()
@@ -712,13 +715,14 @@ def _capability_mechanic(
     available = (
         spec.executable
         and spec.availability == "available"
+        and evaluator_supported
         and providers_met
         and not switched_off
     )
     reason: str | None = None
     if switched_off:
         reason = "This rule is paused right now. Everything else still works."
-    elif not spec.executable:
+    elif not spec.executable or not evaluator_supported:
         reason = "Hilal Markets can read this rule but cannot run it yet."
     elif spec.availability != "available":
         reason = "This rule is not switched on for your account yet."
@@ -872,11 +876,18 @@ def capability_mechanics(
     approval — an unavailable mechanic still cannot pass the provider gate.
     """
 
+    compatibility = compatibility_by_key(
+        ProviderAvailability(served=configured_providers)
+    )
     return tuple(
         _capability_mechanic(
             spec,
             configured_providers=configured_providers,
             disabled_capabilities=disabled_capabilities,
+            evaluator_supported=(
+                compatibility[spec.key].template_valid
+                and compatibility[spec.key].evaluator_supported
+            ),
         )
         for spec in sorted(all_capabilities(), key=lambda item: item.label)
         if spec.executable and spec.availability == "available"

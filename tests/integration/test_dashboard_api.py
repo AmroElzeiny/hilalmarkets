@@ -20,7 +20,6 @@ from ai_market_monitor.db.models import (
     DashboardPreference,
     DisclaimerAcceptance,
     EdgeHealthSnapshot,
-    ReferralRelationship,
     ScanJob,
     ScanResult,
     SetupConditionResult,
@@ -226,12 +225,24 @@ async def test_dashboard_capabilities_endpoint_exposes_registry_and_templates(te
     assert response.status_code == 200
     payload = response.json()
     assert payload["counts"]["total"] == 502
-    assert payload["counts"]["executable"] == 502
-    assert payload["counts"]["recognized_not_executable"] == 0
+    assert payload["counts"]["executable"] == 500
+    assert payload["counts"]["recognized_not_executable"] == 2
+    assert {item["key"] for item in payload["unsupported"]} == {
+        "daily_high_low",
+        "monthly_high_low",
+    }
     assert len(payload["builtin_templates"]) >= 20
     assert any(item["key"] == "time_window" for item in payload["items"])
     assert payload["schema_version"] == "2.0"
     assert any(item["key"] == "ichimoku_cloud" for item in payload["items"])
+    pivot = next(item for item in payload["items"] if item["key"] == "pivot_points")
+    assert pivot["parameter_schema"]["properties"]["component"]["enum"] == [
+        "pivot",
+        "r1",
+        "s1",
+        "r2",
+        "s2",
+    ]
     assert any(item["key"] == "within_last" for item in payload["logic_operators"])
     assert all("condition_template" in item for item in payload["items"])
     assert any(
@@ -1459,19 +1470,26 @@ async def test_dashboard_support_ticket_api_creates_thread_message(test_context)
 async def test_referral_page_shows_paid_conversion_reward_balance(test_context):
     """A referrer sees the money a paid conversion earned them.
 
-    The same intent as before, against the programme that now exists. Two things about
-    it changed and both were defects:
+    The same intent as before, against the programme that now exists. Three things about
+    it changed and each was a defect:
 
     * the page read ``reward_amount_usd`` from the relationship, and **nothing in the
-      product ever wrote that key** — so the balance was ``$0.00`` for everybody, always.
-      A commission is now a share of ``paid_amount_usd``, which the referral service
-      writes at the moment the conversion is recorded;
+      product ever wrote that key** — so the balance was ``$0.00`` for everybody, always;
+    * the balance was then recomputed from a field on the relationship, multiplied by the
+      affiliate's *current* share. Money is a row in the commission ledger now, written
+      once with the rate frozen onto it, so a rate changed today cannot rewrite what last
+      month's referral earned;
     * `/dashboard/referrals` is the affiliate programme's older address and forwards to
       it, because the link is in sent email and in bookmarks.
     """
 
+    from decimal import Decimal
+
     from ai_market_monitor.db.models import AffiliateApplication, User
     from ai_market_monitor.services.affiliate import AffiliateService
+    from ai_market_monitor.services.affiliate_attribution import (
+        ReferralAttributionService,
+    )
 
     await _signup(test_context, "referrer@example.com")
     async with test_context["session_factory"]() as session:
@@ -1487,20 +1505,22 @@ async def test_referral_page_shows_paid_conversion_reward_balance(test_context):
             social_links=["https://x.com/referrer"],
             requested_discount_code="referrer",
         )
-        await service.approve(
+        approved = await service.approve(
             application_id=(await session.scalar(select(AffiliateApplication))).id,
             admin_user_id=admin.id,
             discount_percent="10",
             commission_percent="25",
         )
-        session.add(
-            ReferralRelationship(
-                referrer_user_id=referrer.id,
-                referred_user_id=referred.id,
-                status="paid_converted",
-                reward_status="eligible_after_first_paid_month",
-                metadata_json={"paid_amount_usd": "50.00"},
-            )
+        # Through the attribution service, the way the running product does it. Building
+        # the rows here would prove only that the page can draw a shape nothing writes.
+        attribution = ReferralAttributionService(session)
+        await attribution.assign(
+            user_id=referred.id, link_code=approved.discount_code
+        )
+        await attribution.record_payment(
+            customer_user_id=referred.id,
+            event_key=f"payment:test:{referred.id}",
+            paid_amount_usd=Decimal("50.00"),
         )
         await session.commit()
 

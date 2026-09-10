@@ -181,7 +181,21 @@ python scripts/import_sharia_methodology_pack.py
 uvicorn ai_market_monitor.main:app --reload
 ```
 
-For the complete service stack, install Docker and run `docker compose up --build`.
+For the complete service stack, install Docker. The database volume is declared
+`external: true` on purpose — Compose must never invent one, because a stack that silently
+creates its own volume is how two projects once attached to the same PostgreSQL data
+directory and destroyed it. So on a machine that has never run this stack, create the
+volume named by `POSTGRES_VOLUME_NAME` once, by hand, then start:
+
+```bash
+docker volume create hilalmarkets_postgres_data   # once per machine; must match POSTGRES_VOLUME_NAME
+docker compose up --build
+```
+
+Without that first line Compose stops with `external volume "hilalmarkets_postgres_data" not
+found` after the images have already built. The same rule applies on the server with
+`docker-compose.prod.yml`, where the volume already exists and must not be recreated.
+
 Capability creation and five-scan reviews are asynchronous, so local non-Docker operation also
 requires Redis, the Celery worker and the Celery beat scheduler described in
 [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md).

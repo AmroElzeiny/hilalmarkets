@@ -11,9 +11,13 @@ charge a discount a card never offered. So none of them holds a list. They all a
 1. **Creem** — ``GET /v1/discounts?discount_code=…``. Creem is where discount codes are
    really administered, because the card route runs through Creem's own checkout page and
    Creem applies them itself. Reading Creem means one place to create a code.
-2. **This deployment's own list** — ``BILLING_DISCOUNT_CODES``, plus the launch code that
-   `core/plans.py` owns. Used when Creem is not configured, does not know the code, or
-   cannot be reached.
+2. **This deployment's own list** — ``BILLING_DISCOUNT_CODES``. Used when Creem is not
+   configured, does not know the code, or cannot be reached.
+
+**One list beats both.** ``core/plans.RETIRED_DISCOUNT_CODES`` names codes this product
+has stopped honouring, and they are refused here before Creem is even asked. The launch
+price no longer needs a code — it is the price until the offer's timer runs out — so a
+retired code would come off a price that is already discounted.
 
 **Fail closed, in the one direction that matters.** A code Creem has *refused* — expired,
 switched off, used up, for a different product, or a fixed-amount code we cannot honour on
@@ -42,9 +46,8 @@ from ai_market_monitor.core.plans import (
     DISCOUNT_CODE_PATTERN as _DISCOUNT_CODE_PATTERN,
 )
 from ai_market_monitor.core.plans import (
-    LAUNCH_DISCOUNT_CODE,
+    RETIRED_DISCOUNT_CODES,
     is_discount_code_shaped,
-    launch_discount_percent,
     price_after_percent,
 )
 from ai_market_monitor.services.provider_reliability import ProviderCallError
@@ -69,7 +72,6 @@ DISCOUNT_CODE_PATTERN: Final[str] = _DISCOUNT_CODE_PATTERN
 
 #: Where a code was found. Kept on the offer so an audit record can say which list
 #: granted a discount, months later, when the lists have both changed.
-SOURCE_LAUNCH: Final[str] = "launch"
 SOURCE_SETTINGS: Final[str] = "settings"
 SOURCE_CREEM: Final[str] = "creem"
 
@@ -96,7 +98,7 @@ class DiscountOffer:
     code: str
     #: How much comes off, as a percentage. Always above 0 and at most 100.
     percent: Decimal
-    #: ``launch``, ``settings`` or ``creem``.
+    #: ``settings`` or ``creem``.
     source: str
 
 
@@ -117,22 +119,34 @@ class DiscountedPrice:
     currency: str
 
 
+#: The one sentence shown when what was typed is not code-shaped, with the one example
+#: inside it. The example is deliberately not a real code: it used to be ``HILAL25``, a
+#: code that has since been withdrawn, so the refusal was inviting people to type
+#: something the checkout would then refuse for a second, different reason. The browser
+#: shows this same sentence — see `static/hm-discount-code.js`, which is handed it rather
+#: than holding its own copy.
+DISCOUNT_CODE_SHAPE_MESSAGE: Final[str] = (
+    "That does not look like a code. A code is letters and numbers, like SAVE10."
+)
+
+#: What is said when the box is empty. Same reason: the browser answers instantly and the
+#: server answers after a round trip, and both must say the same thing.
+DISCOUNT_CODE_EMPTY_MESSAGE: Final[str] = "Write your code in the box first."
+
+
 def normalize_discount_code(raw: str | None) -> str:
     """The one reading of what somebody typed into the code box.
 
-    Trims, drops inner spaces (people paste ``HILAL 25``), and upper-cases. Refuses an
+    Trims, drops inner spaces (people paste ``SAVE 10``), and upper-cases. Refuses an
     empty box and anything that is not code-shaped, so an obviously wrong entry is
     answered instantly instead of after a trip to Creem.
     """
 
     cleaned = "".join(str(raw or "").split()).upper()
     if not cleaned:
-        raise DiscountCodeError("discount_code_empty", "Write your code in the box first.")
+        raise DiscountCodeError("discount_code_empty", DISCOUNT_CODE_EMPTY_MESSAGE)
     if not is_discount_code_shaped(cleaned):
-        raise DiscountCodeError(
-            "discount_code_shape",
-            "That does not look like a code. A code is letters and numbers, like HILAL25.",
-        )
+        raise DiscountCodeError("discount_code_shape", DISCOUNT_CODE_SHAPE_MESSAGE)
     return cleaned
 
 
@@ -151,16 +165,9 @@ class DiscountCodeService:
         plan_code: str,
         now: datetime | None = None,
     ) -> DiscountOffer | None:
-        """This deployment's own answer for a code, or ``None`` if it does not know it.
+        """This deployment's own answer for a code, or ``None`` if it does not know it."""
 
-        The launch code is checked first and is **not** overridable from the environment.
-        `core/plans.py` owns what the launch offer is worth and when it stops; a second
-        number for it in an env file is exactly the drift this module exists to prevent.
-        """
-
-        launch_percent = launch_discount_percent(plan_code, now=now)
-        if launch_percent is not None and code == LAUNCH_DISCOUNT_CODE:
-            return DiscountOffer(code=code, percent=launch_percent, source=SOURCE_LAUNCH)
+        del plan_code, now
         percent = self.settings.billing_discount_codes.get(code)
         if percent is None:
             return None
@@ -303,6 +310,17 @@ class DiscountCodeService:
         """The one offer a typed code produces, or a refusal saying why not."""
 
         code = normalize_discount_code(typed)
+        # A retired code is refused before anything is asked anywhere. It is the one
+        # refusal that must not depend on Creem: Creem may still hold the code as active,
+        # and honouring it would take a further percentage off a price that is already the
+        # launch price. `core/plans.py` owns the list, so this and the settings loader
+        # refuse exactly the same codes.
+        if code in RETIRED_DISCOUNT_CODES:
+            raise DiscountCodeError(
+                "discount_code_expired",
+                "That code has finished. The lower price is already on the page — you do "
+                "not need a code for it.",
+            )
         # Creem refuses by raising, so a refusal leaves this block rather than falling
         # through to the local list. `None` covers the two cases that are not refusals —
         # Creem has never heard of the code, or Creem did not answer — and both of those

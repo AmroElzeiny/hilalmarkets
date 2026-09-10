@@ -469,11 +469,6 @@ html[data-theme="dark"] .channels-grid h2 {
   white-space: nowrap;
 }
 
-.price-card .plan-description {
-  min-height: 54px;
-  margin: 0;
-  color: var(--muted);
-}
 
 .price-card ul {
   margin-top: 4px;

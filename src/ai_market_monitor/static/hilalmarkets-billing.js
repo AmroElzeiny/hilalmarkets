@@ -17,6 +17,7 @@
   const cycleInput = dialog.querySelector("[data-billing-cycle]");
   const planLabel = dialog.querySelector("[data-billing-plan-label]");
   const priceLabel = dialog.querySelector("[data-billing-price-label]");
+  const termsLabel = dialog.querySelector("[data-billing-terms-label]");
   const summary = dialog.querySelector("#billing-dialog-summary");
   const periodOptions = dialog.querySelector("[data-billing-period-options]");
   const periodRadios = Array.from(
@@ -30,6 +31,8 @@
   const cryptoOption = dialog.querySelector("[data-billing-method-crypto]");
   const submit = dialog.querySelector("[data-billing-submit]");
   const status = dialog.querySelector("[data-billing-dialog-status]");
+  const noMethodNotice = dialog.querySelector("[data-billing-no-method]");
+  const noMethodReason = dialog.querySelector("[data-billing-no-method-reason]");
   const pageIntervalRadios = Array.from(
     document.querySelectorAll('input[name="dashboard_billing_interval"]')
   );
@@ -122,10 +125,6 @@
       const promoted = available && interval === "monthly" && Boolean(originalPrice);
       if (original) original.toggleAttribute("data-offer-inactive", !promoted);
       if (countdown) countdown.toggleAttribute("data-offer-inactive", !promoted);
-      // The code is a monthly offer. Left under a yearly price it would name a code that
-      // does nothing there, which is worse than saying nothing.
-      const codeNote = card ? card.querySelector("[data-dashboard-plan-code]") : null;
-      if (codeNote) codeNote.hidden = !promoted;
     });
     document.querySelectorAll("[data-dashboard-purchase-button]").forEach((button) => {
       const planCode = button.getAttribute("data-plan-code") || "";
@@ -203,17 +202,50 @@
         ? `${plan.name} - 7-day trial`
         : plan.name;
     }
+    // Which way of paying is ticked, worked out once. Three places below need it, and
+    // three copies of the same three-line expression is three chances to disagree.
+    const selectedMethod = cardInput?.checked
+      ? "card"
+      : cryptoInput?.checked
+        ? "crypto"
+        : "";
+    const decision = selectedMethod === "card" ? cardDecision : cryptoDecision;
+    // Whether this way of paying comes back for more money. It is the payment company's
+    // capability, sent with the offer; nothing here works it out from the company's name.
+    const repeats = selectedMethod ? Boolean(decision.renews) : true;
+    // What a checkout charges with no code. A code replaces it, and the price it replaced
+    // stays on screen so the discount is visible rather than remembered.
+    const charged = trialSelected
+      ? plan.monthly
+      : period === "annual"
+        ? plan.annual
+        : discounted
+          ? discounted.amount
+          : plan.monthly;
+
     if (priceLabel) {
-      // `plan.monthly` is what a checkout charges with no code. A code replaces it, and
-      // the price it replaced stays on screen so the discount is visible rather than
-      // remembered.
+      // "per month" is a promise that the same amount comes off again next month. It was
+      // printed for a crypto invoice too, which takes one payment and stops. A period that
+      // does not come back is written as what it buys instead.
+      const per = period === "annual" ? "per year" : "per month";
+      const forOne = period === "annual" ? "for one year" : "for 30 days";
       priceLabel.textContent = trialSelected
-        ? `$0 today, then ${money(plan.monthly)}/month unless cancelled`
-        : period === "annual"
-          ? `${money(plan.annual)} per year`
-          : discounted
-            ? `${money(discounted.amount)} per month, was ${money(discounted.was)}`
-            : `${money(plan.monthly)} per month`;
+        ? "$0 today"
+        : discounted && period !== "annual"
+          ? `${money(charged)} ${repeats ? per : forOne}, was ${money(discounted.was)}`
+          : `${money(charged)} ${repeats ? per : forOne}`;
+    }
+    if (termsLabel) {
+      // What paying actually does to somebody's money, in the words of the company that
+      // will really take it. This popup only ever said "per month" above, whichever way
+      // of paying was ticked — and a crypto invoice takes one payment and stops. The
+      // sentence is the server's; only the number is put in here, because a discount code
+      // changes the number after the sentence was written.
+      const story =
+        (selectedMethod && decision && decision.story) ||
+        termsLabel.dataset.billingTermsDefault ||
+        "";
+      termsLabel.textContent = story.split("{amount}").join(money(charged));
     }
     // The box prices against the plan being bought, so it is told which one that is and
     // what it costs before anybody presses Apply.
@@ -229,18 +261,30 @@
         : "Review the plan and choose how you want to pay.";
     }
     if (periodOptions) periodOptions.hidden = trialSelected;
+
+    const anyMethodAvailable = cardAvailable || cryptoAvailable;
+    if (noMethodNotice) {
+      noMethodNotice.hidden = anyMethodAvailable;
+    }
+    if (noMethodReason) {
+      // The server owns the reason. Fall back to the nested availability sentence only
+      // for robustness; the top-level key is the one the page JSON is expected to carry.
+      const reason = plan.refusal || availability.refusal || "";
+      noMethodReason.textContent = reason;
+    }
+
     if (status) {
-      status.textContent =
-        cardAvailable || cryptoAvailable
-          ? "You will enter card or wallet details on the selected provider's secure page."
-          : "This plan and billing period are not configured for checkout yet.";
+      if (anyMethodAvailable) {
+        status.textContent = selectedMethod
+          ? "You will enter card or wallet details on the payment company's own secure page."
+          : "Choose a payment method to continue.";
+      } else {
+        // The no-method notice already carries the server-owned reason; keep the status
+        // line empty so the two messages do not compete.
+        status.textContent = "";
+      }
     }
     if (submit) {
-      const selectedMethod = cardInput?.checked
-        ? "card"
-        : cryptoInput?.checked
-          ? "crypto"
-          : "";
       submit.disabled = submitting || !selectedMethod;
       if (!submitting) {
         // Where this button really leads. Both company names used to be written here, so
@@ -255,7 +299,7 @@
           ? company
             ? `Continue to ${company}`
             : "Continue to secure payment"
-          : "Payment method unavailable";
+          : "Continue to secure payment";
       }
     }
   }

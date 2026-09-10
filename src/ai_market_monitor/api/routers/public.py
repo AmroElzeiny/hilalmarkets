@@ -19,8 +19,8 @@ from ai_market_monitor.core.plans import (
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
+    money_back_headline,
     plan_offer,
-    plan_offer_payload,
     promotion_is_active,
     visible_plan_comparison,
     visible_plan_comparison_headers,
@@ -59,6 +59,7 @@ from ai_market_monitor.services.billing import (
     billing_method_provider,
     billing_provider_capabilities,
     payment_method_offers,
+    plan_sale_payload,
 )
 from ai_market_monitor.services.hilal_methodology import (
     page_payload as hilal_page_payload,
@@ -251,19 +252,23 @@ def _public_context(
         {
             "code": code,
             "name": PLAN_DEFINITIONS[code].name,
-            "description": PUBLIC_PLAN_PRESENTATIONS[code].description,
             "button": PUBLIC_PLAN_PRESENTATIONS[code].cta_label,
             "badge": PUBLIC_PLAN_PRESENTATIONS[code].badge,
             "trialNote": PUBLIC_PLAN_PRESENTATIONS[code].trial_note,
+            # The bold line above that sentence. Sent rather than written into the React
+            # card, which held the number 7 by hand while the sentence under it came from
+            # here — so a changed refund window would have left the two disagreeing.
+            "moneyBackHeadline": money_back_headline(code),
             "visibleFeatures": list(PUBLIC_PLAN_PRESENTATIONS[code].visible_features),
             "additionalFeatures": list(
                 PUBLIC_PLAN_PRESENTATIONS[code].additional_features
             ),
             "highlightedFeature": PUBLIC_PLAN_PRESENTATIONS[code].highlighted_feature,
             # `monthlyPrice`, `originalMonthlyPrice` and the two availability flags all
-            # come from `plan_offer_payload`, so the landing page cannot show a price the
-            # dashboard disagrees with.
-            **plan_offer_payload(code),
+            # come from `plan_sale_payload`, so the landing page cannot show a price the
+            # dashboard disagrees with — nor call a plan available that the dashboard
+            # calls "coming soon" because no payment company can take money for it.
+            **plan_sale_payload(settings, code),
         }
         for code in plan_codes
     ]
@@ -366,7 +371,9 @@ def _public_context(
         # pricing cards; the React landing page reads the same values out of
         # `public_pricing_plans` below.
         "plan_offers": {code: plan_offer(code) for code in plan_codes},
-        "plan_offer_values": {code: plan_offer_payload(code) for code in plan_codes},
+        "plan_offer_values": {
+            code: plan_sale_payload(settings, code) for code in plan_codes
+        },
         "promotion_ends_at": PROMOTION_ENDS_AT.isoformat(),
         "promotion_active": promotion_is_active(),
         "plan_comparison": visible_plan_comparison(

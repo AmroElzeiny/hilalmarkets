@@ -23,9 +23,11 @@ every card at once, with the same values the availability check itself uses.
 
 from __future__ import annotations
 
+import inspect
 import math
 import random
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -34,11 +36,18 @@ from ai_market_monitor.engine.builder_operations import (
     _probe_values,
     mechanic_catalog,
 )
+from ai_market_monitor.engine.builder_templates import condition_template
 from ai_market_monitor.engine.capabilities import all_capabilities
-from ai_market_monitor.engine.evaluator import StrategyRuleEngine
+from ai_market_monitor.engine.capability_compatibility import compatibility_by_key
+from ai_market_monitor.engine.evaluator import (
+    EVALUATOR_PRICE_ACTION_NAMES,
+    StrategyRuleEngine,
+    evaluator_supports_price_action,
+)
 from ai_market_monitor.engine.models import EvaluationState
 from ai_market_monitor.engine.price_action import PRICE_ACTION_NAMES
 from ai_market_monitor.engine.strategy_compiler_v2 import compile_strategy_draft_v2
+from ai_market_monitor.schemas.strategy import ConditionRule
 from ai_market_monitor.schemas.strategy_draft_v2 import (
     ConditionNodeType,
     ConditionNodeV2,
@@ -224,4 +233,59 @@ def test_no_market_metric_shares_a_name_with_a_price_action_reading() -> None:
     assert clashing == [], (
         "these names mean one thing as a market metric and another as a price action: "
         f"{clashing}"
+    )
+
+
+def test_the_runtime_answers_every_price_action_name_it_claims_to_know() -> None:
+    """One vocabulary for "can the runtime evaluate this reading?".
+
+    ``evaluator.EVALUATOR_PRICE_ACTION_NAMES`` lists the readings the evaluator answers
+    itself. Every name in it must reach a real branch, and nothing may claim to be
+    evaluated without one. Three modules used to answer this question separately and a
+    hand-written copy knew five of twenty-five names, so working capabilities were
+    published to users as "cannot run it yet".
+    """
+
+    source = (
+        Path(inspect.getsourcefile(StrategyRuleEngine._price_action) or "")
+    ).read_text(encoding="utf-8")
+    body = source.split("def _price_action(")[1].split("\n    @staticmethod")[0]
+    for name in sorted(EVALUATOR_PRICE_ACTION_NAMES):
+        assert f'"{name}"' in body, f"{name} is listed but has no branch in _price_action"
+        assert evaluator_supports_price_action(name), name
+
+    # And the shared module's own vocabulary is answered too, through the same call.
+    for name in sorted(PRICE_ACTION_NAMES):
+        assert evaluator_supports_price_action(name), name
+
+    assert evaluator_supports_price_action("not_a_reading") is False
+    assert evaluator_supports_price_action(None) is False
+
+
+def test_no_capability_is_published_as_unrunnable_while_the_runtime_runs_it() -> None:
+    """A capability the engine evaluates may never be shown as unsupported.
+
+    This is the rule that "Pivot high/low" broke: the registry said the runtime could
+    not run it, the Builder refused to offer it with no reason a person could act on,
+    and the engine had evaluated it correctly all along.
+    """
+
+    wrong: list[str] = []
+    for capability in all_capabilities():
+        try:
+            condition = ConditionRule.model_validate(
+                condition_template(capability, timeframe="15m")
+            )
+        except Exception:  # noqa: BLE001 - a template that will not parse is a separate rule
+            continue
+        operand = condition.left
+        if operand.kind.value != "price_action":
+            continue
+        row = compatibility_by_key()[capability.key]
+        if evaluator_supports_price_action(operand.name) and not row.evaluator_supported:
+            wrong.append(f"{capability.key} ({operand.name})")
+
+    assert wrong == [], (
+        "the engine evaluates these readings, but the catalog publishes them as "
+        f"unsupported: {wrong}"
     )

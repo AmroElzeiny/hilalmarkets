@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hilal OCG Supervisor Report",
+  "type": "object",
+  "required": [
+    "run_id",
+    "status",
+    "baseline",
+    "models",
+    "requirements",
+    "work_packages",
+    "changed_files",
+    "tests",
+    "test_integrity",
+    "hidden_error_audit",
+    "diff_audit",
+    "reviews",
+    "uncertainties",
+    "final_verdict"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "complete",
+        "escalated",
+        "blocked"
+      ]
+    },
+    "baseline": {
+      "type": "object"
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1
+    },
+    "work_packages": {
+      "type": "array",
+      "minItems": 1
+    },
+    "changed_files": {
+      "type": "array"
+    },
+    "tests": {
+      "type": "array"
+    },
+    "test_integrity": {
+      "type": "object"
+    },
+    "hidden_error_audit": {
+      "type": "object"
+    },
+    "diff_audit": {
+      "type": "object"
+    },
+    "reviews": {
+      "type": "array",
+      "minItems": 1
+    },
+    "visual": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "uncertainties": {
+      "type": "array"
+    },
+    "final_verdict": {
+      "enum": [
+        "COMPLETE_VERIFIED",
+        "COMPLETE_WITH_EXPLICIT_UNVERIFIED_ITEM",
+        "ESCALATE_TO_CLAUDE",
+        "BLOCKED"
+      ]
+    }
+  }
+}

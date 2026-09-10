@@ -41,6 +41,22 @@ function codeShape(box) {
   }
 }
 
+/* The two refusals, in the server's own words, so the instant answer here and the answer
+ * that comes back from the server are the same sentence. They used to be written out in
+ * this file, and one of them named HILAL25 — a code that has since been withdrawn, so the
+ * message was telling people to type something checkout would refuse. The fallbacks say
+ * nothing about any particular code. */
+function shapeMessage(box) {
+  return (
+    box.dataset.discountShapeMessage ||
+    "That does not look like a code. A code is letters and numbers."
+  );
+}
+
+function emptyMessage(box) {
+  return box.dataset.discountEmptyMessage || "Write your code in the box first.";
+}
+
 for (const box of document.querySelectorAll("[data-discount]")) attach(box);
 
 export function attach(box) {
@@ -177,9 +193,28 @@ export function attach(box) {
   }
   // The plan can change under the box on the two popup screens, and a code priced for
   // one plan is not priced for another.
+  //
+  // **Written and changed are two different facts.** The field is `<input type="hidden">`,
+  // and on a hidden input the `value` property writes the `value` attribute every time —
+  // even when the text going in is the text already there. So the watcher woke on every
+  // write, not on every change, and one screen turned that into an endless circle:
+  // the popup opened, wrote the plan, the watcher dropped the code, dropping the code
+  // announced a new total, the popup redrew itself on that announcement, redrawing wrote
+  // the plan again. Each turn queued the next before the browser could draw anything, so
+  // the page froze on the first press of Pay and never came back. That is why pressing Pay
+  // did nothing however many times it was pressed.
+  //
+  // The plan this box is priced for is remembered here, and the code is dropped only when
+  // a different plan really arrives. A write that changes nothing now means nothing.
   const planInput = form.querySelector('input[name="plan_code"]');
   if (planInput) {
-    const planWatcher = new MutationObserver(() => drop({ quiet: true }));
+    let pricedFor = planInput.value || "";
+    const planWatcher = new MutationObserver(() => {
+      const now = planInput.value || "";
+      if (now === pricedFor) return;
+      pricedFor = now;
+      drop({ quiet: true });
+    });
     planWatcher.observe(planInput, { attributes: true, attributeFilter: ["value"] });
   }
 
@@ -189,12 +224,12 @@ export function attach(box) {
     if (busy) return;
     const typed = input.value.replace(/\s+/g, "").toUpperCase();
     if (!typed) {
-      say("Write your code in the box first.", "danger");
+      say(emptyMessage(box), "danger");
       input.focus();
       return;
     }
     if (!codeShape(box).test(typed)) {
-      say("That does not look like a code. A code is letters and numbers, like HILAL25.", "danger");
+      say(shapeMessage(box), "danger");
       input.focus();
       return;
     }

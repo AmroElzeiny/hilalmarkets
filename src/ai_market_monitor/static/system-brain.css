@@ -1894,3 +1894,52 @@ tr.is-selected { background: var(--hm-apple-pale); }
   .brain-affiliate-decide > button,
   .brain-affiliate-refuse > button { justify-self: stretch; }
 }
+
+
+/* Payments -------------------------------------------------------------------
+   The sentence a customer ticked, and the list of everything that happened to
+   their money. Both are records rather than controls: nothing on this page is
+   clickable except the link into one customer. */
+
+.brain-consent-record {
+  display: grid;
+  gap: 5px;
+  margin: 0 !important;
+  padding: 12px 13px;
+  border: 1px solid var(--hm-hairline);
+  border-radius: var(--hm-radius-md);
+  background: var(--hm-neutral-bg);
+}
+.brain-consent-record strong { color: var(--hm-ink); }
+.brain-consent-record small { color: var(--hm-muted); font-size: 11px; }
+
+.brain-timelog {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.brain-timelog-entry {
+  display: grid;
+  gap: 3px;
+  padding: 11px 13px;
+  /* The kind of thing that happened is carried by a coloured edge, never by colour
+     alone: the headline says it in words as well. */
+  border-left: 3px solid var(--hm-hairline-strong);
+  border-radius: 0 var(--hm-radius-md) var(--hm-radius-md) 0;
+  background: var(--hm-surface);
+  box-shadow: var(--hm-shadow-xs);
+}
+.brain-timelog-entry time { color: var(--hm-muted); font-size: 11px; }
+.brain-timelog-entry strong { color: var(--hm-ink); font-size: 14px; }
+.brain-timelog-entry span { color: var(--hm-copy); font-size: 12px; }
+.brain-timelog-entry.is-payment { border-left-color: var(--hm-success); }
+.brain-timelog-entry.is-cancel { border-left-color: var(--hm-danger); }
+.brain-timelog-entry.is-downgrade { border-left-color: var(--hm-warning); }
+.brain-timelog-entry.is-upgrade,
+.brain-timelog-entry.is-applied { border-left-color: var(--hm-apple-deep); }
+
+@media (max-width: 640px) {
+  .brain-timelog-entry { padding: 10px 11px; }
+}

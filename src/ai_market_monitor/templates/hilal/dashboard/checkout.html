@@ -6,7 +6,10 @@
   <div>
     <span class="eyebrow">Secure checkout</span>
     <h1>Review before payment.</h1>
-    <p>Your plan, price, and limits below were loaded from the server plan catalog.</p>
+    {# "loaded from the server plan catalog" told the reader where a number came from
+       inside our own system, which is not a fact they can use. This says what to do
+       with the page instead. #}
+    <p>Check the plan and the price below. Nothing is charged on this page.</p>
   </div>
   <a class="btn btn-secondary" href="/dashboard/billing">Back to plans</a>
 </div>
@@ -15,8 +18,9 @@
   <div class="notice {{ 'notice-error' if checkout_state in ['provider_unavailable','checkout_expired','plan_not_available'] else '' }}" role="status">
     <span data-icon="{{ 'alert' if checkout_state in ['provider_unavailable','checkout_expired','plan_not_available'] else 'info' }}" data-icon-class="icon"></span>
     <div>
-      <strong>{{ 'Checkout already in progress' if checkout_state == 'duplicate' else checkout_state.replace('_', ' ').title() }}</strong>
-      <p>{% if checkout_state == 'duplicate' %}A recent checkout for this plan is still available. Continue it instead of creating a duplicate payment.{% elif checkout_state == 'billing_terms_required' %}Review and accept the billing agreement before continuing.{% elif checkout_state == 'provider_unavailable' %}The payment provider could not open a secure checkout. Your plan was not changed.{% elif checkout_state == 'already_subscribed' %}This plan is already active on your account.{% else %}No entitlement was changed. Review the details or return to Plan and Billing.{% endif %}</p>
+      {% set checkout_headings = {'duplicate': 'Checkout already in progress', 'billing_terms_required': 'One step left before you pay', 'provider_unavailable': 'We could not reach the payment company', 'already_subscribed': 'Already on this plan', 'checkout_expired': 'That payment page closed', 'plan_not_available': 'That plan is not on sale right now'} %}
+      <strong>{{ checkout_headings.get(checkout_state, 'We could not open the checkout') }}</strong>
+      <p>{% if checkout_state == 'duplicate' %}You already have a payment page open for this plan. Use it now instead of paying twice for the same thing.{% elif checkout_state == 'billing_terms_required' %}Review and accept the billing agreement before continuing.{% elif checkout_state == 'provider_unavailable' %}The payment company did not answer, so we could not open the secure payment page. Nothing was charged and your plan did not change. Please try again in a few minutes.{% elif checkout_state == 'already_subscribed' %}This plan is already active on your account.{% else %}Nothing was charged and your plan did not change. Check the details above, or go back to Plan and Billing to start again.{% endif %}</p>
     </div>
   </div>
 {% endif %}
@@ -28,14 +32,18 @@
       <span class="icon-box is-gold"><span data-icon="billing" data-icon-class="icon-lg"></span></span>
     </div>
     <dl class="checkout-facts">
-      <div><dt>Access type</dt><dd>{{ 'Monthly subscription' if billing_capabilities.supports_recurring_billing else 'One-time 30-day access' }}</dd></div>
       {# The number the payment will ask for. It opens at the price with no code and the
          box below rewrites it the moment one is accepted, so this — the last screen
          before paying — can never quote a figure the payment does not ask for. #}
       <div><dt>Price</dt><dd><s class="price-original" data-discount-original="{plain} {{ plan.currency }}" hidden></s> <span data-discount-total="{plain} {{ plan.currency }}">{{ checkout_price }} {{ plan.currency }}</span></dd></div>
-      <div><dt>Tax</dt><dd>Shown by the payment provider where applicable</dd></div>
-      <div><dt>Renewal</dt><dd>{{ 'Renews monthly until cancelled' if billing_capabilities.supports_recurring_billing else 'Manual renewal; no automatic charge' }}</dd></div>
-      <div><dt>Cancellation</dt><dd>{{ 'Manage through the provider portal' if billing_capabilities.supports_customer_portal else 'No subscription cancellation is needed' }}</dd></div>
+      <div><dt>Tax</dt><dd>Shown by the payment company where applicable</dd></div>
+      {# Each method has different renewal terms. These words travel with the offer from
+         the provider capability contract, so choosing crypto is never described using
+         the default card provider's recurring terms. #}
+      {% for method, offer in billing_method_offers.items() if offer.available %}
+        <div><dt>{{ method|title }} access</dt><dd>{{ offer.access_terms }}</dd></div>
+        <div><dt>{{ method|title }} cancellation</dt><dd>{{ offer.cancellation_terms }}</dd></div>
+      {% endfor %}
     </dl>
     <div class="checkout-limit-grid">
       <article><span data-icon="watchlist" data-icon-class="icon"></span><strong>{{ plan_limits.get('active_strategies', 0)|plan_limit }}</strong><span>Active Watchlists</span></article>
@@ -54,34 +62,38 @@
         <span data-discount-total="{plain} {{ plan.currency }}">{{ checkout_price }} {{ plan.currency }}</span>
       </strong>
     </div>
-    {% if launch_discount_code %}
-      {# The launch price is reached by typing a code, so the page names the code rather
-         than promising a lower number nobody has asked for yet. #}
+    {% if promotion_original_price %}
+      {# The price above is already the launch price. Nothing has to be typed for it, so
+         the page says what it normally costs and how long this lasts instead of naming a
+         code that no longer exists. #}
       <p class="checkout-small">
-        Use code <code class="hm-code-chip">{{ launch_discount_code }}</code> for
-        {{ launch_discount_percent }}% off. Without it the price stays
-        {{ checkout_price }} {{ plan.currency }} a month.
+        Launch price. It normally costs
+        <s class="price-original">{{ promotion_original_price }} {{ plan.currency }}</s>
+        a month.
       </p>
-      <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" role="group" aria-label="Time left to use this code" hidden></div>
+      <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" role="group" aria-label="Time left at this price" hidden></div>
     {% endif %}
-    <p class="muted">Payment details are entered only on the configured payment provider's secure page.</p>
+    <p class="muted">Payment details are entered only on the payment page run by the payment company, which comes next.</p>
     {% if already_subscribed %}
       <div class="notice notice-success"><span data-icon="check" data-icon-class="icon"></span><div><strong>Already subscribed</strong><p>Your {{ plan.name }} plan is active.</p></div></div>
       <a class="btn btn-primary" href="/dashboard/billing">Open billing</a>
-    {% elif checkout_attempt and checkout_attempt.checkout_url and checkout_attempt.status in ['pending','creating'] %}
-      <a class="btn btn-primary" href="/dashboard/billing/checkout/{{ checkout_attempt.id }}/resume">Continue secure payment</a>
-      <p class="checkout-small">This existing checkout expires {{ checkout_attempt.expires_at|short_dt(user.timezone) }}.</p>
-    {% elif not billing_method_offers.values()|selectattr('available')|list %}
-      {# No way of paying works for this plan right now. A form that cannot succeed is
-         worse than none: it asks somebody for their address and then refuses them. #}
+    {% elif not checkout_availability.purchasable %}
+      {# This account may not buy this plan today - it already holds another paid plan,
+         or no way of paying works. The sentence is the service's own refusal
+         (`plan_checkout_availability`), the same one the popup shows, so a page can
+         never word its own apology for a rule it copied. A form that cannot succeed
+         is worse than none: it asks somebody for their address and then refuses them. #}
       <div class="notice notice-error" role="status">
         <span data-icon="alert" data-icon-class="icon"></span>
         <div>
-          <strong>There is no way to pay for this plan yet</strong>
-          <p>{{ billing_method_offers.card.note }} {{ billing_method_offers.crypto.note }} Nothing was charged.</p>
+          <strong>You cannot buy this plan on this page</strong>
+          <p>{{ checkout_availability.refusal }} Nothing was charged.</p>
         </div>
       </div>
-      <a class="btn btn-secondary" href="/dashboard/billing">Back to plans</a>
+      <a class="btn btn-secondary" href="/dashboard/billing">Open billing</a>
+    {% elif checkout_attempt and checkout_attempt.checkout_url and checkout_attempt.status in ['pending','creating'] %}
+      <a class="btn btn-primary" href="/dashboard/billing/checkout/{{ checkout_attempt.id }}/resume">Continue secure payment</a>
+      <p class="checkout-small">This existing checkout expires {{ checkout_attempt.expires_at|short_dt(user.timezone) }}.</p>
     {% else %}
       <form class="checkout-confirm-form" method="post" action="/dashboard/billing/checkout">
         <input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}">
@@ -97,7 +109,7 @@
           {% for method, offer in billing_method_offers.items() %}
             <div class="billing-method-option">
               <label class="{{ '' if offer.available else 'is-unavailable' }}" aria-disabled="{{ 'false' if offer.available else 'true' }}">
-                <input type="radio" name="payment_method" value="{{ method }}" {{ 'checked' if method == first_available else '' }} {{ '' if offer.available else 'disabled' }} required>
+                <input type="radio" name="payment_method" value="{{ method }}" {{ 'checked' if method == first_available else '' }} {{ '' if offer.available else 'disabled' }}>
                 <span class="billing-method-card"><span data-icon="{{ 'billing' if method == 'card' else 'wallet' }}" data-icon-class="icon"></span><strong>{{ 'Card' if method == 'card' else 'Crypto' }}</strong><small>{{ offer.note }}</small></span>
               </label>
               {# The company that will really take the money, named under the choice. #}
@@ -107,7 +119,7 @@
         </fieldset>
         {# The code box, under the choice that can use it. It draws itself only when the
            chosen way of paying takes a code, which the server decided. #}
-        {{ discount_code_box(discount_methods, checkout_price, plan.currency, launch_discount_code, launch_discount_percent) }}
+        {{ discount_code_box(discount_methods, checkout_price, plan.currency) }}
         <div class="billing-profile-grid">
           <label><span>First name</span><input type="text" name="first_name" value="{{ billing_profile_defaults.first_name }}" maxlength="60" autocomplete="given-name" required></label>
           <label><span>Last name</span><input type="text" name="last_name" value="{{ billing_profile_defaults.last_name }}" maxlength="60" autocomplete="family-name" required></label>
@@ -115,7 +127,7 @@
           <label><span>City</span><input type="text" name="city" maxlength="100" autocomplete="address-level2"></label>
           <label><span>Country</span><input type="text" name="country" maxlength="80" autocomplete="country-name" required></label>
         </div>
-        <label class="checkout-consent"><input type="checkbox" name="terms_accepted" value="true" required><span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, and <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>{% if billing_capabilities.supports_recurring_billing %}, including recurring monthly payment{% else %}, for this one-time 30-day access payment{% endif %}.</span></label>
+        <label class="checkout-consent"><input type="checkbox" name="terms_accepted" value="true" required><span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, and <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>, including the access, renewal, and cancellation terms shown above for my chosen payment method.</span></label>
         <button class="btn btn-primary" type="submit"><span data-icon="shield" data-icon-class="icon-sm"></span>Continue to secure payment</button>
       </form>
     {% endif %}
@@ -132,6 +144,6 @@
   data-event-scope="{{ checkout_attempt.id if checkout_attempt else checkout_request_id }}"
   hidden
 ></div>
-<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260905-inspector-left"></script>
-<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260905-inspector-left"></script>
+<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260910-pay-now"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260910-pay-now"></script>
 {% endblock %}

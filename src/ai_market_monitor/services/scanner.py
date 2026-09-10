@@ -72,6 +72,7 @@ from ai_market_monitor.services.market_preview import (
 )
 from ai_market_monitor.services.notification_preferences import NotificationPreferenceService
 from ai_market_monitor.services.notifications import NotificationDispatcher
+from ai_market_monitor.services.plan_limits import plan_limit_notice
 from ai_market_monitor.services.reliability import ReliabilityService
 from ai_market_monitor.services.sharia_universe import (
     ShariaUniverseError,
@@ -374,6 +375,9 @@ class ScanPersistenceService:
         is_candle_complete: bool,
         plan_alert_budget: int | None,
         plan_weekly_alert_budget: int | None = None,
+        #: Which plan the budgets above came from. Carried so a message that was stopped
+        #: by the plan can name the plan and its real number, rather than saying nothing.
+        entitlement_plan_code: str = "demo",
         evidence_only: bool = False,
         scan_context: dict[str, Any] | None = None,
     ) -> tuple[ScanResult, SetupInstance | None, Alert | None]:
@@ -454,6 +458,7 @@ class ScanPersistenceService:
             result=result,
             plan_alert_budget=plan_alert_budget,
             plan_weekly_alert_budget=plan_weekly_alert_budget,
+            entitlement_plan_code=entitlement_plan_code,
             definition=definition,
             scan_context=scan_context,
         )
@@ -770,6 +775,7 @@ class ScanPersistenceService:
         result: EvaluationResult,
         plan_alert_budget: int | None,
         plan_weekly_alert_budget: int | None,
+        entitlement_plan_code: str,
         definition: StrategyDefinition,
         scan_context: dict[str, Any] | None,
     ) -> Alert | None:
@@ -894,6 +900,21 @@ class ScanPersistenceService:
                         occurred_at=result.evaluation_time,
                     )
                 )
+            # Reaching the **plan's** message budget is the one refusal here a person is
+            # entitled to be told about, and it is the one that used to say nothing at
+            # all: the monitor simply went quiet and no screen explained why. The other
+            # refusals — a duplicate, a cooldown, the hourly number on the Settings page —
+            # are the person's own choices working as asked.
+            await self._create_plan_alert_limit_notice(
+                strategy=strategy,
+                version=version,
+                definition=definition,
+                entitlement_plan_code=entitlement_plan_code,
+                reason=decision.reason,
+                plan_daily_budget=plan_alert_budget,
+                plan_weekly_budget=plan_weekly_alert_budget,
+                configured_daily_budget=configured_budget,
+            )
             return None
         alert = Alert(
             user_id=strategy.user_id,
@@ -950,6 +971,85 @@ class ScanPersistenceService:
         deliveries = await NotificationDispatcher(self.session).enqueue(alert, definition)
         alert.__dict__["_enqueued_delivery_count"] = len(deliveries)
         return alert
+
+    async def _create_plan_alert_limit_notice(
+        self,
+        *,
+        strategy: Strategy,
+        version: StrategyVersion,
+        definition: StrategyDefinition,
+        entitlement_plan_code: str,
+        reason: str | None,
+        plan_daily_budget: int | None,
+        plan_weekly_budget: int | None,
+        configured_daily_budget: int | None,
+    ) -> None:
+        """Tell somebody, once, that their plan's message allowance is used up.
+
+        Sent the same way every other message is — Telegram, email, or in the app —
+        because it is a message about their monitors and the person may not open the site
+        for days. :class:`NotificationDispatcher` picks the destinations from their own
+        settings, so somebody with neither Telegram nor email connected still sees it in
+        the app rather than nothing at all.
+
+        **Once per period, not once per blocked alert.** The deduplication key carries the
+        day or the week, so a monitor that is stopped four hundred times in an afternoon
+        produces one notice, and a fresh one when the allowance next runs out.
+
+        Only the plan's own budget produces this. A daily number the person set on their
+        own monitor is their choice working as asked, and telling them their plan stopped
+        it would be untrue.
+        """
+
+        weekly = reason == "weekly_alert_budget"
+        daily = reason == "daily_alert_budget"
+        if not (weekly or daily):
+            return
+        if weekly and plan_weekly_budget is None:
+            return
+        if daily:
+            if plan_daily_budget is None:
+                return
+            # The monitor's own number bound first, so the plan is not what stopped this.
+            if configured_daily_budget is not None and configured_daily_budget < plan_daily_budget:
+                return
+        code = "alerts_per_week_limit" if weekly else "alerts_per_day_limit"
+        allowed = plan_weekly_budget if weekly else plan_daily_budget
+        now = datetime.now(UTC)
+        period = now.strftime("%G-W%V") if weekly else now.strftime("%Y-%m-%d")
+        dedupe = stable_event_hash(
+            {
+                "user_id": str(strategy.user_id),
+                "notice": code,
+                "period": period,
+            }
+        )
+        existing = await self.session.scalar(
+            select(Alert.id).where(Alert.deduplication_key == dedupe)
+        )
+        if existing:
+            return
+        notice = Alert(
+            user_id=strategy.user_id,
+            strategy_version_id=version.id,
+            setup_instance_id=None,
+            alert_type=AlertType.LIFECYCLE,
+            deduplication_key=dedupe,
+            title="Your plan's message limit is reached",
+            body=plan_limit_notice(code, plan_code=entitlement_plan_code, allowed=allowed),
+            proof_receipt={
+                "notice": code,
+                "plan_code": entitlement_plan_code,
+                "allowed": allowed,
+                "period": period,
+                "qualification_status": "plan_limit_notice",
+            },
+            chart_snapshot_url=None,
+            candle_timestamp=None,
+        )
+        self.session.add(notice)
+        await self.session.flush()
+        await NotificationDispatcher(self.session).enqueue(notice, definition)
 
     async def _create_trial_limit_notice(
         self,
@@ -1298,6 +1398,7 @@ class ScanOrchestrator:
                                 is_candle_complete=is_complete,
                                 plan_alert_budget=plan_alert_budget,
                                 plan_weekly_alert_budget=plan_weekly_alert_budget,
+                                entitlement_plan_code=entitlement.plan.code,
                                 evidence_only=experiment_mode == "dry_run",
                                 scan_context={
                                     **(

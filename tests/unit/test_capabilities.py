@@ -28,7 +28,10 @@ def test_capability_registry_exposes_required_part2_breadth():
     assert {"btc_trend_filter", "market_cap_minimum", "meme_coin_exclusion"}.issubset(
         implemented_keys
     )
-    assert payload["unsupported"] == []
+    assert {item["key"] for item in payload["unsupported"]} == {
+        "daily_high_low",
+        "monthly_high_low",
+    }
     assert {"pump", "dump", "no meme coins", "trend filter"}.issubset(aliases)
 
 

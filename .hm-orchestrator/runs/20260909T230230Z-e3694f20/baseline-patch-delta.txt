@@ -1,0 +1,580 @@
+=== replace
+OLD @@ -123,6 +124,15 @@ from ai_market_monitor.services.affiliate import (
+NEW @@ -99,7 +100,6 @@ from ai_market_monitor.db.models.enums import (
+NEW      MonitorShariaAssetStatus,
+NEW      ShariaAssetStatus,
+NEW      StrategyStatus,
+NEW -    SubscriptionStatus,
+NEW      UserRole,
+NEW  )
+NEW  from ai_market_monitor.engine.quality import alert_trust_score_from_proof
+NEW @@ -123,6 +123,15 @@ from ai_market_monitor.services.affiliate import (
+=== replace
+OLD @@ -143,6 +153,8 @@ from ai_market_monitor.services.billing import (
+NEW @@ -133,6 +142,7 @@ from ai_market_monitor.services.billing import (
+NEW      PAYMENT_METHODS,
+NEW      BillingError,
+NEW      BillingService,
+NEW +    active_paid_plan_codes,
+NEW      billing_method_provider,
+NEW      billing_provider_capabilities,
+NEW      configured_billing_provider,
+NEW @@ -143,6 +153,9 @@ from ai_market_monitor.services.billing import (
+=== insert
+NEW +    plan_checkout_availability,
+=== replace
+OLD @@ -163,6 +175,22 @@ from ai_market_monitor.services.monitor_operations import (
+NEW @@ -163,6 +176,22 @@ from ai_market_monitor.services.monitor_operations import (
+=== replace
+OLD @@ -345,6 +373,26 @@ def _optional_uuid(value: str | None, *, label: str) -> UUID | None:
+NEW @@ -345,40 +374,23 @@ def _optional_uuid(value: str | None, *, label: str) -> UUID | None:
+=== insert
+NEW -async def _active_paid_plan_codes(
+NEW -    session: AsyncSession,
+NEW -    *,
+NEW -    user_id: UUID,
+NEW -) -> frozenset[str]:
+NEW -    """Return provider-backed active plans, never administrative access."""
+NEW -    active_codes = list(
+NEW -        (
+NEW -            await session.scalars(
+NEW -                select(Plan.code)
+NEW -                .join(Subscription, Subscription.plan_id == Plan.id)
+NEW -                .where(
+NEW -                    Subscription.user_id == user_id,
+NEW -                    Subscription.provider.notin_(("admin", "free", "trial")),
+NEW -                    Subscription.status.in_(
+NEW -                        (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
+NEW -                    ),
+NEW -                    (Subscription.current_period_end.is_(None))
+NEW -                    | (Subscription.current_period_end > datetime.now(UTC)),
+NEW -                )
+NEW -                .order_by(Subscription.updated_at.desc())
+NEW -            )
+NEW -        ).all()
+NEW -    )
+NEW -    return frozenset(active_codes)
+=== replace
+OLD +
+NEW  
+=== replace
+OLD +
+NEW  
+NEW -def _plan_checkout_allowed(
+NEW -    *, plan_code: str, active_paid_plan_codes: frozenset[str]
+NEW -) -> bool:
+NEW -    offer = plan_offer(plan_code)
+NEW -    return (
+NEW -        plan_code not in active_paid_plan_codes
+NEW -        and (offer.monthly_available or offer.annual_available)
+=== replace
+OLD +    )
+OLD +
+OLD +
+OLD  async def _active_paid_plan_codes(
+OLD      session: AsyncSession,
+OLD      *,
+OLD @@ -1117,6 +1165,47 @@ async def subscribe(
+NEW      )
+NEW  
+NEW  
+NEW @@ -1117,6 +1129,47 @@ async def subscribe(
+=== replace
+OLD @@ -1365,6 +1454,7 @@ async def signup_verify_submit(
+NEW @@ -1365,6 +1418,7 @@ async def signup_verify_submit(
+=== replace
+OLD @@ -1397,6 +1487,10 @@ async def signup_verify_submit(
+NEW @@ -1397,6 +1451,10 @@ async def signup_verify_submit(
+=== replace
+OLD @@ -1828,6 +1922,7 @@ async def google_callback(
+NEW @@ -1828,6 +1886,7 @@ async def google_callback(
+=== replace
+OLD @@ -1861,6 +1956,10 @@ async def google_callback(
+NEW @@ -1861,6 +1920,10 @@ async def google_callback(
+=== replace
+OLD @@ -3298,6 +3397,32 @@ async def billing_page(
+OLD          }
+NEW @@ -3277,27 +3340,42 @@ async def billing_page(
+NEW      billing = BillingService(session, settings)
+NEW      card_provider = billing_method_provider(settings, "card")
+NEW      crypto_provider = billing_method_provider(settings, "crypto")
+NEW -    active_paid_plan_codes = await _active_paid_plan_codes(session, user_id=user.id)
+NEW +    user_active_paid_plan_codes = await active_paid_plan_codes(session, user_id=user.id)
+NEW      display_name_parts = (user.display_name or "").strip().split(maxsplit=1)
+NEW      billing_selection_availability = {
+NEW -        code: {
+NEW -            "purchasable": _plan_checkout_allowed(
+NEW -                plan_code=code,
+NEW -                active_paid_plan_codes=active_paid_plan_codes,
+NEW -            ),
+NEW -            "card_monthly": payment_method_available(
+NEW -                settings, method="card", plan_code=code, billing_cycle="monthly"
+NEW -            ),
+NEW -            "card_annual": payment_method_available(
+NEW -                settings, method="card", plan_code=code, billing_cycle="annual"
+NEW -            ),
+NEW -            "crypto_monthly": payment_method_available(
+NEW -                settings, method="crypto", plan_code=code, billing_cycle="monthly"
+NEW -            ),
+NEW -            "trial": False,
+NEW -        }
+NEW +        code: plan_checkout_availability(
+NEW +            settings,
+NEW +            plan_code=code,
+NEW +            active_paid_plan_codes=user_active_paid_plan_codes,
+NEW +        )
+=== replace
+OLD @@ -3350,7 +3475,7 @@ async def billing_page(
+NEW @@ -3350,7 +3428,7 @@ async def billing_page(
+=== replace
+OLD @@ -3374,13 +3499,11 @@ async def billing_page(
+NEW @@ -3368,19 +3446,17 @@ async def billing_page(
+NEW                  billing_enabled=settings.billing_enabled
+NEW              ),
+NEW              trial_claimable=False,
+NEW -            active_paid_plan_codes=active_paid_plan_codes,
+NEW +            active_paid_plan_codes=user_active_paid_plan_codes,
+NEW              whatsapp_operational=settings.whatsapp_enabled,
+NEW              billing_enabled=settings.billing_enabled,
+=== replace
+OLD @@ -3410,13 +3533,30 @@ async def billing_page(
+NEW @@ -3410,13 +3486,30 @@ async def billing_page(
+=== replace
+OLD @@ -3433,8 +3573,13 @@ async def billing_page(
+NEW @@ -3428,13 +3521,25 @@ async def billing_page(
+NEW                          "monthly": str(effective_monthly_price(code)),
+NEW                          "annual": str(PUBLIC_PLAN_PRESENTATIONS[code].annual_price),
+NEW                          "availability": billing_selection_availability[code],
+NEW +                        # The sentence the server owns for why this plan cannot be bought,
+NEW +                        # surfaced at the top level so the dialog script shows it instead
+NEW +                        # of inventing its own fallback reason in the browser.
+NEW +                        "refusal": (
+NEW +                            billing_selection_availability.get(code, {}).get("refusal")
+NEW +                            or ""
+NEW +                        ),
+NEW                          # Decided here, per period, so the script draws an answer rather
+NEW                          # than working one out from flags a second time.
+=== replace
+OLD @@ -3757,16 +3902,7 @@ async def billing_checkout_review(
+NEW @@ -3755,18 +3860,9 @@ async def billing_checkout_review(
+NEW          checkout_attempt = await session.get(BillingCheckoutAttempt, attempt_id)
+NEW          if checkout_attempt is None or checkout_attempt.user_id != user.id:
+=== replace
+OLD      active_paid_plan_codes = await _active_paid_plan_codes(session, user_id=user.id)
+NEW -    active_paid_plan_codes = await _active_paid_plan_codes(session, user_id=user.id)
+NEW +    review_active_paid_plan_codes = await active_paid_plan_codes(session, user_id=user.id)
+=== replace
+OLD @@ -3776,13 +3912,10 @@ async def billing_checkout_review(
+NEW @@ -3776,13 +3872,10 @@ async def billing_checkout_review(
+=== replace
+OLD @@ -3797,11 +3930,13 @@ async def billing_checkout_review(
+NEW @@ -3797,17 +3890,19 @@ async def billing_checkout_review(
+=== replace
+OLD @@ -3938,6 +4073,23 @@ async def billing_checkout(
+NEW              checkout_attempt=checkout_attempt,
+NEW              checkout_state=state,
+NEW -            already_subscribed=plan.code in active_paid_plan_codes,
+NEW +            already_subscribed=plan.code in review_active_paid_plan_codes,
+NEW              billing_profile_defaults={
+NEW                  "first_name": display_name_parts[0] if display_name_parts else "",
+NEW                  "last_name": display_name_parts[1] if len(display_name_parts) > 1 else "",
+NEW @@ -3938,6 +4033,23 @@ async def billing_checkout(
+=== replace
+OLD @@ -3984,6 +4136,118 @@ async def billing_checkout(
+NEW @@ -3984,6 +4096,118 @@ async def billing_checkout(
+=== replace
+OLD @@ -4252,11 +4516,14 @@ async def affiliate_page(
+NEW @@ -4252,11 +4476,14 @@ async def affiliate_page(
+=== replace
+OLD @@ -4271,6 +4538,10 @@ async def affiliate_page(
+NEW @@ -4271,6 +4498,10 @@ async def affiliate_page(
+=== replace
+OLD @@ -4327,6 +4598,15 @@ async def affiliate_apply(
+NEW @@ -4327,6 +4558,15 @@ async def affiliate_apply(
+=== replace
+OLD @@ -4352,4 +4632,4 @@ async def affiliate_request_payout(
+NEW @@ -4352,4 +4592,4 @@ async def affiliate_request_payout(
+=== replace
+OLD @@ -69,12 +69,11 @@ from ai_market_monitor.core.dashboard_paths import (
+NEW @@ -35,19 +35,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
+NEW  
+NEW  from ai_market_monitor.api.dependencies import get_market_data_provider
+NEW  from ai_market_monitor.api.routers.dashboard import (
+NEW -    _active_paid_plan_codes,
+NEW      _billing_history_rows,
+NEW      _builder_screening_context,
+NEW      _context,
+NEW      _monitor_cards_context,
+NEW      _permanent_redirect,
+NEW -    _plan_checkout_allowed,
+NEW      _require_user,
+NEW      _timezone_options,
+NEW      asset_passport_context,
+NEW      screened_market_context,
+NEW      templates,
+NEW  )
+NEW +from ai_market_monitor.services.billing import (
+NEW +    active_paid_plan_codes,
+NEW +    plan_checkout_availability,
+NEW +)
+NEW  from ai_market_monitor.api.template_env import short_datetime as _short_datetime
+NEW  from ai_market_monitor.core.asset_logos import asset_logo
+NEW  from ai_market_monitor.core.config import Settings, get_settings
+NEW @@ -69,12 +71,11 @@ from ai_market_monitor.core.dashboard_paths import (
+=== replace
+OLD @@ -1617,19 +1616,16 @@ def _plan_card(
+NEW @@ -114,7 +115,6 @@ from ai_market_monitor.services.automated_research_reader import AutomatedResear
+NEW  from ai_market_monitor.services.billing import (
+NEW      DISCOUNT_CODE_METHODS,
+NEW      BillingService,
+NEW -    payment_method_available,
+NEW      payment_method_offers_by_method,
+NEW      payment_method_payload,
+NEW  )
+NEW @@ -1609,27 +1609,23 @@ def _plan_card(
+NEW      presentation = PUBLIC_PLAN_PRESENTATIONS[code]
+NEW      offer = plan_offer_payload(code)
+NEW      current = code == entitlement.plan.code or code in active_paid_plan_codes
+NEW -    buyable = bool(
+NEW -        offer["monthlyAvailable"]
+NEW -        and availability.get("purchasable")
+NEW -        and (availability.get("card_monthly") or availability.get("crypto_monthly"))
+NEW +    buyable = bool(offer["monthlyAvailable"] and availability.get("purchasable"))
+NEW +    holds_other_paid_plan = bool(
+NEW +        active_paid_plan_codes and code not in active_paid_plan_codes
+NEW      )
+=== replace
+OLD @@ -1654,7 +1650,14 @@ def _plan_card(
+NEW @@ -1650,11 +1646,20 @@ def _plan_card(
+NEW                  if offer["monthlyPrice"] == 0
+NEW                  else f"{plan.name} is not open for new subscriptions yet."
+NEW                  if not offer["monthlyAvailable"]
+NEW +                else "Change plan on the billing page"
+NEW +                if holds_other_paid_plan
+NEW                  else "Paid subscriptions are switched off just now. Nothing was charged."
+=== replace
+OLD @@ -1788,10 +1791,6 @@ async def subscription_page(
+NEW @@ -1684,7 +1689,7 @@ async def subscription_page(
+NEW      await PlanCatalogService(session).sync_defaults()
+NEW      entitlement = await EntitlementService(session).current(user.id)
+NEW      trial = await session.scalar(select(Trial).where(Trial.user_id == user.id))
+NEW -    active_paid_plan_codes = await _active_paid_plan_codes(session, user_id=user.id)
+NEW +    user_active_paid_plan_codes = await active_paid_plan_codes(session, user_id=user.id)
+NEW      watchlists_running = int(
+NEW          await session.scalar(
+NEW              select(func.count(Strategy.id)).where(
+NEW @@ -1697,18 +1702,11 @@ async def subscription_page(
+NEW      )
+NEW  
+NEW      availability = {
+NEW -        code: {
+NEW -            "purchasable": _plan_checkout_allowed(
+NEW -                plan_code=code,
+NEW -                active_paid_plan_codes=active_paid_plan_codes,
+NEW -            ),
+NEW -            "card_monthly": payment_method_available(
+NEW -                settings, method="card", plan_code=code, billing_cycle="monthly"
+NEW -            ),
+NEW -            "crypto_monthly": payment_method_available(
+NEW -                settings, method="crypto", plan_code=code, billing_cycle="monthly"
+NEW -            ),
+NEW -        }
+NEW +        code: plan_checkout_availability(
+NEW +            settings,
+NEW +            plan_code=code,
+NEW +            active_paid_plan_codes=user_active_paid_plan_codes,
+NEW +        )
+NEW          for code in PURCHASABLE_PLAN_CODES
+NEW      }
+NEW  
+NEW @@ -1767,11 +1765,11 @@ async def subscription_page(
+NEW      else:
+NEW          renewal = "This lasts 30 days. It does not renew by itself."
+NEW  
+NEW -    cards = [
+NEW +        cards = [
+NEW          _plan_card(
+NEW              code,
+NEW              entitlement=entitlement,
+NEW -            active_paid_plan_codes=active_paid_plan_codes,
+NEW +            active_paid_plan_codes=user_active_paid_plan_codes,
+NEW              availability=availability.get(code, {}),
+NEW              pay_methods=payment_method_payload(
+NEW                  settings, plan_code=code, billing_cycles=("monthly",)
+NEW @@ -1788,10 +1786,6 @@ async def subscription_page(
+=== replace
+OLD @@ -1823,12 +1822,10 @@ async def subscription_page(
+NEW @@ -1823,12 +1817,10 @@ async def subscription_page(
+=== replace
+OLD @@ -1,5 +1,6 @@
+NEW @@ -1,6 +1,7 @@
+=== insert
+NEW -from collections.abc import Mapping, Sequence
+=== replace
+OLD  from collections.abc import Mapping, Sequence
+NEW +from collections.abc import Collection, Mapping, Sequence
+=== insert
+NEW  from decimal import Decimal, InvalidOperation
+=== replace
+OLD @@ -418,6 +468,58 @@ def payment_method_available(
+NEW @@ -418,6 +468,156 @@ def payment_method_available(
+=== insert
+NEW +async def active_paid_plan_codes(
+NEW +    session: AsyncSession,
+NEW +    *,
+NEW +    user_id: UUID,
+NEW +) -> frozenset[str]:
+NEW +    """The codes of all provider-backed active paid plans for one account.
+NEW +
+NEW +    Administrative grants, the free plan and trials are not "paid" in the sense that a
+NEW +    checkout can conflict with them. This is the single source for that question: the
+NEW +    billing page, the checkout route and the plan-change service all read it rather than
+NEW +    writing their own query.
+NEW +    """
+NEW +
+NEW +    codes = list(
+NEW +        (
+NEW +            await session.scalars(
+NEW +                select(Plan.code)
+NEW +                .join(Subscription, Subscription.plan_id == Plan.id)
+NEW +                .where(
+NEW +                    Subscription.user_id == user_id,
+NEW +                    Subscription.provider.notin_(("admin", "free", "trial")),
+NEW +                    Subscription.status.in_(
+NEW +                        (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
+NEW +                    ),
+NEW +                    (Subscription.current_period_end.is_(None))
+NEW +                    | (Subscription.current_period_end > datetime.now(UTC)),
+NEW +                )
+NEW +                .order_by(Subscription.updated_at.desc())
+NEW +            )
+NEW +        ).all()
+NEW +    )
+NEW +    return frozenset(codes)
+NEW +
+NEW +
+NEW +def plan_checkout_availability(
+NEW +    settings: Settings,
+NEW +    plan_code: str,
+NEW +    *,
+NEW +    active_paid_plan_codes: Collection[str],
+NEW +    billing_cycle: str | None = None,
+NEW +) -> dict[str, Any]:
+NEW +    """One owner for "can this account buy this plan today, by which method".
+NEW +
+NEW +    The answer composes two layers: whether the payment company can really sell the plan
+NEW +    for a period, and whether this account is allowed to buy it (it may not already hold
+NEW +    a paid plan). A checkout must never be offered when either layer says no.
+NEW +
+NEW +    ``billing_cycle`` is accepted for callers that ask about one period, but the returned
+NEW +    shape always carries every JS-facing flag so a page can draw the whole choice.
+NEW +    """
+NEW +
+NEW +    name = plan_name(plan_code)
+NEW +    paid_held = set(active_paid_plan_codes) & set(PURCHASABLE_PLAN_CODES)
+NEW +    holds_this = plan_code in active_paid_plan_codes
+NEW +    holds_other = bool(paid_held) and not holds_this
+NEW +    account_may_buy = not holds_this and not holds_other
+NEW +
+NEW +    card_monthly = account_may_buy and payment_method_available(
+NEW +        settings, method="card", plan_code=plan_code, billing_cycle="monthly"
+NEW +    )
+NEW +    card_annual = account_may_buy and payment_method_available(
+NEW +        settings, method="card", plan_code=plan_code, billing_cycle="annual"
+NEW +    )
+NEW +    crypto_monthly = account_may_buy and payment_method_available(
+NEW +        settings, method="crypto", plan_code=plan_code, billing_cycle="monthly"
+NEW +    )
+NEW +    purchasable = card_monthly or card_annual or crypto_monthly
+NEW +
+NEW +    refusal = ""
+NEW +    if holds_this:
+NEW +        refusal = (
+NEW +            f"You already have the {name} plan. "
+NEW +            "The change period may be managed from the billing page."
+NEW +        )
+NEW +    elif holds_other:
+NEW +        refusal = (
+NEW +            "You are on a paid plan. Open the plan switcher on the billing page "
+NEW +            f"to move to the {name} plan."
+NEW +        )
+NEW +    elif not purchasable:
+NEW +        if plan_code not in PURCHASABLE_PLAN_CODES:
+NEW +            refusal = "There is no way to pay for this plan yet."
+NEW +        else:
+NEW +            refusal = "There is no way to pay for this plan yet."
+NEW +
+NEW +    result: dict[str, Any] = {
+NEW +        "purchasable": purchasable,
+NEW +        "card_monthly": card_monthly,
+NEW +        "card_annual": card_annual,
+NEW +        "crypto_monthly": crypto_monthly,
+NEW +        "trial": False,
+NEW +        "refusal": refusal,
+NEW +    }
+NEW +    if billing_cycle is not None:
+NEW +        result["billing_cycle"] = billing_cycle
+NEW +    return result
+NEW +
+NEW +
+=== replace
+OLD @@ -1262,6 +1364,22 @@ class BillingService:
+NEW @@ -1239,29 +1439,28 @@ class BillingService:
+NEW          plan = await PlanCatalogService(self.session).get_or_sync(plan_code)
+NEW          if not plan.is_active or plan.price_monthly <= 0:
+NEW              raise BillingError("plan_not_available", "This paid plan is not available.")
+NEW -        current_plans = set(
+NEW -            (
+NEW -                await self.session.scalars(
+NEW -                    select(Plan.code)
+NEW -                    .join(Subscription, Subscription.plan_id == Plan.id)
+NEW -                    .where(
+NEW -                        Subscription.user_id == user_id,
+NEW -                        Subscription.provider.notin_(("admin", "free", "trial")),
+NEW -                        Subscription.status.in_(
+NEW -                            [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]
+NEW -                        ),
+NEW -                        (Subscription.current_period_end.is_(None))
+NEW -                        | (Subscription.current_period_end > datetime.now(UTC)),
+NEW -                    )
+NEW -                    .order_by(Subscription.updated_at.desc())
+NEW -                )
+NEW -            ).all()
+NEW -        )
+NEW +        current_plans = set(await active_paid_plan_codes(self.session, user_id=user_id))
+NEW          if plan_code in current_plans:
+NEW              raise BillingError(
+=== replace
+OLD @@ -1379,9 +1497,13 @@ class BillingService:
+NEW @@ -1379,9 +1578,13 @@ class BillingService:
+=== replace
+OLD @@ -1771,6 +1893,10 @@ class BillingService:
+NEW @@ -1771,6 +1974,10 @@ class BillingService:
+=== replace
+OLD @@ -1897,7 +2023,7 @@ class BillingService:
+NEW @@ -1897,7 +2104,7 @@ class BillingService:
+=== replace
+OLD @@ -1911,6 +2037,12 @@ class BillingService:
+NEW @@ -1911,6 +2118,12 @@ class BillingService:
+=== replace
+OLD @@ -1957,7 +2089,7 @@ class BillingService:
+NEW @@ -1957,7 +2170,7 @@ class BillingService:
+=== replace
+OLD @@ -1971,6 +2103,12 @@ class BillingService:
+NEW @@ -1971,6 +2184,12 @@ class BillingService:
+=== replace
+OLD @@ -1987,6 +2125,49 @@ class BillingService:
+NEW @@ -1987,6 +2206,49 @@ class BillingService:
+=== replace
+OLD @@ -2159,16 +2340,33 @@ class BillingService:
+NEW @@ -2159,16 +2421,33 @@ class BillingService:
+=== replace
+OLD @@ -2196,7 +2394,7 @@ class BillingService:
+NEW @@ -2196,7 +2475,7 @@ class BillingService:
+=== replace
+OLD @@ -2340,12 +2538,20 @@ class BillingService:
+NEW @@ -2340,12 +2619,20 @@ class BillingService:
+=== replace
+OLD @@ -2369,7 +2575,12 @@ class BillingService:
+NEW @@ -2369,7 +2656,12 @@ class BillingService:
+=== replace
+OLD @@ -2501,6 +2712,17 @@ def _cycle_key(billing_cycle: str) -> str:
+NEW @@ -2501,6 +2793,17 @@ def _cycle_key(billing_cycle: str) -> str:
+=== replace
+OLD @@ -122,10 +122,6 @@
+NEW @@ -30,6 +30,8 @@
+NEW    const cryptoOption = dialog.querySelector("[data-billing-method-crypto]");
+NEW    const submit = dialog.querySelector("[data-billing-submit]");
+NEW    const status = dialog.querySelector("[data-billing-dialog-status]");
+NEW +  const noMethodNotice = dialog.querySelector("[data-billing-no-method]");
+NEW +  const noMethodReason = dialog.querySelector("[data-billing-no-method-reason]");
+NEW    const pageIntervalRadios = Array.from(
+NEW      document.querySelectorAll('input[name="dashboard_billing_interval"]')
+NEW    );
+NEW @@ -122,10 +124,6 @@
+=== insert
+NEW @@ -229,11 +227,33 @@
+NEW          : "Review the plan and choose how you want to pay.";
+NEW      }
+NEW      if (periodOptions) periodOptions.hidden = trialSelected;
+NEW +
+NEW +    const anyMethodAvailable = cardAvailable || cryptoAvailable;
+NEW +    if (noMethodNotice) {
+NEW +      noMethodNotice.hidden = anyMethodAvailable;
+NEW +    }
+NEW +    if (noMethodReason) {
+NEW +      // The server owns the reason. Fall back to the nested availability sentence only
+NEW +      // for robustness; the top-level key is the one the page JSON is expected to carry.
+NEW +      const reason = plan.refusal || availability.refusal || "";
+NEW +      noMethodReason.textContent = reason;
+NEW +    }
+NEW +
+NEW      if (status) {
+NEW -      status.textContent =
+NEW -        cardAvailable || cryptoAvailable
+NEW +      if (anyMethodAvailable) {
+NEW +        const selectedMethod = cardInput?.checked
+NEW +          ? "card"
+NEW +          : cryptoInput?.checked
+NEW +            ? "crypto"
+NEW +            : "";
+NEW +        status.textContent = selectedMethod
+NEW            ? "You will enter card or wallet details on the selected provider's secure page."
+NEW -          : "This plan and billing period are not configured for checkout yet.";
+NEW +          : "Choose a payment method to continue.";
+NEW +      } else {
+NEW +        // The no-method notice already carries the server-owned reason; keep the status
+NEW +        // line empty so the two messages do not compete.
+NEW +        status.textContent = "";
+NEW +      }
+NEW      }
+NEW      if (submit) {
+NEW        const selectedMethod = cardInput?.checked
+NEW @@ -255,7 +275,7 @@
+NEW            ? company
+NEW              ? `Continue to ${company}`
+NEW              : "Continue to secure payment"
+NEW -          : "Payment method unavailable";
+NEW +          : "Continue to secure payment";
+NEW        }
+NEW      }
+NEW    }
+=== replace
+OLD @@ -230,7 +288,7 @@
+NEW @@ -228,9 +286,20 @@
+NEW          </div>
+NEW        </fieldset>
+=== insert
+NEW +      {# When no payment method works for this plan and period, the server-owned reason
+NEW +         is shown here. Hidden by default; the script un-hides it and sets the reason
+NEW +         text from the plan data so the browser never falls back to its own sentence. #}
+NEW +      <div class="notice notice-error" role="status" data-billing-no-method hidden>
+NEW +        <span data-icon="alert" data-icon-class="icon"></span>
+NEW +        <div>
+NEW +          <strong>There is no way to pay for this plan yet</strong>
+NEW +          <p data-billing-no-method-reason></p>
+NEW +        </div>
+NEW +      </div>
+NEW +
+=== replace
+OLD @@ -251,6 +309,124 @@
+NEW @@ -251,6 +320,124 @@
+=== replace
+OLD @@ -264,7 +440,7 @@
+NEW @@ -264,7 +451,7 @@
+=== replace
+OLD @@ -272,13 +448,15 @@
+NEW @@ -272,13 +459,15 @@
+=== replace
+OLD @@ -299,6 +477,7 @@
+NEW @@ -299,6 +488,7 @@
+=== insert
+NEW @@ -97,7 +102,7 @@
+NEW            {% for method, offer in billing_method_offers.items() %}
+NEW              <div class="billing-method-option">
+NEW                <label class="{{ '' if offer.available else 'is-unavailable' }}" aria-disabled="{{ 'false' if offer.available else 'true' }}">
+NEW -                <input type="radio" name="payment_method" value="{{ method }}" {{ 'checked' if method == first_available else '' }} {{ '' if offer.av
+NEW +                <input type="radio" name="payment_method" value="{{ method }}" {{ 'checked' if method == first_available else '' }} {{ '' if offer.av
+NEW                  <span class="billing-method-card"><span data-icon="{{ 'billing' if method == 'card' else 'wallet' }}" data-icon-class="icon"></span><
+NEW                </label>
+NEW                {# The company that will really take the money, named under the choice. #}

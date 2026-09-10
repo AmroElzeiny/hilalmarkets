@@ -60,6 +60,7 @@ from ai_market_monitor.services.affiliate import (
     first_name_of,
     try_sending_now,
 )
+from ai_market_monitor.services.affiliate_attribution import REFERRAL_LINK_QUERY_KEY
 from ai_market_monitor.services.affiliate_payout_options import MINIMUM_PAYOUT_USD
 from ai_market_monitor.services.sharia_admin_dashboard import (
     ShariaAdminDashboardService,
@@ -100,6 +101,9 @@ from ai_market_monitor.services.system_brain_bulk_review import (
 from ai_market_monitor.services.system_brain_conversations import (
     AdminConversationExplorer,
     AdminConversationNotFound,
+)
+from ai_market_monitor.services.system_brain_payments import (
+    SystemBrainPaymentsService,
 )
 from ai_market_monitor.services.system_brain_repository_index import (
     RepositoryEvidenceIndexService,
@@ -918,6 +922,52 @@ async def system_brain_users(
     )
 
 
+@router.get(
+    "/system-brain/payments",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+@router.get(
+    "/dashboard/system-brain/payments",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def system_brain_payments(
+    request: Request,
+    q: str | None = Query(default=None, max_length=160),
+    page: int = Query(default=1, ge=1),
+    customer: UUID | None = Query(default=None),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Who paid, for what, how often, and everything they asked to change.
+
+    One address for both views. Opening a customer keeps the search and the page in the
+    address bar, so going back lands on the same list rather than at the top of it.
+    """
+
+    context = await _base_context(
+        request,
+        session,
+        settings,
+        principal,
+        section="payments",
+    )
+    service = SystemBrainPaymentsService(session)
+    context.update(await service.list_customers(query=q, page=page))
+    context["payment_customer"] = (
+        await service.customer(customer) if customer is not None else None
+    )
+    return _protect(
+        templates.TemplateResponse(
+            request=request,
+            name="system_brain.html",
+            context=context,
+        )
+    )
+
+
 def _affiliate_redirect(*, success: str | None = None, error: str | None = None):
     query = urlencode(
         {key: value for key, value in (("success", success), ("error", error)) if value}
@@ -964,6 +1014,10 @@ async def system_brain_affiliate(
             "pending_payouts": await service.pending_payouts(),
             "decided_payouts": await service.decided_payouts(limit=25),
             "default_commission": DEFAULT_COMMISSION_PERCENT,
+            # The one resolver, handed to the page rather than the page reading the two
+            # columns itself. An empty "later" column means "the same as the first", and
+            # a template working that out on its own is a second copy of the rule.
+            "commission_rates_for": service.rates_for,
         }
     )
     return _protect(
@@ -985,6 +1039,7 @@ async def system_brain_approve_affiliate(
     discount_code: str = Form(default=""),
     discount_percent: str = Form(...),
     commission_percent: str = Form(default=""),
+    subsequent_commission_percent: str = Form(default=""),
     decision_note: str = Form(default=""),
     principal: UserPrincipal = Depends(_require_application_admin),
     session: AsyncSession = Depends(get_db_session),
@@ -1005,6 +1060,7 @@ async def system_brain_approve_affiliate(
             discount_code=discount_code or None,
             discount_percent=discount_percent,
             commission_percent=commission_percent or None,
+            subsequent_commission_percent=subsequent_commission_percent or None,
         )
         delivery = None
         applicant = await session.get(User, application.user_id)
@@ -1020,7 +1076,16 @@ async def system_brain_approve_affiliate(
                     "discount_code": application.discount_code,
                     "discount_percent": f"{application.discount_percent:.0f}",
                     "commission_percent": f"{application.commission_percent:.0f}",
-                    "referral_url": f"{base}/signup?ref={application.discount_code}",
+                    # Both rates, so the email says what they earn on a first payment and
+                    # what they earn on every one after it. Read through the one resolver,
+                    # so an application approved before the second rate existed says the
+                    # first rate twice rather than promising nothing on renewals.
+                    "subsequent_commission_percent": (
+                        f"{service.rates_for(application).subsequent_percent:.0f}"
+                    ),
+                    "referral_url": (
+                        f"{base}/signup?{REFERRAL_LINK_QUERY_KEY}={application.discount_code}"
+                    ),
                     "minimum_payout": f"${MINIMUM_PAYOUT_USD:.2f}",
                 },
             )

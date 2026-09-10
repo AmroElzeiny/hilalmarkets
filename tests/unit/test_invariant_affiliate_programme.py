@@ -40,6 +40,10 @@ from ai_market_monitor.services.affiliate import (
     normalize_discount_code,
     normalize_social_links,
 )
+from ai_market_monitor.services.affiliate_attribution import (
+    CONTEXT_SIGNUP,
+    ReferralAttributionService,
+)
 from ai_market_monitor.services.affiliate_payout_options import (
     ALTERNATIVE_METHOD_EMAIL,
     MAXIMUM_NETWORK_FEE_USD,
@@ -109,18 +113,33 @@ async def _converted_referral(
     affiliate: User,
     customer: User,
     paid_usd: str,
-) -> ReferralRelationship:
-    """A referral that has become money, written the way the referral service writes it."""
+    event_key: str | None = None,
+) -> ReferralRelationship | None:
+    """Somebody who joined through an affiliate and paid, written the product's own way.
 
-    relationship = ReferralRelationship(
-        referrer_user_id=affiliate.id,
-        referred_user_id=customer.id,
-        status="paid_converted",
-        reward_status="eligible_after_first_paid_month",
-        metadata_json={"paid_amount_usd": paid_usd},
+    Through the attribution service rather than by building rows by hand. A test that
+    assembles the rows itself is a test measuring a shape nothing in the running product
+    produces, and this suite has to fail when the real path breaks — not when a
+    hand-built fixture stops matching it.
+    """
+
+    application = await AffiliateService(session).application_for(affiliate.id)
+    assert application is not None and application.discount_code
+    attribution = ReferralAttributionService(session)
+    relationship = await attribution.assign(
+        user_id=customer.id, link_code=application.discount_code
     )
-    session.add(relationship)
-    await session.flush()
+    await attribution.record_code_use(
+        code=application.discount_code,
+        user_id=customer.id,
+        context=CONTEXT_SIGNUP,
+        event_key=f"signup:{customer.id}",
+    )
+    await attribution.record_payment(
+        customer_user_id=customer.id,
+        event_key=event_key or f"payment:test:{customer.id}",
+        paid_amount_usd=Decimal(paid_usd),
+    )
     return relationship
 
 
@@ -470,10 +489,19 @@ async def test_commission_is_a_share_of_what_the_customer_actually_paid(
         )
 
         stats = await AffiliateService(session).stats(application)
-        assert stats.uses == 1
-        assert stats.paid_conversions == 1
+        assert stats.link_signups == 1
+        assert stats.code_uses == 1
         assert stats.total_commission_usd == Decimal("10.00")
+        # The first payment somebody makes, so the whole of it is on the first-payment
+        # rate and none of it on the renewal one.
+        assert stats.first_commission_usd == Decimal("10.00")
+        assert stats.subsequent_commission_usd == Decimal("0.00")
         assert stats.available_usd == Decimal("10.00")
+        # And it can be opened: a total nobody can look inside is a number an affiliate
+        # is asked to trust.
+        assert len(stats.commission_log) == 1
+        assert stats.commission_log[0].customer_name == "Layla"
+        assert stats.commission_log[0].amount_usd == Decimal("10.00")
 
 
 async def test_a_referral_with_no_recorded_payment_earns_nothing(test_context) -> None:

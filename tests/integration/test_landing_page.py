@@ -1,5 +1,13 @@
 from pathlib import Path
 
+from ai_market_monitor.core.plans import (
+    MONEY_BACK_DAYS,
+    PUBLIC_PLAN_PRESENTATIONS,
+    PURCHASABLE_PLAN_CODES,
+    RETIRED_DISCOUNT_CODES,
+    effective_monthly_price,
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 LANDING_SOURCE = ROOT / "Hilal-Markets-Website" / "src" / "App.tsx"
 
@@ -119,15 +127,25 @@ async def test_the_shipped_landing_bundle_matches_the_launched_source(test_conte
     # The way into the product, and the plans, really shipped. Each of these was on the
     # forbidden list while the site was pre-launch; the list is inverted rather than
     # deleted, so a bundle that quietly loses the pricing section fails here.
+    # Every plan's button word comes from `core/plans.py`, so renaming a plan or opening
+    # a new one for sale is caught here the day the bundle goes stale. Typed out by hand
+    # this list still said "Choose Monitor monthly" long after the plan became Plus.
     for required in (
         "/signin",
         "/dashboard-entry",
         "/subscribe?",
-        "Choose Monitor monthly",
         "monthlyPrice",
-        "7-day money-back guarantee",
+        f"{MONEY_BACK_DAYS['pro']}-day money-back guarantee",
+        *(PUBLIC_PLAN_PRESENTATIONS[code].cta_label for code in PURCHASABLE_PLAN_CODES),
     ):
         assert required in bundle, required
+    # A price the bundle draws is the price the server charges. The apostrophe-free
+    # numbers are checked rather than the words, because minifying rewrites the words.
+    for code in PURCHASABLE_PLAN_CODES:
+        assert f"monthlyPrice:{int(effective_monthly_price(code))}" in bundle, code
+    # And no withdrawn discount code survives inside the built file.
+    for retired in RETIRED_DISCOUNT_CODES:
+        assert retired not in bundle, retired
     for forbidden in (
         "#waitlist",
         "Join the waitlist",

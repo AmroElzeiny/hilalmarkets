@@ -272,7 +272,7 @@ async def test_vague_aliases_are_deterministic_and_do_not_false_match_macro_term
         )
     )
     operands = {condition.left.name for condition in trending.strategy.conditions.children}
-    assert {"choppiness_index", "wide_range_candle", "volume_ratio"}.issubset(operands)
+    assert {"choppiness_index", "impulse_candle", "volume_ratio"}.issubset(operands)
     choppiness = next(
         condition
         for condition in trending.strategy.conditions.children
@@ -637,8 +637,11 @@ def test_risk_and_persisted_runtime_conditions_execute_inside_same_tree():
 
 def test_all_registered_capabilities_are_executable_and_schema_valid():
     assert len(all_capabilities()) == 502
-    assert len(executable_capabilities()) == 502
-    assert unsupported_capabilities() == ()
+    assert len(executable_capabilities()) == 500
+    assert {item.key for item in unsupported_capabilities()} == {
+        "daily_high_low",
+        "monthly_high_low",
+    }
     for capability in executable_capabilities():
         ConditionRule.model_validate(condition_template(capability))
 

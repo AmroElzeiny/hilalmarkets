@@ -145,6 +145,12 @@ class AccountEmailOutboxService:
                 discount_code=str(payload.get("discount_code") or ""),
                 discount_percent=str(payload.get("discount_percent") or "0"),
                 commission_percent=str(payload.get("commission_percent") or "0"),
+                # Missing on rows queued before the second rate existed. The renderer
+                # reads an empty one as "the same as the first rate", which is what the
+                # programme itself does.
+                subsequent_commission_percent=str(
+                    payload.get("subsequent_commission_percent") or ""
+                ),
                 referral_url=str(payload.get("referral_url") or ""),
                 minimum_payout=str(payload.get("minimum_payout") or "$5.00"),
             )

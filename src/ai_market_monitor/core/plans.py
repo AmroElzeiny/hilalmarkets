@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -9,8 +10,24 @@ UNLIMITED_SYMBOL_CAP = 100_000
 PUBLIC_PLAN_CODES = ("demo", "trader", "pro")
 PURCHASABLE_PLAN_CODES = ("trader", "pro")
 
+#: How long the strategy-approval allowance looks back, in days. **The same window on
+#: every plan** — only the count differs.
+#:
+#: One owner because three things have to agree: the limit key below is named after it,
+#: `EntitlementService.enforce_strategy_approval` counts inside it, and the pricing cards
+#: and comparison table print it. Two of those used to write "30" out by hand, so a
+#: changed window would have left the page promising one thing and the gate enforcing
+#: another.
+STRATEGY_APPROVAL_WINDOW_DAYS = 30
+
+#: The limit key that carries that allowance. Written once so a typo in one plan cannot
+#: silently mean "no limit" — a missing key is unlimited, which is exactly how the Plus
+#: plan came to allow unlimited approvals while the table said otherwise.
+STRATEGY_APPROVAL_LIMIT_KEY = "strategy_approvals_per_30_days"
+
 FULL_ACCESS_LIMITS: dict[str, int] = {
     "saved_strategies": UNLIMITED_SYMBOL_CAP,
+    STRATEGY_APPROVAL_LIMIT_KEY: UNLIMITED_SYMBOL_CAP,
     "active_strategies": UNLIMITED_SYMBOL_CAP,
     "symbols_per_strategy": UNLIMITED_SYMBOL_CAP,
     "minimum_timeframe_minutes": 1,
@@ -88,24 +105,22 @@ def visible_public_plan_codes(*, billing_enabled: bool) -> tuple[str, ...]:
 # price on the landing page and another in the dashboard has no way to know which is real.
 # --------------------------------------------------------------------------------
 
-#: When the launch offer stops. After this instant the launch code stops working, the
-#: plan costs its normal price, and the countdown disappears. All three facts come from
-#: this one value.
-PROMOTION_ENDS_AT = datetime(2026, 9, 15, 0, 0, tzinfo=UTC)
+#: When the launch offer stops. After this instant every plan costs its normal price and
+#: the countdown disappears. Both facts come from this one value.
+PROMOTION_ENDS_AT = datetime(2026, 9, 20, 0, 0, tzinfo=UTC)
 
-#: The code somebody types to get the launch price, and how much it takes off.
+#: Discount codes this product used to run and must **not** honour any more.
 #:
-#: The launch price used to apply on its own, to everybody, with nothing to type. It is a
-#: **discount code** now: the plan costs its normal price, and this code is the only way
-#: to the lower one. That is why the number below is a percentage and not a second price
-#: — one number, so "25% off" and "$15 a month" can never drift apart. Every surface that
-#: quotes the lower price derives it here through :func:`coded_monthly_price`.
+#: A retired code is not the same as a deleted one. Creem holds its own copy of every
+#: code, and a code left active there is a code a card buyer can still type on Creem's own
+#: checkout page — taking a further percentage off a price that is already the launch
+#: price. Nothing offline can see Creem, so `scripts/check_creem_prices.py` holds this
+#: list against Creem's discounts and reports any that is still alive.
 #:
-#: The card route is a separate world: Creem holds its own copy of the product price and
-#: its own discount codes, so the same code must exist in the Creem dashboard at the same
-#: percentage. `scripts/check_creem_prices.py` compares the two and is the only thing
-#: that can catch a disagreement, because nothing offline can see Creem.
-LAUNCH_DISCOUNT_CODE = "HILAL25"
+#: ``HILAL25`` was the launch **code**. The launch price is not reached by typing anything
+#: any more — it is simply the price until :data:`PROMOTION_ENDS_AT` — so the code must
+#: stop working on both sides, not only on ours.
+RETIRED_DISCOUNT_CODES: tuple[str, ...] = ("HILAL25",)
 
 #: What any discount code may be made of: letters, digits, dash and underscore, two to
 #: forty characters.
@@ -142,27 +157,34 @@ _CENTS = Decimal("0.01")
 
 @dataclass(frozen=True, slots=True)
 class PlanOffer:
-    """Whether a plan can be bought, per interval, and what a code takes off it."""
+    """Whether a plan can be bought, per interval, and what it costs while the offer runs."""
 
     monthly_available: bool
     annual_available: bool
-    #: How much :data:`LAUNCH_DISCOUNT_CODE` takes off a month, as a percentage, while
-    #: :data:`PROMOTION_ENDS_AT` is still in the future. ``None`` means this plan has no
-    #: launch code and is only ever sold at its normal price.
-    launch_discount_percent: Decimal | None = None
+    #: What one month costs while :data:`PROMOTION_ENDS_AT` is still in the future.
+    #: ``None`` means this plan is only ever sold at its normal price.
+    #:
+    #: A **price**, not a percentage, and nothing has to be typed to reach it. The launch
+    #: offer used to be a discount code; it is now simply the price until the timer runs
+    #: out, so the number a card is showing is the number a checkout charges with nothing
+    #: entered anywhere.
+    promotional_monthly_price: Decimal | None = None
 
 
 PLAN_OFFERS: dict[str, PlanOffer] = {
     # Free, so there is nothing to buy and nothing to discount.
     "demo": PlanOffer(monthly_available=True, annual_available=False),
-    # The one plan on offer. Annual billing is not open yet.
+    # Annual billing is not open yet on either paid plan.
     "trader": PlanOffer(
         monthly_available=True,
         annual_available=False,
-        launch_discount_percent=Decimal("25"),
+        promotional_monthly_price=Decimal("9.00"),
     ),
-    # Not open yet, on either interval.
-    "pro": PlanOffer(monthly_available=False, annual_available=False),
+    "pro": PlanOffer(
+        monthly_available=True,
+        annual_available=False,
+        promotional_monthly_price=Decimal("17.00"),
+    ),
 }
 
 _DEFAULT_OFFER = PlanOffer(monthly_available=False, annual_available=False)
@@ -197,47 +219,43 @@ def price_after_percent(amount: Decimal, percent: Decimal) -> Decimal:
     return (amount * kept).quantize(_CENTS, rounding=ROUND_HALF_UP)
 
 
-def launch_discount_percent(code: str, *, now: datetime | None = None) -> Decimal | None:
-    """How much the launch code takes off this plan today, or ``None``.
+def promotional_monthly_price(code: str, *, now: datetime | None = None) -> Decimal | None:
+    """The launch price for this plan today, or ``None`` when it is not running.
 
-    Reads the offer and the clock together, so the price on a card, the sentence naming
-    the code under it and the countdown beside it can never say different things.
+    Reads the offer and the clock together, so the price on a card and the countdown
+    beside it can never say different things. A promotional price that is not below the
+    normal price is not an offer, and is refused rather than shown as one.
     """
     offer = plan_offer(code)
-    if offer.launch_discount_percent is None or not promotion_is_active(now):
+    price = offer.promotional_monthly_price
+    if price is None or not promotion_is_active(now):
         return None
-    return offer.launch_discount_percent
+    normal = PLAN_DEFINITIONS[code].monthly_price
+    if price >= normal:
+        return None
+    return price.quantize(_CENTS, rounding=ROUND_HALF_UP)
 
 
 def effective_monthly_price(code: str, *, now: datetime | None = None) -> Decimal:
-    """What a checkout charges for one month when **no** discount code is used.
+    """What a checkout charges for one month, with nothing typed anywhere.
 
-    This is the price the payment company is asked for by default, so it is also the
-    number `scripts/check_creem_prices.py` holds the Creem product against.
+    This is the price the payment company is asked for, so it is also the number
+    `scripts/check_creem_prices.py` holds the Creem product against, the amount written
+    onto a card checkout attempt, and the amount a crypto invoice is raised for.
 
-    It used to carry the launch price. It does not any more: the launch price is reached
-    by typing :data:`LAUNCH_DISCOUNT_CODE`, and a function that quietly returned the
-    lower number would charge everybody the offer price whether they used the code or
-    not — which is exactly what "the code is the only route to it" rules out.
+    While the launch offer runs it **is** the launch price. That is the whole change from
+    the discount-code offer that came before it: there is no code to type, so a function
+    that returned the higher number would charge everybody more than every page shows.
     """
-    del now
+    promotional = promotional_monthly_price(code, now=now)
+    if promotional is not None:
+        return promotional
     return PLAN_DEFINITIONS[code].monthly_price
-
-
-def coded_monthly_price(code: str, *, now: datetime | None = None) -> Decimal | None:
-    """What one month costs **with** the launch code, or ``None`` when there is no code.
-
-    This is the headline figure on a pricing card, beside the crossed-out normal price.
-    """
-    percent = launch_discount_percent(code, now=now)
-    if percent is None:
-        return None
-    return price_after_percent(PLAN_DEFINITIONS[code].monthly_price, percent)
 
 
 def original_monthly_price(code: str, *, now: datetime | None = None) -> Decimal | None:
     """The crossed-out price, or ``None`` when there is nothing to cross out."""
-    if coded_monthly_price(code, now=now) is None:
+    if promotional_monthly_price(code, now=now) is None:
         return None
     return PLAN_DEFINITIONS[code].monthly_price
 
@@ -252,7 +270,7 @@ def annual_saving(code: str, *, now: datetime | None = None) -> Decimal:
     presentation = PUBLIC_PLAN_PRESENTATIONS.get(code)
     if presentation is None or presentation.annual_price <= 0:
         return Decimal("0.00")
-    monthly = coded_monthly_price(code, now=now) or effective_monthly_price(code, now=now)
+    monthly = effective_monthly_price(code, now=now)
     saving = (monthly * 12) - presentation.annual_price
     return max(saving, Decimal("0.00"))
 
@@ -279,37 +297,33 @@ def plan_offer_payload(code: str, *, now: datetime | None = None) -> dict[str, o
     number in the payload would ship it in the page source for anyone to read, and the
     point of "Soon" is that there is no price to quote yet.
 
-    ``monthlyPrice`` is the headline on a card: the launch-code price while the launch
-    offer runs, the normal price otherwise. ``fullMonthlyPrice`` is always what a
-    checkout charges with no code, so a card can say "without the code it is $20" from
-    the same object rather than working it out.
+    ``monthlyPrice`` is both the headline on a card **and** what a checkout charges: the
+    launch price while the offer runs, the normal price afterwards. ``originalMonthlyPrice``
+    is the number to cross out beside it, or ``None`` when there is nothing to cross out.
+
+    There is no code in this payload any more. The launch price is reached by buying
+    before :data:`PROMOTION_ENDS_AT`, not by typing anything, so a card that named a code
+    would send people looking for a box that does not exist.
     """
     offer = plan_offer(code)
-    full = effective_monthly_price(code, now=now)
-    coded = coded_monthly_price(code, now=now)
+    charged = effective_monthly_price(code, now=now)
     original = original_monthly_price(code, now=now)
-    percent = launch_discount_percent(code, now=now)
     return {
         "monthlyAvailable": offer.monthly_available,
         "annualAvailable": offer.annual_available,
-        "monthlyPrice": float(coded if coded is not None else full)
-        if offer.monthly_available
-        else None,
+        "monthlyPrice": float(charged) if offer.monthly_available else None,
         "annualPrice": (
             float(PUBLIC_PLAN_PRESENTATIONS[code].annual_price)
             if offer.annual_available and code in PUBLIC_PLAN_PRESENTATIONS
             else None
         ),
         "originalMonthlyPrice": float(original) if original is not None else None,
-        # What a checkout charges when nobody types a code, and the code that changes it.
-        # Both are `None` for a plan nobody can buy, for the same reason as the price.
-        "fullMonthlyPrice": float(full) if offer.monthly_available else None,
-        "discountCode": (
-            LAUNCH_DISCOUNT_CODE if percent is not None and offer.monthly_available else None
-        ),
-        "discountPercent": (
-            float(percent) if percent is not None and offer.monthly_available else None
-        ),
+        # The same number as `monthlyPrice`, kept because three templates and the landing
+        # bundle read it. It stopped being a *second* price the day the code went away:
+        # what a checkout charges and what a card shows are now one figure by construction.
+        "fullMonthlyPrice": float(charged) if offer.monthly_available else None,
+        "promotionEndsAt": PROMOTION_ENDS_AT.isoformat(),
+        "promotionRunning": original is not None,
         "comingSoonLabel": COMING_SOON_LABEL,
     }
 
@@ -327,8 +341,10 @@ class PlanDefinition:
 
 @dataclass(frozen=True, slots=True)
 class PublicPlanPresentation:
+    # No `description`. The audience sentence said nothing the bullets below do not say,
+    # so it was removed rather than kept as a fourth place a plan could be described
+    # differently.
     annual_price: Decimal
-    description: str
     cta_label: str
     visible_features: tuple[str, ...]
     additional_features: tuple[str, ...] = ()
@@ -340,7 +356,7 @@ class PublicPlanPresentation:
 PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
     "demo": PlanDefinition(
         code="demo",
-        name="Basic",
+        name="Explore",
         monthly_price=Decimal("0.00"),
         description=(
             "Explore screened assets and use the AI assistant with measured monitoring "
@@ -348,7 +364,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         ),
         limits={
             "saved_strategies": 2,
-            "strategy_approvals_per_30_days": 2,
+            STRATEGY_APPROVAL_LIMIT_KEY: 2,
             "active_strategies": 1,
             "symbols_per_strategy": 200,
             "minimum_timeframe_minutes": 1,
@@ -378,15 +394,16 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
     ),
     "trader": PlanDefinition(
         code="trader",
-        name="Monitor",
-        monthly_price=Decimal("20.00"),
+        name="Plus",
+        monthly_price=Decimal("15.00"),
         description="Continuous guided monitoring for active individual investors.",
         limits={
             "saved_strategies": 5,
-            "active_strategies": 5,
+            STRATEGY_APPROVAL_LIMIT_KEY: 20,
+            "active_strategies": 3,
             "symbols_per_strategy": 200,
             "minimum_timeframe_minutes": 1,
-            "alerts_per_day": 50,
+            "alerts_per_day": 20,
             "forensic_investigations_per_month": UNLIMITED_SYMBOL_CAP,
             "on_demand_scans_per_month": 10,
             "light_prompt_scans_per_day": 10,
@@ -409,10 +426,11 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
     "pro": PlanDefinition(
         code="pro",
         name="Pro",
-        monthly_price=Decimal("22.00"),
-        description="More simultaneous market monitors, quick scans, and alert capacity.",
+        monthly_price=Decimal("25.00"),
+        description="More simultaneous market monitors and unlimited alert capacity.",
         limits={
             "saved_strategies": 10,
+            STRATEGY_APPROVAL_LIMIT_KEY: UNLIMITED_SYMBOL_CAP,
             "active_strategies": 10,
             "symbols_per_strategy": 500,
             "minimum_timeframe_minutes": 1,
@@ -445,6 +463,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         monthly_price=Decimal("79.00"),
         limits={
             "saved_strategies": 100,
+            STRATEGY_APPROVAL_LIMIT_KEY: UNLIMITED_SYMBOL_CAP,
             "active_strategies": 25,
             "symbols_per_strategy": UNLIMITED_SYMBOL_CAP,
             "minimum_timeframe_minutes": 1,
@@ -472,6 +491,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         monthly_price=Decimal("299.00"),
         limits={
             "saved_strategies": 250,
+            STRATEGY_APPROVAL_LIMIT_KEY: UNLIMITED_SYMBOL_CAP,
             "active_strategies": 100,
             "symbols_per_strategy": UNLIMITED_SYMBOL_CAP,
             "minimum_timeframe_minutes": 1,
@@ -517,6 +537,7 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         description="Founder/admin lifetime access with practical no-limit caps.",
         limits={
             "saved_strategies": UNLIMITED_SYMBOL_CAP,
+            STRATEGY_APPROVAL_LIMIT_KEY: UNLIMITED_SYMBOL_CAP,
             "active_strategies": UNLIMITED_SYMBOL_CAP,
             "symbols_per_strategy": UNLIMITED_SYMBOL_CAP,
             "minimum_timeframe_minutes": 1,
@@ -565,15 +586,16 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
     ),
     "pro_trial": PlanDefinition(
         code="pro_trial",
-        name="7-Day Monitor Trial",
+        name="7-Day Plus Trial",
         monthly_price=Decimal("0.00"),
-        description="Seven days of Monitor access for an existing trial account.",
+        description="Seven days of Plus access for an existing trial account.",
         limits={
             "saved_strategies": 5,
-            "active_strategies": 5,
+            STRATEGY_APPROVAL_LIMIT_KEY: 20,
+            "active_strategies": 3,
             "symbols_per_strategy": 200,
             "minimum_timeframe_minutes": 1,
-            "alerts_per_day": 50,
+            "alerts_per_day": 20,
             "alerts_per_trial_cycle": 350,
             "forensic_investigations_per_month": UNLIMITED_SYMBOL_CAP,
             "historical_previews_per_trial_cycle": 10,
@@ -608,105 +630,282 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
 }
 
 
+# --------------------------------------------------------------------------------
+# What a plan allows, written for a person.
+#
+# Every one of these reads :data:`PLAN_DEFINITIONS`, so the comparison table, the bullet
+# points on a pricing card and the gate that actually stops somebody are three views of
+# one number. They used to be three separate lists of words. That is how the Plus plan
+# came to advertise a strategy-approval limit it did not have: the table said one thing,
+# and the limits table simply had no such key, which means "no limit".
+# --------------------------------------------------------------------------------
+
+#: The words used when a plan does not cap something at all.
+UNLIMITED_WORD = "Unlimited"
+
+#: The words used when a plan does not include something at all.
+NOT_INCLUDED_WORD = "Not included"
+
+
+def _limit_value(code: str, key: str) -> int | None:
+    """One plan's limit as a whole number, or ``None`` when it is not capped.
+
+    A missing key means "not capped", which is how the limits table has always been read.
+    Saying so here, once, is what stops each caller inventing its own reading of a gap.
+    """
+
+    raw = PLAN_DEFINITIONS[code].limits.get(key)
+    if raw is None:
+        return None
+    number = int(raw)
+    return None if number >= UNLIMITED_SYMBOL_CAP else number
+
+
+def approval_allowance_words(code: str) -> str:
+    """How many strategies this plan may approve, and over what window."""
+
+    allowed = _limit_value(code, STRATEGY_APPROVAL_LIMIT_KEY)
+    if allowed is None:
+        return UNLIMITED_WORD
+    return f"{allowed} per {STRATEGY_APPROVAL_WINDOW_DAYS} days"
+
+
+def active_monitor_words(code: str) -> str:
+    """How many market monitors may run at once on this plan."""
+
+    allowed = _limit_value(code, "active_strategies")
+    return UNLIMITED_WORD if allowed is None else str(allowed)
+
+
+def notification_allowance_words(code: str) -> str:
+    """How many monitor messages this plan allows, in the period that really binds.
+
+    A plan can carry a daily cap, a weekly cap or both, and the one that binds is the
+    smaller of the two once they are put on the same scale. The free plan's "2 a week" is
+    tighter than its "2 a day", so a table that only read the daily figure would promise
+    fourteen messages a week where two arrive.
+    """
+
+    daily = _limit_value(code, "alerts_per_day")
+    weekly = _limit_value(code, "alerts_per_week")
+    if weekly is not None and (daily is None or weekly <= daily * 7):
+        return f"{weekly} per week"
+    if daily is None:
+        return UNLIMITED_WORD
+    return f"{daily} per day"
+
+
+def _plural(count: int, singular: str, plural: str) -> str:
+    return singular if count == 1 else plural
+
+
+def _approval_bullet(code: str) -> str:
+    allowed = _limit_value(code, STRATEGY_APPROVAL_LIMIT_KEY)
+    if allowed is None:
+        return "Unlimited strategy approvals"
+    return (
+        f"Approve {allowed} {_plural(allowed, 'strategy', 'strategies')} "
+        f"per {STRATEGY_APPROVAL_WINDOW_DAYS} days"
+    )
+
+
+def _active_monitor_bullet(code: str) -> str:
+    allowed = _limit_value(code, "active_strategies")
+    if allowed is None:
+        return "Unlimited active market monitors"
+    return f"{allowed} active market {_plural(allowed, 'monitor', 'monitors')}"
+
+
+def _notification_bullet(code: str) -> str:
+    daily = _limit_value(code, "alerts_per_day")
+    weekly = _limit_value(code, "alerts_per_week")
+    if weekly is not None and (daily is None or weekly <= daily * 7):
+        return f"{weekly} monitor notifications per week across all monitors"
+    if daily is None:
+        return "Unlimited monitor alerts per day"
+    return f"Up to {daily} monitor alerts per day"
+
+
+#: How a monitor message can reach somebody, named the way a beginner would say it.
+#: One string, because the pricing card, the comparison table and the settings page all
+#: describe the same three destinations and used to name two of them.
+DELIVERY_CHANNEL_WORDS = "In-app, Telegram, and email"
+
+#: The same three, written the short way a narrow table column needs.
+DELIVERY_CHANNEL_WORDS_SHORT = "In-app + Telegram + Email"
+
+#: How long after paying a refund can still be asked for, per plan. ``None`` means the
+#: plan has no refund window. One owner: the card, the table and the checkout consent
+#: line all read it, and a number written out three times is a promise free to drift.
+MONEY_BACK_DAYS: dict[str, int | None] = {"demo": None, "trader": None, "pro": 7}
+
+
+def plan_name(code: str) -> str:
+    """What one plan is called, wherever a sentence or a heading names it.
+
+    One owner. Plan names are typed into templates, error messages and limit
+    notices; a rename that missed one of them left a page and a refusal calling the
+    same plan two different things. Everything that needs the word asks here.
+    """
+
+    definition = PLAN_DEFINITIONS.get(code)
+    return definition.name if definition else code
+
+
+def money_back_words(code: str) -> str:
+    """The refund window for one plan, for a table cell."""
+
+    days = MONEY_BACK_DAYS.get(code)
+    return NOT_INCLUDED_WORD if days is None else f"{days} days"
+
+
+def money_back_headline(code: str) -> str | None:
+    """The bold line above that sentence, or ``None`` when there is no refund.
+
+    A separate function from :func:`money_back_words` because the two read differently in
+    the two places they appear: a table cell says "7 days", a headline says "7-day
+    money-back guarantee". The Jinja card used the table cell's words inside the headline
+    and read "7 days money-back guarantee", while the React card said "7-day" — the same
+    promise, worded two ways, on two pages showing the same plan.
+    """
+
+    days = MONEY_BACK_DAYS.get(code)
+    if days is None:
+        return None
+    return f"{days}-day money-back guarantee"
+
+
+def money_back_note(code: str) -> str | None:
+    """The refund sentence under a pricing card, or ``None`` when there is no refund."""
+
+    days = MONEY_BACK_DAYS.get(code)
+    if days is None:
+        return None
+    return f"Cancel within {days} days of payment for a full refund."
+
+
+#: Every bullet on a pricing card is one row of `PUBLIC_PLAN_COMPARISON`, said in
+#: sentence form. The table under the cards is the source of truth: a card may show fewer
+#: rows than the table, never a different answer to one. Two rules follow from that, and
+#: `tests/unit/test_invariant_plan_card_matches_comparison.py` checks both for every plan
+#: and every row:
+#:
+#: * a card never names something the table marks "Not included" for that plan;
+#: * where the table states a level ("Full") or an allowance ("20 per 30 days"), the
+#:   bullet states the same one — the allowance bullets read the same limits the table
+#:   reads, so a changed limit moves both together.
 PUBLIC_PLAN_PRESENTATIONS: dict[str, PublicPlanPresentation] = {
     "demo": PublicPlanPresentation(
         annual_price=Decimal("0.00"),
-        description=(
-            "For traders who want the AI assistant, screened-asset evidence, and a "
-            "measured introduction to market monitoring."
-        ),
         cta_label="Start free",
-        highlighted_feature="AI assistant with Basic limits",
+        highlighted_feature="Halal assets, passports, and monitors",
         visible_features=(
-            "AI assistant with Basic limits",
-            "Approve 2 strategies per 30 days",
-            "1 active market monitor",
-            "2 monitor notifications per week across all monitors",
-            "1 quick scan per week",
-            "Halal assets, methodologies, and evidence reports",
+            "Halal assets, passports, and monitors",
+            _approval_bullet("demo"),
+            _active_monitor_bullet("demo"),
+            _notification_bullet("demo"),
             "Full Evidence Passports",
         ),
+        # "Published compliance-status changes" used to sit here beside "Favorite coins
+        # and compliance-status changes". Both are the one table row "Halal status-change
+        # alerts", so the card listed the same thing twice and a beginner counted two.
         additional_features=(
-            "Methodology reasons, sources, versions, and review dates",
-            "Favorite coins and compliance-status changes",
-            "In-app and Telegram notifications",
-            "Why wasn't I alerted? available on Monitor",
-            "Published compliance-status changes",
-            "Standard email support",
+            "Full methodology reports: reasons, sources, versions, and review dates",
+            "Favorite coins",
+            f"{DELIVERY_CHANNEL_WORDS} notifications",
         ),
     ),
     "trader": PublicPlanPresentation(
         annual_price=Decimal("120.00"),
-        description=(
-            "For regular traders who want AI-assisted market monitoring and clear "
-            "evidence behind every alert."
-        ),
-        cta_label="Choose Monitor monthly",
-        trial_note="Cancel within 7 days of payment for a full refund.",
-        highlighted_feature="AI assistant for creating market monitors",
+        cta_label="Choose Plus monthly",
+        trial_note=money_back_note("trader"),
+        highlighted_feature="AI assistant with Plus limits",
         visible_features=(
-            "Everything in Basic",
-            "AI assistant for creating market monitors",
-            "5 active market monitors",
-            "10 quick scans per month",
-            "Up to 50 monitor alerts per day",
-            "Full Why wasn't I alerted? explanations",
-            "Complete Opportunity Journeys",
+            "Everything in Explore",
+            "AI assistant with Plus limits",
+            _active_monitor_bullet("trader"),
+            _approval_bullet("trader"),
+            _notification_bullet("trader"),
+            # The table says "Included" for this row, not "Full". The card said "Full",
+            # which promised a level the table does not offer.
+            "Why wasn't I alerted? explanations",
+            "Full Opportunity Journeys",
         ),
+        # "Missed-alert investigations" used to sit here as well. It is the same feature
+        # as "Why wasn't I alerted? explanations" above — the settings field behind both
+        # is `missed_alert_investigations` — so the card was selling one thing twice
+        # under two names, and a beginner reading it would count two features.
         additional_features=(
-            "Condition-level proof",
-            "Missed-alert investigations",
-            "In-app and Telegram monitor alerts",
+            "Full condition-level proof",
+            "Telegram monitor delivery",
         ),
     ),
     "pro": PublicPlanPresentation(
         annual_price=Decimal("220.00"),
-        description=(
-            "For active traders who need more simultaneous monitors, more quick scans, "
-            "and unlimited monitor alerts."
-        ),
         cta_label="Choose Pro",
-        highlighted_feature="WhatsApp delivery",
+        trial_note=money_back_note("pro"),
+        highlighted_feature="Max limits across features",
         visible_features=(
-            "Everything in Monitor",
-            "10 active market monitors",
-            "100 quick scans per month",
-            "Unlimited monitor alerts per day",
-            "WhatsApp delivery",
+            "Everything in Plus",
+            "Max limits across features",
+            _active_monitor_bullet("pro"),
+            _approval_bullet("pro"),
+            _notification_bullet("pro"),
         ),
         additional_features=(
-            "AI assistant for creating market monitors",
-            "Condition-level proof",
-            "Complete Opportunity Journeys",
-            "Missed-alert investigations",
+            "AI assistant with Pro limits",
+            "Full condition-level proof",
+            "Full Opportunity Journeys",
+            "Why wasn't I alerted? explanations",
+            "Telegram monitor delivery",
         ),
     ),
 }
 
 
-PUBLIC_PLAN_COMPARISON: tuple[tuple[str, str, str, str], ...] = (
-    ("Halal Assets market", "Included", "Included", "Included"),
-    ("Evidence Passports", "Full", "Full", "Full"),
-    ("Methodology reports", "Full", "Full", "Full"),
-    ("Favorite coins", "Included", "Included", "Included"),
-    (
-        "Halal status-change alerts",
-        "In-app + Telegram",
-        "In-app + Telegram",
-        "In-app + Telegram",
-    ),
-    ("AI assistant", "Limited", "Included", "Included"),
-    ("Strategy approvals", "2 per 30 days", "Included", "Included"),
-    ("Active market monitors", "1", "5", "10"),
-    ("Quick scans", "1 per week", "10 per month", "100 per month"),
-    ("Monitor notifications", "2 per week", "Up to 50 per day", "Unlimited"),
-    ("Condition proof", "Not included", "Full", "Full"),
-    ("Opportunity Journeys", "Not included", "Complete", "Complete"),
-    ("Why wasn't I alerted?", "Not included", "Included", "Included"),
-    ("Telegram monitor delivery", "Included", "Included", "Included"),
-    ("WhatsApp", "Not included", "Not included", "Coming soon"),
-    ("Money-back window", "Not included", "7 days", "Not included"),
-)
+#: How much of the AI assistant each plan carries. Words, not a number, because what
+#: changes between the plans is how far the assistant will go — not a countable thing.
+AI_ASSISTANT_WORDS: dict[str, str] = {
+    "demo": "Limited",
+    "trader": "Extended",
+    "pro": "Max",
+}
+
+
+def _comparison_rows() -> tuple[tuple[str, str, str, str], ...]:
+    """The comparison table, built from the limits it is describing.
+
+    Nothing here is a second copy of a number. A row that states an allowance asks the
+    same function the pricing card and the gate ask, so the three cannot drift.
+    """
+
+    def per_plan(reader: Callable[[str], str]) -> tuple[str, str, str]:
+        return (reader("demo"), reader("trader"), reader("pro"))
+
+    return (
+        ("Halal Assets market", "Included", "Included", "Included"),
+        ("Evidence Passports", "Full", "Full", "Full"),
+        ("Methodology reports", "Full", "Full", "Full"),
+        ("Favorite coins", "Included", "Included", "Included"),
+        (
+            "Halal status-change alerts",
+            DELIVERY_CHANNEL_WORDS_SHORT,
+            DELIVERY_CHANNEL_WORDS_SHORT,
+            DELIVERY_CHANNEL_WORDS_SHORT,
+        ),
+        ("AI assistant", *per_plan(AI_ASSISTANT_WORDS.__getitem__)),
+        ("Strategy approvals", *per_plan(approval_allowance_words)),
+        ("Active market monitors", *per_plan(active_monitor_words)),
+        ("Monitor notifications", *per_plan(notification_allowance_words)),
+        ("Condition proof", NOT_INCLUDED_WORD, "Full", "Full"),
+        ("Opportunity Journeys", NOT_INCLUDED_WORD, "Full", "Full"),
+        ("Why wasn't I alerted?", NOT_INCLUDED_WORD, "Included", "Included"),
+        ("Telegram monitor delivery", "Included", "Included", "Included"),
+        ("Money-back window", *per_plan(money_back_words)),
+    )
+
+
+PUBLIC_PLAN_COMPARISON: tuple[tuple[str, str, str, str], ...] = _comparison_rows()
 
 
 #: Which plan each column of `PUBLIC_PLAN_COMPARISON` describes, after the feature name.
@@ -735,6 +934,66 @@ def visible_plan_comparison(*, billing_enabled: bool) -> tuple[tuple[str, ...], 
     ]
     return tuple(
         tuple(row[index] for index in columns) for row in PUBLIC_PLAN_COMPARISON
+    )
+
+
+# --------------------------------------------------------------------------------
+# Which plan is above which, and therefore what pressing a button means.
+# --------------------------------------------------------------------------------
+
+#: The order the public plans sit in. One list, because four things ask the same
+#: question — the button on a plan card ("Pay", "Upgrade" or "Downgrade"), the form that
+#: opens when it is pressed, the rule deciding whether the change takes effect now or at
+#: the end of the paid period, and the System Brain row describing what happened.
+PLAN_RANK: dict[str, int] = {"demo": 0, "trader": 1, "pro": 2}
+
+#: What one plan card's button does, given the plan somebody is already on.
+PLAN_CHANGE_SAME = "same"
+PLAN_CHANGE_UPGRADE = "upgrade"
+PLAN_CHANGE_DOWNGRADE = "downgrade"
+PLAN_CHANGE_NEW = "new"
+
+
+def plan_rank(code: str) -> int:
+    """Where a plan sits in the order. An unknown plan sits at the bottom."""
+
+    return PLAN_RANK.get(code, 0)
+
+
+def smallest_plan_with(feature: str) -> str | None:
+    """The cheapest plan on sale that really carries this feature, or ``None``.
+
+    One owner, because refusals name a plan. Two routes refusing "Why wasn't I alerted?"
+    both had the sentence "available on the Monitor plan" typed into them, and both went
+    on saying it after the plan was renamed to Plus. Asking the catalog which plan first
+    grants the feature means a rename, a reprice, or moving a feature between plans can
+    never leave a refusal pointing at the wrong plan.
+    """
+
+    for code in sorted(PURCHASABLE_PLAN_CODES, key=plan_rank):
+        definition = PLAN_DEFINITIONS.get(code)
+        if definition is not None and definition.features.get(feature):
+            return code
+    return None
+
+
+def plan_change_kind(*, current: str | None, target: str) -> str:
+    """Moving from one plan to another: is it the same plan, up, down, or a first buy?
+
+    ``current`` is ``None`` — or the free plan — when nothing is being paid for yet, and
+    then buying anything is a first purchase rather than an upgrade. That distinction is
+    not cosmetic: an upgrade changes a subscription the payment company already holds,
+    and a first purchase creates one.
+    """
+
+    if current is None or current not in PURCHASABLE_PLAN_CODES:
+        return PLAN_CHANGE_SAME if current == target else PLAN_CHANGE_NEW
+    if current == target:
+        return PLAN_CHANGE_SAME
+    return (
+        PLAN_CHANGE_UPGRADE
+        if plan_rank(target) > plan_rank(current)
+        else PLAN_CHANGE_DOWNGRADE
     )
 
 

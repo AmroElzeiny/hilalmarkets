@@ -7,6 +7,14 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import Page, expect
 
+from ai_market_monitor.core.plans import (
+    PUBLIC_PLAN_PRESENTATIONS,
+    PURCHASABLE_PLAN_CODES,
+    effective_monthly_price,
+    money_back_note,
+    plan_name,
+)
+from ai_market_monitor.services.plan_changes import switch_label_soon
 from tests.browser.conftest import (
     assert_hilal_brand_palette,
     assert_no_horizontal_overflow,
@@ -918,21 +926,35 @@ def test_private_beta_billing_desktop_and_mobile_visual_qa(
 
     page.goto(f"{base_url}/dashboard/billing")
     expect(page.locator(".billing-current-plan")).to_be_visible()
+    # Every plan name and every price is read from `core/plans.py`. Typed out here they
+    # went stale silently: this block still expected "Basic", "Choose Monitor monthly"
+    # and "$22" long after the plans were renamed and repriced.
     expect(page.locator(".billing-current-plan").get_by_role("heading")).to_have_text(
-        "Basic"
+        plan_name("demo")
     )
     expect(page.get_by_text("Choose the level of monitoring you need")).to_be_visible()
     expect(page.locator(".dashboard-price-card")).to_have_count(3)
-    expect(page.get_by_role("button", name="Choose Monitor monthly")).to_be_visible()
-    expect(page.get_by_text("7-day money-back guarantee")).to_be_visible()
-    expect(page.get_by_text("Cancel within 7 days of payment for a full refund.")).to_be_visible()
-    expect(page.get_by_text("Pro is coming soon")).to_be_visible()
-    expect(page.get_by_text("$22", exact=True)).to_have_count(0)
+    expect(page.get_by_text(money_back_note("pro"))).to_be_visible()
+    # This server runs with billing switched off, so no plan can be bought and every
+    # paid card says so — in the same words the public pricing page uses. It must not
+    # invite a purchase the checkout would refuse, and it must show no price either.
+    for code in PURCHASABLE_PLAN_CODES:
+        expect(
+            page.get_by_text(switch_label_soon(plan_name(code)))
+        ).to_be_visible()
+        expect(
+            page.get_by_role(
+                "button", name=PUBLIC_PLAN_PRESENTATIONS[code].cta_label
+            )
+        ).to_have_count(0)
+        for amount in (
+            int(effective_monthly_price(code)),
+            int(PUBLIC_PLAN_PRESENTATIONS[code].annual_price),
+        ):
+            expect(page.get_by_text(f"${amount}", exact=True)).to_have_count(0)
     expect(page.get_by_text("Paid billing is disabled")).to_have_count(0)
     expect(page.get_by_role("radio", name="Annual")).to_be_disabled()
     expect(page.get_by_role("radio", name="Monthly")).to_be_checked()
-    expect(page.get_by_text("$220", exact=True)).to_have_count(0)
-    expect(page.get_by_role("button", name="Choose Monitor annually")).to_have_count(0)
     expect(page.locator(".dashboard-plan-comparison table")).to_be_visible()
     expect(page.locator(".dashboard-plan-comparison")).to_have_css("margin-top", "18px")
     expect(page.locator(".billing-history-panel")).to_have_css("margin-top", "18px")

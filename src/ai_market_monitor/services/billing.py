@@ -1,9 +1,10 @@
 import hmac
 import json
-from collections.abc import Mapping, Sequence
+import logging
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from hashlib import sha256, sha512
 from typing import Any, Final, Protocol
 from uuid import UUID, uuid4
@@ -19,7 +20,9 @@ from ai_market_monitor.core.plans import (
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
     effective_monthly_price,
+    plan_name,
     plan_offer,
+    plan_offer_payload,
 )
 from ai_market_monitor.db.models import (
     AuditEvent,
@@ -35,6 +38,8 @@ from ai_market_monitor.services.entitlements import EntitlementService, PlanCata
 from ai_market_monitor.services.provider_reliability import ProviderCallError
 from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.services.trials import TrialLifecycleService
+
+logger = logging.getLogger(__name__)
 
 SENSITIVE_KEYS = {
     "address",
@@ -245,6 +250,29 @@ def creem_product_id_for(
     return settings.creem_product_ids.get(f"{plan_code}_{_cycle_key(billing_cycle)}") or None
 
 
+def plan_code_for_creem_product(settings: Settings, product_id: str | None) -> str | None:
+    """Which plan a Creem product belongs to, read backwards from the same table.
+
+    This is what a **renewal** has to be judged by. A Creem subscription carries the
+    metadata it was created with, so after a plan change its ``plan_code`` still names the
+    plan somebody used to be on — while the product it is really charging for is the new
+    one. Believing the metadata would move a customer who paid to upgrade back down to
+    their old plan on their very first renewal, silently.
+
+    ``None`` when the product is not one of ours, and then the metadata is all there is.
+    """
+
+    if not product_id:
+        return None
+    for key, value in settings.creem_product_ids.items():
+        if value != product_id:
+            continue
+        plan_code, _, period = key.rpartition("_")
+        if plan_code and period in {"monthly", "annual", "trial"}:
+            return plan_code
+    return None
+
+
 def method_word(method: str | None) -> str | None:
     """How one way of paying is named in front of a person."""
 
@@ -305,6 +333,79 @@ class PaymentMethodOffer:
     note: str
     company: str | None = None
     company_site: str | None = None
+    #: The period this offer was asked about. It is part of what paying does to
+    #: somebody's money — "every month" and "every year" are not the same promise — so
+    #: the sentence below cannot be written without it.
+    billing_cycle: str = "monthly"
+
+    @property
+    def access_terms(self) -> str:
+        """How access works through this offer's actual payment company."""
+
+        if self.provider is None:
+            return "This payment method is unavailable."
+        capabilities = billing_provider_capabilities(self.provider)
+        if capabilities.supports_recurring_billing:
+            return "Monthly subscription. Renews monthly until cancelled."
+        return "One-time 30-day access. No automatic renewal."
+
+    @property
+    def renews_by_itself(self) -> bool:
+        """Whether paying this way takes money again without being asked."""
+
+        if self.provider is None:
+            return False
+        return billing_provider_capabilities(self.provider).supports_recurring_billing
+
+    @property
+    def charge_story(self) -> str:
+        """The same fact as :attr:`access_terms`, told with the amount in it.
+
+        Both exist, and neither may be written in a browser, because "does this take
+        money again by itself?" is the payment company's capability and nothing else may
+        answer it. Both checkout popups wrote one sentence for every method — "then $17
+        every month until you stop it" — so a crypto buyer was promised a monthly
+        subscription NOWPayments cannot create, on the same screen where the landing page
+        promises the checkout will show "whether it renews by itself".
+
+        ``{amount}`` is left as a placeholder rather than filled in, because a discount
+        code changes the amount in the browser after this sentence was written. The page
+        puts the number in; it never decides which sentence.
+        """
+
+        if self.provider is None:
+            return "This payment method is unavailable."
+        if not self.renews_by_itself:
+            if self.billing_cycle == "monthly":
+                return (
+                    "{amount} today, for 30 days of access. It does not renew by "
+                    "itself, so nothing is taken again unless you buy again."
+                )
+            return (
+                "{amount} today. It does not renew by itself, so nothing is taken "
+                "again unless you buy again."
+            )
+        if self.billing_cycle == "trial_7_day":
+            return (
+                "Nothing today. After the 7 free days it is {amount} every month "
+                "until you stop it. You can stop it whenever you like."
+            )
+        every = "every year" if self.billing_cycle == "annual" else "every month"
+        return (
+            f"{{amount}} today, then {{amount}} {every} until you stop it. "
+            "You can stop it whenever you like."
+        )
+
+    @property
+    def cancellation_terms(self) -> str:
+        """How this offer is stopped, derived from the provider capability contract."""
+
+        if self.provider is None:
+            return "This payment method is unavailable."
+        capabilities = billing_provider_capabilities(self.provider)
+        if capabilities.supports_customer_portal:
+            return "Manage through the payment provider's portal."
+        return "No subscription cancellation is needed."
 
 
 def billing_method_provider(settings: Settings, payment_method: str) -> str | None:
@@ -418,6 +519,227 @@ def payment_method_available(
     )
 
 
+def plan_is_on_sale(
+    settings: Settings,
+    plan_code: str,
+    *,
+    billing_cycle: str = "monthly",
+) -> bool:
+    """Whether a page may invite somebody to take this plan today.
+
+    One question with one answer, asked by every surface that draws a plan card: the
+    public pricing page, the landing page and the dashboard. They used to answer it in
+    two different ways. The public card asked the price list alone — "is this plan for
+    sale?" — while the dashboard card asked whether a payment company could really take
+    the money for *this* plan. On a server holding a product id for one paid plan and not
+    the other, the public page invited a visitor to choose the second one and the
+    dashboard then told the same person it was coming soon.
+
+    The free plan is always on sale: there is nothing to charge for it, so no payment
+    company has to be ready.
+    """
+
+    offer = plan_offer(plan_code)
+    listed = offer.annual_available if billing_cycle == "annual" else offer.monthly_available
+    if not listed:
+        return False
+    if plan_code not in PURCHASABLE_PLAN_CODES:
+        return True
+    return any(
+        payment_method_available(
+            settings, method=method, plan_code=plan_code, billing_cycle=billing_cycle
+        )
+        for method in PAYMENT_METHODS
+    )
+
+
+def plan_sale_payload(settings: Settings, plan_code: str) -> dict[str, object]:
+    """``plan_offer_payload`` with availability answered by *this* server.
+
+    ``plan_offer_payload`` is the price list, and knows nothing about payment companies.
+    Every page that draws a card gets this instead, so "available" on a card always means
+    a visitor could really reach a payment page from it.
+    """
+
+    payload = dict(plan_offer_payload(plan_code))
+    payload["monthlyAvailable"] = plan_is_on_sale(
+        settings, plan_code, billing_cycle="monthly"
+    )
+    payload["annualAvailable"] = plan_is_on_sale(
+        settings, plan_code, billing_cycle="annual"
+    )
+    return payload
+
+
+#: Payment companies that keep a card on file and can be asked to charge it again, so a
+#: plan change is a re-price of the subscription they already hold. Anything else - a
+#: crypto invoice, an administrator's grant, the free plan - holds no card: it buys a
+#: fixed period, charges once, and ends by itself.
+#:
+#: One owner, here, because two very different rules depend on it: whether a plan change
+#: is a form or a purchase, and whether a purchase may be offered at all.
+RECURRING_PROVIDERS: frozenset[str] = frozenset({"creem", "stripe"})
+
+
+async def paid_access_can_be_repriced(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+) -> bool:
+    """Does any paid plan this account holds sit on a card the company can charge again?
+
+    This decides which route to another plan exists. A card subscription is re-priced by
+    the switch buttons, so a second checkout would leave two live subscriptions and two
+    charges every month - it must be refused. Crypto access holds no card and cannot be
+    re-priced, so buying the other plan **is** the route, and refusing that purchase
+    leaves the person with a button that can never work.
+
+    ``False`` when nothing paid is held at all. Callers only ask once they know a paid
+    plan is in the way, and "nothing to re-price" is the honest answer either way.
+    """
+
+    providers = (
+        await session.scalars(
+            select(Subscription.provider)
+            .join(Plan, Subscription.plan_id == Plan.id)
+            .where(
+                Subscription.user_id == user_id,
+                Plan.code.in_(PURCHASABLE_PLAN_CODES),
+                Subscription.provider.notin_(("admin", "free", "trial")),
+                Subscription.status.in_(
+                    (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
+                ),
+                (Subscription.current_period_end.is_(None))
+                | (Subscription.current_period_end > datetime.now(UTC)),
+            )
+        )
+    ).all()
+    return any((provider or "") in RECURRING_PROVIDERS for provider in providers)
+
+
+async def active_paid_plan_codes(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+) -> frozenset[str]:
+    """The codes of all provider-backed active paid plans for one account.
+
+    Administrative grants, the free plan and trials are not "paid" in the sense that a
+    checkout can conflict with them. This is the single source for that question: the
+    billing page, the checkout route and the plan-change service all read it rather than
+    writing their own query.
+    """
+
+    codes = list(
+        (
+            await session.scalars(
+                select(Plan.code)
+                .join(Subscription, Subscription.plan_id == Plan.id)
+                .where(
+                    Subscription.user_id == user_id,
+                    Subscription.provider.notin_(("admin", "free", "trial")),
+                    Subscription.status.in_(
+                        (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
+                    ),
+                    (Subscription.current_period_end.is_(None))
+                    | (Subscription.current_period_end > datetime.now(UTC)),
+                )
+                .order_by(Subscription.updated_at.desc())
+            )
+        ).all()
+    )
+    return frozenset(codes)
+
+
+def plan_checkout_availability(
+    settings: Settings,
+    plan_code: str,
+    *,
+    active_paid_plan_codes: Collection[str],
+    held_access_can_be_repriced: bool = True,
+    billing_cycle: str | None = None,
+    payment_method: str | None = None,
+) -> dict[str, Any]:
+    """One owner for "can this account buy this plan today, by which method".
+
+    The answer composes two layers: whether the payment company can really sell the plan
+    for a period, and whether this account is allowed to buy it. A checkout must never be
+    offered when either layer says no.
+
+    A different paid plan is bought through a normal checkout at its full price. The old
+    paid period is ended only after that new payment is confirmed. Buying the same plan
+    remains refused.
+
+    ``billing_cycle`` and ``payment_method`` let a saved checkout ask about its exact
+    offer. Unknown values fail closed. The returned shape still carries every page-facing
+    flag so a page can draw the whole choice. ``held_access_can_be_repriced`` remains in
+    the signature while older callers are moved over; it no longer changes the answer.
+    """
+
+    name = plan_name(plan_code)
+    paid_held = set(active_paid_plan_codes) & set(PURCHASABLE_PLAN_CODES)
+    holds_this = plan_code in active_paid_plan_codes
+    holds_other = bool(paid_held) and not holds_this
+    del held_access_can_be_repriced
+    account_may_buy = not holds_this
+
+    card_monthly = account_may_buy and payment_method_available(
+        settings, method="card", plan_code=plan_code, billing_cycle="monthly"
+    )
+    card_annual = account_may_buy and payment_method_available(
+        settings, method="card", plan_code=plan_code, billing_cycle="annual"
+    )
+    crypto_monthly = account_may_buy and payment_method_available(
+        settings, method="crypto", plan_code=plan_code, billing_cycle="monthly"
+    )
+    purchasable = card_monthly or card_annual or crypto_monthly
+
+    requested_purchasable = purchasable
+    if billing_cycle is not None or payment_method is not None:
+        cycle = _cycle_key(billing_cycle or "")
+        requested_purchasable = {
+            ("card", "monthly"): card_monthly,
+            ("card", "annual"): card_annual,
+            ("crypto", "monthly"): crypto_monthly,
+        }.get((payment_method or "", cycle), False)
+
+    refusal = ""
+    if holds_this:
+        refusal = (
+            f"You already have the {name} plan. "
+            "You can change it or cancel it on this billing page."
+        )
+    elif not purchasable:
+        # One sentence, one branch. There used to be two branches here with the
+        # identical string — nothing but a place for them to drift apart.
+        refusal = "There is no way to pay for this plan yet."
+
+    result: dict[str, Any] = {
+        "purchasable": purchasable,
+        "card_monthly": card_monthly,
+        "card_annual": card_annual,
+        "crypto_monthly": crypto_monthly,
+        "trial": False,
+        "refusal": refusal,
+        # The two facts the refusal is built from, published rather than kept private.
+        # Pages need them separately: "you already have this one" is a success notice and
+        # "you are on a different paid plan" is a refusal, and they are not the same
+        # screen. Every page that asked one of these questions used to answer it itself
+        # from the raw plan-code set, and each hand-written copy understood a slightly
+        # different subset - one of them forgot to ignore plan codes nobody can buy.
+        "holds_this": holds_this,
+        "holds_other": holds_other,
+        # "They hold another plan" and "they must switch instead of buying" are not the
+        # same fact, and a page that treats them as one sends a crypto customer to a
+        # switch button that cannot move them.
+        "must_switch_instead": False,
+        "requested_purchasable": requested_purchasable,
+    }
+    if billing_cycle is not None:
+        result["billing_cycle"] = billing_cycle
+    return result
+
+
 def _method_note(
     *,
     method: str,
@@ -466,6 +788,7 @@ def payment_method_offers(
                 note=_method_note(method=method, provider=provider, available=available),
                 company=provider_word(provider),
                 company_site=provider_site(provider),
+                billing_cycle=billing_cycle,
             )
         )
     return tuple(offers)
@@ -490,6 +813,14 @@ def payment_method_offers_by_method(
 #: Every billing period a checkout popup can ask about.
 BILLING_CYCLES: Final[tuple[str, ...]] = ("monthly", "annual", "trial_7_day")
 
+#: What a checkout charges before a way of paying has been chosen. Written here beside the
+#: per-method sentences because it is the same fact, half answered: the amount is already
+#: known and what happens after today is not, until a method is picked. ``{amount}`` is
+#: filled in by the page for the reason :attr:`PaymentMethodOffer.charge_story` explains.
+CHARGE_STORY_BEFORE_CHOOSING: Final[str] = (
+    "{amount} today. Choose how you want to pay to see what happens after that."
+)
+
 
 def payment_method_payload(
     settings: Settings,
@@ -507,6 +838,11 @@ def payment_method_payload(
     read "Continue to Creem" and "Continue to NOWPayments" from two strings written into
     the script, so the day a setting names another company the button would have sent
     people to a company that was never going to charge them.
+
+    ``story``, ``terms`` and ``renews`` travel with it for the third time the same thing
+    happened. Both popups told everybody the charge repeated every month, because the one
+    sentence they had was written for a card. It is not true of a crypto invoice, and it
+    is a promise about somebody's money.
     """
 
     return {
@@ -515,6 +851,9 @@ def payment_method_payload(
                 "available": offer.available,
                 "note": offer.note,
                 "company": offer.company,
+                "story": offer.charge_story,
+                "terms": offer.access_terms,
+                "renews": offer.renews_by_itself,
             }
             for offer in payment_method_offers(
                 settings, plan_codes=(plan_code,), billing_cycle=cycle
@@ -1239,29 +1578,55 @@ class BillingService:
         plan = await PlanCatalogService(self.session).get_or_sync(plan_code)
         if not plan.is_active or plan.price_monthly <= 0:
             raise BillingError("plan_not_available", "This paid plan is not available.")
-        current_plans = set(
-            (
-                await self.session.scalars(
-                    select(Plan.code)
-                    .join(Subscription, Subscription.plan_id == Plan.id)
-                    .where(
-                        Subscription.user_id == user_id,
-                        Subscription.provider.notin_(("admin", "free", "trial")),
-                        Subscription.status.in_(
-                            [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]
-                        ),
-                        (Subscription.current_period_end.is_(None))
-                        | (Subscription.current_period_end > datetime.now(UTC)),
-                    )
-                    .order_by(Subscription.updated_at.desc())
-                )
-            ).all()
-        )
+        current_plans = set(await active_paid_plan_codes(self.session, user_id=user_id))
         if plan_code in current_plans:
             raise BillingError(
                 "already_subscribed",
                 f"Your {plan.name} plan is already active.",
             )
+        # Somebody already paying for one plan may not buy a second one here. Moving
+        # between paid plans is a form and a tick box on the billing page — Creem
+        # re-prices the subscription they already have — so a checkout would leave two
+        # live subscriptions and two charges every month.
+        #
+        # This could not happen while Pro was closed: the only paid plan was the one
+        # they were on, and the guard above caught it. Opening Pro made the second half
+        # of the rule necessary, and nothing else was checking it.
+        #
+        # The reason is the whole rule. It holds for a card, which really would be
+        # charged twice; it does not hold for crypto access, which holds no card, cannot
+        # be re-priced, and charges once for a fixed period. This guard used to refuse
+        # both, so the billing page's own advice to a crypto customer — "buy the plan you
+        # want and it starts when the payment arrives" — led to a Pay button that could
+        # never be pressed. The one owner of that question answers it here too.
+        other_paid = sorted(current_plans & set(PURCHASABLE_PLAN_CODES))
+        availability = plan_checkout_availability(
+            self.settings,
+            plan_code=plan_code,
+            active_paid_plan_codes=current_plans,
+            billing_cycle=billing_cycle,
+            payment_method=provider_method(self.provider.provider_name),
+        )
+        if not availability["requested_purchasable"]:
+            raise BillingError(
+                "plan_not_available",
+                "This plan and payment choice are not available. Nothing was charged. "
+                "Return to billing and choose an available option.",
+            )
+
+        replacement_source = None
+        if other_paid:
+            from ai_market_monitor.services.plan_replacements import (
+                PaidPlanReplacementService,
+                PlanReplacementError,
+            )
+
+            try:
+                replacement_source = await PaidPlanReplacementService(
+                    self.session, self.settings
+                ).source_for_checkout(user_id=user_id, target_plan_code=plan_code)
+            except PlanReplacementError as exc:
+                raise BillingError(exc.code, str(exc)) from exc
 
         now = datetime.now(UTC)
         expired = list(
@@ -1354,6 +1719,12 @@ class BillingService:
             terms_accepted_at=now,
             expires_at=now + timedelta(minutes=self.settings.billing_checkout_ttl_minutes),
             billing_profile=_sanitize_billing_profile(billing_profile),
+            replaces_subscription_id=(
+                replacement_source[0].id if replacement_source is not None else None
+            ),
+            replaces_checkout_attempt_id=(
+                replacement_source[1].id if replacement_source is not None else None
+            ),
         )
         self.session.add(attempt)
         await self.session.flush()
@@ -1379,9 +1750,13 @@ class BillingService:
         normalized = requested.strip().lower()
         offer = plan_offer(plan_code)
         if normalized == "trial_7_day":
+            # Named from the catalog, never typed here: the plan was called "Monitor"
+            # in this sentence long after the product had renamed it, and the sentence
+            # also promised a refund window that only one plan actually has.
             raise BillingError(
                 "billing_cycle_not_available",
-                "Monitor is available as a paid monthly plan with a seven-day refund window.",
+                f"{plan_name(plan_code)} is sold as a paid monthly plan. "
+                "There is no free trial period.",
             )
         if normalized in {"annual", "annual_auto_renewal"} and not offer.annual_available:
             raise BillingError(
@@ -1467,6 +1842,32 @@ class BillingService:
         plan = await self.session.get(Plan, attempt.plan_id)
         if plan is None or not plan.is_active:
             raise BillingError("plan_not_available", "The selected plan is no longer available.")
+        availability = plan_checkout_availability(
+            self.settings,
+            plan_code=plan.code,
+            active_paid_plan_codes=await active_paid_plan_codes(
+                self.session, user_id=user_id
+            ),
+            billing_cycle=attempt.billing_cycle,
+            payment_method=provider_method(attempt.provider),
+        )
+        if not availability["requested_purchasable"]:
+            raise BillingError(
+                "plan_not_available",
+                "This plan and payment choice are no longer available. Nothing was "
+                "charged. Return to billing and choose an available option.",
+            )
+        from ai_market_monitor.services.plan_replacements import (
+            PaidPlanReplacementService,
+            PlanReplacementError,
+        )
+
+        try:
+            await PaidPlanReplacementService(self.session, self.settings).attach_source(
+                attempt=attempt, target_plan_code=plan.code
+            )
+        except PlanReplacementError as exc:
+            raise BillingError(exc.code, str(exc)) from exc
         identity = await self.session.scalar(
             select(UserIdentity)
             .where(
@@ -1771,6 +2172,10 @@ class BillingService:
             "amount": normalized_amount,
             "currency": order.get("currency") or product.get("currency"),
             "receipt_url": item.get("receipt_url") or order.get("receipt_url"),
+            # The product Creem is really charging for. It outranks `plan_code` above on a
+            # renewal: the metadata is frozen at first checkout and a plan change never
+            # rewrites it, so after an upgrade the two disagree and only this one is right.
+            "provider_product_id": product.get("id"),
             "provider_discount_amount": BillingService._minor_unit_amount(
                 order.get("discount_amount")
             ),
@@ -1863,6 +2268,8 @@ class BillingService:
             select(BillingEvent).where(BillingEvent.provider_event_id == event_id)
         )
         if existing is not None:
+            if existing.processing_status == "failed":
+                return await self.reprocess_failed_event(event_id)
             return BillingWebhookResult(
                 event_id=event_id,
                 event_type=existing.event_type,
@@ -1897,21 +2304,27 @@ class BillingService:
                 event_type=event_type,
                 data=data,
             )
-            if subscription is not None and self._is_payment_email_event(
+            if subscription is not None and self._is_completed_payment_event(
                 provider=provider,
                 event_type=event_type,
                 subscription=subscription,
             ):
-                from ai_market_monitor.services.payment_emails import (
-                    PaymentEmailOutboxService,
-                )
-
-                await PaymentEmailOutboxService(self.session, self.settings).enqueue(
+                await self._after_completed_payment(
                     billing_event=event,
                     subscription=subscription,
                     data=data,
                 )
         except Exception as exc:
+            if getattr(exc, "code", "") == "old_subscription_cancel_failed":
+                await self._save_replacement_failure(
+                    provider=provider,
+                    event_id=event_id,
+                    event_type=event_type,
+                    payload=payload,
+                    user_id=user_id,
+                    error_code="old_subscription_cancel_failed",
+                )
+                raise
             event.processing_status = "failed"
             event.error_code = getattr(exc, "code", exc.__class__.__name__)
             await self.session.flush()
@@ -1946,6 +2359,13 @@ class BillingService:
         payload = dict(event.payload_redacted or {})
         data = dict(payload.get("data") or {})
         try:
+            # A retry must pass the same checkout, amount and currency checks as the
+            # first delivery. Replaying stored data is not permission to skip them.
+            await self._hydrate_checkout_data(
+                data,
+                provider=event.provider,
+                event_type=event.event_type,
+            )
             subscription = await self._apply_event(
                 provider=event.provider,
                 event_id=event.provider_event_id,
@@ -1957,21 +2377,27 @@ class BillingService:
                 event_type=event.event_type,
                 data=data,
             )
-            if subscription is not None and self._is_payment_email_event(
+            if subscription is not None and self._is_completed_payment_event(
                 provider=event.provider,
                 event_type=event.event_type,
                 subscription=subscription,
             ):
-                from ai_market_monitor.services.payment_emails import (
-                    PaymentEmailOutboxService,
-                )
-
-                await PaymentEmailOutboxService(self.session, self.settings).enqueue(
+                await self._after_completed_payment(
                     billing_event=event,
                     subscription=subscription,
                     data=data,
                 )
         except Exception as exc:
+            if getattr(exc, "code", "") == "old_subscription_cancel_failed":
+                await self._save_replacement_failure(
+                    provider=event.provider,
+                    event_id=event.provider_event_id,
+                    event_type=event.event_type,
+                    payload=payload,
+                    user_id=event.user_id,
+                    error_code="old_subscription_cancel_failed",
+                )
+                raise
             event.processing_status = "failed"
             event.error_code = getattr(exc, "code", exc.__class__.__name__)
             await self.session.flush()
@@ -1986,6 +2412,139 @@ class BillingService:
             replayed=False,
             user_id=event.user_id,
         )
+
+    async def _after_completed_payment(
+        self,
+        *,
+        billing_event: BillingEvent,
+        subscription: Subscription,
+        data: dict[str, Any],
+    ) -> None:
+        """Run every durable result of one confirmed payment in one transaction."""
+
+        from ai_market_monitor.services.payment_emails import PaymentEmailOutboxService
+        from ai_market_monitor.services.plan_replacements import (
+            PaidPlanReplacementService,
+            PlanReplacementError,
+        )
+
+        attempt_id = self._parse_uuid(data.get("checkout_attempt_id"))
+        if attempt_id is not None:
+            try:
+                await PaidPlanReplacementService(
+                    self.session, self.settings
+                ).apply_after_payment(
+                    checkout_attempt_id=attempt_id,
+                    replacement=subscription,
+                    billing_event=billing_event,
+                )
+            except PlanReplacementError as exc:
+                raise BillingError(exc.code, str(exc)) from exc
+        await PaymentEmailOutboxService(self.session, self.settings).enqueue(
+            billing_event=billing_event,
+            subscription=subscription,
+            data=data,
+        )
+        await self._credit_the_affiliate(
+            provider=billing_event.provider,
+            provider_event_id=billing_event.provider_event_id,
+            subscription=subscription,
+            data=data,
+        )
+
+    async def _save_replacement_failure(
+        self,
+        *,
+        provider: str,
+        event_id: str,
+        event_type: str,
+        payload: Mapping[str, Any],
+        user_id: UUID | None,
+        error_code: str,
+    ) -> None:
+        """Keep a failed paid move visible even though its plan changes roll back."""
+
+        from ai_market_monitor.observability.issues import OperationalIssueService
+
+        await self.session.rollback()
+        event = await self.session.scalar(
+            select(BillingEvent).where(BillingEvent.provider_event_id == event_id)
+        )
+        if event is None:
+            event = BillingEvent(
+                user_id=user_id,
+                provider=provider,
+                provider_event_id=event_id,
+                event_type=event_type,
+                processing_status="failed",
+                payload_redacted=redact_payload(dict(payload)),
+                error_code=error_code,
+                created_at=datetime.now(UTC),
+            )
+            self.session.add(event)
+            await self.session.flush()
+        else:
+            event.processing_status = "failed"
+            event.error_code = error_code
+            event.processed_at = None
+        await OperationalIssueService(self.session).record_occurrence(
+            dedupe_key=f"billing:replacement-cancel:{event_id}"[:160],
+            category="billing",
+            severity="critical",
+            summary=(
+                "A new plan was paid for, but the old recurring charge could not be "
+                "stopped after retries. Reprocess the failed billing event."
+            ),
+            affected_scope="billing.plan_replacement",
+            evidence_refs=(f"billing_event:{event_id}"[:134],),
+            source="billing_webhook",
+        )
+        # The calling route rolls back ordinary failures. Commit this alert first so a
+        # person can see it and the saved event can be deliberately reprocessed.
+        await self.session.commit()
+
+    async def _credit_the_affiliate(
+        self,
+        *,
+        provider: str,
+        provider_event_id: str,
+        subscription: Subscription,
+        data: Mapping[str, Any],
+    ) -> None:
+        """Turn one confirmed payment into one earning for whoever brought this customer.
+
+        Called from the two places a payment is confirmed — the live webhook and the
+        replay of a failed one — and keyed on the provider's own event id, so the same
+        payment arriving twice earns the affiliate once. Everything else is decided by
+        :mod:`ai_market_monitor.services.affiliate_attribution`: who the customer belongs
+        to, whether this is their first payment or a later one, and which of the two
+        rates applies. Nothing about commission is worked out here.
+
+        A failure never fails the payment. The subscription is already active and the
+        customer already has what they paid for; an earning that could not be written is
+        a missing row somebody can see, while an exception here would turn a successful
+        payment into a webhook the provider keeps retrying.
+        """
+
+        from ai_market_monitor.services.affiliate_attribution import (
+            ReferralAttributionService,
+        )
+
+        try:
+            await ReferralAttributionService(self.session).record_payment(
+                customer_user_id=subscription.user_id,
+                event_key=f"payment:{provider}:{provider_event_id}",
+                # Only a last resort. The attribution service prefers the completed
+                # checkout row, which is the record of money that really moved; this is
+                # what the provider said, used when there is no checkout behind it.
+                paid_amount_usd=_amount_or_none(data.get("amount")),
+                plan_id=subscription.plan_id,
+            )
+        except Exception:  # pragma: no cover - a diagnostic must never become the failure
+            logger.exception(
+                "affiliate commission could not be recorded",
+                extra={"provider_event_id": provider_event_id},
+            )
 
     async def _apply_event(
         self, *, provider: str, event_id: str, event_type: str, data: dict[str, Any]
@@ -2159,16 +2718,33 @@ class BillingService:
             raise BillingError(
                 "checkout_user_mismatch", "The payment user does not match the checkout attempt."
             )
+        # Which plan this payment is really for.
+        #
+        # A subscription keeps the metadata it was created with for ever, so after an
+        # upgrade or a downgrade the checkout attempt still names the old plan while the
+        # product being charged is the new one. That is not a mismatch — it is exactly the
+        # change the customer asked for — and the amount to expect is the **new** plan's
+        # price, not the amount frozen on the first checkout.
+        #
+        # Without this a customer who upgraded would have their first renewal refused as
+        # overpaid: they really pay the higher price, and nothing confirms it.
+        charged_plan_code = plan_code_for_creem_product(
+            self.settings, self._optional_str(data.get("provider_product_id"))
+        )
+        plan_changed = charged_plan_code is not None and charged_plan_code != plan.code
         supplied_plan = str(data.get("plan_code") or "")
-        if supplied_plan and supplied_plan != plan.code:
+        if supplied_plan and supplied_plan != plan.code and not plan_changed:
             raise BillingError(
                 "checkout_plan_mismatch", "The paid plan does not match the checkout attempt."
             )
-        expected_amount = (
-            plan.price_monthly
-            if attempt.billing_cycle == "trial_7_day" and event_type == "subscription.paid"
-            else attempt.amount
-        )
+        if plan_changed and charged_plan_code is not None:
+            expected_amount = effective_monthly_price(charged_plan_code)
+        else:
+            expected_amount = (
+                plan.price_monthly
+                if attempt.billing_cycle == "trial_7_day" and event_type == "subscription.paid"
+                else attempt.amount
+            )
         # A discount Creem itself applied on its own checkout page. It is only ever read
         # from the provider's own report of this order, never from anything a buyer can
         # type, and it moves the accepted amount by exactly the figure Creem states.
@@ -2186,6 +2762,10 @@ class BillingService:
                 expected_currency=attempt.currency,
                 provider_discount=provider_discount,
             )
+            # This row is the record of what really moved. A discount entered on the
+            # payment company's page is known only now, so replace the earlier quote
+            # with the confirmed discounted figure before any unused-time calculation.
+            attempt.amount = expected_amount
         if provider == "nowpayments" and event_type == "payment.finished":
             self._validate_nowpayments_settlement(data)
         if provider_discount > 0 and not attempt.discount_code:
@@ -2196,7 +2776,7 @@ class BillingService:
             )
         data["checkout_attempt_id"] = str(attempt.id)
         data["user_id"] = str(attempt.user_id)
-        data["plan_code"] = plan.code
+        data["plan_code"] = charged_plan_code if plan_changed else plan.code
         data["amount"] = str(expected_amount)
         data["currency"] = attempt.currency
 
@@ -2260,7 +2840,7 @@ class BillingService:
                 continue
             too_small = False
             if actual <= candidate + tolerance:
-                return candidate
+                return actual.quantize(Decimal("0.01"), ROUND_HALF_UP)
         if too_small:
             raise BillingError(
                 "payment_underpaid", "The verified payment is below the accepted amount."
@@ -2340,12 +2920,20 @@ class BillingService:
         await self.session.flush()
 
     @staticmethod
-    def _is_payment_email_event(
+    def _is_completed_payment_event(
         *,
         provider: str,
         event_type: str,
         subscription: Subscription,
     ) -> bool:
+        """Did money actually change hands on this event?
+
+        One answer, because two things now depend on it: the receipt email, and the
+        affiliate commission. It used to be named after the email alone, and a second
+        reading of "is this a payment" written for the commission is exactly how one of
+        them would come to fire on an event the other ignored.
+        """
+
         if subscription.status not in {
             SubscriptionStatus.ACTIVE,
             SubscriptionStatus.TRIALING,
@@ -2369,7 +2957,12 @@ class BillingService:
         user_id = self._parse_uuid(data.get("user_id"))
         if user_id is None:
             raise BillingError("user_missing", "Billing event did not include a user id.")
-        plan_code = str(data.get("plan_code") or data.get("price_lookup_key") or "demo")
+        # Which plan this subscription is really for. The payment company's own product is
+        # asked first, because it is the thing being charged; the metadata is a copy taken
+        # when the checkout was created and a later plan change does not rewrite it.
+        plan_code = plan_code_for_creem_product(
+            self.settings, self._optional_str(data.get("provider_product_id"))
+        ) or str(data.get("plan_code") or data.get("price_lookup_key") or "demo")
         plan = await PlanCatalogService(self.session).get_or_sync(plan_code)
         provider_subscription_id = str(
             data.get("provider_subscription_id") or data.get("subscription_id") or ""
@@ -2499,6 +3092,17 @@ def _cycle_key(billing_cycle: str) -> str:
         "trial_7_day": "trial",
         "one_time_30_day": "monthly",
     }.get(billing_cycle, billing_cycle)
+
+
+def _amount_or_none(value: Any) -> Decimal | None:
+    """A money figure a provider sent, or nothing rather than a guess."""
+
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
 
 
 def _sanitize_billing_profile(profile: Mapping[str, Any] | None) -> dict[str, str]:

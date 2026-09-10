@@ -696,6 +696,57 @@ body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action.is-danger:
   color: var(--t-surface);
 }
 
+/* Ask AI — a modifier on the `.t-action` family. It opens the dashboard assistant.
+   The fill is a sky blue that keeps white text readable (4.86:1) and still reads as
+   a friendly blue rather than the emerald/apple accent. */
+@keyframes hm-ask-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.045); }
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action-is-ask {
+  min-height: 44px;
+  border-color: var(--hm-sky);
+  background: var(--hm-sky);
+  color: var(--hm-surface);
+  font-weight: 600;
+  flex: 0 0 auto;
+  transform-origin: center;
+  animation: hm-ask-breathe 2600ms ease-in-out infinite;
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action-is-ask:hover {
+  border-color: var(--hm-sky-strong);
+  background: var(--hm-sky-strong);
+  transform: translateY(-1px);
+  animation-play-state: paused;
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action-is-ask:focus-visible {
+  animation-play-state: paused;
+}
+
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action-is-ask:active {
+  border-color: var(--hm-sky-strong);
+  background: var(--hm-sky-strong);
+  transform: none;
+  animation-play-state: paused;
+}
+
+/* Compact variant: used on settings group heads, pushed to the inline-end. */
+body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action-is-ask.is-compact {
+  min-height: 44px;
+  padding: 0 var(--t-2);
+  margin-inline-start: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action-is-ask {
+    animation: none;
+    transform: none;
+  }
+}
+
 body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-action:disabled {
   border-color: var(--t-line);
   background: var(--t-quiet);

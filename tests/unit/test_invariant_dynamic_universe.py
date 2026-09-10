@@ -14,17 +14,16 @@ import pytest
 
 from ai_market_monitor.core.plans import (
     COMING_SOON_LABEL,
-    LAUNCH_DISCOUNT_CODE,
     PLAN_DEFINITIONS,
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
-    coded_monthly_price,
+    PURCHASABLE_PLAN_CODES,
     effective_monthly_price,
-    launch_discount_percent,
     original_monthly_price,
     plan_offer,
     plan_offer_payload,
     promotion_is_active,
+    promotional_monthly_price,
     visible_plan_comparison,
     visible_plan_comparison_headers,
     visible_public_plan_codes,
@@ -1194,11 +1193,16 @@ def test_the_comparison_table_always_has_one_column_per_visible_plan(
     assert all(len(row) == len(headers) + 1 for row in rows)
 
 
-def test_only_the_monitor_plan_is_on_sale_and_only_monthly() -> None:
-    """Enforced by `core/plans.plan_offer`, read by every pricing surface."""
+def test_both_paid_plans_are_on_sale_and_only_monthly() -> None:
+    """Enforced by `core/plans.plan_offer`, read by every pricing surface.
 
-    assert plan_offer("trader").monthly_available is True
-    assert plan_offer("pro").monthly_available is False
+    Asserted for every purchasable plan rather than for one named plan, so opening a
+    plan for sale cannot leave a surface still calling it "coming soon".
+    """
+
+    for code in PURCHASABLE_PLAN_CODES:
+        assert plan_offer(code).monthly_available is True, code
+        assert promotional_monthly_price(code, now=PROMOTION_ENDS_AT - timedelta(1)), code
     for code in PUBLIC_PLAN_CODES:
         assert plan_offer(code).annual_available is False, code
 
@@ -1212,39 +1216,36 @@ def test_an_unknown_plan_is_never_for_sale() -> None:
 
 
 def test_the_launch_price_and_the_countdown_come_from_one_rule() -> None:
-    """A price on the page and a timer beside it must never disagree.
+    """A price on the page, the amount charged, and a timer beside them: one rule.
 
-    The launch price is reached by typing a code. So there are two numbers here, and the
-    difference between them is the whole rule: `effective_monthly_price` is what a
-    checkout charges when nobody types anything, and `coded_monthly_price` is what the
-    code brings it down to. If the first one ever carried the launch price, everybody
-    would get the offer without the code and every card saying "using code" would be
-    false.
+    Nothing is typed to reach the launch price, so `effective_monthly_price` **is** the
+    launch price while the offer runs. That is what makes the card, the crypto invoice
+    and the Creem product check one number rather than three. The moment the deadline
+    passes, the same call returns the normal price and the crossed-out figure disappears.
     """
 
     before = PROMOTION_ENDS_AT - timedelta(minutes=1)
     after = PROMOTION_ENDS_AT
     normal_price = PLAN_DEFINITIONS["trader"].monthly_price
-    launch_price = coded_monthly_price("trader", now=before)
+    launch_price = promotional_monthly_price("trader", now=before)
     assert launch_price is not None and launch_price < normal_price
 
     assert promotion_is_active(before) is True
-    assert effective_monthly_price("trader", now=before) == normal_price
+    assert effective_monthly_price("trader", now=before) == launch_price
     assert original_monthly_price("trader", now=before) == normal_price
 
     assert promotion_is_active(after) is False
     assert effective_monthly_price("trader", now=after) == normal_price
-    # Nothing to cross out, and no code, once the offer is over.
+    # Nothing to cross out once the offer is over.
     assert original_monthly_price("trader", now=after) is None
-    assert coded_monthly_price("trader", now=after) is None
+    assert promotional_monthly_price("trader", now=after) is None
 
 
 @pytest.mark.parametrize("code", PUBLIC_PLAN_CODES)
-def test_a_plan_with_no_code_has_nothing_crossed_out(code: str) -> None:
-    if code == "trader":
-        pytest.skip("the Monitor plan is the one with a launch code")
+def test_a_plan_with_no_offer_has_nothing_crossed_out(code: str) -> None:
+    if promotional_monthly_price(code) is not None:
+        pytest.skip("this plan is running a launch price")
     assert original_monthly_price(code) is None
-    assert coded_monthly_price(code) is None
     assert effective_monthly_price(code) == PLAN_DEFINITIONS[code].monthly_price
 
 
@@ -1261,8 +1262,8 @@ def test_the_offer_payload_carries_everything_a_card_needs(code: str) -> None:
         "annualPrice",
         "originalMonthlyPrice",
         "fullMonthlyPrice",
-        "discountCode",
-        "discountPercent",
+        "promotionEndsAt",
+        "promotionRunning",
         "comingSoonLabel",
     }
     assert payload["comingSoonLabel"] == COMING_SOON_LABEL
@@ -1270,19 +1271,18 @@ def test_the_offer_payload_carries_everything_a_card_needs(code: str) -> None:
     # An interval that is not open carries no number at all, so the page source cannot
     # leak a price for something nobody can buy.
     assert payload["annualPrice"] is None
-    coded = coded_monthly_price(code, now=when)
-    if coded is not None:
-        # The headline is the coded price; the code and the "without it" figure travel
-        # with it so a card can explain the number rather than only show it.
-        assert payload["monthlyPrice"] == float(coded)
+    assert payload["promotionEndsAt"] == PROMOTION_ENDS_AT.isoformat()
+    promotional = promotional_monthly_price(code, now=when)
+    if promotional is not None:
+        # The headline is the launch price, and the normal price travels with it so a card
+        # can explain the number rather than only show it.
+        assert payload["monthlyPrice"] == float(promotional)
+        assert payload["fullMonthlyPrice"] == float(promotional)
         assert payload["originalMonthlyPrice"] == float(PLAN_DEFINITIONS[code].monthly_price)
-        assert payload["fullMonthlyPrice"] == float(PLAN_DEFINITIONS[code].monthly_price)
-        assert payload["discountCode"] == LAUNCH_DISCOUNT_CODE
-        assert payload["discountPercent"] == float(launch_discount_percent(code, now=when) or 0)
+        assert payload["promotionRunning"] is True
     else:
         assert payload["originalMonthlyPrice"] is None
-        assert payload["discountCode"] is None
-        assert payload["discountPercent"] is None
+        assert payload["promotionRunning"] is False
     if not payload["monthlyAvailable"]:
         assert payload["monthlyPrice"] is None
         assert payload["fullMonthlyPrice"] is None
