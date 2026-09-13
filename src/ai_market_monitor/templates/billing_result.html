@@ -2,8 +2,13 @@
 {% block content %}
 <main class="billing-result-page" tabindex="-1" data-checkout-result>
   <section class="billing-result-hero" aria-labelledby="billing-result-title">
-    <div class="billing-result-mark is-{{ 'success' if message in ['payment_successful', 'trial_started'] else ('pending' if message else 'error') }}">
-      <span data-icon="{{ 'check' if message in ['payment_successful', 'trial_started'] else ('clock' if message else 'alert') }}" data-icon-class="icon-lg"></span>
+    {% set mark_paid = message in ['payment_successful', 'trial_started'] %}
+    {% set mark_refunded = message == 'payment_refunded' %}
+    {# A refund is not a success (no access started), not a wait (nothing is coming),
+       and not a fault (nothing failed). It keeps the plain base mark, with the
+       "went back" icon — no is-pending warning, no is-error alarm. #}
+    <div class="billing-result-mark{{ '' if mark_refunded else (' is-success' if mark_paid else (' is-pending' if message else ' is-error')) }}">
+      <span data-icon="{{ 'undo' if mark_refunded else ('check' if mark_paid else ('clock' if message else 'alert')) }}" data-icon-class="icon-lg"></span>
     </div>
     <span class="kicker">Plan and billing</span>
     <h1 id="billing-result-title">{{ title }}</h1>
@@ -11,6 +16,8 @@
       <p>Your payment is verified and your {{ plan.name if plan else 'selected' }} access is active. A receipt is on its way to your account email.</p>
     {% elif message == 'trial_started' %}
       <p>Your existing seven-day Monitor trial is active until the access end date shown in Billing.</p>
+    {% elif message == 'payment_refunded' %}
+      <p>The money went back to you. Your plan did not continue.</p>
     {% elif message %}
       <p>You came back from the payment company, but we have not received its payment confirmation yet. Your plan stays unchanged until it arrives.</p>
     {% else %}
@@ -54,6 +61,6 @@
   data-event-scope="{{ checkout_attempt.id if checkout_attempt else page }}"
   hidden
 ></div>
-<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260910-pay-now"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260913-corner-clear"></script>
 {% endif %}
 {% endblock %}

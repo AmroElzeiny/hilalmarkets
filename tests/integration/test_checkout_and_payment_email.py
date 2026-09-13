@@ -15,6 +15,8 @@ from sqlalchemy import func, select
 from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.core.copy_rules import scan_text
 from ai_market_monitor.core.plans import (
+    PLAN_DEFINITIONS,
+    PLAN_LIMIT_WORDS,
     PURCHASABLE_PLAN_CODES,
     RETIRED_DISCOUNT_CODES,
     effective_monthly_price,
@@ -43,6 +45,7 @@ from ai_market_monitor.services.billing import (
 )
 from ai_market_monitor.services.discount_codes import DiscountCodeService
 from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
+from ai_market_monitor.services.payment_emails import RECEIPT_LIMIT_KEYS
 from tests.support.billing_config import live_billing_overrides
 
 
@@ -160,13 +163,25 @@ async def test_every_reported_payment_choice_opens_a_provider_page(
             "checkout_url": f"https://checkout.creem.io/{payload['request_id']}",
         }
 
-    async def fake_provider_request(*args, provider, json, **kwargs):
+    # The keyword parameter below is named ``json``, which shadows the module's
+    # ``json`` inside this function, so bind the real parser before the def.
+    json_loads = json.loads
+
+    async def fake_provider_request(*args, provider, json=None, content=None, **kwargs):
         assert provider == "nowpayments"
+        # The crypto invoice now sends its finished body as exact bytes through
+        # ``content=`` (see ``core/money.wire_json_body``); a caller still passing
+        # ``json=`` behaves as before. Read whichever one carried the body, once.
+        body = json
+        if body is None:
+            assert content is not None, "the provider request carried no body"
+            # ``json.loads`` accepts both ``bytes`` and ``str``.
+            body = json_loads(content)
         return httpx.Response(
             200,
             json={
-                "id": f"inv_{json['order_id']}",
-                "invoice_url": f"https://nowpayments.io/payment/{json['order_id']}",
+                "id": f"inv_{body['order_id']}",
+                "invoice_url": f"https://nowpayments.io/payment/{body['order_id']}",
             },
         )
 
@@ -440,6 +455,117 @@ async def test_a_wrong_code_is_refused_and_charges_nothing(test_context):
 
     async with test_context["session_factory"]() as session:
         assert await session.scalar(select(func.count(BillingCheckoutAttempt.id))) == 0
+
+
+async def test_a_full_price_renewal_after_a_discounted_first_period_lands(test_context):
+    """A code typed on the payment page moves the FIRST charge, not every later one.
+
+    The buyer here used a discount code on Creem's own page, so the checkout row ended
+    at the discounted figure. A month later Creem charged the plan's real price. The
+    renewal used to be compared only against the stored (discounted) figure and refused
+    as overpaid: the customer paid, and the renewal never landed. A confirmed renewal
+    must be accepted at either figure — what was last stored, or the plan's current
+    effective price — while an amount above the plan's price is still refused.
+    """
+
+    email = "renewal-after-discount@example.com"
+    await _signup(test_context, email)
+    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
+    full_price = effective_monthly_price("trader")
+    first_period = full_price - Decimal("2.00")
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(
+            select(User)
+            .join(UserIdentity, UserIdentity.user_id == User.id)
+            .where(UserIdentity.normalized_identifier == email)
+        )
+        assert user is not None
+        plan = await PlanCatalogService(session).get_or_sync("trader")
+        now = datetime.now(UTC)
+        attempt = BillingCheckoutAttempt(
+            user_id=user.id,
+            plan_id=plan.id,
+            billing_cycle="monthly_auto_renewal",
+            provider="creem",
+            status="completed",
+            idempotency_key=f"renewal-discount-{user.id}",
+            terms_version="test",
+            amount=first_period,
+            currency="USD",
+            discount_code="WELCOME2",
+            terms_accepted_at=now - timedelta(days=30),
+            expires_at=now,
+            completed_at=now - timedelta(days=30),
+            billing_profile={"first_name": "Amina"},
+        )
+        subscription = Subscription(
+            user_id=user.id,
+            plan_id=plan.id,
+            status=SubscriptionStatus.ACTIVE,
+            provider="creem",
+            provider_subscription_id=f"creem-renew-{user.id}",
+            current_period_start=now - timedelta(days=30),
+            current_period_end=now - timedelta(days=1),
+        )
+        session.add_all([attempt, subscription])
+        await session.commit()
+
+    def renewal(event_id: str, amount: Decimal, **extra: str) -> dict[str, object]:
+        moment = datetime.now(UTC)
+        return {
+            "id": event_id,
+            "type": "subscription.paid",
+            "data": {
+                "checkout_attempt_id": str(attempt.id),
+                "plan_code": "trader",
+                "provider_subscription_id": subscription.provider_subscription_id,
+                "amount": str(amount),
+                "currency": "USD",
+                "status": "active",
+                "current_period_start": moment.isoformat(),
+                "current_period_end": (moment + timedelta(days=30)).isoformat(),
+                **extra,
+            },
+        }
+
+    async with test_context["session_factory"]() as session:
+        service = BillingService(session, enabled, provider_name="creem")
+
+        # 1. Full-price renewal after the discounted first period: accepted, and the
+        #    row records the figure really paid.
+        first = await service.process_event(
+            provider="creem", payload=renewal("renew-full-price", full_price)
+        )
+        await session.commit()
+        assert first.processing_status == "processed"
+        landed = await session.get(BillingCheckoutAttempt, attempt.id)
+        assert landed is not None
+        assert landed.amount == full_price
+
+        # 2. A later renewal that is discounted again still lands, and the row follows.
+        again = full_price - Decimal("3.00")
+        second = await service.process_event(
+            provider="creem",
+            payload=renewal(
+                "renew-discounted-again",
+                again,
+                provider_discount_amount="3.00",
+                provider_discount_code="SAVE3",
+            ),
+        )
+        await session.commit()
+        assert second.processing_status == "processed"
+        relanded = await session.get(BillingCheckoutAttempt, attempt.id)
+        assert relanded is not None
+        assert relanded.amount == again
+
+        # 3. Still no free ride: an amount above the plan's price is refused.
+        with pytest.raises(BillingError) as error:
+            await service.process_event(
+                provider="creem",
+                payload=renewal("renew-too-much", full_price + Decimal("5.00")),
+            )
+        assert error.value.code == "payment_overpaid"
 
 
 async def test_verified_static_payment_activates_once_and_emails_once(test_context):
@@ -1429,3 +1555,239 @@ def test_customer_billing_surfaces_carry_no_engineer_speak(surface, banned, carr
         assert phrase not in text, f"{phrase!r} back in {surface.name}"
     for phrase in carried:
         assert phrase in text, f"{phrase!r} missing from {surface.name}"
+
+
+# ── What a plan's limits are called ──────────────────────────────────────────
+
+
+def _limit_tile_names(page: str) -> list[str]:
+    document = lxml.html.fromstring(page)
+    return [
+        name.text_content().strip()
+        for name in document.xpath(
+            '//div[contains(@class,"checkout-limit-grid")]/article/span[last()]'
+        )
+    ]
+
+
+@pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+async def test_the_checkout_names_each_limit_as_every_other_page_does(test_context, plan_code):
+    """The review page's limit tiles had their own names and called a plan's monitors
+    "Active Watchlists". A Watchlist is a saved list of coins, a different thing. The
+    names come from `PLAN_LIMIT_WORDS`, which the subscription page and the receipt use.
+    """
+
+    await _signup(test_context, f"limit-words-{plan_code}@example.com")
+    enabled = test_context["settings"].model_copy(update={"billing_enabled": True})
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+    response = await test_context["client"].get(
+        f"/dashboard/billing/checkout?plan_code={plan_code}"
+    )
+    assert response.status_code == 200, response.text
+
+    names = _limit_tile_names(response.text)
+    assert names[:3] == [
+        PLAN_LIMIT_WORDS["active_strategies"],
+        PLAN_LIMIT_WORDS["on_demand_scans_per_month"],
+        PLAN_LIMIT_WORDS["detailed_history_days"],
+    ]
+    assert not [name for name in names if "watchlist" in name.casefold()], names
+
+
+@pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+async def test_the_receipt_names_each_limit_as_every_other_page_does(test_context, plan_code):
+    """The receipt's list of limits had its own names too: "Active Watchlists" and
+    "Markets per Watchlist" for a plan's monitors. Read from the email really sent after
+    a verified payment, in both of its parts."""
+
+    await _signup(test_context, f"receipt-words-{plan_code}@example.com")
+    form = await _review_form(test_context, plan_code)
+    checkout = await test_context["client"].post(
+        "/dashboard/billing/checkout",
+        data=form,
+        follow_redirects=False,
+    )
+    assert checkout.status_code == 303
+    parsed = urlsplit(checkout.headers["location"])
+    paid = await test_context["client"].get(f"{parsed.path}?{parsed.query}")
+    assert paid.status_code == 200
+
+    (receipt,) = [
+        row
+        for row in test_context["settings"].email_test_outbox
+        if row.get("purpose") == "payment_success"
+    ]
+    limits = PLAN_DEFINITIONS[plan_code].limits
+    expected = [PLAN_LIMIT_WORDS[key] for key in RECEIPT_LIMIT_KEYS if key in limits]
+    assert expected, "a rule that matches nothing passes for the wrong reason"
+
+    block = receipt["body"].split("Your main limits:\n", 1)[1].split("\n\n", 1)[0]
+    named = [
+        line[2:].split(": ", 1)[0] for line in block.splitlines() if line.startswith("- ")
+    ]
+    assert named == expected, block
+    assert "watchlist" not in block.casefold(), block
+    for name in expected:
+        assert name in receipt["html_body"], name
+    for retired in ("Active Watchlists", "Markets per Watchlist"):
+        assert retired not in receipt["html_body"]
+
+
+async def _refund_a_nowpayments_checkout(test_context, email: str) -> tuple:
+    """One crypto checkout whose money has come back, owned by the person using the browser.
+
+    The ``refunded`` word is written by the product's own refund reader
+    (``BillingService.process_event``), not set by hand, so the route is aimed at exactly
+    the record a real refund leaves: money returned, no plan named to end, so the plan is
+    untouched and the payment was never ``completed`` in this shape. Returns the attempt
+    id (for the browser routes) and the user id (for the guard replay).
+    """
+
+    await _signup(test_context, email)
+    now = datetime.now(UTC)
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(
+            select(User)
+            .join(UserIdentity, UserIdentity.user_id == User.id)
+            .where(UserIdentity.normalized_identifier == email)
+        )
+        assert user is not None
+        plan = await PlanCatalogService(session).get_or_sync("trader")
+        attempt = BillingCheckoutAttempt(
+            user_id=user.id,
+            plan_id=plan.id,
+            billing_cycle="one_time_30_day",
+            provider="nowpayments",
+            status="pending",
+            idempotency_key=f"refund-cancel-{user.id}",
+            terms_version="test",
+            amount=effective_monthly_price("trader"),
+            currency="USD",
+            terms_accepted_at=now,
+            expires_at=now + timedelta(days=1),
+            billing_profile={"first_name": "Amina"},
+        )
+        session.add(attempt)
+        await session.commit()
+        attempt_id = attempt.id
+        user_id = user.id
+
+    async with test_context["session_factory"]() as session:
+        await BillingService(session, test_context["settings"]).process_event(
+            provider="nowpayments",
+            payload={
+                "id": f"evt-refund-{attempt_id}",
+                "type": "payment.refunded",
+                "data": {
+                    "checkout_attempt_id": str(attempt_id),
+                    "user_id": str(user_id),
+                    "status": "refunded",
+                },
+            },
+        )
+        await session.commit()
+
+    # Sanity on the starting shape: the refund reader really did record it, and this
+    # payment was never settled, so ``completed_at`` has nothing to hold.
+    async with test_context["session_factory"]() as session:
+        refunded = await session.get(BillingCheckoutAttempt, attempt_id)
+        assert refunded is not None
+        assert refunded.status == "refunded"
+        assert refunded.completed_at is None
+    return attempt_id, user_id
+
+
+async def test_the_billing_cancel_route_never_erases_a_recorded_refund(test_context) -> None:
+    """Opening the old cancel link after a refund must not overwrite the refund.
+
+    ``GET /billing/cancel`` used to move any attempt that was not
+    completed/failed/expired to ``cancelled``. ``refunded`` was not in that set, so a
+    customer revisiting the cancel URL their crypto checkout was created with rewrote
+    ``refunded`` to ``cancelled`` — erasing the refund record and, worse, switching off
+    the NOWPayments double-grant guard (which keys on ``refunded``) so a re-delivered
+    ``payment.finished`` counted the returned money as kept again.
+    """
+
+    attempt_id, user_id = await _refund_a_nowpayments_checkout(
+        test_context, "cancel-keeps-refund@example.com"
+    )
+
+    cancelled = await test_context["client"].get(f"/billing/cancel?attempt={attempt_id}")
+    assert cancelled.status_code == 200, cancelled.text
+
+    async with test_context["session_factory"]() as session:
+        attempt = await session.get(BillingCheckoutAttempt, attempt_id)
+        assert attempt is not None
+        assert attempt.status == "refunded", (
+            "the cancel route overwrote a recorded refund with 'cancelled'"
+        )
+        assert attempt.completed_at is None
+
+    # With the refund record intact, the double-grant guard still refuses to settle the
+    # same money a second time when NOWPayments re-delivers its success event.
+    async with test_context["session_factory"]() as session:
+        with pytest.raises(BillingError) as refused:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider="nowpayments",
+                payload={
+                    "id": f"evt-finished-after-cancel-{attempt_id}",
+                    "type": "payment.finished",
+                    "data": {
+                        "checkout_attempt_id": str(attempt_id),
+                        "user_id": str(user_id),
+                        "plan_code": "trader",
+                        "status": "active",
+                        "amount": str(effective_monthly_price("trader")),
+                        "currency": "USD",
+                    },
+                },
+            )
+        assert refused.value.code == "checkout_already_completed"
+
+    async with test_context["session_factory"]() as session:
+        after_replay = await session.get(BillingCheckoutAttempt, attempt_id)
+        assert after_replay is not None
+        assert after_replay.status == "refunded"
+        assert after_replay.completed_at is None
+
+
+async def test_the_billing_result_page_says_refunded_for_a_refunded_checkout(
+    test_context,
+) -> None:
+    """A returned payment must not read as a pending or failed checkout on the result page.
+
+    The post-payment ``state_content`` map had no ``refunded`` entry, so a refunded
+    checkout fell back to "Payment confirmation pending" — and, being outside the
+    completed/pending/processing set, was rendered in the error tone. The honest word is
+    "Refunded", and it must not read as an error.
+    """
+
+    attempt_id, _ = await _refund_a_nowpayments_checkout(
+        test_context, "success-says-refunded@example.com"
+    )
+
+    page = await test_context["client"].get(f"/billing/success?attempt={attempt_id}")
+    assert page.status_code == 200, page.text
+    words = _visible_words(page.text)
+    assert "Refunded" in words
+    assert "Payment confirmation pending" not in words
+    assert "The checkout did not complete" not in words
+    # The body paragraph must be the refund's own honest words, not the generic
+    # "came back from the payment company" paragraph. That paragraph says the money
+    # is still to come; for a refund the money already went back, so on this page
+    # it is simply untrue.
+    assert "The money went back to you. Your plan did not continue." in words
+    assert "we have not received its payment confirmation" not in words
+    # The mark at the top must not carry the pending (clock) or error (alert) tone:
+    # nothing is still arriving, and nothing failed. A refund keeps the plain base
+    # mark with the "went back" icon.
+    mark = re.search(r'class="(billing-result-mark[^"]*)"', page.text)
+    assert mark is not None
+    assert mark.group(1) == "billing-result-mark"
+    mark_icon = re.search(
+        r'data-icon="([a-z0-9_]+)" data-icon-class="icon-lg"', page.text
+    )
+    assert mark_icon is not None
+    assert mark_icon.group(1) not in {"clock", "alert"}
+    # Beginner-language rule: the copy lint stays clean on the page the buyer lands on.
+    assert scan_text(words, Path("billing_result [refunded]")) == ()

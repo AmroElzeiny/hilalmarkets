@@ -29,6 +29,7 @@ from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.dashboard_paths import MONITOR_PATH, monitor_edit_path
 from ai_market_monitor.core.plans import (
     DISCOUNT_CODE_PATTERN,
+    PLAN_LIMIT_WORDS,
     money_back_headline,
     money_back_words,
     plan_name,
@@ -42,6 +43,7 @@ from ai_market_monitor.services.hilal_methodology import (
     METHODOLOGY_PUBLIC_PATH as AUTOMATED_METHODOLOGY_PATH,
 )
 from ai_market_monitor.services.plan_changes import switch_label_soon
+from ai_market_monitor.services.plan_replacements import REPLACEMENT_REFUSALS
 from ai_market_monitor.services.sharia_automated_screen import (
     AUTOMATED_DISCLOSURE,
 )
@@ -215,7 +217,14 @@ def register(templates: Jinja2Templates) -> Jinja2Templates:
     # words and read "7 days money-back guarantee" while the React card said "7-day".
     templates.env.globals["money_back_headline"] = money_back_headline
     templates.env.globals["plan_name"] = plan_name
+    # What each plan limit is called. The checkout review wrote its own labels by hand
+    # and called a monitor a Watchlist, while the subscription page called it a monitor.
+    templates.env.globals["plan_limit_words"] = PLAN_LIMIT_WORDS
     # The sentence on a plan card that cannot be bought yet. The public pricing card and
     # the dashboard card both draw it, and each used to write its own version.
     templates.env.globals["switch_label_soon"] = switch_label_soon
+    # The checkout route's refusals when a paid plan cannot be replaced safely. The
+    # dashboard's error notice reads them by code; without this it printed the code
+    # itself, title-cased, to the person ("Paid Amount Missing").
+    templates.env.globals["plan_replacement_refusals"] = REPLACEMENT_REFUSALS
     return templates

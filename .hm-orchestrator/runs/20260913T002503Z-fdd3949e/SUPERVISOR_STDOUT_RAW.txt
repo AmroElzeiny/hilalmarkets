@@ -1,0 +1,641 @@
+﻿[0m
+> hm-supervisor-deep · deepseek-v4.1-flash
+[0m
+[0m# [0mTodos
+[•] Read governing docs (CLAUDE.md, policies, model maps, prior-run reviews)
+[ ] Recon D1-D5 root causes in code
+[ ] D1: refund recording + money-owed class fix with tests
+[ ] D2: one held-plan owner with invariant test
+[ ] D3: money-to-wire owner; no float on money; test
+[ ] D4: evidence-ref pointer-only sanitizer + tests
+[ ] D5: corner-assistant focus obscuring fix + browser test
+[ ] Reviews: logic, adversarial, visual
+[ ] Final verification suite + clutter removal
+[ ] Write SUPERVISOR_REPORT.json/.md per contract
+[0m
+[0m→ [0mRead CLAUDE.md
+[0m→ [0mRead .hm-orchestrator/policy/ROUTING_POLICY.md
+[0m→ [0mRead .hm-orchestrator/policy/SUPERVISOR_REPORT_CONTRACT.md
+I'll start by reading the governing documents and the previous run's evidence, then map the five defects.
+[0m→ [0mRead .hm-orchestrator/models/ROLE_MODEL_MAP.md
+[0m→ [0mRead .hm-orchestrator/models/MODEL_METADATA_RULES.md
+[0m→ [0mRead .hm-orchestrator/policy/supervisor-report.schema.json
+Now the model maps, schema, and the previous run's evidence.
+[0m→ [0mRead .hm-orchestrator/models/LIVE_MODELS.md
+[0m→ [0mRead .hm-orchestrator/runs/20260912T193031Z-4125cfbe/REVIEW_FIXES_ADVERSARIAL.md
+[0m→ [0mRead .hm-orchestrator/runs/20260912T193031Z-4125cfbe/VISUAL_REVIEW.md
+[0m→ [0mRead .hm-orchestrator/runs/20260912T193031Z-4125cfbe/EVIDENCE_FIX_A_B.md
+[0m
+[0m$ [0mgit status --porcelain | Select-Object -First 40; Write-Output "---BRANCH---"; git rev-parse --abbrev-ref HEAD; git rev-parse HEAD
+D .claude/settings.local.disabled.json
+ M .hm-orchestrator/CLAUDE_MD_INSERT.md
+ M .hm-orchestrator/current/CLAUDE_READ_THIS.md
+ M .hm-orchestrator/current/MISSION.md
+ M .hm-orchestrator/current/RUN.json
+ M .hm-orchestrator/current/VISUAL_CONTRACT.md
+ M .hm-orchestrator/models/LIVE_ENDPOINT.json
+ M .hm-orchestrator/models/LIVE_MODELS.md
+ M .hm-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+ M .hm-orchestrator/models/LIVE_MODEL_IDS.txt
+ M .hm-orchestrator/policy/ROUTING_POLICY.md
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s1-pro-none-1024x768.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s1-pro-none-1440x900.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s1-pro-none-390x844.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s2-pro-card-1024x768.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s2-pro-card-1440x900.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s2-pro-card-390x844.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s3-pro-crypto-1024x768.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s3-pro-crypto-1440x900.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s3-pro-crypto-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-trader-refusal-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-trader-refusal-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-trader-refusal-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-switch-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-switch-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-switch-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-scheduled-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-scheduled-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-scheduled-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-refusal-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-refusal-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-refusal-390x844.png
+ M .opencode/agents/hm-direct-read.md
+ M .opencode/agents/hm-direct-write.md
+ M .opencode/agents/hm-explorer.md
+ M .opencode/agents/hm-reviewer-adversarial.md
+ M .opencode/agents/hm-reviewer-logic.md
+ M .opencode/agents/hm-reviewer-visual.md
+ M .opencode/agents/hm-supervisor-deep.md
+ M .opencode/agents/hm-supervisor.md
+---BRANCH---
+cloudflare-access-service-tokens
+75b195804941a961a99b3888528a23e4a554a42b
+[0m
+[0m→ [0mRead .agents/commands.json
+Let me read the command authority and check the prior run's clutter.
+[0m
+[0m$ [0mGet-ChildItem "C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260912T193031Z-4125cfbe" | Select-Object Name,Length; Write-Output "---TEMP PY---"; Get-ChildItem -Recurse -Filter "temp_*.py" | Select-Object FullName
+Name                                                Length 
+----                                                ------ 
+fixa_snapshot                                              
+adjacent_availability_invariant.txt                 326    
+adjacent_plan_change_journey.txt                    164    
+adjacent_resume_invariant.txt                       164    
+adj_billing_offers.txt                              164    
+adj_checkout_email.txt                              164    
+adj_pages_templates.txt                             812    
+adj_renewal_words.txt                               326    
+BASELINE_COMMIT.txt                                 45     
+BASELINE_DIFF.patch                                 731797 
+BASELINE_STATUS.txt                                 8689   
+billing_batch_final.txt                             482    
+billing_junit.xml                                   49898  
+broad_junit.xml                                     4963304
+broad_suites_final.txt                              32802  
+browser_checkout_final.txt                          248    
+browser_checkout_junit.xml                          3468   
+browser_final.txt                                   239    
+browser_junit.xml                                   838    
+EVIDENCE_FIX_A_B.md                                 10422  
+FINAL_DIFF.patch                                    788697 
+final_mypy_src.txt                                  94     
+final_offline_suites.txt                            65294  
+final_results.txt                                   978    
+FINAL_STATUS.txt                                    8744   
+final_tests_integration.txt                         5186   
+final_test_invariant_annual_only_plan_card.txt      164    
+final_test_invariant_plan_checkout_availability.txt 326    
+final_test_invariant_plan_replacement_money.txt     164    
+final_test_invariant_resume_checkout_cycle.txt      164    
+final_test_operational_issue_queue.txt              164    
+final_test_paid_plan_replacement.txt                164    
+final_test_plan_change_journey.txt                  164    
+fix1_failure_before.txt                             952    
+fix1_repro_before.txt                               137    
+fix1_verification.txt                               164    
+fix2_failure_before.txt                             65274  
+fix2_verification.txt                               164    
+fix3_verification.txt                               164    
+fix4_failure_before.txt                             15994  
+fix4_verification.txt                               164    
+fixb_paid_plan_replacement.txt                      164    
+fix_skip_pytest.txt                                 302    
+fix_skip_ruff.txt                                   42     
+LAUNCH_PROMPT.txt                                   934    
+MISSION.md                                          41071  
+money_invariants_verification.txt                   326    
+mypy_after_fixes.txt                                49     
+mypy_final.txt                                      63     
+mypy_src.txt                                        94     
+R11_CREEM_SAVED_CARD.md                             1716   
+R13_HARNESS_CONFIRMATION.md                         2180   
+repro_postfix_output.txt                            164    
+repro_prefix_output.txt                             29022  
+REVIEW_FIXES_ADVERSARIAL.md                         15216  
+REVIEW_FIXES_LOGIC.md                               29720  
+ruff_after_fixes.txt                                23     
+ruff_all.txt                                        5318   
+ruff_final.txt                                      37     
+ruff_src_tests.txt                                  42     
+SUPERVISOR_REPORT.json                              24313  
+SUPERVISOR_REPORT.md                                10022  
+SUPERVISOR_STDOUT.txt                               128738 
+SUPERVISOR_STDOUT_RAW.txt                           130381 
+TEST_INTEGRITY.md                                   5228   
+unit_annual_only_card.txt                           164    
+unit_issue_queue.txt                                164    
+unit_replacement_money.txt                          164    
+vision_fresh_checkout.txt                           19313  
+vision_fresh_corner_bottom.txt                      19014  
+vision_fresh_corner_market.txt                      12857  
+vision_fresh_settings_subscription.txt              4067   
+vision_fresh_surfaces.txt                           27714  
+vision_fresh_test_market.txt                        3619   
+VISUAL_CONTRACT.md                                  15079  
+VISUAL_REVIEW.md                                    8551   
+WORKER_FIX_REPORT.md                                9207   
+_probe.txt                                          81     
+---TEMP PY---
+[0m
+[0m$ [0mWrite-Output "=== billing.py lines ==="; (Get-Content "src/ai_market_monitor/services/billing.py").Count; Write-Output "=== plan_replacements.py ==="; (Get-Content "src/ai_market_monitor/services/plan_replacements.py").Count; Write-Output "=== issues.py ==="; (Get-Content "src/ai_market_monitor/observability/issues.py").Count; Write-Output "=== dashboard.py ==="; (Get-Content "src/ai_market_monitor/api/routers/dashboard.py").Count; Write-Output "=== dashboard_test.py ==="; (Get-Content "src/ai_market_monitor/api/routers/dashboard_test.py").Count
+=== billing.py lines ===
+3459
+=== plan_replacements.py ===
+487
+=== issues.py ===
+465
+=== dashboard.py ===
+4779
+=== dashboard_test.py ===
+2278
+[0m
+[0m$ [0mWrite-Output "=== prior run dashboard copies ==="; Get-ChildItem "C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260912T193031Z-4125cfbe" -Filter "dashboard*.py" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName; Write-Output "=== temp py anywhere ==="; Get-ChildItem "C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant" -Recurse -Filter "temp_*.py" -ErrorAction SilentlyContinue | Select-Object FullName; Write-Output "=== worktree head ==="; Test-Path "C:\wt-head"; Write-Output "=== git worktree list ==="; git worktree list
+=== prior run dashboard copies ===
+System.Management.Automation.RemoteException
+FullName                                                                                                               
+--------                                                                                                               
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260912T193031Z-4125cfbe\f...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260912T193031Z-4125cfbe\f...
+=== temp py anywhere ===
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.oi-venv\Lib\site-packages\pip\_internal\utils\te...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Lib\site-packages\pip\_internal\utils\temp_...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv311\Lib\site-packages\pip\_internal\utils\te...
+=== worktree head ===
+True
+=== git worktree list ===
+C:/Users/amroe/Downloads/NovaAIS_Systems/Trading/Trading_assistant  75b19580 [cloudflare-access-service-tokens]
+C:/wt-baseline                                                      145275f2 (detached HEAD)
+C:/wt-head                                                          75b19580 (detached HEAD)
+[0m
+[0m• [0mMap D1/D2 money readers[90m Hm-Explorer Agent[0m
+[0m• [0mMap D3/D4 wire+evidence paths[90m Hm-Explorer Agent[0m
+Prior-run clutter confirmed under `fixa_snapshot`. Now let me build the code map. I'll dispatch explorers for the money/state defects while I read the D5 visual surface myself.
+[0m✓ [0mMap D3/D4 wire+evidence paths[90m Hm-Explorer Agent[0m
+[0m✓ [0mMap D1/D2 money readers[90m Hm-Explorer Agent[0m
+Recon is strong. Now let me examine D5 (visual) and confirm the exact code sites myself.
+[0m→ [0mRead .hm-orchestrator/current/VISUAL_CONTRACT.md
+[0m
+[0m$ [0mWrite-Output "=== hm-hilal-chat.css ==="; (Get-Content "src/ai_market_monitor/static/hm-hilal-chat.css").Count; Write-Output "=== files mentioning hm-hilal ==="; git grep -l "hm-hilal" -- "src/ai_market_monitor/templates" "src/ai_market_monitor/static"; Write-Output "=== scroll-padding in static ==="; git grep -n "scroll-padding" -- "src/ai_market_monitor/static" "src/ai_market_monitor/templates"; Write-Output "=== browser tests ==="; Get-ChildItem "tests/browser" -Filter "*.py" | Select-Object Name
+=== hm-hilal-chat.css ===
+843
+=== files mentioning hm-hilal ===
+src/ai_market_monitor/static/hilalmarkets-public-chat.css
+src/ai_market_monitor/static/hm-dashboard-test.css
+src/ai_market_monitor/static/hm-hilal-chat.css
+src/ai_market_monitor/templates/hilal/base_dashboard.html
+src/ai_market_monitor/templates/hilal/dashboard_test/partials/hilal_chat.html
+=== scroll-padding in static ===
+=== browser tests ===
+System.Management.Automation.RemoteException
+Name                                    
+----                                    
+conftest.py                             
+test_adversarial_qa_e2e.py              
+test_affiliate_page_e2e.py              
+test_ask_ai_button_e2e.py               
+test_ask_ai_corner_tag_e2e.py           
+test_auth_pages_e2e.py                  
+test_checkout_pay_button_e2e.py         
+test_dashboard_e2e.py                   
+test_dashboard_guide_e2e.py             
+test_dashboard_shell_e2e.py             
+test_dashboard_test_account_e2e.py      
+test_dashboard_test_connections_e2e.py  
+test_dashboard_test_opportunities_e2e.py
+test_dashboard_test_watchlists_e2e.py   
+test_hilal_chat_e2e.py                  
+test_landing_analytics.py               
+test_main_dashboard_e2e.py              
+test_market_card_actions_e2e.py         
+test_methodology_page_look.py           
+test_monitor_canvas_e2e.py              
+test_phase5_status_and_brand.py         
+test_public_pages_e2e.py                
+test_registry_publication_contract.py   
+test_sharia_governance_admin.py         
+test_visual_fixes_e2e.py                
+test_zz_scratch_widths.py
+[0m
+[0m→ [0mRead src/ai_market_monitor/static/hm-hilal-chat.css[90m [limit=200][0m
+[0m
+[0m$ [0mWrite-Output "=== hm-hilal definitions ==="; git grep -n "hm-hilal\|h-lift\|hilal-orb\|hilal-tag\|position: fixed\|position:fixed" -- "src/ai_market_monitor/static/hm-hilal-chat.css" | Select-Object -First 80
+=== hm-hilal definitions ===
+src/ai_market_monitor/static/hm-hilal-chat.css:26:body.hilal-dashboard .hm-hilal {
+src/ai_market_monitor/static/hm-hilal-chat.css:31:     under it. See `watchCookieBanner` in hm-hilal-chat.js. */
+src/ai_market_monitor/static/hm-hilal-chat.css:32:  --h-lift: 0px;
+src/ai_market_monitor/static/hm-hilal-chat.css:33:  --h-h: min(620px, calc(100dvh - 120px - var(--h-lift)));
+src/ai_market_monitor/static/hm-hilal-chat.css:34:  position: fixed;
+src/ai_market_monitor/static/hm-hilal-chat.css:36:  bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--h-lift));
+src/ai_market_monitor/static/hm-hilal-chat.css:49:  body.hilal-dashboard .hm-hilal { transition: none; }
+src/ai_market_monitor/static/hm-hilal-chat.css:62:body.hilal-dashboard .hm-hilal .hilal-window :where(button, a, textarea, input, [tabindex]):focus-visible {
+src/ai_market_monitor/static/hm-hilal-chat.css:83:body.hilal-dashboard .hm-hilal .hilal-tag {
+src/ai_market_monitor/static/hm-hilal-chat.css:109:body.hilal-dashboard .hm-hilal .hilal-tag-run {
+src/ai_market_monitor/static/hm-hilal-chat.css:116:  animation: hilal-tag-run 19s linear infinite;
+src/ai_market_monitor/static/hm-hilal-chat.css:119:body.hilal-dashboard .hm-hilal:hover .hilal-tag-run,
+src/ai_market_monitor/static/hm-hilal-chat.css:120:body.hilal-dashboard .hm-hilal:focus-within .hilal-tag-run { animation-play-state: paused; }
+src/ai_market_monitor/static/hm-hilal-chat.css:123:body.hilal-dashboard .hm-hilal:has(.hilal-orb[aria-expanded="true"]) .hilal-tag { display: none; }
+src/ai_market_monitor/static/hm-hilal-chat.css:125:@keyframes hilal-tag-run { to { transform: translateX(-50%); } }
+src/ai_market_monitor/static/hm-hilal-chat.css:130:  body.hilal-dashboard .hm-hilal .hilal-tag { width: 267px; }
+src/ai_market_monitor/static/hm-hilal-chat.css:135:body.hilal-dashboard .hm-hilal .hilal-orb {
+src/ai_market_monitor/static/hm-hilal-chat.css:151:body.hilal-dashboard .hm-hilal .hilal-orb:not([aria-expanded="true"]) {
+src/ai_market_monitor/static/hm-hilal-chat.css:156:body.hilal-dashboard .hm-hilal .hilal-orb-face {
+src/ai_market_monitor/static/hm-hilal-chat.css:179:body.hilal-dashboard .hm-hilal .hilal-orb-face .icon { width: 29px; height: 29px; }
+src/ai_market_monitor/static/hm-hilal-chat.css:183:body.hilal-dashboard .hm-hilal .hilal-orb-ring {
+src/ai_market_monitor/static/hm-hilal-chat.css:191:body.hilal-dashboard .hm-hilal .hilal-orb:hover .hilal-orb-face {
+src/ai_market_monitor/static/hm-hilal-chat.css:196:body.hilal-dashboard .hm-hilal .hilal-orb:active .hilal-orb-face { transform: scale(.96); }
+src/ai_market_monitor/static/hm-hilal-chat.css:199:body.hilal-dashboard .hm-hilal .hilal-orb[aria-expanded="true"] .hilal-orb-face {
+src/ai_market_monitor/static/hm-hilal-chat.css:205:body.hilal-dashboard .hm-hilal[data-state="thinking"] .hilal-orb-ring {
+src/ai_market_monitor/static/hm-hilal-chat.css:213:body.hilal-dashboard .hm-hilal[data-state="locked"] .hilal-orb-face {
+src/ai_market_monitor/static/hm-hilal-chat.css:219:body.hilal-dashboard .hm-hilal .hilal-orb-badge {
+src/ai_market_monitor/static/hm-hilal-chat.css:241:body.hilal-dashboard .hm-hilal .hilal-window {
+src/ai_market_monitor/static/hm-hilal-chat.css:259:body.hilal-dashboard .hm-hilal .hilal-window > :not(.hilal-scroll) { flex: none; }
+src/ai_market_monitor/static/hm-hilal-chat.css:261:body.hilal-dashboard .hm-hilal .hilal-head {
+src/ai_market_monitor/static/hm-hilal-chat.css:271:body.hilal-dashboard .hm-hilal .hilal-head-mark {
+src/ai_market_monitor/static/hm-hilal-chat.css:283:body.hilal-dashboard .hm-hilal .hilal-head-mark .icon { width: 19px; height: 19px; }
+src/ai_market_monitor/static/hm-hilal-chat.css:285:body.hilal-dashboard .hm-hilal .hilal-head-copy {
+src/ai_market_monitor/static/hm-hilal-chat.css:291:body.hilal-dashboard .hm-hilal .hilal-head-name {
+src/ai_market_monitor/static/hm-hilal-chat.css:297:body.hilal-dashboard .hm-hilal .hilal-head-name strong {
+src/ai_market_monitor/static/hm-hilal-chat.css:306:body.hilal-dashboard .hm-hilal .hilal-beta {
+src/ai_market_monitor/static/hm-hilal-chat.css:317:body.hilal-dashboard .hm-hilal .hilal-head-note {
+src/ai_market_monitor/static/hm-hilal-chat.css:325:body.hilal-dashboard .hm-hilal .hilal-head-acts {
+src/ai_market_monitor/static/hm-hilal-chat.css:331:body.hilal-dashboard .hm-hilal .hilal-icon-btn {
+src/ai_market_monitor/static/hm-hilal-chat.css:349:body.hilal-dashboard .hm-hilal .hilal-icon-btn:hover {
+src/ai_market_monitor/static/hm-hilal-chat.css:355:body.hilal-dashboard .hm-hilal .hilal-icon-btn[disabled] { opacity: .4; cursor: not-allowed; }
+src/ai_market_monitor/static/hm-hilal-chat.css:361:body.hilal-dashboard .hm-hilal .hilal-icon-btn::after,
+src/ai_market_monitor/static/hm-hilal-chat.css:362:body.hilal-dashboard .hm-hilal .hilal-chip::after {
+src/ai_market_monitor/static/hm-hilal-chat.css:376:body.hilal-dashboard .hm-hilal .hilal-meter {
+src/ai_market_monitor/static/hm-hilal-chat.css:386:body.hilal-dashboard .hm-hilal .hilal-meter-track {
+src/ai_market_monitor/static/hm-hilal-chat.css:395:body.hilal-dashboard .hm-hilal .hilal-meter-fill {
+src/ai_market_monitor/static/hm-hilal-chat.css:404:body.hilal-dashboard .hm-hilal .hilal-meter[data-state="low"] .hilal-meter-fill { background: var(--hm-warning); }
+src/ai_market_monitor/static/hm-hilal-chat.css:405:body.hilal-dashboard .hm-hilal .hilal-meter[data-state="out"] .hilal-meter-fill { background: var(--t-muted); }
+src/ai_market_monitor/static/hm-hilal-chat.css:406:body.hilal-dashboard .hm-hilal .hilal-meter[data-state="low"] .hilal-meter-text { color: var(--hm-warning); }
+src/ai_market_monitor/static/hm-hilal-chat.css:410:body.hilal-dashboard .hm-hilal .hilal-scroll {
+src/ai_market_monitor/static/hm-hilal-chat.css:421:body.hilal-dashboard .hm-hilal .hilal-thread {
+src/ai_market_monitor/static/hm-hilal-chat.css:429:body.hilal-dashboard .hm-hilal .hilal-msg {
+src/ai_market_monitor/static/hm-hilal-chat.css:436:body.hilal-dashboard .hm-hilal .hilal-msg[data-who="user"] { flex-direction: row-reverse; }
+src/ai_market_monitor/static/hm-hilal-chat.css:438:body.hilal-dashboard .hm-hilal .hilal-bubble-mark {
+src/ai_market_monitor/static/hm-hilal-chat.css:449:body.hilal-dashboard .hm-hilal .hilal-bubble-mark .icon-sm { width: 14px; height: 14px; }
+src/ai_market_monitor/static/hm-hilal-chat.css:453:body.hilal-dashboard .hm-hilal .hilal-bubble {
+src/ai_market_monitor/static/hm-hilal-chat.css:468:body.hilal-dashboard .hm-hilal .hilal-msg[data-who="user"] .hilal-bubble {
+src/ai_market_monitor/static/hm-hilal-chat.css:475:body.hilal-dashboard .hm-hilal .hilal-msg[data-who="assistant"] .hilal-bubble {
+src/ai_market_monitor/static/hm-hilal-chat.css:480:body.hilal-dashboard .hm-hilal .hilal-bubble[data-mode="REFUSAL"] {
+src/ai_market_monitor/static/hm-hilal-chat.css:487:body.hilal-dashboard .hm-hilal .hilal-bubble[data-mode="GUIDE"] {
+src/ai_market_monitor/static/hm-hilal-chat.css:495:body.hilal-dashboard .hm-hilal .hilal-bubble p {
+src/ai_market_monitor/static/hm-hilal-chat.css:502:body.hilal-dashboard .hm-hilal .hilal-bubble p:last-child { margin-bottom: 0; }
+src/ai_market_monitor/static/hm-hilal-chat.css:504:body.hilal-dashboard .hm-hilal .hilal-msg-note {
+src/ai_market_monitor/static/hm-hilal-chat.css:514:body.hilal-dashboard .hm-hilal .hilal-msg-note[data-kind="GUIDE"] { color: var(--t-copy); }
+src/ai_market_monitor/static/hm-hilal-chat.css:517:body.hilal-dashboard .hm-hilal .hilal-msg-report {
+src/ai_market_monitor/static/hm-hilal-chat.css:528:body.hilal-dashboard .hm-hilal .hilal-msg:hover .hilal-msg-report,
+src/ai_market_monitor/static/hm-hilal-chat.css:529:body.hilal-dashboard .hm-hilal .hilal-msg-report:focus-visible { opacity: 1; }
+src/ai_market_monitor/static/hm-hilal-chat.css:530:body.hilal-dashboard .hm-hilal .hilal-msg-report:hover { color: var(--hm-danger); }
+src/ai_market_monitor/static/hm-hilal-chat.css:531:body.hilal-dashboard .hm-hilal .hilal-msg-report[data-done="true"] { opacity: 1; color: var(--t-accent-text); }
+src/ai_market_monitor/static/hm-hilal-chat.css:535:body.hilal-dashboard .hm-hilal .hilal-typing {
+src/ai_market_monitor/static/hm-hilal-chat.css:542:body.hilal-dashboard .hm-hilal .hilal-dots {
+src/ai_market_monitor/static/hm-hilal-chat.css:551:body.hilal-dashboard .hm-hilal .hilal-dots i {
+src/ai_market_monitor/static/hm-hilal-chat.css:559:body.hilal-dashboard .hm-hilal .hilal-dots i:nth-child(2) { animation-delay: .14s; }
+src/ai_market_monitor/static/hm-hilal-chat.css:560:body.hilal-dashboard .hm-hilal .hilal-dots i:nth-child(3) { animation-delay: .28s; }
+src/ai_market_monitor/static/hm-hilal-chat.css:569:body.hilal-dashboard .hm-hilal .hilal-chips {
+src/ai_market_monitor/static/hm-hilal-chat.css:580:body.hilal-dashboard .hm-hilal .hilal-chip {
+src/ai_market_monitor/static/hm-hilal-chat.css:607:body.hilal-dashboard .hm-hilal .hilal-chip:hover {
+src/ai_market_monitor/static/hm-hilal-chat.css:615:body.hilal-dashboard .hm-hilal .hilal-locked {
+src/ai_market_monitor/static/hm-hilal-chat.css:625:body.hilal-dashboard .hm-hilal .hilal-locked-mark { flex: none; color: var(--t-copy); }
+src/ai_market_monitor/static/hm-hilal-chat.css:626:body.hilal-dashboard .hm-hilal .hilal-locked strong { display: block; color: var(--t-ink-strong); font-size: .84rem; }
+[0m
+[0m→ [0mRead src/ai_market_monitor/templates/hilal/dashboard_test/partials/hilal_chat.html
+[0m
+[0m$ [0mWrite-Output "=== base_dashboard hilal refs ==="; git grep -n "hilal_chat\|hm-hilal-chat\|hm-hilal\b\|<body\|main\b" -- "src/ai_market_monitor/templates/hilal/base_dashboard.html" | Select-Object -First 60
+=== base_dashboard hilal refs ===
+src/ai_market_monitor/templates/hilal/base_dashboard.html:50:  {% if hilal_chat_gate(hilal_chat|default(false), settings) %}
+src/ai_market_monitor/templates/hilal/base_dashboard.html:51:  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260911-ask-tag">
+src/ai_market_monitor/templates/hilal/base_dashboard.html:61:  'main': 'dashboard-today',
+src/ai_market_monitor/templates/hilal/base_dashboard.html:71:<body class="dashboard-body hilal-dashboard theme-light app-body" data-brand-system="hilal-markets-v2" data-dashboard-page="{{ page }}" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-csrf-token="{{ dashboard_csrf_token or '' }}" data-dashboard-notifications="{{ 'true' if shell_prefs.get('dashboard_notifications_enabled', True) else 'false' }}" data-dashboard-notification-sound="{{ shell_prefs.get('dashboard_notification_sound', 'chime') }}" data-forming-notifications="{{ 'true' if shell_prefs.get('forming_dashboard_notifications', False) else 'false' }}" data-forming-notification-sound="{{ shell_prefs.get('forming_notification_sound', 'pulse') }}" data-testid="dashboard-root"{% if guide_page_key %} data-hm-guide-page="{{ guide_page_key }}" data-hm-guide-new-user="{{ 'true' if (onboarding_complete is defined and not onboarding_complete) else 'false' }}"{% endif %}>
+src/ai_market_monitor/templates/hilal/base_dashboard.html:76:    <main class="app-main">
+src/ai_market_monitor/templates/hilal/base_dashboard.html:175:    </main>
+src/ai_market_monitor/templates/hilal/base_dashboard.html:185:  {% set hilal_chat_on = hilal_chat_gate(hilal_chat|default(false), settings) %}
+src/ai_market_monitor/templates/hilal/base_dashboard.html:186:  {% if hilal_chat_on %}{% include "hilal/dashboard_test/partials/hilal_chat.html" %}{% endif %}
+src/ai_market_monitor/templates/hilal/base_dashboard.html:202:  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260911-ask-tag"></script>{% endif %}
+[0m
+[0m→ [0mRead tests/browser/test_ask_ai_corner_tag_e2e.py
+[0m
+[0m$ [0mWrite-Output "=== app-main / scroll container css ==="; git grep -n "app-main\|app-body\|dashboard-body\|overflow-y\|overflow: auto\|scroll-behavior\|html *{\|body {" -- "src/ai_market_monitor/static/hm-dashboard-test.css" | Select-Object -First 50; Write-Output "=== h-lift in js ==="; git grep -n "h-lift\|watchCookieBanner\|cookie" -- "src/ai_market_monitor/static/hm-hilal-chat.js" | Select-Object -First 30
+=== app-main / scroll container css ===
+src/ai_market_monitor/static/hm-dashboard-test.css:1063:body.hilal-dashboard :is(.hm-t, dialog.t-dialog, .hm-hilal) .t-banner-body { display: flex; flex-direction: column; gap: var(--t-2); align-items: flex-start; }
+src/ai_market_monitor/static/hm-dashboard-test.css:1100:body.hilal-dashboard dialog.t-dialog .t-dialog-body {
+src/ai_market_monitor/static/hm-dashboard-test.css:1102:  overflow-y: auto;
+src/ai_market_monitor/static/hm-dashboard-test.css:1309:body.hilal-dashboard .t-more-body { display: flex; flex-direction: column; gap: 10px; padding: 0 14px 14px; }
+src/ai_market_monitor/static/hm-dashboard-test.css:1311:body.hilal-dashboard .t-more[open] .t-more-body { animation: t-open 220ms var(--hm-motion); }
+=== h-lift in js ===
+src/ai_market_monitor/static/hm-hilal-chat.js:96:    this.watchCookieBanner();
+src/ai_market_monitor/static/hm-hilal-chat.js:103:   * Stay out from under the cookie banner.
+src/ai_market_monitor/static/hm-hilal-chat.js:107:   * see Hilal and could not click it until they had answered the cookie question.
+src/ai_market_monitor/static/hm-hilal-chat.js:113:  watchCookieBanner() {
+src/ai_market_monitor/static/hm-hilal-chat.js:114:    const banner = document.querySelector("[data-cookie-banner]");
+src/ai_market_monitor/static/hm-hilal-chat.js:119:      this.root.style.setProperty("--h-lift", showing ? `${Math.ceil(box.height) + 12}px` : "0px");
+[0m
+[0m$ [0mWrite-Output "=== .app-main / .app-body / overflow in dashboard css ==="; git grep -n "\.app-main\b\|\.app-body\b\|\.dashboard-body\b" -- "src/ai_market_monitor/static/*.css" | Select-Object -First 40; Write-Output "=== overflow hidden on html/body ==="; git grep -n "overflow: hidden\|overflow:hidden\|overflow-y: hidden\|height: 100%" -- "src/ai_market_monitor/static/hm-dashboard-test.css" "src/ai_market_monitor/static/hilalmarkets-brand.css" "src/ai_market_monitor/static/hilalmarkets.css" | Select-Object -First 40
+=== .app-main / .app-body / overflow in dashboard css ===
+src/ai_market_monitor/static/dashboard.css:15:body.dashboard-body.theme-light {
+src/ai_market_monitor/static/dashboard.css:31:body.dashboard-body {
+src/ai_market_monitor/static/dashboard.css:44:body.dashboard-body.theme-light {
+src/ai_market_monitor/static/dashboard.css:90:body.dashboard-body.theme-light .dash-sidebar {
+src/ai_market_monitor/static/dashboard.css:154:body.dashboard-body.theme-light .button-ghost {
+src/ai_market_monitor/static/dashboard.css:160:body.dashboard-body.theme-light .button-secondary {
+src/ai_market_monitor/static/dashboard.css:178:body.dashboard-body.theme-light .dash-card,
+src/ai_market_monitor/static/dashboard.css:179:body.dashboard-body.theme-light .dash-panel,
+src/ai_market_monitor/static/dashboard.css:180:body.dashboard-body.theme-light .plan-card {
+src/ai_market_monitor/static/dashboard.css:184:body.dashboard-body.theme-light .hero-panel {
+src/ai_market_monitor/static/dashboard.css:673:  body.dashboard-body { grid-template-columns: 1fr; }
+src/ai_market_monitor/static/dashboard.css:713:body.dashboard-body.theme-light,
+src/ai_market_monitor/static/dashboard.css:714:html[data-theme="light"] body.dashboard-body {
+src/ai_market_monitor/static/dashboard.css:738:body.dashboard-body {
+src/ai_market_monitor/static/dashboard.css:749:body.dashboard-body.theme-light,
+src/ai_market_monitor/static/dashboard.css:750:html[data-theme="light"] body.dashboard-body {
+src/ai_market_monitor/static/dashboard.css:755:body.dashboard-body.sidebar-collapsed { padding-left: 0; }
+src/ai_market_monitor/static/dashboard.css:756:body.dashboard-body h1,
+src/ai_market_monitor/static/dashboard.css:757:body.dashboard-body h2,
+src/ai_market_monitor/static/dashboard.css:758:body.dashboard-body h3,
+src/ai_market_monitor/static/dashboard.css:759:body.dashboard-body .brand {
+src/ai_market_monitor/static/dashboard.css:782:body.dashboard-body.theme-light .dash-sidebar,
+src/ai_market_monitor/static/dashboard.css:783:html[data-theme="light"] body.dashboard-body .dash-sidebar {
+src/ai_market_monitor/static/dashboard.css:880:body.dashboard-body.theme-light .dash-card,
+src/ai_market_monitor/static/dashboard.css:881:body.dashboard-body.theme-light .dash-panel,
+src/ai_market_monitor/static/dashboard.css:882:body.dashboard-body.theme-light .plan-card,
+src/ai_market_monitor/static/dashboard.css:883:html[data-theme="light"] body.dashboard-body .dash-card,
+src/ai_market_monitor/static/dashboard.css:884:html[data-theme="light"] body.dashboard-body .dash-panel,
+src/ai_market_monitor/static/dashboard.css:885:html[data-theme="light"] body.dashboard-body .plan-card {
+src/ai_market_monitor/static/dashboard.css:906:body.dashboard-body.theme-light .button-ghost,
+src/ai_market_monitor/static/dashboard.css:907:html[data-theme="light"] body.dashboard-body .button-ghost {
+src/ai_market_monitor/static/dashboard.css:968:html[data-theme="light"] body.dashboard-body .proof-json {
+src/ai_market_monitor/static/dashboard.css:985:body.dashboard-body.theme-light .lifecycle-card,
+src/ai_market_monitor/static/dashboard.css:986:html[data-theme="light"] body.dashboard-body .lifecycle-card {
+src/ai_market_monitor/static/dashboard.css:1050:body:not(.dashboard-body):not(.auth-body) .plan-grid {
+src/ai_market_monitor/static/dashboard.css:1055:body:not(.dashboard-body):not(.auth-body) .plan-card {
+src/ai_market_monitor/static/dashboard.css:1060:body:not(.dashboard-body):not(.auth-body) .plan-card p {
+src/ai_market_monitor/static/dashboard.css:1065:  body.dashboard-body,
+src/ai_market_monitor/static/dashboard.css:1066:  body.dashboard-body.sidebar-collapsed {
+src/ai_market_monitor/static/dashboard.css:1087:  body:not(.dashboard-body):not(.auth-body) .plan-grid {
+=== overflow hidden on html/body ===
+src/ai_market_monitor/static/hilalmarkets.css:46:.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+src/ai_market_monitor/static/hilalmarkets.css:51:body.no-scroll{overflow:hidden}
+src/ai_market_monitor/static/hilalmarkets.css:97:.card{background:var(--white);border:1px solid var(--line);border-radius:var(--radius);padding:24px;box-shadow:var(--shadow-sm);position:relative;overflow:hidden}
+src/ai_market_monitor/static/hilalmarkets.css:141:.progress{height:8px;background:#e8eeeb;border-radius:999px;overflow:hidden}
+src/ai_market_monitor/static/hilalmarkets.css:162:.hero{min-height:860px;padding:150px 0 86px;overflow:hidden;position:relative;background:
+src/ai_market_monitor/static/hilalmarkets.css:207:.bento-card{padding:28px;border-radius:26px;border:1px solid var(--line);background:#fff;position:relative;overflow:hidden;box-shadow:var(--shadow-sm)}
+src/ai_market_monitor/static/hilalmarkets.css:229:.passport-cover{background:var(--emerald-900);color:#fff;border-radius:28px;padding:30px;min-height:460px;position:relative;overflow:hidden;box-shadow:var(--shadow)}
+src/ai_market_monitor/static/hilalmarkets.css:341:.accordion-item{border:1px solid var(--line);border-radius:16px;background:#fff;overflow:hidden}
+src/ai_market_monitor/static/hilalmarkets.css:349: var(--emerald-950);color:#fff;position:relative;overflow:hidden}
+src/ai_market_monitor/static/hilalmarkets.css:363:.topbar-notifications{position:relative}.notification-center-trigger{position:relative}.notification-count{position:absolute;right:-5px;top:-5px;display:grid;place-items:center;min-width:20px;height:20px;padding:0 5px;border:2px solid var(--ivory);border-radius:999px;background:var(--red);color:#fff;font-size:.62rem;font-weight:800}.notification-center-popover{position:absolute;right:0;top:calc(100% + 12px);width:min(420px,calc(100vw - 24px));max-height:min(620px,calc(100dvh - 100px));padding:16px;border:1px solid var(--line);border-radius:19px;background:#fff;box-shadow:var(--shadow-lg);overflow:auto}.notification-center-popover[hidden]{display:none}.notification-center-popover>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:2px 2px 12px;border-bottom:1px solid var(--line)}.notification-center-popover h2{margin:2px 0 0;font-size:1.2rem}.notification-center-popover>header>a{color:var(--emerald-700);font-size:.78rem;font-weight:750}.notification-center-list{display:grid}.notification-center-item{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;padding:12px 2px;border-bottom:1px solid var(--line);transition:background .2s}.notification-center-item:last-child{border-bottom:0}.notification-center-item:hover{background:var(--emerald-50)}.notification-center-item .icon-box{width:37px;height:37px;border-radius:11px}.notification-center-item>span:last-child{display:grid;gap:2px;min-width:0}.notification-center-item strong,.notification-center-item small,.notification-center-item time{overflow:hidden;text-overflow:ellipsis}.notification-center-item small{color:var(--muted);font-size:.75rem}.notification-center-item time{color:#8a9691;font-size:.66rem}.notification-center-empty{padding:30px 10px;text-align:center;color:var(--muted)}
+src/ai_market_monitor/static/hilalmarkets.css:435:.activity-insight-card{min-width:0;border:1px solid var(--line);border-radius:17px;background:#fff;box-shadow:var(--shadow-sm);overflow:hidden}.activity-insight-card>summary{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;padding:14px;cursor:pointer;list-style:none}.activity-insight-card>summary::-webkit-details-marker{display:none}.activity-insight-card>summary>span:nth-child(2){display:grid}.activity-insight-card>summary small{color:var(--muted);font-size:.72rem}.activity-insight-card>summary>.icon-sm{transition:transform .2s}.activity-insight-card[open]>summary>.icon-sm{transform:rotate(180deg)}.activity-insight-body{display:grid;gap:12px;padding:0 14px 14px;border-top:1px solid var(--line)}.activity-insight-body>.btn,.activity-insight-body>.chip{justify-self:start;margin-top:12px}.journey-panel{margin-top:16px}
+src/ai_market_monitor/static/hilalmarkets.css:453:.scan-stage{padding:34px;border-radius:25px;background:var(--emerald-900);color:#fff;position:relative;overflow:hidden}
+src/ai_market_monitor/static/hilalmarkets.css:457:.scan-progress{height:10px;background:rgba(255,255,255,.1);border-radius:999px;overflow:hidden;margin:22px 0 8px}
+src/ai_market_monitor/static/hilalmarkets.css:478:.passport-page-head{padding:28px;border-radius:25px;background:var(--emerald-900);color:#fff;position:relative;overflow:hidden}
+src/ai_market_monitor/static/hilalmarkets.css:487:.passport-summary-facts{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:18px 0 0}.passport-summary-facts>div{min-width:0;padding:10px 11px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(255,255,255,.06)}.passport-summary-facts small,.passport-summary-facts strong{display:block}.passport-summary-facts small{color:#9fc0b7;font-size:.66rem}.passport-summary-facts strong{margin-top:2px;color:var(--white);font-size:.76rem;overflow:hidden;text-overflow:ellipsis}
+src/ai_market_monitor/static/hilalmarkets.css:866:.live-market-panel{padding:0;overflow:hidden;margin-top:18px}
+src/ai_market_monitor/static/hilalmarkets.css:895:.live-asset strong,.live-asset small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+src/ai_market_monitor/static/hilalmarkets.css:897:.live-asset-logo,.market-passport-logo{display:grid;place-items:center;flex:0 0 auto;border:1px solid var(--line);border-radius:50%;background:var(--white);box-shadow:var(--shadow-sm);overflow:hidden;color:var(--emerald-800);font-size:.72rem;font-weight:800}
+src/ai_market_monitor/static/hilalmarkets.css:923:.market-passport-facts strong,.market-passport-prices strong{display:block;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.9rem;font-variant-numeric:tabular-nums}
+src/ai_market_monitor/static/hilalmarkets.css:953:.passport-quick-facts small,.passport-quick-facts strong{display:block}.passport-quick-facts small{color:var(--muted);font-size:.68rem}.passport-quick-facts strong{margin-top:3px;font-size:.78rem;overflow:hidden;text-overflow:ellipsis}
+src/ai_market_monitor/static/hm-dashboard-test.css:455:  overflow: hidden;
+src/ai_market_monitor/static/hm-dashboard-test.css:468:  height: 100%;
+src/ai_market_monitor/static/hm-dashboard-test.css:480:  overflow: hidden;
+src/ai_market_monitor/static/hm-dashboard-test.css:1180:  overflow: hidden;
+src/ai_market_monitor/static/hm-dashboard-test.css:1189:body.hilal-dashboard .t-fav-row .t-logo img { width: 100%; height: 100%; object-fit: contain; }
+src/ai_market_monitor/static/hm-dashboard-test.css:1236:  overflow: hidden;
+src/ai_market_monitor/static/hm-dashboard-test.css:1245:body.hilal-dashboard .t-pq-hero .t-logo img { width: 100%; height: 100%; object-fit: contain; }
+src/ai_market_monitor/static/hm-dashboard-test.css:1265:  overflow: hidden;
+[0m
+[0m$ [0mWrite-Output "=== main.css files ==="; Get-ChildItem "src/ai_market_monitor/static" -Filter "*.css" | Select-Object Name,Length; Write-Output "=== base_dashboard head links ==="; (Get-Content "src/ai_market_monitor/templates/hilal/base_dashboard.html")[35..75]
+=== main.css files ===
+System.Management.Automation.RemoteException
+Name                          Length
+----                          ------
+dashboard.css                 115482
+hilalmarkets-auth.css          34670
+hilalmarkets-brand.css          9066
+hilalmarkets-cookie.css        10168
+hilalmarkets-dashboard-v2.css 112367
+hilalmarkets-fonts.css          2008
+hilalmarkets-guide.css          5976
+hilalmarkets-public-chat.css   17786
+hilalmarkets-public.css        20932
+hilalmarkets.css               90354
+hm-account-test.css            55672
+hm-affiliate.css                8154
+hm-ask-tag.css                  3603
+hm-connections-test.css        14380
+hm-dashboard-test.css          62011
+hm-hilal-chat.css              31568
+hm-main.css                    35735
+hm-monitor-test.css            63382
+hm-shell.css                   34838
+hm-watch-test.css              30312
+sharia-product.css             20632
+styles.css                     28054
+system-brain-compliance.css     5421
+system-brain.css               97175
+=== base_dashboard head links ===
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260911-ask-tag">
+  {# One owner for the cookie banner and its settings window, which this template includes below. #}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260911-ask-tag">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260911-ask-tag">
+  {% block page_styles %}{% endblock %}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260911-ask-tag">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260911-ask-tag">
+  {#- The shell �?" the side menu and the topbar �?" after the sheet it replaces, because it
+      is the one owner of both and nothing above may still be describing them. -#}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260911-ask-tag">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260911-ask-tag">
+  {#- A page whose styles must win over the shared dashboard sheets loads them here.
+      `page_styles` above is deliberately kept before them for pages that only add. -#}
+  {% block page_styles_late %}{% endblock %}
+  {% if hilal_chat_gate(hilal_chat|default(false), settings) %}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260911-ask-tag">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-ask-tag.css') }}?v=20260911-ask-tag">
+  {% endif %}
+</head>
+{#- The page guide's identity is decided on the server, not parsed from the URL. -#}
+{#- The assistant page is gone, and the Scanner went with it: the Scanner was a mode of
+    that page and had no address of its own. Both of their guide keys are gone too �?" a
+    guide whose steps point at markers no page draws can never open, and leaving it here
+    would look like a working guide nobody could reach. -#}
+{%- set guide_page_key = {
+  'main': 'dashboard-today',
+  'screened_market': 'screened-market',
+  'asset_passport': 'asset-passport',
+  'watchlists': 'watch-plans',
+  'activity': 'activity',
+  'integrations': 'integrations',
+  'billing': 'billing',
+  'settings': 'settings'
+}.get(page, '') -%}
+{% set shell_prefs = (dashboard_preference.notification_preferences if dashboard_preference else {}) or {} %}
+<body class="dashboard-body hilal-dashboard theme-light app-body" data-brand-system="hilal-markets-v2" data-dashboard-page="{{ page }}" data-dashboard-api="/api/v1/dashboard" data-chart-library-cdn="{{ settings.chart_library_cdn_url or '' }}" data-csrf-token="{{ dashboard_csrf_token or '' }}" data-dashboard-notifications="{{ 'true' if shell_prefs.get('dashboard_notifications_enabled', True) else 'false' }}" data-dashboard-notification-sound="{{ shell_prefs.get('dashboard_notification_sound', 'chime') }}" data-forming-notifications="{{ 'true' if shell_prefs.get('forming_dashboard_notifications', False) else 'false' }}" data-forming-notification-sound="{{ shell_prefs.get('forming_notification_sound', 'pulse') }}" data-testid="dashboard-root"{% if guide_page_key %} data-hm-guide-page="{{ guide_page_key }}" data-hm-guide-new-user="{{ 'true' if (onboarding_complete is defined and not onboarding_complete) else 'false' }}"{% endif %}>
+  <div class="app-shell">
+    {% include "hilal/partials/dashboard_sidebar.html" %}
+    <div class="sidebar-backdrop" data-sidebar-backdrop data-hilal-sidebar-backdrop></div>
+System.Management.Automation.RemoteException
+    <main class="app-main">
+[0m
+[0m→ [0mRead src/ai_market_monitor/services/billing.py[90m [offset=2820, limit=180][0m
+Let me read the exact code sites so I can write precise, verifiable work packages.
+[0m→ [0mRead src/ai_market_monitor/services/billing.py[90m [offset=3180, limit=80][0m
+[0m→ [0mRead src/ai_market_monitor/services/billing.py[90m [limit=160, offset=2420][0m
+[0m→ [0mRead src/ai_market_monitor/static/hm-hilal-chat.js[90m [limit=140][0m
+[0m
+[0m$ [0mWrite-Output "=== app-shell/app-main in hm-shell.css ==="; git grep -n "app-shell\|app-main\|app-body\|overflow" -- "src/ai_market_monitor/static/hm-shell.css" | Select-Object -First 60
+=== app-shell/app-main in hm-shell.css ===
+src/ai_market_monitor/static/hm-shell.css:37:body.hilal-dashboard .app-shell {
+src/ai_market_monitor/static/hm-shell.css:46:body.hilal-dashboard .app-main { min-width: 0; }
+src/ai_market_monitor/static/hm-shell.css:75:     hidden overflow would also clip the focus ring on the first and last rows. */
+src/ai_market_monitor/static/hm-shell.css:76:  overflow: visible;
+src/ai_market_monitor/static/hm-shell.css:116:  overflow: hidden;
+src/ai_market_monitor/static/hm-shell.css:165:  overflow: hidden;
+src/ai_market_monitor/static/hm-shell.css:166:  text-overflow: ellipsis;
+src/ai_market_monitor/static/hm-shell.css:188:  overflow-x: hidden;
+src/ai_market_monitor/static/hm-shell.css:189:  overflow-y: auto;
+src/ai_market_monitor/static/hm-shell.css:271:  overflow: hidden;
+src/ai_market_monitor/static/hm-shell.css:272:  text-overflow: ellipsis;
+src/ai_market_monitor/static/hm-shell.css:424:  overflow: hidden;
+src/ai_market_monitor/static/hm-shell.css:425:  text-overflow: ellipsis;
+src/ai_market_monitor/static/hm-shell.css:467:  overflow: hidden;
+src/ai_market_monitor/static/hm-shell.css:471:  text-overflow: ellipsis;
+src/ai_market_monitor/static/hm-shell.css:476:  overflow: hidden;
+src/ai_market_monitor/static/hm-shell.css:479:  text-overflow: ellipsis;
+src/ai_market_monitor/static/hm-shell.css:531:  body.hilal-dashboard.sidebar-collapsed .app-shell {
+src/ai_market_monitor/static/hm-shell.css:572:    overflow: hidden;
+src/ai_market_monitor/static/hm-shell.css:581:    overflow: hidden;
+src/ai_market_monitor/static/hm-shell.css:682:  overflow: hidden;
+src/ai_market_monitor/static/hm-shell.css:687:  text-overflow: ellipsis;
+src/ai_market_monitor/static/hm-shell.css:693:  overflow: hidden;
+src/ai_market_monitor/static/hm-shell.css:699:  text-overflow: ellipsis;
+src/ai_market_monitor/static/hm-shell.css:787:  overflow: hidden;
+src/ai_market_monitor/static/hm-shell.css:788:  text-overflow: ellipsis;
+src/ai_market_monitor/static/hm-shell.css:958:    overflow: hidden;
+src/ai_market_monitor/static/hm-shell.css:968:  body.hilal-dashboard .app-shell { display: block; padding: 10px; }
+src/ai_market_monitor/static/hm-shell.css:1017:  body.hilal-dashboard .app-shell { padding: 8px; }
+src/ai_market_monitor/static/hm-shell.css:1050:  body.hilal-dashboard .app-shell,
+[0m
+[0m→ [0mRead src/ai_market_monitor/static/hm-shell.css[90m [limit=60, offset=30][0m
+[0m→ [0mRead src/ai_market_monitor/static/hm-shell.css[90m [limit=30, offset=175][0m
+[0m→ [0mRead .opencode/agents/hm-worker-strong.md
+[0m→ [0mRead .opencode/agents/hm-reviewer-visual.md
+Now I have enough to plan. Let me check the run directory and prepare the work-package plan.
+[0m
+[0m$ [0mGet-ChildItem "C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T002503Z-fdd3949e" -Force | Select-Object Name,Length; Write-Output "=== ruff exclude? ==="; git grep -n "exclude" -- "pyproject.toml" | Select-Object -First 20; Write-Output "=== run-model.ps1 exists ==="; Test-Path "tools/hm-orchestrator/run-model.ps1"
+Name                Length
+----                ------
+BASELINE_COMMIT.txt     45
+BASELINE_DIFF.patch 759741
+BASELINE_STATUS.txt   8846
+LAUNCH_PROMPT.txt      934
+MISSION.md           12306
+VISUAL_CONTRACT.md   15079
+=== ruff exclude? ===
+pyproject.toml:83:exclude = ["alembic/versions"]
+pyproject.toml:84:extend-exclude = ["HilalMarkets_Chatbot_AI_Evaluator"]
+=== run-model.ps1 exists ===
+True
+[0m
+[0m$ [0mWrite-Output "=== callers of active_paid_plan_codes in tests ==="; git grep -n "active_paid_plan_codes" -- "tests" "src" | Select-Object -First 40; Write-Output "=== tests referencing price_amount float ==="; git grep -n "price_amount\|NowPayments.*checkout\|nowpayments" -- "tests/unit/test_billing_entitlements.py" | Select-Object -First 30
+=== callers of active_paid_plan_codes in tests ===
+src/ai_market_monitor/api/routers/dashboard.py:3453:            active_paid_plan_codes=user_held_plan_codes,
+src/ai_market_monitor/api/routers/dashboard.py:3827:            active_paid_plan_codes=await paid_plan_codes_for_replacement_decisions(
+src/ai_market_monitor/api/routers/dashboard.py:4039:        active_paid_plan_codes=review_held_plan_codes,
+src/ai_market_monitor/api/routers/dashboard_test.py:1738:            active_paid_plan_codes=user_held_plan_codes,
+src/ai_market_monitor/services/billing.py:724:async def active_paid_plan_codes(
+src/ai_market_monitor/services/billing.py:769:    access still comes from ``active_paid_plan_codes`` and entitlements.
+src/ai_market_monitor/services/billing.py:806:    active_paid_plan_codes: Collection[str],
+src/ai_market_monitor/services/billing.py:834:    paid_held = set(active_paid_plan_codes) & set(PURCHASABLE_PLAN_CODES)
+src/ai_market_monitor/services/billing.py:835:    holds_this = plan_code in active_paid_plan_codes
+src/ai_market_monitor/services/billing.py:1763:            active_paid_plan_codes=current_plans,
+src/ai_market_monitor/services/billing.py:2005:            active_paid_plan_codes=await active_paid_plan_codes(
+tests/integration/test_checkout_and_payment_email.py:1057:        active_paid_plan_codes={held_code},
+tests/integration/test_plan_change_journey.py:608:    subscription page used to answer the same question from `active_paid_plan_codes`,
+tests/unit/test_billing_entitlements.py:924:        settings, plan_code=plan_code, active_paid_plan_codes=frozenset()
+tests/unit/test_invariant_plan_checkout_availability.py:114:        SETTINGS_CASES[shape], plan_code=code, active_paid_plan_codes={code}
+tests/unit/test_invariant_plan_checkout_availability.py:138:        SETTINGS_CASES[shape], plan_code=target, active_paid_plan_codes={held}
+tests/unit/test_invariant_plan_checkout_availability.py:143:        SETTINGS_CASES[shape], plan_code=target, active_paid_plan_codes=set()
+tests/unit/test_invariant_plan_checkout_availability.py:160:        active_paid_plan_codes={held},
+tests/unit/test_invariant_plan_checkout_availability.py:182:        active_paid_plan_codes={held},
+tests/unit/test_invariant_plan_checkout_availability.py:197:            active_paid_plan_codes={held},
+tests/unit/test_invariant_plan_checkout_availability.py:202:            active_paid_plan_codes={held},
+tests/unit/test_invariant_plan_checkout_availability.py:224:        settings, plan_code=code, active_paid_plan_codes={held}
+tests/unit/test_invariant_plan_checkout_availability.py:227:        settings, plan_code=code, active_paid_plan_codes=set()
+tests/unit/test_invariant_plan_checkout_availability.py:241:        SETTINGS_CASES[shape], plan_code=code, active_paid_plan_codes=set()
+tests/unit/test_invariant_plan_checkout_availability.py:261:            settings, plan_code=code, active_paid_plan_codes=set()
+tests/unit/test_invariant_plan_checkout_availability.py:283:        SETTINGS_CASES[shape], plan_code=code, active_paid_plan_codes=held
+tests/unit/test_invariant_plan_checkout_availability.py:298:_MEMBERSHIP_COPY = re.compile(r"\bin\s+\w*active_paid_plan_codes\b")
+tests/unit/test_invariant_plan_checkout_availability.py:313:    Calling `active_paid_plan_codes(...)` to load the set is fine - that is how the
+tests/unit/test_invariant_plan_checkout_availability.py:338:    assert _MEMBERSHIP_COPY.search("already_subscribed=plan.code in active_paid_plan_codes")
+tests/unit/test_invariant_plan_checkout_availability.py:339:    assert _MEMBERSHIP_COPY.search("current = code in user_active_paid_plan_codes")
+tests/unit/test_invariant_plan_checkout_availability.py:341:        "codes = await active_paid_plan_codes(session, user_id=user.id)"
+tests/unit/test_invariant_resume_checkout_cycle.py:350:            active_paid_plan_codes=frozenset(),
+=== tests referencing price_amount float ===
+tests/unit/test_billing_entitlements.py:100:        "billing_provider": "nowpayments",
+tests/unit/test_billing_entitlements.py:103:        "nowpayments_ipn_secret": None,
+tests/unit/test_billing_entitlements.py:646:    nowpayments_body = json.dumps(
+tests/unit/test_billing_entitlements.py:663:    nowpayments_signature = hmac.new(b"secret", sorted_body, sha512).hexdigest()
+tests/unit/test_billing_entitlements.py:665:        nowpayments_body,
+tests/unit/test_billing_entitlements.py:666:        nowpayments_signature,
+tests/unit/test_billing_entitlements.py:667:        provider="nowpayments",
+tests/unit/test_billing_entitlements.py:670:        BillingWebhookVerifier(settings).verify(nowpayments_body, "bad", provider="nowpayments")
+tests/unit/test_billing_entitlements.py:673:async def test_nowpayments_finished_ipn_creates_subscription(test_context):
+tests/unit/test_billing_entitlements.py:682:            request_key="nowpayments-finished",
+tests/unit/test_billing_entitlements.py:689:            "price_amount": MONITOR_CHECKOUT_AMOUNT_TEXT,
+tests/unit/test_billing_entitlements.py:704:                "price_amount": payload["price_amount"],
+tests/unit/test_billing_entitlements.py:713:            provider="nowpayments",
+tests/unit/test_billing_entitlements.py:722:        assert subscription.provider == "nowpayments"
+tests/unit/test_billing_entitlements.py:729:                provider="nowpayments",
+tests/unit/test_billing_entitlements.py:735:                        "provider_subscription_id": "nowpayments_second_payment",
+tests/unit/test_billing_entitlements.py:748:async def test_nowpayments_partial_payment_never_grants_access(test_context):
+tests/unit/test_billing_entitlements.py:757:            request_key="nowpayments-partial",
+tests/unit/test_billing_entitlements.py:762:            provider="nowpayments",
+tests/unit/test_billing_entitlements.py:764:                "id": "evt-nowpayments-partial",
+tests/unit/test_billing_entitlements.py:768:                    "provider_subscription_id": "nowpayments_partial",
+tests/unit/test_billing_entitlements.py:790:async def test_nowpayments_settlement_uses_actual_crypto_received(
+tests/unit/test_billing_entitlements.py:825:            await service.process_event(provider="nowpayments", payload=payload)
+tests/unit/test_billing_entitlements.py:832:    nowpayments = billing_provider_capabilities("nowpayments")
+tests/unit/test_billing_entitlements.py:839:    assert nowpayments.supports_recurring_billing is False
+tests/unit/test_billing_entitlements.py:840:    assert nowpayments.supports_customer_portal is False
+tests/unit/test_billing_entitlements.py:841:    assert nowpayments.supports_automatic_cancellation is False
+tests/unit/test_billing_entitlements.py:842:    assert nowpayments.supports_refunds is False
+tests/unit/test_billing_entitlements.py:843:    assert nowpayments.supports_invoice_receipts is True
+tests/unit/test_billing_entitlements.py:900:    "no_nowpayments_key": {"nowpayments_api_key": None},
+[0m
+[0m→ [0mRead tests/unit/test_invariant_plan_checkout_availability.py[90m [limit=80, offset=290][0m
+[0m→ [0mRead src/ai_market_monitor/observability/issues.py[90m [limit=180, offset=40][0m
+[0m
+[0m# [0mTodos
+[✓] Read governing docs (CLAUDE.md, policies, model maps, prior-run reviews)
+[✓] Recon D1-D5 root causes in code
+[•] D1: refund recording + money-owed class fix with tests
+[ ] D2: one held-plan owner with invariant test
+[ ] D3: money-to-wire owner; no float on money; test
+[ ] D4: evidence-ref pointer-only sanitizer + tests
+[ ] D5: corner-assistant focus obscuring fix + browser test
+[ ] Reviews: logic, adversarial, visual
+[ ] Final verification suite + clutter removal
+[ ] Write SUPERVISOR_REPORT.json/.md per contract
+[0m
+Recon complete. I'll now delegate work packages sequentially to respect the one-pytest-at-a-time memory rule, starting with D1 (highest risk).
+[0m• [0mD1 refund recording fix[90m Hm-Worker-Strong Agent[0m

@@ -1,0 +1,8 @@
+R2-6 MINOR: a cancellation webhook downgrades a completed attempt to processing.
+
+Test: tests/integration/test_paid_plan_replacement.py::test_canceled_event_does_not_downgrade_completed_attempt
+Failure before fix (else branch unconditionally set processing):
+
+AssertionError: assert 'processing' == 'completed'
+
+The completed attempt was overwritten, which hides it from payment_that_bought.

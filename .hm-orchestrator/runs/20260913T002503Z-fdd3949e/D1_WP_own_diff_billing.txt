@@ -1,0 +1,153 @@
+﻿diff --git "a/C:\\Users\\amroe\\AppData\\Local\\Temp\\opencode\\d1_pre\\src\\ai_market_monitor\\services\\billing.py" "b/src\\ai_market_monitor\\services\\billing.py"
+index 8b80fd4b..e88d187c 100644
+--- "a/C:\\Users\\amroe\\AppData\\Local\\Temp\\opencode\\d1_pre\\src\\ai_market_monitor\\services\\billing.py"
++++ "b/src\\ai_market_monitor\\services\\billing.py"
+@@ -2973,35 +2973,50 @@ class BillingService:
+                 {},
+             )
+             return subscription
+-        if event_type in {"payment.refunded", "refund.created"}:
+-            subscription = await self._upsert_subscription(
+-                provider=provider,
+-                data=data,
+-                forced_status=SubscriptionStatus.CANCELED,
++        if event_type in REFUND_EVENT_TYPES:
++            # The money is going back, so the plan it bought is over тАФ for the refund
++            # names. A dispute is money frozen while the card network decides, and
++            # ending a plan on a decision that can still be reversed is not this
++            # function's call to make, so those names stay audit-only.
++            #
++            # Neither kind may be *refused*. A payment event that names a checkout we
++            # cannot see has to be refused, because accepting it would hand out a plan for
++            # money nobody paid. A refund carries no plan to hand out, and raising here
++            # rolls the whole webhook back: the record of money leaving is lost with it,
++            # and the provider stops retrying eventually and stops at that loss. So when
++            # the event names nobody, the attempt is still marked below and a person is
++            # told, instead of an error being returned.
++            refunded_plan = await self._end_refunded_plan(
++                provider=provider, event_id=event_id, event_type=event_type, data=data
+             )
+-            subscription.canceled_at = datetime.now(UTC)
+-            await EntitlementService(self.session).snapshot(subscription.user_id)
++            if refunded_plan is None:
++                # Either a chargeback name, which has never touched the plan, or a refund
++                # that named no subscription to end. The audit line is kept exactly as it
++                # was for those names; the payment itself is settled by
++                # ``_record_checkout_event`` a moment later.
++                if event_type in REFUND_CHARGEBACK_EVENT_TYPES:
++                    user_id = self._parse_uuid(data.get("user_id"))
++                    if user_id:
++                        self._audit(user_id, f"billing.{event_type}", "user", user_id, {})
++                return None
++            await EntitlementService(self.session).snapshot(refunded_plan.user_id)
+             await EntitlementService(self.session).pause_excess_after_downgrade(
+-                subscription.user_id
++                refunded_plan.user_id
+             )
+             self._audit(
+-                subscription.user_id,
++                refunded_plan.user_id,
+                 "billing.payment_refunded",
+                 "subscription",
+-                subscription.id,
++                refunded_plan.id,
+                 {},
+             )
+-            return subscription
++            return refunded_plan
+         if event_type in {"payment.expired", "payment.failed"}:
+             user_id = self._parse_uuid(data.get("user_id"))
+             if user_id:
+                 self._audit(user_id, f"billing.{event_type}", "user", user_id, {})
+-            return None
+-        if event_type in {"charge.refunded", "charge.dispute.created", "dispute.created"}:
+-            user_id = self._parse_uuid(data.get("user_id"))
+-            if user_id:
+-                self._audit(user_id, f"billing.{event_type}", "user", user_id, {})
+         return None
++
+     async def _end_refunded_plan(
+         self,
+         *,
+@@ -3235,6 +3250,21 @@ class BillingService:
+         event_id: str,
+         event_type: str,
+     ) -> None:
++        if event_type in REFUND_EVENT_TYPES:
++            # Money coming back is read by its own rules, and they are looser on purpose.
++            # Everything below this point checks a *payment* against what was owed before
++            # access is granted: an unreadable checkout reference, the wrong company, the
++            # wrong person, the wrong plan or the wrong amount all refuse the event, and
++            # each of those refusals protects a plan somebody could otherwise get for
++            # nothing. A refund grants nothing. Refusing one for a bad reference threw the
++            # record of money leaving away with the error, which is how a refunded payment
++            # stayed a sale on our books: so a refund is attached where the payload allows
++            # and alerted where it does not, and never refused here. The money-in checks
++            # below are untouched.
++            await self._attach_refund_to_attempt(
++                provider=provider, event_id=event_id, event_type=event_type, data=data
++            )
++            return
+         raw_attempt_id = data.get("checkout_attempt_id")
+         if raw_attempt_id in (None, ""):
+             requires_checkout = provider == "nowpayments" or event_type in {
+@@ -3271,8 +3301,14 @@ class BillingService:
+         if (
+             provider == "nowpayments"
+             and event_type == "payment.finished"
+-            and attempt.status == "completed"
++            and attempt.status in {SETTLED_ATTEMPT_STATUS, REFUNDED_ATTEMPT_STATUS}
+         ):
++            # ``refunded`` is in this check because the money behind a one-time crypto
++            # invoice came back after it was paid. Without it, a re-delivered
++            # ``payment.finished`` тАФ NOWPayments sends the invoice status again тАФ would
++            # pass as never-settled, because the refund has just moved the row off
++            # ``completed``, and would hand out a second 30-day period for money this
++            # product no longer holds.
+             raise BillingError(
+                 "checkout_already_completed",
+                 "This one-time checkout has already granted its access period.",
+@@ -3494,6 +3530,10 @@ class BillingService:
+ 
+         attempt_id = self._parse_uuid(data.get("checkout_attempt_id"))
+         if attempt_id is None:
++            # A refund with nothing here was already reported by
++            # ``_attach_refund_to_attempt``, which is where the searching happens. Every
++            # event reaches this function through that one, so alerting again would count
++            # one refund twice.
+             return
+         attempt = await self.session.get(BillingCheckoutAttempt, attempt_id)
+         if attempt is None:
+@@ -3501,14 +3541,22 @@ class BillingService:
+         attempt.provider_event_id = provider_event_id
+         normalized_status = self._status_from_provider(str(data.get("status") or "pending"))
+         current_status = attempt.status
+-        if event_type in {
++        if event_type in REFUND_EVENT_TYPES:
++            # The money came back. This is the one reading of a settled payment that is
++            # not a downgrade-by-accident, and the R2-6 guard below must not swallow it:
++            # leaving the row ``completed`` is how a refunded payment keeps counting as a
++            # sale to the money-owed valuation, the affiliate commission and the
++            # operations count. Idempotent тАФ a second refund event changes nothing.
++            if current_status != REFUNDED_ATTEMPT_STATUS:
++                attempt.status = REFUNDED_ATTEMPT_STATUS
++        elif event_type in {
+             "checkout.session.completed",
+             "invoice.payment_succeeded",
+             "payment.finished",
+             "subscription.paid",
+             "subscription.trialing",
+         } and normalized_status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING}:
+-            attempt.status = "completed"
++            attempt.status = SETTLED_ATTEMPT_STATUS
+             attempt.completed_at = datetime.now(UTC)
+             attempt.last_error = None
+         elif event_type in {
+@@ -3516,7 +3564,6 @@ class BillingService:
+             "payment.failed",
+             "payment.expired",
+             "payment.partially_paid",
+-            "payment.refunded",
+         }:
+             # A settled attempt must never be downgraded to failed by a later event,
+             # such as a cancellation webhook that still carries its metadata.

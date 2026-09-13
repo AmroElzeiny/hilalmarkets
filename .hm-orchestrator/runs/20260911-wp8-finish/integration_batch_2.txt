@@ -1,0 +1,298 @@
+﻿........................................................................ [ 13%]
+........................................................................ [ 27%]
+........................................................................ [ 41%]
+.....................................................F.F.F.F............ [ 55%]
+........................................................................ [ 69%]
+........................................................................ [ 83%]
+........................................................................ [ 97%]
+.............                                                            [100%]
+================================== FAILURES ===================================
+_ test_page_offer_matches_server_acceptance[trader-card-monthly-held-different] _
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000024B5575CEF0>, 'client': <httpx.AsyncClient object at 0x0000024B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000024B553F2B40>
+plan = 'trader', method = 'card', cycle = 'monthly', held_kind = 'different'
+
+    @pytest.mark.parametrize(("plan", "method", "cycle", "held_kind"), _TEST_CASES)
+    async def test_page_offer_matches_server_acceptance(
+        test_context, monkeypatch, plan, method, cycle, held_kind
+    ):
+        """What the billing page marks available must match what checkout accepts.
+    
+        The page's JSON carries a ``purchasable`` flag and per-method flags. The
+        dialog enables a method only when both are true. The server must reach the
+        same answer, so that no control on the page is dead and no control refuses
+        without a reason. Holding a *different* paid plan on an account that holds
+        no card is a purchase, not a switch, and must be accepted.
+    
+        The payment companies are answered in process. Without that the POST would
+        carry an obviously fake key to the real Creem and the real NOWPayments, and
+        their "wrong key" would arrive here disguised as our own server refusing the
+        customer — which is what this test measures.
+        """
+    
+        email = f"billing-offer-{plan}-{method}-{cycle}-{held_kind}@example.com"
+        held_plan = plan if held_kind == "same" else _other_paid_plan(plan)
+    
+        settings = test_context["settings"]
+        client = test_context["client"]
+        await _signup(client, settings, email)
+        user_id = await _user_id_for_email(test_context["session_factory"], email)
+        await _grant_paid_plan(test_context["session_factory"], user_id, held_plan)
+    
+        enabled = settings.model_copy(update=live_billing_overrides())
+        test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+        stub_payment_companies(monkeypatch)
+    
+        page = await client.get("/dashboard/billing")
+        assert page.status_code == 200, page.text
+    
+        plan_data = _billing_plan_data(page.text)
+        page_available = _page_says_method_available(plan_data, plan, method, cycle)
+    
+        csrf, request_id = _extract_csrf_and_request_id(page.text)
+        post = await client.post(
+            "/dashboard/billing/checkout",
+            data={
+                "plan_code": plan,
+                "billing_cycle": cycle,
+                "payment_method": method,
+                "checkout_request_id": request_id,
+                "terms_accepted": "true",
+                "first_name": "Amina",
+                "last_name": "Trader",
+                "address_line1": "1 Market Street",
+                "city": "Cairo",
+                "country": "Egypt",
+                "csrf_token": csrf,
+            },
+            headers={"accept": "application/json", "x-requested-with": "XMLHttpRequest"},
+        )
+        server_accepts = post.status_code in (200, 302, 303)
+    
+>       assert page_available == server_accepts, (
+            f"Plan={plan}, method={method}, cycle={cycle}, held={held_plan}: "
+            f"page says available={page_available}, but POST returned {post.status_code}"
+        )
+E       AssertionError: Plan=trader, method=card, cycle=monthly, held=pro: page says available=True, but POST returned 400
+E       assert True == False
+
+tests\unit\test_invariant_billing_offers.py:245: AssertionError
+_ test_page_offer_matches_server_acceptance[trader-crypto-monthly-held-different] _
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000024B57158A40>, 'client': <httpx.AsyncClient object at 0x0000024B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000024B55CE5D90>
+plan = 'trader', method = 'crypto', cycle = 'monthly', held_kind = 'different'
+
+    @pytest.mark.parametrize(("plan", "method", "cycle", "held_kind"), _TEST_CASES)
+    async def test_page_offer_matches_server_acceptance(
+        test_context, monkeypatch, plan, method, cycle, held_kind
+    ):
+        """What the billing page marks available must match what checkout accepts.
+    
+        The page's JSON carries a ``purchasable`` flag and per-method flags. The
+        dialog enables a method only when both are true. The server must reach the
+        same answer, so that no control on the page is dead and no control refuses
+        without a reason. Holding a *different* paid plan on an account that holds
+        no card is a purchase, not a switch, and must be accepted.
+    
+        The payment companies are answered in process. Without that the POST would
+        carry an obviously fake key to the real Creem and the real NOWPayments, and
+        their "wrong key" would arrive here disguised as our own server refusing the
+        customer — which is what this test measures.
+        """
+    
+        email = f"billing-offer-{plan}-{method}-{cycle}-{held_kind}@example.com"
+        held_plan = plan if held_kind == "same" else _other_paid_plan(plan)
+    
+        settings = test_context["settings"]
+        client = test_context["client"]
+        await _signup(client, settings, email)
+        user_id = await _user_id_for_email(test_context["session_factory"], email)
+        await _grant_paid_plan(test_context["session_factory"], user_id, held_plan)
+    
+        enabled = settings.model_copy(update=live_billing_overrides())
+        test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+        stub_payment_companies(monkeypatch)
+    
+        page = await client.get("/dashboard/billing")
+        assert page.status_code == 200, page.text
+    
+        plan_data = _billing_plan_data(page.text)
+        page_available = _page_says_method_available(plan_data, plan, method, cycle)
+    
+        csrf, request_id = _extract_csrf_and_request_id(page.text)
+        post = await client.post(
+            "/dashboard/billing/checkout",
+            data={
+                "plan_code": plan,
+                "billing_cycle": cycle,
+                "payment_method": method,
+                "checkout_request_id": request_id,
+                "terms_accepted": "true",
+                "first_name": "Amina",
+                "last_name": "Trader",
+                "address_line1": "1 Market Street",
+                "city": "Cairo",
+                "country": "Egypt",
+                "csrf_token": csrf,
+            },
+            headers={"accept": "application/json", "x-requested-with": "XMLHttpRequest"},
+        )
+        server_accepts = post.status_code in (200, 302, 303)
+    
+>       assert page_available == server_accepts, (
+            f"Plan={plan}, method={method}, cycle={cycle}, held={held_plan}: "
+            f"page says available={page_available}, but POST returned {post.status_code}"
+        )
+E       AssertionError: Plan=trader, method=crypto, cycle=monthly, held=pro: page says available=True, but POST returned 400
+E       assert True == False
+
+tests\unit\test_invariant_billing_offers.py:245: AssertionError
+_ test_page_offer_matches_server_acceptance[pro-card-monthly-held-different] __
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000024B57348AA0>, 'client': <httpx.AsyncClient object at 0x0000024B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000024B572AA960>
+plan = 'pro', method = 'card', cycle = 'monthly', held_kind = 'different'
+
+    @pytest.mark.parametrize(("plan", "method", "cycle", "held_kind"), _TEST_CASES)
+    async def test_page_offer_matches_server_acceptance(
+        test_context, monkeypatch, plan, method, cycle, held_kind
+    ):
+        """What the billing page marks available must match what checkout accepts.
+    
+        The page's JSON carries a ``purchasable`` flag and per-method flags. The
+        dialog enables a method only when both are true. The server must reach the
+        same answer, so that no control on the page is dead and no control refuses
+        without a reason. Holding a *different* paid plan on an account that holds
+        no card is a purchase, not a switch, and must be accepted.
+    
+        The payment companies are answered in process. Without that the POST would
+        carry an obviously fake key to the real Creem and the real NOWPayments, and
+        their "wrong key" would arrive here disguised as our own server refusing the
+        customer — which is what this test measures.
+        """
+    
+        email = f"billing-offer-{plan}-{method}-{cycle}-{held_kind}@example.com"
+        held_plan = plan if held_kind == "same" else _other_paid_plan(plan)
+    
+        settings = test_context["settings"]
+        client = test_context["client"]
+        await _signup(client, settings, email)
+        user_id = await _user_id_for_email(test_context["session_factory"], email)
+        await _grant_paid_plan(test_context["session_factory"], user_id, held_plan)
+    
+        enabled = settings.model_copy(update=live_billing_overrides())
+        test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+        stub_payment_companies(monkeypatch)
+    
+        page = await client.get("/dashboard/billing")
+        assert page.status_code == 200, page.text
+    
+        plan_data = _billing_plan_data(page.text)
+        page_available = _page_says_method_available(plan_data, plan, method, cycle)
+    
+        csrf, request_id = _extract_csrf_and_request_id(page.text)
+        post = await client.post(
+            "/dashboard/billing/checkout",
+            data={
+                "plan_code": plan,
+                "billing_cycle": cycle,
+                "payment_method": method,
+                "checkout_request_id": request_id,
+                "terms_accepted": "true",
+                "first_name": "Amina",
+                "last_name": "Trader",
+                "address_line1": "1 Market Street",
+                "city": "Cairo",
+                "country": "Egypt",
+                "csrf_token": csrf,
+            },
+            headers={"accept": "application/json", "x-requested-with": "XMLHttpRequest"},
+        )
+        server_accepts = post.status_code in (200, 302, 303)
+    
+>       assert page_available == server_accepts, (
+            f"Plan={plan}, method={method}, cycle={cycle}, held={held_plan}: "
+            f"page says available={page_available}, but POST returned {post.status_code}"
+        )
+E       AssertionError: Plan=pro, method=card, cycle=monthly, held=trader: page says available=True, but POST returned 400
+E       assert True == False
+
+tests\unit\test_invariant_billing_offers.py:245: AssertionError
+_ test_page_offer_matches_server_acceptance[pro-crypto-monthly-held-different] _
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000024B575703B0>, 'client': <httpx.AsyncClient object at 0x0000024B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000024B572CA270>
+plan = 'pro', method = 'crypto', cycle = 'monthly', held_kind = 'different'
+
+    @pytest.mark.parametrize(("plan", "method", "cycle", "held_kind"), _TEST_CASES)
+    async def test_page_offer_matches_server_acceptance(
+        test_context, monkeypatch, plan, method, cycle, held_kind
+    ):
+        """What the billing page marks available must match what checkout accepts.
+    
+        The page's JSON carries a ``purchasable`` flag and per-method flags. The
+        dialog enables a method only when both are true. The server must reach the
+        same answer, so that no control on the page is dead and no control refuses
+        without a reason. Holding a *different* paid plan on an account that holds
+        no card is a purchase, not a switch, and must be accepted.
+    
+        The payment companies are answered in process. Without that the POST would
+        carry an obviously fake key to the real Creem and the real NOWPayments, and
+        their "wrong key" would arrive here disguised as our own server refusing the
+        customer — which is what this test measures.
+        """
+    
+        email = f"billing-offer-{plan}-{method}-{cycle}-{held_kind}@example.com"
+        held_plan = plan if held_kind == "same" else _other_paid_plan(plan)
+    
+        settings = test_context["settings"]
+        client = test_context["client"]
+        await _signup(client, settings, email)
+        user_id = await _user_id_for_email(test_context["session_factory"], email)
+        await _grant_paid_plan(test_context["session_factory"], user_id, held_plan)
+    
+        enabled = settings.model_copy(update=live_billing_overrides())
+        test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+        stub_payment_companies(monkeypatch)
+    
+        page = await client.get("/dashboard/billing")
+        assert page.status_code == 200, page.text
+    
+        plan_data = _billing_plan_data(page.text)
+        page_available = _page_says_method_available(plan_data, plan, method, cycle)
+    
+        csrf, request_id = _extract_csrf_and_request_id(page.text)
+        post = await client.post(
+            "/dashboard/billing/checkout",
+            data={
+                "plan_code": plan,
+                "billing_cycle": cycle,
+                "payment_method": method,
+                "checkout_request_id": request_id,
+                "terms_accepted": "true",
+                "first_name": "Amina",
+                "last_name": "Trader",
+                "address_line1": "1 Market Street",
+                "city": "Cairo",
+                "country": "Egypt",
+                "csrf_token": csrf,
+            },
+            headers={"accept": "application/json", "x-requested-with": "XMLHttpRequest"},
+        )
+        server_accepts = post.status_code in (200, 302, 303)
+    
+>       assert page_available == server_accepts, (
+            f"Plan={plan}, method={method}, cycle={cycle}, held={held_plan}: "
+            f"page says available={page_available}, but POST returned {post.status_code}"
+        )
+E       AssertionError: Plan=pro, method=crypto, cycle=monthly, held=trader: page says available=True, but POST returned 400
+E       assert True == False
+
+tests\unit\test_invariant_billing_offers.py:245: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_invariant_billing_offers.py::test_page_offer_matches_server_acceptance[trader-card-monthly-held-different]
+FAILED tests/unit/test_invariant_billing_offers.py::test_page_offer_matches_server_acceptance[trader-crypto-monthly-held-different]
+FAILED tests/unit/test_invariant_billing_offers.py::test_page_offer_matches_server_acceptance[pro-card-monthly-held-different]
+FAILED tests/unit/test_invariant_billing_offers.py::test_page_offer_matches_server_acceptance[pro-crypto-monthly-held-different]

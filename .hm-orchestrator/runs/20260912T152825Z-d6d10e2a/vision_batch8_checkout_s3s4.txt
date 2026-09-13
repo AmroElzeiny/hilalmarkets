@@ -1,0 +1,95 @@
+﻿opencode.exe : [0m
+At C:\Users\amroe\AppData\Roaming\npm\opencode.ps1:14 char:3
++   & "$basedir/node_modules/opencode-ai/bin/opencode.exe"   $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([0m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+> hm-direct-read ┬╖ deepseek-v4-flash-vision-exp
+[0m
+I viewed all six attached images. Below is what I actually saw in each, in the order given. No files were changed.
+
+---
+
+**IMAGE 1 тАФ `s3-pro-crypto-1440x900.png`**
+1. State: a checkout/review modal. It is titled "Set up your subscription", "Step 3 of 3", sitting over the "Your plan" page.
+2. Pay button: yes. A live, bright lime "Go to the crypto payment page" button is shown, enabled. No refusal sentence.
+3. Payment form: no card fields and no QR/invoice panel. Only a payment-method choice (Card / Crypto). Crypto is selected and labelled "Handled by NOWPayments".
+4. Price: yes тАФ Pro at **$17**. Looks like a normal price.
+5. Refusal / "cannot be changed": none seen.
+6. Visual defect: yes тАФ there is a hard horizontal seam where the dark modal backdrop begins, cutting through the plan cards and the "Choosing a plan" heading. A large empty dark area sits on the left. This looks like a full-page screenshot stitch, not necessarily an in-app fault, so I am not certain.
+   Also present: a tick-box row "I agree to the Terms, the Privacy policy and the Risk disclosure, and to the price shown above." It is unticked, yet the pay button is still enabled.
+
+**VERDICT: PASS** тАФ checkout is live, price normal, no refusal. Note the backdrop seam and the enabled button with an unticked agreement box.
+
+---
+
+**IMAGE 2 тАФ `s3-pro-crypto-1024x768.png`**
+1. State: same checkout/review modal, Step 3 of 3, Pro, over the "Your plan" page.
+2. Pay button: yes, live and enabled ("Go to the crypto payment page"). No refusal sentence.
+3. Payment form: method choice only (Card / Crypto); Crypto selected, NOWPayments. No card fields, no QR/invoice.
+4. Price: yes тАФ Pro **$17**, normal.
+5. Refusal / "cannot be changed": none seen.
+6. Visual defect: the dark backdrop has the same hard top edge cutting the plan cards and "Choosing a plan". Notably, the "I agree to the TermsтАж" tick-box row that was visible in IMAGE 1 is **not visible here** тАФ the modal goes from the discount-code row straight to "Nothing is charged until the last step." I cannot tell whether it is scrolled out or genuinely missing at this width.
+
+**VERDICT: PASS** тАФ live enabled pay button, normal price, no refusal. Flag: agreement box absent at this size.
+
+---
+
+**IMAGE 3 тАФ `s3-pro-crypto-390x844.png` (mobile)**
+1. State: same checkout/review modal, Step 3 of 3, Pro, over the plan list (Explore, Plus $9, Pro $17).
+2. Pay button: yes, live and enabled ("Go to the crypto payment page"). No refusal sentence.
+3. Payment form: method choice only (Card / Crypto); Crypto selected, NOWPayments. No card fields, no QR/invoice.
+4. Price: yes тАФ Pro **$17**, and Plus **$9**. Normal.
+5. Refusal / "cannot be changed": none seen.
+6. Visual defect: the backdrop again has a hard top edge cutting the plan content. The "I agree to the TermsтАж" tick-box row is again **not visible**. Some right-edge text looks tight. No clear overlap of controls.
+
+**VERDICT: PASS** тАФ live enabled pay button, normal prices, no refusal. Same missing agreement-box observation.
+
+---
+
+**IMAGE 4 тАФ `s4-billing-pro-card-crypto-holder-1440x900.png`**
+1. State: a plan list / billing page ("Plan and billing", "Choose the level of monitoring you need"), not a modal.
+2. Pay button: yes тАФ the Pro card has a live green "Pay" button, enabled. No refusal sentence. Plus shows "Current plan" and "Cancel plan".
+3. Payment form: none on this page; no card fields, no QR/invoice.
+4. Price: yes тАФ Explore $0, Plus $9 (was $15), Pro **$17** (was $25). Normal.
+5. Refusal / "cannot be changed": no refusal. The Pro card carries a long note: "You pay the full Pro price today. It starts only after that payment is confirmed. Your old plan stays active if you leave or the payment fails. After a confirmed payment, the old plan ends and a person sends the value of its unused time within 48 hours." This is an explanation, not a refusal.
+6. Visual defect: none obvious. Layout is clean. Payment history shows a Completed Plus payment, Browser Test, 9.00 USD, One Time 30 Day.
+
+**VERDICT: PASS** тАФ enabled Pay button, normal price, no refusal.
+
+---
+
+**IMAGE 5 тАФ `s4-billing-pro-card-crypto-holder-1024x768.png`**
+1. State: same billing / plan list page.
+2. Pay button: yes тАФ green "Pay" on Pro, enabled. No refusal sentence.
+3. Payment form: none visible.
+4. Price: yes тАФ $0 / $9 / **$17**. Normal.
+5. Refusal / "cannot be changed": none. Same explanatory paragraph as IMAGE 4.
+6. Visual defect: at this width the plan cards are narrow and the Pro note wraps into many lines, but I saw no overlap or cut-off controls.
+
+**VERDICT: PASS** тАФ enabled Pay button, normal price, no refusal.
+
+---
+
+**IMAGE 6 тАФ `s4-billing-pro-card-crypto-holder-390x844.png` (mobile)**
+1. State: same billing / plan list page, stacked vertically.
+2. Pay button: yes тАФ green "Pay" on the Pro card, enabled. No refusal sentence.
+3. Payment form: none visible.
+4. Price: yes тАФ Explore $0, Plus $9, Pro **$17**. Normal.
+5. Refusal / "cannot be changed": none. Same explanatory paragraph on Pro.
+6. Visual defect: none clear. The plan-details table is stacked; text is small but readable. Payment history shows the Completed Plus payment, 9.00 USD.
+
+**VERDICT: PASS** тАФ enabled Pay button, normal price, no refusal.
+
+---
+
+## Summary
+
+- **All six images: PASS.** Every checkout state has a live, enabled Pay / "Go to the crypto payment page" button, a normal price ($9 and $17), and **no refusal sentence** blocking the purchase.
+- **No image showed a payment form with card fields or a QR/invoice panel.** The modal only lets the person choose Card or Crypto; the note says card/wallet details are entered on the payment company's own page.
+- **Uncertainties I could not resolve from the images alone:**
+  - Images 1тАУ3 show a hard horizontal seam where the dark modal backdrop starts, cutting the plan cards and the "Choosing a plan" heading. This is most likely a full-page-screenshot stitching artifact, not an in-app defect, but I cannot prove that from a still image.
+  - The "I agree to the TermsтАж" tick-box is visible in IMAGE 1 but **not visible in IMAGES 2 and 3**. I cannot tell if it is scrolled out of view or missing at those widths.
+  - In IMAGE 1 the agreement box is unticked while the pay button is still enabled. I cannot tell from a still image whether clicking it enforces the agreement.
+- I did not run any command and made no file changes; this was a read-only visual review.

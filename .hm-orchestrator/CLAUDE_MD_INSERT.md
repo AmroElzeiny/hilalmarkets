@@ -24,7 +24,6 @@ Before delegation:
 3. Read:
    - `.hm-orchestrator/policy/ROUTING_POLICY.md`
    - `.hm-orchestrator/models/LIVE_MODELS.md` when present
-   - `.hm-orchestrator/models/OCG_CATALOG_2026-09-09.md`
    - `.hm-orchestrator/models/MODEL_METADATA_RULES.md`
 4. Create `.hm-orchestrator/current/MISSION.md`.
 5. Divide the mission into 3–8 outcome-based work packages. Do not create dozens of microtasks. The OpenCode supervisor owns microtask decomposition.

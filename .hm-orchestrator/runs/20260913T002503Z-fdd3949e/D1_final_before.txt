@@ -1,0 +1,203 @@
+﻿F...FFFFFFFFFFFFFFFFF...FFFFFFFFFFFFFFFFF...FFFFFFFFFFFFFFFFFFFFFFFFFFFF [ 51%]
+FFFFFFFFFFFFFFFFFFFFF.........FFFFFFFFFFF........................FFFF    [100%]
+================================== FAILURES ===================================
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/payment.refunded on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/refund.created on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/refund.created on a creating payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/refund.created on a pending payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/refund.created on a processing payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/charge.refunded on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/charge.refunded on a creating payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/charge.refunded on a pending payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/charge.refunded on a processing payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/charge.dispute.created on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/charge.dispute.created on a creating payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/charge.dispute.created on a pending payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/charge.dispute.created on a processing payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/dispute.created on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/dispute.created on a creating payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/dispute.created on a pending payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: stripe/dispute.created on a processing payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/payment.refunded on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/refund.created on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/refund.created on a creating payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/refund.created on a pending payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/refund.created on a processing payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/charge.refunded on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/charge.refunded on a creating payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/charge.refunded on a pending payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/charge.refunded on a processing payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/charge.dispute.created on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/charge.dispute.created on a creating payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/charge.dispute.created on a pending payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/charge.dispute.created on a processing payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/dispute.created on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/dispute.created on a creating payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/dispute.created on a pending payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: creem/dispute.created on a processing payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/payment.refunded on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/refund.created on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/refund.created on a creating payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/refund.created on a pending payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/refund.created on a processing payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/charge.refunded on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/charge.refunded on a creating payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/charge.refunded on a pending payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/charge.refunded on a processing payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/charge.dispute.created on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/charge.dispute.created on a creating payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/charge.dispute.created on a pending payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/charge.dispute.created on a processing payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/dispute.created on a completed payment left it as 'completed': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/dispute.created on a creating payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/dispute.created on a pending payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:211: AssertionError: nowpayments/dispute.created on a processing payment left it as 'processing': the refund was never written down
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAC3FA690> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAC47BBF0> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAC4F6ED0> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAC4487D0> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAC3832F0> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAC285AC0> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAC178590> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAC0824B0> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFABF54950> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAC055AF0> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFABE64950> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAA0562A0> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAA454DD0> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAA3E0050> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:245: AssertionError: assert (<ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAA494E60> is not None and 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:288: AssertionError: assert 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:288: AssertionError: assert 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:288: AssertionError: assert 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:288: AssertionError: assert 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:288: AssertionError: assert 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:288: AssertionError: assert 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:288: AssertionError: assert 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:288: AssertionError: assert 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:288: AssertionError: assert 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:288: AssertionError: assert 'completed' == 'refunded'
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3247: ai_market_monitor.services.billing.BillingError: A successful payment must match a server-created checkout attempt.
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3247: ai_market_monitor.services.billing.BillingError: A successful payment must match a server-created checkout attempt.
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3247: ai_market_monitor.services.billing.BillingError: A successful payment must match a server-created checkout attempt.
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3247: ai_market_monitor.services.billing.BillingError: A successful payment must match a server-created checkout attempt.
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3247: ai_market_monitor.services.billing.BillingError: A successful payment must match a server-created checkout attempt.
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:316: AssertionError: assert 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:352: AssertionError: assert [] == ['critical']
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:388: assert <ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x000001BFAD8F2690> is None
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:616: AssertionError: []
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3267: ai_market_monitor.services.billing.BillingError: Billing event did not match a server-created checkout.
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3255: ai_market_monitor.services.billing.BillingError: Billing event included an invalid checkout reference.
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3580: ai_market_monitor.services.billing.BillingError: Billing event did not include a subscription id.
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:666: assert 0 == 1
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:666: assert 0 == 1
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3568: ai_market_monitor.services.billing.BillingError: Billing event did not include a user id.
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3247: ai_market_monitor.services.billing.BillingError: A successful payment must match a server-created checkout attempt.
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3267: ai_market_monitor.services.billing.BillingError: Billing event did not match a server-created checkout.
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3255: ai_market_monitor.services.billing.BillingError: Billing event included an invalid checkout reference.
+C:\Users\amroe\AppData\Local\Temp\opencode\d1_pre\src\ai_market_monitor\services\billing.py:3580: ai_market_monitor.services.billing.BillingError: Billing event did not include a subscription id.
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:846: AssertionError: a refunded payment was still offered as the money held
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:938: assert 1 == 0
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:986: AssertionError: assert 'completed' == 'refunded'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py:1026: AssertionError: assert 'completed' == 'refunded'
+- generated xml file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T002503Z-fdd3949e\D1_final_before.xml -
+=========================== short test summary info ===========================
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-payment.refunded-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-refund.created-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-refund.created-creating]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-refund.created-pending]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-refund.created-processing]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-charge.refunded-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-charge.refunded-creating]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-charge.refunded-pending]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-charge.refunded-processing]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-charge.dispute.created-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-charge.dispute.created-creating]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-charge.dispute.created-pending]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-charge.dispute.created-processing]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-dispute.created-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-dispute.created-creating]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-dispute.created-pending]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[stripe-dispute.created-processing]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-payment.refunded-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-refund.created-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-refund.created-creating]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-refund.created-pending]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-refund.created-processing]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-charge.refunded-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-charge.refunded-creating]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-charge.refunded-pending]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-charge.refunded-processing]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-charge.dispute.created-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-charge.dispute.created-creating]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-charge.dispute.created-pending]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-charge.dispute.created-processing]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-dispute.created-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-dispute.created-creating]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-dispute.created-pending]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[creem-dispute.created-processing]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-payment.refunded-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-refund.created-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-refund.created-creating]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-refund.created-pending]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-refund.created-processing]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-charge.refunded-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-charge.refunded-creating]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-charge.refunded-pending]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-charge.refunded-processing]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-charge.dispute.created-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-charge.dispute.created-creating]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-charge.dispute.created-pending]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-charge.dispute.created-processing]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-dispute.created-completed]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-dispute.created-creating]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-dispute.created-pending]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_always_reaches_the_payment_it_refunds[nowpayments-dispute.created-processing]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[stripe-payment.refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[stripe-refund.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[stripe-charge.refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[stripe-charge.dispute.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[stripe-dispute.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[creem-payment.refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[creem-refund.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[creem-charge.refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[creem-charge.dispute.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[creem-dispute.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[nowpayments-payment.refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[nowpayments-refund.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[nowpayments-charge.refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[nowpayments-charge.dispute.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refunded_payment_no_longer_counts_as_money_kept[nowpayments-dispute.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[stripe-payment.refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[stripe-refund.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[stripe-charge.refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[stripe-charge.dispute.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[stripe-dispute.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[creem-payment.refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[creem-refund.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[creem-charge.refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[creem-charge.dispute.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[creem-dispute.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[nowpayments-payment.refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[nowpayments-refund.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[nowpayments-charge.refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[nowpayments-charge.dispute.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_recorded_when_the_event_names_no_checkout[nowpayments-dispute.created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_is_found_from_the_person_when_nothing_else_names_it
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_cannot_be_matched_is_an_alert_not_a_crash
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_every_money_reader_stops_counting_a_refunded_payment
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_every_unplaceable_refund_leaves_exactly_one_alert[names-nobody]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_every_unplaceable_refund_leaves_exactly_one_alert[names-a-checkout-we-never-created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_every_unplaceable_refund_leaves_exactly_one_alert[names-an-unreadable-checkout]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_every_unplaceable_refund_leaves_exactly_one_alert[payment-found-plan-unfound]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_names_nobody_is_accepted_and_alerted[stripe-charge-refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_names_nobody_is_accepted_and_alerted[stripe-dispute-created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_names_nobody_is_accepted_and_alerted[creem-refund-created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_names_nobody_is_accepted_and_alerted[crypto-payment-refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused[unknown-id]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused[invalid-id]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_could_belong_to_two_payments_is_not_guessed
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_plan_move_after_a_refund_owes_nothing_back
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_lands_between_freeze_and_payment_owes_nothing_back
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_the_same_refund_arriving_twice_changes_nothing_twice
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_two_refund_events_for_one_payment_produce_one_alert

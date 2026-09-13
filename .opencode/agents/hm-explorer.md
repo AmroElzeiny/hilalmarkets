@@ -1,77 +1,30 @@
 ---
 description: Read-heavy repository explorer for call graphs, duplicate implementations, tests, contracts, and root-cause evidence.
 mode: subagent
-model: opencode-go/deepseek-v4-flash
-permissions:
-  - action: read
-    resource: "*"
-    effect: allow
-  - action: glob
-    resource: "*"
-    effect: allow
-  - action: grep
-    resource: "*"
-    effect: allow
-  - action: edit
-    resource: "*"
-    effect: deny
-  - action: read
-    resource: "*.env"
-    effect: deny
-  - action: read
-    resource: "*.env.*"
-    effect: deny
-  - action: edit
-    resource: "*.env"
-    effect: deny
-  - action: edit
-    resource: "*.env.*"
-    effect: deny
-  - action: edit
-    resource: "CLAUDE.md"
-    effect: deny
-  - action: edit
-    resource: "AGENTS.md"
-    effect: deny
-  - action: edit
-    resource: ".claude/*"
-    effect: deny
-  - action: edit
-    resource: ".opencode/*"
-    effect: deny
-  - action: edit
-    resource: ".hm-orchestrator/policy/*"
-    effect: deny
-  - action: edit
-    resource: ".hm-orchestrator/models/*"
-    effect: deny
-  - action: edit
-    resource: "tools/hm-orchestrator/*"
-    effect: deny
-  - action: shell
-    resource: "*"
-    effect: allow
-  - action: shell
-    resource: "git push *"
-    effect: deny
-  - action: shell
-    resource: "git commit *"
-    effect: deny
-  - action: shell
-    resource: "git reset *"
-    effect: deny
-  - action: shell
-    resource: "git clean *"
-    effect: deny
-  - action: shell
-    resource: "git rebase *"
-    effect: deny
-  - action: shell
-    resource: "git merge *"
-    effect: deny
-  - action: subagent
-    resource: "*"
-    effect: deny
+model: opencode-go/deepseek-v4.1-flash
+permission:
+  read:
+    "*": allow
+    "*.env": deny
+    "*.env.*": deny
+  glob:
+    "*": allow
+  grep:
+    "*": allow
+  bash:
+    "*": allow
+    "git push *": deny
+    "git commit *": deny
+    "git reset *": deny
+    "git clean *": deny
+    "git rebase *": deny
+    "git merge *": deny
+  edit:
+    "*": deny
+    ".hm-orchestrator/runs/*": allow
+  task:
+    "*": deny
+  webfetch: allow
 ---
 
 

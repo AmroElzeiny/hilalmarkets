@@ -14,9 +14,12 @@
 <div class="brain-agent-dock" data-brain-agent-dock
      data-brain-agent-focus="{{ agent_focus | default('') }}">
 
+  {#- The "Ask AI" label above the circle comes from `hm-ask-tag.css`, the one rule every
+      corner assistant shares, and the name starts with the same two words. -#}
   <button class="brain-agent-orb" type="button" data-brain-agent-open
           aria-expanded="false" aria-controls="brain-agent-window"
-          aria-label="Open the System Brain assistant. It reads the product's own records and can see the page you are on.">
+          aria-label="Ask AI. Open the System Brain assistant. It reads the product's own records and can see the page you are on.">
+    <span class="hm-ask-tag" aria-hidden="true">Ask AI</span>
     <span class="brain-agent-orb-ring" aria-hidden="true"></span>
     <span class="brain-agent-orb-face" aria-hidden="true"><i data-icon="bot"></i></span>
   </button>

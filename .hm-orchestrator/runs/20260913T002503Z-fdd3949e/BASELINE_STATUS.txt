@@ -1,0 +1,141 @@
+﻿ D .claude/settings.local.disabled.json
+ M .hm-orchestrator/CLAUDE_MD_INSERT.md
+ M .hm-orchestrator/current/CLAUDE_READ_THIS.md
+ M .hm-orchestrator/current/MISSION.md
+ M .hm-orchestrator/current/RUN.json
+ M .hm-orchestrator/current/VISUAL_CONTRACT.md
+ M .hm-orchestrator/models/LIVE_ENDPOINT.json
+ M .hm-orchestrator/models/LIVE_MODELS.md
+ M .hm-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+ M .hm-orchestrator/models/LIVE_MODEL_IDS.txt
+ M .hm-orchestrator/policy/ROUTING_POLICY.md
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s1-pro-none-1024x768.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s1-pro-none-1440x900.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s1-pro-none-390x844.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s2-pro-card-1024x768.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s2-pro-card-1440x900.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s2-pro-card-390x844.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s3-pro-crypto-1024x768.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s3-pro-crypto-1440x900.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s3-pro-crypto-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-trader-refusal-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-trader-refusal-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-trader-refusal-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-switch-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-switch-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-switch-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-scheduled-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-scheduled-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-scheduled-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-refusal-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-refusal-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-refusal-390x844.png
+ M .opencode/agents/hm-direct-read.md
+ M .opencode/agents/hm-direct-write.md
+ M .opencode/agents/hm-explorer.md
+ M .opencode/agents/hm-reviewer-adversarial.md
+ M .opencode/agents/hm-reviewer-logic.md
+ M .opencode/agents/hm-reviewer-visual.md
+ M .opencode/agents/hm-supervisor-deep.md
+ M .opencode/agents/hm-supervisor.md
+ M .opencode/agents/hm-test-debugger.md
+ M .opencode/agents/hm-worker-fast.md
+ M .opencode/agents/hm-worker-strong.md
+ M .opencode/commands/hm-review.md
+ M .opencode/commands/hm-visual-review.md
+ M CLAUDE.md
+ M src/ai_market_monitor/api/routers/dashboard.py
+ M src/ai_market_monitor/api/routers/dashboard_test.py
+ M src/ai_market_monitor/api/template_env.py
+ M src/ai_market_monitor/core/plans.py
+ M src/ai_market_monitor/observability/issues.py
+ M src/ai_market_monitor/observability/labels.py
+ M src/ai_market_monitor/services/billing.py
+ M src/ai_market_monitor/services/payment_emails.py
+ M src/ai_market_monitor/services/plan_changes.py
+ M src/ai_market_monitor/services/plan_replacements.py
+ M src/ai_market_monitor/static/hilalmarkets-dashboard-v2.css
+ M src/ai_market_monitor/static/hilalmarkets-public-chat.css
+ M src/ai_market_monitor/static/hilalmarkets-public.css
+ M src/ai_market_monitor/static/hilalmarkets.css
+ M src/ai_market_monitor/static/hm-hilal-chat.css
+ M src/ai_market_monitor/static/hm-hilal-chat.js
+ M src/ai_market_monitor/static/hm-plan-change.js
+ M src/ai_market_monitor/static/landing/assets/landing.css
+ M src/ai_market_monitor/static/system-brain.css
+ M src/ai_market_monitor/templates/auth.html
+ M src/ai_market_monitor/templates/billing_result.html
+ M src/ai_market_monitor/templates/dashboard_public.html
+ M src/ai_market_monitor/templates/hilal/base_dashboard.html
+ M src/ai_market_monitor/templates/hilal/base_public.html
+ M src/ai_market_monitor/templates/hilal/dashboard/activity.html
+ M src/ai_market_monitor/templates/hilal/dashboard/affiliate.html
+ M src/ai_market_monitor/templates/hilal/dashboard/alert_proof.html
+ M src/ai_market_monitor/templates/hilal/dashboard/billing.html
+ M src/ai_market_monitor/templates/hilal/dashboard/checkout.html
+ M src/ai_market_monitor/templates/hilal/dashboard/passport.html
+ M src/ai_market_monitor/templates/hilal/dashboard/strategy_detail.html
+ M src/ai_market_monitor/templates/hilal/dashboard/strategy_verify.html
+ M src/ai_market_monitor/templates/hilal/dashboard/strategy_versions.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/connections.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/market.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/monitor.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/opportunities.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/partials/hilal_chat.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/passport.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/report.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/research.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/research_detail.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/settings.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/subscription.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/support.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/watchlists.html
+ M src/ai_market_monitor/templates/hilal/main/home.html
+ M src/ai_market_monitor/templates/hilal/partials/public_chat.html
+ M src/ai_market_monitor/templates/hilal/public/help.html
+ M src/ai_market_monitor/templates/hilal/public/react_site.html
+ M src/ai_market_monitor/templates/system_brain.html
+ M src/ai_market_monitor/templates/system_brain_agent_dock.html
+ M src/ai_market_monitor/templates/system_brain_auth.html
+ M tests/browser/conftest.py
+ M tests/browser/test_checkout_pay_button_e2e.py
+ M tests/integration/test_checkout_and_payment_email.py
+ M tests/integration/test_paid_plan_replacement.py
+ M tests/integration/test_plan_change_journey.py
+ M tests/integration/test_system_brain_payments.py
+ M tests/unit/test_billing_entitlements.py
+ M tests/unit/test_dashboard_static_assets.py
+ M tests/unit/test_invariant_billing_offers.py
+ M tests/unit/test_invariant_public_footer_and_chrome.py
+ M tests/unit/test_invariant_resume_checkout_cycle.py
+ M tests/unit/test_operational_issue_queue.py
+ M tools/hm-orchestrator/delegate.ps1
+ M tools/hm-orchestrator/run-model.ps1
+ M tools/hm-orchestrator/verify-system.ps1
+?? .hm-orchestrator/models/ROLE_MODEL_MAP.md
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-billing-pro-card-crypto-holder-1024x768.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-billing-pro-card-crypto-holder-1440x900.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-billing-pro-card-crypto-holder-390x844.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-pay-for-card-holder-1024x768.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-pay-for-card-holder-1440x900.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-pay-for-card-holder-390x844.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-pay-note-1024x768.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-pay-note-1440x900.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-pay-note-390x844.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-review-card-holder-1024x768.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-review-card-holder-1440x900.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-review-card-holder-390x844.png
+?? .hm-orchestrator/runs/20260911-wp8-finish/
+?? .hm-orchestrator/runs/20260912T152017Z-10ed86cb/
+?? .hm-orchestrator/runs/20260912T152825Z-d6d10e2a/
+?? .hm-orchestrator/runs/20260912T193031Z-4125cfbe/
+?? .hm-orchestrator/runs/20260913T002503Z-fdd3949e/
+?? src/ai_market_monitor/static/hm-ask-tag.css
+?? tests/browser/test_ask_ai_corner_tag_e2e.py
+?? tests/browser/test_visual_fixes_e2e.py
+?? tests/integration/test_held_plan_renewal_words.py
+?? tests/integration/test_invariant_pages_close_their_tags.py
+?? tests/support/html_balance.py
+?? tests/unit/test_invariant_annual_only_plan_card.py
+?? tests/unit/test_invariant_ask_ai_corner_tag.py
+?? tests/unit/test_invariant_templates_compile.py

@@ -71,6 +71,7 @@ Read:
 - .hm-orchestrator/models/LIVE_MODELS.md
 - .hm-orchestrator/models/LIVE_MODELS_VERBOSE.txt
 - .hm-orchestrator/models/MODEL_METADATA_RULES.md
+- .hm-orchestrator/models/ROLE_MODEL_MAP.md
 Do not claim completion without evidence.
 "@
 

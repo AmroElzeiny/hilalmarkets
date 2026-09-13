@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.dashboard_paths import MONITOR_PATH
+from ai_market_monitor.core.plans import PLAN_LIMIT_WORDS, UNLIMITED_SYMBOL_CAP
 from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
     BillingEvent,
@@ -530,22 +531,30 @@ def _safe_url(value: Any) -> str | None:
     return text[:2000] if text.startswith(("https://", "http://")) else None
 
 
+#: The limits a receipt lists, in order. Their names come from `PLAN_LIMIT_WORDS`, the
+#: same words the subscription page and the checkout review use. This list used to hold
+#: its own labels, and called a monitor a Watchlist.
+RECEIPT_LIMIT_KEYS: tuple[str, ...] = (
+    "active_strategies",
+    "symbols_per_strategy",
+    "on_demand_scans_per_month",
+    "detailed_history_days",
+)
+
+
 def _main_limits(limits: dict[str, Any]) -> list[dict[str, str]]:
-    labels = (
-        ("active_strategies", "Active Watchlists"),
-        ("symbols_per_strategy", "Markets per Watchlist"),
-        ("on_demand_scans_per_month", "Market checks per month"),
-        ("detailed_history_days", "Detailed evidence history"),
-    )
     result: list[dict[str, str]] = []
-    for key, label in labels:
+    for key in RECEIPT_LIMIT_KEYS:
         if key not in limits:
             continue
         value = limits[key]
-        rendered = "Unlimited" if isinstance(value, int) and value >= 100_000 else str(value)
-        if key == "detailed_history_days" and rendered != "Unlimited":
-            rendered = f"{rendered} days"
-        result.append({"label": label, "value": rendered})
+        rendered = (
+            "Unlimited"
+            if isinstance(value, int) and value >= UNLIMITED_SYMBOL_CAP
+            else str(value)
+        )
+        # No "days" after the history figure: "Days of history kept" already says it.
+        result.append({"label": PLAN_LIMIT_WORDS[key], "value": rendered})
     return result
 
 

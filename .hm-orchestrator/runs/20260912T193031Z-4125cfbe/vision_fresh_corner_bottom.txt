@@ -1,0 +1,407 @@
+﻿opencode.exe : [0m
+At C:\Users\amroe\AppData\Roaming\npm\opencode.ps1:14 char:3
++   & "$basedir/node_modules/opencode-ai/bin/opencode.exe"   $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([0m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+> hm-reviewer-visual ┬╖ deepseek-v4-flash-vision-exp
+[0m
+I'll analyze the images programmatically to get exact pixel evidence rather than guessing.
+[0m$ [0m$py = ".venv/Scripts/python.exe"; if (Test-Path $py) { & $py -c "import PIL; print('PIL', PIL.__version__)" 
+} else { python -c "import PIL; print('PIL', PIL.__version__)" }
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'PIL'
+[0m
+[0m$ [0mGet-ChildItem 
+"C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260911-wp8-finish\screens" 
+| Select-Object Name, Length
+Name                                         Length
+----                                         ------
+create-monitor-1024x768.png                  212216
+create-monitor-1440x900.png                  231779
+create-monitor-390x844.png                   128257
+dashboard-corner-1024x768.png                114133
+dashboard-corner-1440x900.png                145022
+dashboard-corner-390x844.png                  64990
+landing-corner-1024x768.png                  139621
+landing-corner-1440x900.png                  175048
+landing-corner-390x844.png                    55403
+landing-corner-reduced-motion-1440x900.png   138941
+landing-corner-with-back-to-top-1024x768.png  88437
+landing-corner-with-back-to-top-1440x900.png 105076
+landing-corner-with-back-to-top-390x844.png   54664
+market-1024x768.png                          168395
+market-1440x900.png                          171095
+market-390x844.png                           113404
+market-reduced-motion-1440x900.png           168906
+opportunities-1024x768.png                   266322
+opportunities-1440x900.png                   262657
+opportunities-390x844.png                    206924
+settings-1024x768.png                        415264
+settings-1440x900.png                        429145
+settings-390x844.png                         361590
+subscription-1024x768.png                    255822
+subscription-1440x900.png                    235198
+subscription-390x844.png                     198196
+[0m
+[0mтЬЧ [0mWrite C:/Users/amroe/AppData/Local/Temp/opencode/img_analyze.ps1 failed
+[91m[1mError: [0mThe user has specified a rule which prevents you from using this specific tool call. Here are some 
+of the relevant rules [{"permission":"*","action":"allow","pattern":"*"},{"permission":"edit","pattern":"*","action":"d
+eny"},{"permission":"edit","pattern":".hm-orchestrator/runs/*","action":"allow"}]
+PIL isn't available and I won't install packages. I'll use .NET `System.Drawing` (built into Windows) to read actual pixel data.
+Edit tool is restricted to the runs dir, so I'll run the analysis inline without writing a file.
+[0m
+[0m$ [0m$cs = @'
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Collections.Generic;
+public class ImgAn {
+  public static string Analyze(string path) {
+    using (var bmp = new Bitmap(path)) {
+      int w=bmp.Width,h=bmp.Height;
+      var data=bmp.LockBits(new Rectangle(0,0,w,h),ImageLockMode.ReadOnly,PixelFormat.Format32bppArgb);
+      int stride=data.Stride; byte[] by=new byte[stride*h];
+      Marshal.Copy(data.Scan0,by,0,by.Length); bmp.UnlockBits(data);
+      var sb=new StringBuilder(); sb.AppendLine("SIZE "+w+"x"+h);
+      int firstDark=-1;
+      for(int y=0;y<h&&firstDark<0;y++){int row=y*stride;for(int x=0;x<w;x++){int i=row+x*4;int 
+b=by[i],g=by[i+1],r=by[i+2];if(r<120&&g<120&&b<120){firstDark=y;break;}}}
+      sb.AppendLine("FIRST_DARK_ROW "+firstDark);
+      bool[] gr=new bool[w*h],bl=new bool[w*h],li=new bool[w*h];
+      for(int y=0;y<h;y++){int row=y*stride;for(int x=0;x<w;x++){int i=row+x*4;int b=by[i],g=by[i+1],r=by[i+2];int 
+idx=y*w+x;
+        if(g>170&&b<140&&(g-b)>50&&(g-r)>15&&r>80)gr[idx]=true;
+        if(b>170&&(b-r)>60&&(b-g)>25&&r<150)bl[idx]=true;
+        if(r>205&&g>205&&b>205)li[idx]=true;}}
+      sb.AppendLine("== GREEN =="); sb.Append(Comp(gr,w,h));
+      sb.AppendLine("== BLUE =="); sb.Append(Comp(bl,w,h));
+      sb.AppendLine("== LIGHT =="); sb.Append(Comp(li,w,h));
+      return sb.ToString();
+    }
+  }
+  static string Comp(bool[] m,int w,int h){
+    var sb=new StringBuilder(); bool[] seen=new bool[w*h]; var cs=new List<int[]>(); int[] st=new int[w*h];
+    for(int s=0;s<w*h;s++){ if(!m[s]||seen[s])continue; int sp=0; st[sp++]=s; seen[s]=true;
+      int mnx=w,mny=h,mxx=-1,mxy=-1,c=0;
+      while(sp>0){int p=st[--sp];int y=p/w,x=p-y*w;c++;
+        if(x<mnx)mnx=x;if(x>mxx)mxx=x;if(y<mny)mny=y;if(y>mxy)mxy=y;
+        for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){int 
+ny=y+dy,nx=x+dx;if(nx<0||ny<0||nx>=w||ny>=h)continue;int np=ny*w+nx;if(m[np]&&!seen[np]){seen[np]=true;st[sp++]=np;}}}
+      cs.Add(new int[]{c,mnx,mny,mxx,mxy});}
+    cs.Sort((a,b)=>b[0].CompareTo(a[0])); int n=0;
+    foreach(var q in cs){ sb.AppendLine(string.Format("area={0} bbox=({1},{2})-({3},{4}) w={5} 
+h={6}",q[0],q[1],q[2],q[3],q[4],q[3]-q[1]+1,q[4]-q[2]+1)); if(++n>=8)break;}
+    return sb.ToString();
+  }
+}
+'@
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition $cs
+$dir="C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260911-wp8-finish\scre
+ens"
+foreach($n in @("landing-corner-with-back-to-top-1440x900.png","landing-corner-with-back-to-top-1024x768.png","landing-
+corner-with-back-to-top-390x844.png")){
+  Write-Output ("##### "+$n); [ImgAn]::Analyze((Join-Path $dir $n))
+}
+##### landing-corner-with-back-to-top-1440x900.png
+SIZE 1440x900
+FIRST_DARK_ROW 20
+== GREEN ==
+area=3652 bbox=(1277,13)-(1375,56) w=99 h=44
+area=2163 bbox=(1362,821)-(1417,875) w=56 h=55
+area=70 bbox=(1382,840)-(1398,857) w=17 h=18
+area=5 bbox=(1312,36)-(1314,37) w=3 h=2
+area=4 bbox=(1354,33)-(1355,34) w=2 h=2
+area=4 bbox=(1346,33)-(1347,34) w=2 h=2
+== BLUE ==
+area=1272 bbox=(1361,785)-(1418,810) w=58 h=26
+area=5 bbox=(1374,796)-(1375,798) w=2 h=3
+area=3 bbox=(1400,797)-(1401,798) w=2 h=2
+== LIGHT ==
+area=734901 bbox=(0,0)-(1439,521) w=1440 h=522
+area=1975 bbox=(1366,724)-(1413,771) w=48 h=48
+area=157 bbox=(217,610)-(237,622) w=21 h=13
+area=155 bbox=(133,736)-(146,749) w=14 h=14
+area=111 bbox=(266,605)-(277,622) w=12 h=18
+area=109 bbox=(161,605)-(172,622) w=12 h=18
+area=102 bbox=(189,610)-(200,622) w=12 h=13
+area=101 bbox=(240,610)-(251,622) w=12 h=13
+
+##### landing-corner-with-back-to-top-1024x768.png
+SIZE 1024x768
+FIRST_DARK_ROW 20
+== GREEN ==
+area=3652 bbox=(901,13)-(999,56) w=99 h=44
+area=2181 bbox=(946,689)-(1001,744) w=56 h=56
+area=73 bbox=(965,708)-(983,726) w=19 h=19
+area=5 bbox=(936,36)-(938,37) w=3 h=2
+area=4 bbox=(978,33)-(979,34) w=2 h=2
+area=4 bbox=(970,33)-(971,34) w=2 h=2
+== BLUE ==
+area=1352 bbox=(944,653)-(1003,679) w=60 h=27
+area=4 bbox=(958,665)-(959,666) w=2 h=2
+area=3 bbox=(984,665)-(985,666) w=2 h=2
+== LIGHT ==
+area=371916 bbox=(0,0)-(1023,374) w=1024 h=375
+area=1975 bbox=(950,592)-(997,639) w=48 h=48
+area=157 bbox=(121,459)-(141,471) w=21 h=13
+area=155 bbox=(37,593)-(50,606) w=14 h=14
+area=111 bbox=(170,454)-(181,471) w=12 h=18
+area=109 bbox=(65,454)-(76,471) w=12 h=18
+area=102 bbox=(93,459)-(104,471) w=12 h=13
+area=101 bbox=(144,459)-(155,471) w=12 h=13
+
+##### landing-corner-with-back-to-top-390x844.png
+SIZE 390x844
+FIRST_DARK_ROW 19
+== GREEN ==
+area=2166 bbox=(320,771)-(375,825) w=56 h=55
+area=66 bbox=(341,790)-(355,807) w=15 h=18
+== BLUE ==
+area=1261 bbox=(320,735)-(376,760) w=57 h=26
+area=4 bbox=(358,747)-(359,748) w=2 h=2
+area=2 bbox=(333,747)-(333,748) w=1 h=2
+== LIGHT ==
+area=49836 bbox=(0,0)-(389,131) w=390 h=132
+area=1975 bbox=(324,676)-(371,723) w=48 h=48
+area=157 bbox=(113,192)-(133,204) w=21 h=13
+area=155 bbox=(29,323)-(42,336) w=14 h=14
+area=111 bbox=(162,187)-(173,204) w=12 h=18
+area=109 bbox=(57,187)-(68,204) w=12 h=18
+area=102 bbox=(85,192)-(96,204) w=12 h=13
+area=101 bbox=(136,192)-(147,204) w=12 h=13
+[0m
+Pixel data is in. Now let me probe the footer legal-text region for overlap, and sample the header/background colors.
+[0m$ [0m$cs = @'
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Collections.Generic;
+public class Probe {
+  public static string Run(string path){
+    using(var bmp=new Bitmap(path)){
+      int w=bmp.Width,h=bmp.Height;
+      var data=bmp.LockBits(new Rectangle(0,0,w,h),ImageLockMode.ReadOnly,PixelFormat.Format32bppArgb);
+      int stride=data.Stride; byte[] by=new byte[stride*h];
+      Marshal.Copy(data.Scan0,by,0,by.Length); bmp.UnlockBits(data);
+      Func<int,int,int[]> px=(x,y)=>{int i=y*stride+x*4;return new int[]{by[i+2],by[i+1],by[i]};};
+      var sb=new StringBuilder(); sb.AppendLine("SIZE "+w+"x"+h);
+      int[] c0=px(5,0), c1=px(5,10), c2=px(5,40), c3=px(5,70), c4=px(5,h-1), c5=px(w-1,0);
+      sb.AppendLine("px(5,0)="+c0[0]+","+c0[1]+","+c0[2]+"  px(5,10)="+c1[0]+","+c1[1]+","+c1[2]+"  
+px(5,40)="+c2[0]+","+c2[1]+","+c2[2]+"  px(5,70)="+c3[0]+","+c3[1]+","+c3[2]+"  
+px(5,h-1)="+c4[0]+","+c4[1]+","+c4[2]+"  px(w-1,0)="+c5[0]+","+c5[1]+","+c5[2]);
+      // widget boxes
+      int[] circ=null,lab=null,btt=null;
+      // recompute masks and components quickly via bounds of color
+      int gminx=w,gminy=h,gmaxx=-1,gmaxy=-1,gc=0;
+      int bminx=w,bminy=h,bmaxx=-1,bmaxy=-1,bc=0;
+      int lminx=w,lminy=h,lmaxx=-1,lmaxy=-1,lc=0;
+      for(int y=0;y<h;y++){for(int x=0;x<w;x++){int[] p=px(x,y);int r=p[0],g=p[1],b=p[2];
+        bool green=g>170&&b<140&&(g-b)>50&&(g-r)>15&&r>80;
+        bool blue=b>170&&(b-r)>60&&(b-g)>25&&r<150;
+        bool light=r>205&&g>205&&b>205;
+        if(green&&y>h/2){gc++;if(x<gminx)gminx=x;if(x>gmaxx)gmaxx=x;if(y<gminy)gminy=y;if(y>gmaxy)gmaxy=y;}
+        if(blue&&y>h/2){bc++;if(x<bminx)bminx=x;if(x>bmaxx)bmaxx=x;if(y<bminy)bminy=y;if(y>bmaxy)bmaxy=y;}
+        if(light&&y>h/2&&x>w/2){lc++;if(x<lminx)lminx=x;if(x>lmaxx)lmaxx=x;if(y<lminy)lminy=y;if(y>lmaxy)lmaxy=y;}
+      }}
+      circ=new int[]{gminx,gminy,gmaxx,gmaxy}; lab=new int[]{bminx,bminy,bmaxx,bmaxy}; btt=new 
+int[]{lminx,lminy,lmaxx,lmaxy};
+      sb.AppendLine("CIRCLE "+gminx+","+gminy+"-"+gmaxx+","+gmaxy+"  LABEL "+bminx+","+bminy+"-"+bmaxx+","+bmaxy+"  
+BTT "+lminx+","+lminy+"-"+lmaxx+","+lmaxy);
+      int strip=(int)(h*0.75);
+      // text-like pixels, excluding widget boxes expanded 2
+      Func<int,int,bool> inBox=(x,y)=>{
+        int[][] boxes={circ,lab,btt};
+        foreach(var bx in boxes){ if(x>=bx[0]-2&&x<=bx[2]+2&&y>=bx[1]-2&&y<=bx[3]+2) return true;}
+        return false;};
+      int tminx=w,tminy=h,tmaxx=-1,tmaxy=-1,tc=0;
+      int[] rowmax=new int[h]; for(int i=0;i<h;i++) rowmax[i]=-1;
+      for(int y=strip;y<h;y++){for(int x=0;x<w;x++){int[] p=px(x,y);int r=p[0],g=p[1],b=p[2];
+        int mx=Math.Max(r,Math.Max(g,b)), mn=Math.Min(r,Math.Min(g,b));
+        bool green=g>170&&b<140&&(g-b)>50&&(g-r)>15&&r>80;
+        bool blue=b>170&&(b-r)>60&&(b-g)>25&&r<150;
+        bool text=mx>80&&mx<225&&(mx-mn)<50&&!green&&!blue&&!inBox(x,y);
+        if(text){tc++;if(x<tminx)tminx=x;if(x>tmaxx)tmaxx=x;if(y<tminy)tminy=y;if(y>tmaxy)tmaxy=y; 
+if(x>rowmax[y])rowmax[y]=x;}
+      }}
+      sb.AppendLine("TEXT(excl widgets) count="+tc+" bbox=("+tminx+","+tminy+")-("+tmaxx+","+tmaxy+")");
+      // overlap: text pixels inside each widget box
+      Func<int[],string> ov=(bx)=>{int cnt=0;int ox0=w,ox1=-1,oy0=h,oy1=-1;
+        for(int y=Math.Max(0,bx[1]);y<=Math.Min(h-1,bx[3]);y++)for(int x=Math.Max(0,bx[0]);x<=Math.Min(w-1,bx[2]);x++){
+          int[] p=px(x,y);int r=p[0],g=p[1],b=p[2];int mx=Math.Max(r,Math.Max(g,b)),mn=Math.Min(r,Math.Min(g,b));
+          bool green=g>170&&b<140&&(g-b)>50&&(g-r)>15&&r>80;
+          bool blue=b>170&&(b-r)>60&&(b-g)>25&&r<150;
+          bool light=r>205&&g>205&&b>205;
+          if(mx>80&&mx<225&&(mx-mn)<50&&!green&&!blue&&!light){cnt++;if(x<ox0)ox0=x;if(x>ox1)ox1=x;if(y<oy0)oy0=y;if(y>
+oy1)oy1=y;}
+        }
+        return "graytext-in-box="+cnt+(cnt>0?(" bbox=("+ox0+","+oy0+")-("+ox1+","+oy1+")"):"");};
+      sb.AppendLine("OVERLAP circle: "+ov(circ));
+      sb.AppendLine("OVERLAP label : "+ov(lab));
+      sb.AppendLine("OVERLAP btt   : "+ov(btt));
+      // report rows near widget where text is close
+      int threshold=Math.Min(Math.Min(circ[0],lab[0]),btt[0])-15;
+      for(int y=strip;y<h;y++){ if(rowmax[y]>=threshold) sb.AppendLine("  row "+y+" textmaxx="+rowmax[y]); }
+      return sb.ToString();
+    }
+  }
+}
+'@
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition $cs
+$dir="C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260911-wp8-finish\scre
+ens"
+foreach($n in @("landing-corner-with-back-to-top-1440x900.png","landing-corner-with-back-to-top-1024x768.png","landing-
+corner-with-back-to-top-390x844.png")){
+  Write-Output ("##### "+$n); [Probe]::Run((Join-Path $dir $n))
+}
+##### landing-corner-with-back-to-top-1440x900.png
+SIZE 1440x900
+px(5,0)=245,248,252  px(5,10)=245,248,252  px(5,40)=245,248,252  px(5,70)=245,248,251  px(5,h-1)=43,46,53  
+px(w-1,0)=245,248,252
+CIRCLE 1362,821-1417,875  LABEL 1361,785-1418,810  BTT 721,451-1439,800
+TEXT(excl widgets) count=8157 bbox=(120,677)-(1319,860)
+OVERLAP circle: graytext-in-box=66 bbox=(1362,821)-(1417,875)
+OVERLAP label : graytext-in-box=0
+OVERLAP btt   : graytext-in-box=2966 bbox=(721,604)-(1413,771)
+  row 678 textmaxx=709
+  row 679 textmaxx=709
+  row 680 textmaxx=717
+  row 681 textmaxx=718
+  row 682 textmaxx=718
+  row 683 textmaxx=718
+  row 684 textmaxx=718
+  row 685 textmaxx=717
+  row 686 textmaxx=717
+  row 687 textmaxx=718
+  row 713 textmaxx=711
+  row 714 textmaxx=711
+  row 715 textmaxx=711
+  row 716 textmaxx=718
+  row 717 textmaxx=717
+  row 718 textmaxx=718
+  row 719 textmaxx=718
+  row 720 textmaxx=718
+  row 721 textmaxx=718
+  row 722 textmaxx=717
+  row 723 textmaxx=718
+  row 820 textmaxx=1319
+  row 848 textmaxx=1257
+  row 849 textmaxx=1302
+  row 850 textmaxx=1301
+  row 851 textmaxx=1314
+  row 852 textmaxx=1315
+  row 853 textmaxx=1316
+  row 854 textmaxx=1316
+  row 855 textmaxx=1311
+  row 856 textmaxx=1318
+  row 857 textmaxx=1319
+  row 858 textmaxx=1232
+  row 859 textmaxx=1232
+  row 860 textmaxx=1232
+
+##### landing-corner-with-back-to-top-1024x768.png
+SIZE 1024x768
+px(5,0)=245,248,252  px(5,10)=245,248,252  px(5,40)=245,248,252  px(5,70)=245,248,251  px(5,h-1)=43,46,53  
+px(w-1,0)=245,248,252
+CIRCLE 946,689-1001,744  LABEL 944,653-1003,679  BTT 513,490-997,669
+TEXT(excl widgets) count=4945 bbox=(24,580)-(681,733)
+OVERLAP circle: graytext-in-box=42 bbox=(947,689)-(1000,744)
+OVERLAP label : graytext-in-box=2 bbox=(999,653)-(1000,679)
+OVERLAP btt   : graytext-in-box=3115 bbox=(513,490)-(997,662)
+  row 662 textmaxx=510
+  row 721 textmaxx=619
+  row 722 textmaxx=664
+  row 723 textmaxx=664
+  row 724 textmaxx=676
+  row 725 textmaxx=678
+  row 726 textmaxx=678
+  row 727 textmaxx=678
+  row 728 textmaxx=673
+  row 729 textmaxx=681
+  row 730 textmaxx=681
+  row 731 textmaxx=595
+  row 732 textmaxx=595
+  row 733 textmaxx=595
+
+##### landing-corner-with-back-to-top-390x844.png
+SIZE 390x844
+px(5,0)=246,248,252  px(5,10)=246,248,252  px(5,40)=245,248,252  px(5,70)=245,248,251  px(5,h-1)=43,46,53  
+px(w-1,0)=246,248,252
+CIRCLE 320,771-375,825  LABEL 320,735-376,760  BTT 207,441-371,751
+TEXT(excl widgets) count=4202 bbox=(16,647)-(264,812)
+OVERLAP circle: graytext-in-box=64 bbox=(320,771)-(375,825)
+OVERLAP label : graytext-in-box=0
+OVERLAP btt   : graytext-in-box=2064 bbox=(207,441)-(371,739)
+  row 702 textmaxx=204
+  row 733 textmaxx=204
+  row 734 textmaxx=204
+  row 735 textmaxx=201
+  row 736 textmaxx=201
+  row 737 textmaxx=201
+  row 738 textmaxx=201
+  row 739 textmaxx=201
+  row 762 textmaxx=239
+  row 763 textmaxx=239
+  row 764 textmaxx=254
+  row 765 textmaxx=254
+  row 766 textmaxx=254
+  row 767 textmaxx=254
+  row 768 textmaxx=254
+  row 769 textmaxx=254
+  row 770 textmaxx=254
+  row 771 textmaxx=254
+  row 772 textmaxx=254
+  row 773 textmaxx=253
+  row 782 textmaxx=243
+  row 783 textmaxx=243
+  row 784 textmaxx=263
+  row 785 textmaxx=264
+  row 786 textmaxx=260
+  row 787 textmaxx=263
+  row 788 textmaxx=264
+  row 789 textmaxx=264
+  row 790 textmaxx=264
+  row 791 textmaxx=207
+  row 792 textmaxx=206
+  row 793 textmaxx=206
+[0m
+I inspected the actual pixels in all three PNGs (via .NET `System.Drawing`), so the numbers below are measured, not estimated.
+
+**Method:** detected the green circle, blue "Ask AI" label, and the light 48├Ч48 back-to-top button as connected components; measured their bounding boxes; measured the footer legal-text pixel extent; sampled the header rows.
+
+| Check | 1440├Ч900 | 1024├Ч768 | 390├Ч844 |
+|---|---|---|---|
+| 1. Label + circle wholly on screen | PASS | PASS | PASS |
+| 2. Back-to-top above label, gap | PASS (13 px) | PASS (13 px) | PASS (11 px) |
+| 3. Header at very top, no empty band | PASS | PASS | PASS |
+| 4. Overlap with footer legal text | PASS | PASS | PASS |
+
+**Per-image detail**
+
+**1440├Ч900**
+1. PASS тАФ "Ask AI" box (1361,785)-(1418,810); circle (1362,821)-(1417,875). Right edge 1418 of 1440, bottom 875 of 900. Both whole.
+2. PASS тАФ back-to-top 48├Ч48 at (1366,724)-(1413,771); label starts y=785. 13 px clear gap, no touch.
+3. PASS тАФ first dark pixel (logo) at row 20; header background runs from row 0. No band above.
+4. PASS тАФ legal text right edge x=1319; circle left edge x=1362. 43 px gap, no overlap.
+
+**1024├Ч768**
+1. PASS тАФ label (944,653)-(1003,679); circle (946,689)-(1001,744). Right 1003 of 1024, bottom 744 of 768.
+2. PASS тАФ back-to-top at (950,592)-(997,639); label starts y=653. 13 px gap.
+3. PASS тАФ first dark pixel at row 20.
+4. PASS тАФ legal text right edge x=681; circle left x=946. 265 px gap.
+
+**390├Ч844**
+1. PASS тАФ label (320,735)-(376,760); circle (320,771)-(375,825). Right 376 of 390, bottom 825 of 844.
+2. PASS тАФ back-to-top at (324,676)-(371,723); label starts y=735. 11 px gap.
+3. PASS тАФ first dark pixel at row 19.
+4. PASS тАФ legal text right edge x=264; circle left x=320. 56 px gap.
+
+**Note:** a few dozen gray pixels register inside the circle boxes, but their bounding box equals the full circle box тАФ that is the circle's anti-aliased edge, not text. On the label the count is 0 (1440, 390) and 2 edge pixels (1024).
+
+All four checks PASS at all three widths.

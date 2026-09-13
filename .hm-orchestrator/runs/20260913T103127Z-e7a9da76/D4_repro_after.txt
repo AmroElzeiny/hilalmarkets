@@ -1,0 +1,8 @@
+============================= test session starts =============================
+collected 61 items
+
+tests\unit\test_operational_issue_queue.py ............................. [ 47%]
+................................                                         [100%]
+
+- generated xml file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T103127Z-e7a9da76\D4_repro_after.xml -
+============================= 61 passed in 28.08s =============================

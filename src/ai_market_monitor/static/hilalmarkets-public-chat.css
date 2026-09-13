@@ -27,13 +27,9 @@
    surface behind the ring keeps it readable while the ring itself stays the same
    near-black every other control on the site draws. */
 .public-chat-launcher:focus-visible{outline:var(--hm-focus-ring)!important;outline-offset:4px;box-shadow:0 0 0 7px #fff!important}
-.public-chat-launcher::after{
-  position:absolute;right:calc(100% + 10px);top:50%;padding:8px 11px;border-radius:10px;
-  background:var(--hm-chat-ink);color:#fff;content:attr(data-tooltip);font:500 .74rem/1 'Onest',sans-serif;
-  white-space:nowrap;opacity:0;pointer-events:none;transform:translate(5px,-50%);
-  transition:opacity 160ms ease,transform 160ms ease;
-}
-.public-chat-launcher:hover::after,.public-chat-launcher:focus-visible::after{opacity:1;transform:translate(0,-50%)}
+/* The hover tooltip that used to sit to the left of the circle ("Ask Hilal Markets") is
+   gone. The "Ask AI" label above the circle is always visible now (`hm-ask-tag.css`),
+   and a second, different name appearing on hover was two labels for one button. */
 .public-chat-launcher>*{pointer-events:none}
 .public-chat-launcher-icon,.public-chat-brand-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:50%}
 /* The star sits straight on the green circle, with no grey disc behind it.
@@ -173,7 +169,6 @@ body.public-chat-open{overflow:hidden}
 
 @media(max-width:640px){
   .public-chat-launcher{right:14px;bottom:14px}
-  .public-chat-launcher::after{display:none}
   .public-chat-panel{inset:0;width:100%;height:100%;max-height:none;border:0;border-radius:0;transform:translateY(16px)}
   .public-chat-head{padding-top:max(16px,env(safe-area-inset-top))}
   .public-chat-brand p{max-width:210px}

@@ -21,6 +21,8 @@ import { snapshot } from "./hm-page-context.js";
 const POLL_MS = 1000;
 //: How tall the writing box may grow before it starts scrolling instead.
 const GROW_LIMIT = 132;
+//: Room kept between a control somebody is using and the top of the corner widget.
+const CLEARANCE_GAP = 12;
 const icon = (name, cls = "icon") => (window.icon ? window.icon(name, cls) : "");
 
 /* The small line under an answer that says what kind of answer it is.
@@ -42,6 +44,24 @@ const STAR_WORDS = {
   5: "Thank you. That is good to hear.",
 };
 
+/* Run once the page has stopped scrolling: three frames in a row at the same place, or
+ * after about a second and a half whatever happens, so a page that never settles cannot
+ * keep this waiting. `scrollend` would say the same thing, but not in every browser. */
+function whenScrollSettles(run) {
+  let last = null;
+  let still = 0;
+  let frames = 0;
+  const tick = () => {
+    const at = window.scrollY;
+    still = at === last ? still + 1 : 0;
+    last = at;
+    frames += 1;
+    if (still >= 3 || frames > 90) run();
+    else window.requestAnimationFrame(tick);
+  };
+  window.requestAnimationFrame(tick);
+}
+
 function ready(run) {
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run);
   else run();
@@ -53,6 +73,10 @@ class HilalChat {
     this.find = (selector) => root.querySelector(selector);
 
     this.orb = this.find("[data-hilal-open]");
+    // The name the button has while the window is shut. It is read from the template
+    // rather than typed again here: a second copy said "your Hilal Markets assistant",
+    // so after the first close the button lost "Ask AI" and "sees the page you are on".
+    this.openName = this.orb.getAttribute("aria-label");
     this.badge = this.find("[data-hilal-badge]");
     this.window = this.find("[data-hilal-window]");
     this.scroll = this.find("[data-hilal-scroll]");
@@ -89,6 +113,7 @@ class HilalChat {
     this.placeholder = this.input.placeholder;
 
     this.bind();
+    this.keepControlsClear();
     this.watchCookieBanner();
     // One status read on load, so the button already knows whether it can be used
     // before anybody clicks it. Polling only starts when the window is open.
@@ -113,6 +138,9 @@ class HilalChat {
       const box = banner.getBoundingClientRect();
       const showing = banner.classList.contains("is-visible") && box.height > 0;
       this.root.style.setProperty("--h-lift", showing ? `${Math.ceil(box.height) + 12}px` : "0px");
+      // With less motion there is no transition to wait for, so the room is re-measured
+      // here as well as when the move ends.
+      this.publishClearance();
     };
     lift();
     // Its height changes with the width of the window; its visibility changes when the
@@ -121,6 +149,83 @@ class HilalChat {
     new MutationObserver(lift).observe(banner, {
       attributes: true,
       attributeFilter: ["class"],
+    });
+  }
+
+  /**
+   * Never sit on top of a control somebody is using.
+   *
+   * This widget is fixed to the corner, above the page, so whatever scrolls under it is
+   * hidden. Measured before this existed: the round button covered the Settings page's
+   * own "Ask AI" pill on a phone, and the label covered "Open the list" on Create monitor
+   * at 1024 wide. A person tabbing through the page landed on things they could not see
+   * (WCAG 2.2 SC 2.4.11, Focus Not Obscured).
+   *
+   * Two halves, one measurement:
+   *
+   *   * the room the widget takes is published as `--hm-corner-clearance`, and the shell
+   *     (`hm-shell.css`) keeps that much space at the end of every page, so the last
+   *     control can always be scrolled clear of it;
+   *   * a control that receives focus underneath it is scrolled up until it clears.
+   *
+   * Only the parts a person can see count — the tag, the "Ask AI" label and the button.
+   * The box around them is wider than the button and mostly empty, and treating that
+   * empty space as covered would push the page around for nothing. The open window is
+   * not counted either: while it is open, focus is inside it.
+   */
+  keepControlsClear() {
+    const parts = () =>
+      [...this.root.querySelectorAll("[data-hilal-tag], [data-hilal-open], .hm-ask-tag")]
+        .map((part) => part.getBoundingClientRect())
+        .filter((box) => box.width > 0 && box.height > 0);
+
+    this.publishClearance = () => {
+      const boxes = parts();
+      const top = boxes.length ? Math.min(...boxes.map((box) => box.top)) : window.innerHeight;
+      const room = Math.max(0, Math.ceil(window.innerHeight - top) + CLEARANCE_GAP);
+      document.documentElement.style.setProperty("--hm-corner-clearance", `${room}px`);
+    };
+    this.publishClearance();
+    new ResizeObserver(this.publishClearance).observe(this.root);
+    window.addEventListener("resize", this.publishClearance);
+    // The cookie banner moves the widget with a transition; the room is right only once
+    // it has arrived.
+    this.root.addEventListener("transitionend", this.publishClearance);
+
+    const clear = (target) => {
+      const box = target.getBoundingClientRect();
+      const boxes = parts();
+      // Only when the widget is really the thing on top there. A dialog or the cookie
+      // banner sits above it, and a control inside those is not hidden by it.
+      const covered = boxes.some((part) => {
+        const left = Math.max(box.left, part.left);
+        const right = Math.min(box.right, part.right);
+        const top = Math.max(box.top, part.top);
+        const bottom = Math.min(box.bottom, part.bottom);
+        if (right - left < 1 || bottom - top < 1) return false;
+        const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+        return Boolean(hit && this.root.contains(hit));
+      });
+      if (!covered) return;
+      // Clear the whole column of the widget above the control, not only the part on it
+      // now: moving a control up from under the button put it under the "Ask AI" label
+      // that sits on top of the button.
+      const column = boxes.filter(
+        (part) => Math.min(box.right, part.right) - Math.max(box.left, part.left) >= 1,
+      );
+      const needed = box.bottom - Math.min(...column.map((part) => part.top)) + CLEARANCE_GAP;
+      if (needed > 0) window.scrollBy({ top: Math.ceil(needed), behavior: "instant" });
+    };
+
+    document.addEventListener("focusin", (event) => {
+      const target = event.target;
+      if (this.open || !(target instanceof Element) || this.root.contains(target)) return;
+      // The dashboard scrolls smoothly, so a control that was off screen is still
+      // travelling when focus arrives, and it can come to rest exactly under this corner.
+      // It is judged where it stops, not where it started.
+      whenScrollSettles(() => {
+        if (document.activeElement === target && !this.open) clear(target);
+      });
     });
   }
 
@@ -298,7 +403,7 @@ class HilalChat {
     this.open = false;
     this.stopPolling();
     this.orb.setAttribute("aria-expanded", "false");
-    this.orb.setAttribute("aria-label", "Open Hilal, your Hilal Markets assistant");
+    this.orb.setAttribute("aria-label", this.openName);
 
     const finish = () => {
       this.window.hidden = true;

@@ -1,7 +1,7 @@
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Final, Protocol
 from uuid import UUID
 
 from sqlalchemy import select
@@ -9,12 +9,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.dashboard_paths import (
+    ABOUT_PATH,
     CONNECTIONS_PATH,
+    HOME_PATH,
+    HOW_IT_WORKS_PATH,
     LIFECYCLES_PATH,
     MONITOR_PATH,
     MONITORS_PATH,
     OPPORTUNITIES_PATH,
+    PRICING_PATH,
+    PUBLIC_HOME_PATH,
     SETTINGS_PATH,
+    SUBSCRIPTION_PATH,
     SUPPORT_PATH,
 )
 from ai_market_monitor.core.security import IdentityAssertionTokenService
@@ -27,7 +33,6 @@ from ai_market_monitor.db.models import (
     SetupInstance,
     Strategy,
     StrategyVersion,
-    Subscription,
     TelegramCallbackReceipt,
     TelegramConnection,
     TelegramConversationState,
@@ -46,6 +51,11 @@ from ai_market_monitor.db.models.enums import (
     SetupLifecycleState,
     StrategyStatus,
 )
+from ai_market_monitor.engine.active_question import (
+    ConfirmationReply,
+    normalize_answer_text,
+    resolve_confirmation,
+)
 from ai_market_monitor.engine.dedup import stable_event_hash
 from ai_market_monitor.engine.models import EvaluationResult
 from ai_market_monitor.schemas.on_demand import OnDemandScanRequest
@@ -58,7 +68,7 @@ from ai_market_monitor.schemas.onboarding import (
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.services.admin_notifications import AdminNotificationService
 from ai_market_monitor.services.alert_presentation import ACTION_LABELS
-from ai_market_monitor.services.billing import BillingError, BillingService
+from ai_market_monitor.services.billing import BillingError
 from ai_market_monitor.services.interfaces import MarketDataProvider, RecentMarketPreviewer
 from ai_market_monitor.services.monitor_operations import (
     MonitorOperationError,
@@ -85,6 +95,11 @@ from ai_market_monitor.services.verified_strategy import (
     VerifiedStrategyError,
     VerifiedStrategyService,
 )
+from ai_market_monitor.telegram.profile import (
+    BOUNDARY_TEXT,
+    PRODUCT_DESCRIPTOR,
+    TELEGRAM_ROLE_TEXT,
+)
 from ai_market_monitor.telegram.rendering import (
     escape,
     render_confirmed_alert,
@@ -92,12 +107,32 @@ from ai_market_monitor.telegram.rendering import (
     render_near_miss_list,
 )
 from ai_market_monitor.telegram.types import (
+    KEYBOARD_INLINE,
+    KEYBOARD_REMOVE_REPLY_KEYBOARD,
     NearMissListItem,
     TelegramButton,
     TelegramCallback,
     TelegramInboundMessage,
     TelegramOutboundMessage,
 )
+
+#: What a typed reply has to say to answer the open Telegram-connection question, when it
+#: is not a yes or a no: the words this screen prints on its own buttons, and the labels
+#: this bot prints everywhere for "leave this step". Everything else is read by the one
+#: yes/no vocabulary in ``engine/active_question.py``, which is also why "ok", "sure" and
+#: a mistyped "confitm" answer this question too.
+_TELEGRAM_LINK_LABELS: Final[dict[str, ConfirmationReply]] = {
+    "confirm": ConfirmationReply.AFFIRMATIVE,
+    "connect": ConfirmationReply.AFFIRMATIVE,
+    # The reply-keyboard captions this prompt used before its buttons went inline. They
+    # are still sitting in chats that opened before the fix, and a key pressed is an
+    # answer, not a mystery.
+    "yes connect": ConfirmationReply.AFFIRMATIVE,
+    "cancel": ConfirmationReply.NEGATIVE,
+    "back": ConfirmationReply.NEGATIVE,
+    "go back": ConfirmationReply.NEGATIVE,
+    "main menu": ConfirmationReply.NEGATIVE,
+}
 
 #: Where a "scan the market once" button really goes.
 #:
@@ -121,13 +156,27 @@ PRIMARY_MENU = [
     "ℹ️ About",
 ]
 
+#: The start screen. The descriptor and the boundaries are read from ``telegram/profile``,
+#: the same sentences Telegram's own profile shows before the first message.
 MAIN_MENU_TEXT = (
     "🏠 Main Menu\n\n"
-    "Welcome to Hilal Markets.\n\n"
-    "📈 I monitor approved crypto spot-market conditions.\n"
-    "🔄 Lifecycles show what is forming, complete, invalidated, or expired.\n"
-    "🧾 Alerts include deterministic proof.\n\n"
-    "Decision support only. It does not guarantee outcomes or place trades."
+    f"Welcome to Hilal Markets. {PRODUCT_DESCRIPTOR}\n\n"
+    f"{TELEGRAM_ROLE_TEXT}\n"
+    "📋 My Monitors: the rules you asked Hilal Markets to watch.\n"
+    "🔄 Lifecycles: how close each setup is, from forming to confirmed, no longer valid "
+    "or expired.\n\n"
+    f"{BOUNDARY_TEXT}"
+)
+
+#: Where results are. There is no separate performance page: what the monitors found is
+#: on Opportunities, and this used to promise "forward-test analytics" that do not exist.
+RESULTS_TEXT = "Results\n\nWhat your monitors found is on the Opportunities page on the website."
+
+#: The "Import strategy" prompt, written in three places before. It asked for
+#: "JSON-like rules", which no beginner can act on.
+IMPORT_STRATEGY_TEXT = (
+    "Paste your strategy in your own words. I will turn it into a draft for you to check "
+    "and approve before it can watch the market."
 )
 
 MAIN_MENU_BUTTONS = [
@@ -173,6 +222,10 @@ ALERT_DAYS = [
 ]
 
 ALERT_HOURS = [f"{hour:02d}:00" for hour in range(24)]
+
+#: The labels this bot prints for "leave where you are". One owner, because the connect
+#: question and the rest of the menus must not disagree about what "Go Back" means.
+_BACK_LABELS: Final[frozenset[str]] = frozenset({"Back", "Go Back", "Main Menu"})
 
 TELEGRAM_TIMEZONES = [
     "UTC",
@@ -227,9 +280,16 @@ class TelegramBotService:
                 and existing_conversation.flow == "telegram_link"
                 and existing_conversation.step == "confirm"
             ):
-                return self._telegram_link_confirmation_message(
-                    message,
-                    existing_conversation,
+                # Start pressed while the connect question is still open and still
+                # unanswered. The question is shown again, on the same inline buttons,
+                # rather than starting a second account beside it. Once the question has
+                # been answered this step is gone, so /start can never bring it back.
+                state = existing_conversation.state_data or {}
+                return self._telegram_link_prompt(
+                    chat_id=message.chat_id,
+                    email=str(state.get("dashboard_email") or "") or None,
+                    replaces=str(state.get("dashboard_replaces") or "") or None,
+                    correlation_id=existing_conversation.correlation_id,
                 )
         attribution = self._parse_deep_link(start_param)
         assertion = IdentityAssertionTokenService(self.settings).issue(
@@ -276,8 +336,8 @@ class TelegramBotService:
             f"Bot start: @{message.username or '-'} tg:{message.telegram_user_id}"
         )
         linked_text = (
-            "\n\nDashboard account connected. I can now show trial status, subscription dates "
-            "and monitor stats for this Telegram user."
+            "\n\nDashboard account connected. Your monitors, trial and plan now show up in "
+            "this chat."
             if linked
             else ""
         )
@@ -294,23 +354,32 @@ class TelegramBotService:
             return await self._free_command(message)
         if message.text.startswith("/start"):
             return await self.handle_start(message)
+        # The commands in ``telegram/profile.BOT_COMMANDS``. None of them needs an
+        # account or an open conversation, so they are answered before either is read.
+        command = self._command_name(message.text)
+        if command in {"about", "help"}:
+            return self._about_message(message)
+        if command == "pricing":
+            return self._pricing_message(message)
+        if command == "support":
+            return self._support_menu_message(message)
         conversation = await self._conversation(message.telegram_user_id)
         if conversation is None:
-            return self._plain(message, "Send /start to begin or resume onboarding.")
+            return self._plain(message, "Send /start to open the main menu.")
         text = message.text.strip()
         if conversation.flow == "telegram_link" and conversation.step == "confirm":
-            normalized_link_text = self._normalize_menu_text(text).casefold()
-            if "yes" in normalized_link_text and "connect" in normalized_link_text:
+            decision = self._telegram_link_decision(text)
+            if decision is ConfirmationReply.AFFIRMATIVE:
                 return await self._confirm_dashboard_telegram_link(
                     self._callback_from_message(message, "telegram_link:confirm"),
                     conversation,
                 )
-            if normalized_link_text in {"cancel", "go back", "back", "main menu"}:
+            if decision is ConfirmationReply.NEGATIVE:
                 return await self._cancel_dashboard_telegram_link(
                     self._callback_from_message(message, "telegram_link:cancel"),
                     conversation,
                 )
-            return self._telegram_link_confirmation_message(message, conversation)
+            return self._telegram_link_reminder_message(message, conversation)
         if conversation.flow == "create_monitor" and conversation.step == "collect_setup_text":
             try:
                 return await self._receive_setup_text(message, conversation)
@@ -392,12 +461,12 @@ class TelegramBotService:
         if normalized == "Open Main Website":
             return self._plain(
                 message,
-                f"Main website: {self._dashboard_url('/')}",
+                f"Main website: {self._dashboard_url(PUBLIC_HOME_PATH)}",
                 buttons=[
                     TelegramButton(
                         "Open Main Website",
                         "external:website",
-                        url=self._dashboard_url("/"),
+                        url=self._dashboard_url(PUBLIC_HOME_PATH),
                     )
                 ],
             )
@@ -435,8 +504,7 @@ class TelegramBotService:
             await self.session.commit()
             return self._plain(
                 message,
-                "Paste your strategy description or JSON-like rules. I will convert it into "
-                "a draft for approval before it can monitor live.",
+                IMPORT_STRATEGY_TEXT,
                 menu=["Go Back"],
             )
         if normalized in CREATE_TEMPLATE_LABELS:
@@ -505,7 +573,7 @@ class TelegramBotService:
                 "Upgrade Creator": "creator",
             }[normalized]
             return await self._billing_checkout_message(message, conversation, plan_code)
-        if normalized in {"Back", "Go Back", "Main Menu"}:
+        if normalized in _BACK_LABELS:
             return await self._main_menu_message(message, conversation)
         if normalized == "Create Monitor":
             return await self._dashboard_callback(
@@ -577,9 +645,7 @@ class TelegramBotService:
             await self._push_navigation(conversation, "menu:performance")
             return self._plain(
                 message,
-                "Performance\n\nForward-test analytics and setup-performance summaries are "
-                "available in the dashboard. Telegram will show a compact summary once live "
-                "results exist.",
+                RESULTS_TEXT,
                 buttons=self._back_buttons("dashboard:performance"),
             )
         if normalized == "About":
@@ -596,8 +662,8 @@ class TelegramBotService:
         if conversation.flow in {"why_no_alert", "setup_replay"}:
             return self._plain(
                 message,
-                "Lifecycles\n\nReplay is hidden. Use lifecycle cards for setup state, "
-                "missing conditions, proof context and chart evidence.",
+                "Lifecycles\n\nOpen Lifecycles on the website to see each setup: which "
+                "conditions passed, which are still missing, and the chart.",
                 buttons=[
                     self._dashboard_button("Open Lifecycles", LIFECYCLES_PATH),
                     TelegramButton("Support", "support:missing_alert"),
@@ -660,9 +726,19 @@ class TelegramBotService:
             elif callback.data in {"account:signup", "account:signin"}:
                 response = await self._account_link_callback(callback, conversation)
             elif callback.data == "telegram_link:confirm":
-                response = await self._confirm_dashboard_telegram_link(callback, conversation)
+                response = await self._confirm_dashboard_telegram_link(
+                    callback,
+                    conversation,
+                    # A tap carries the message it was pressed on, which is the question
+                    # being answered: the answer replaces it, buttons and all.
+                    edited_message_id=callback.message_id,
+                )
             elif callback.data == "telegram_link:cancel":
-                response = await self._cancel_dashboard_telegram_link(callback, conversation)
+                response = await self._cancel_dashboard_telegram_link(
+                    callback,
+                    conversation,
+                    edited_message_id=callback.message_id,
+                )
             elif callback.data == "open_dashboard":
                 response = await self._dashboard_callback(
                     TelegramCallback(
@@ -752,8 +828,7 @@ class TelegramBotService:
                 await self.session.flush()
                 response = self._plain_callback(
                     callback,
-                    "Paste your strategy description or JSON-like rules. I will convert it "
-                    "into a draft for approval before it can monitor live.",
+                    IMPORT_STRATEGY_TEXT,
                     buttons=self._back_buttons("back:create"),
                 )
             elif callback.data.startswith("template:"):
@@ -1021,7 +1096,7 @@ class TelegramBotService:
             f"{strategy.name} notifications are muted for 24 hours. "
             "The monitor and evidence remain saved.",
             buttons=[
-                self._dashboard_button("Open Settings", "/dashboard/settings"),
+                self._dashboard_button("Open Settings", SETTINGS_PATH),
                 TelegramButton("Go Back", "back:previous"),
             ],
         )
@@ -1054,7 +1129,7 @@ class TelegramBotService:
                 callback,
                 "This alert does not include enough strategy-symbol context to mute safely.",
                 buttons=[
-                    self._dashboard_button("Dashboard", "/dashboard/settings"),
+                    self._dashboard_button("Settings", SETTINGS_PATH),
                     TelegramButton("🏠 Main Menu", "back:main"),
                 ],
             )
@@ -1124,6 +1199,16 @@ class TelegramBotService:
         return buttons
 
     @staticmethod
+    def _command_name(text: str) -> str | None:
+        """``/about``, ``/About`` and ``/about@hilal_bot`` are all the command ``about``."""
+
+        stripped = text.strip()
+        if not stripped.startswith("/"):
+            return None
+        word = stripped[1:].split(maxsplit=1)[0] if len(stripped) > 1 else ""
+        return word.partition("@")[0].casefold() or None
+
+    @staticmethod
     def _normalize_menu_text(text: str) -> str:
         normalized = text.strip().replace("\ufe0f", "")
         for prefix in (
@@ -1159,20 +1244,20 @@ class TelegramBotService:
             else False
         )
         text = (
-            "Welcome to the free Hilal Markets starter screen.\n\n"
-            "Use the free/trial path to create a monitor, preview how proof receipts work, "
-            "and start monitoring without automatic trading.\n\n"
-            "You stay responsible for every trading decision."
+            "Start with Hilal Markets for free.\n\n"
+            "Create an account on the website and choose the coins and conditions to watch. "
+            "Your alerts then arrive in this chat. Nothing is ever traded for you.\n\n"
+            "You make every trading decision."
         )
         return self._plain(
             message,
             text,
             buttons=[
-                TelegramButton("Claim trial", "account:signup"),
+                TelegramButton("Create account", "account:signup"),
                 TelegramButton(
                     "Open Main Website",
                     "external:website",
-                    url=self._dashboard_url("/"),
+                    url=self._dashboard_url(PUBLIC_HOME_PATH),
                 ),
                 *([] if linked else [TelegramButton("Sign up / sign in", "account:auth")]),
             ],
@@ -1182,21 +1267,21 @@ class TelegramBotService:
     def _about_text(self) -> str:
         return (
             "ℹ️ About Hilal Markets\n\n"
+            f"{PRODUCT_DESCRIPTOR}\n\n"
             "📌 What it does:\n"
-            "- Monitors approved crypto spot-market conditions.\n"
-            "- Tracks setup lifecycles from forming to complete, invalidated, or expired.\n"
-            "- Sends compact alerts with deterministic proof.\n\n"
+            "- Shows which crypto coins are screened, with the evidence behind each status.\n"
+            "- Watches the spot market for the conditions you choose.\n"
+            "- Sends you an alert here when they are met, with the reasons.\n\n"
             "🧠 How it works:\n"
-            "1. You describe what to watch in the Dashboard.\n"
-            "2. AI converts words into structured rules.\n"
-            "3. You approve the interpretation.\n"
-            "4. The deterministic scanner monitors markets.\n\n"
+            "1. On the website, you choose the coins and the conditions to watch.\n"
+            "2. You check the rules and switch the monitor on.\n"
+            "3. Hilal Markets checks the market and tells you here.\n\n"
             "🛡️ What it does not do:\n"
-            "- It does not place trades.\n"
+            "- It does not place trades or move money.\n"
             "- It does not guarantee outcomes.\n"
-            "- It does not ask for wallet seed phrases or withdrawal keys.\n\n"
-            "Use Telegram for quick status and alerts. Use Dashboard for monitor building, "
-            "settings, tickets, and billing."
+            "- It never asks for your password, wallet seed phrase or keys.\n\n"
+            "Use Telegram for alerts and a quick look. Use the website to build monitors, "
+            "change settings, manage your plan and get help."
         )
 
     def _about_message(self, message: TelegramInboundMessage) -> TelegramOutboundMessage:
@@ -1228,7 +1313,10 @@ class TelegramBotService:
                 "💸 Pricing\n\nHilal Markets is invite-only during its private beta, so "
                 "plans and prices are not published yet. Nothing is charged in the beta."
             )
-        return "💸 Pricing\n\nCompare plans on the public pricing page."
+        return (
+            "💸 Pricing\n\nSee every plan and its price on the public pricing page. "
+            "To choose or change your plan, open the Subscription page."
+        )
 
     def _pricing_buttons(self) -> list[TelegramButton]:
         if self.settings.waitlist_mode:
@@ -1237,8 +1325,9 @@ class TelegramBotService:
             TelegramButton(
                 "Open Pricing",
                 "external:pricing",
-                url=self._dashboard_url("/pricing#pricing"),
-            )
+                url=self._dashboard_url(f"{PRICING_PATH}#pricing"),
+            ),
+            self._dashboard_button("Subscription page", SUBSCRIPTION_PATH),
         ]
 
     def _pricing_message(self, message: TelegramInboundMessage) -> TelegramOutboundMessage:
@@ -1267,13 +1356,13 @@ class TelegramBotService:
             )
         buttons.extend(
             [
-                self._dashboard_button("Create a ticket", "/dashboard/support"),
+                self._dashboard_button("Create a ticket", SUPPORT_PATH),
             ]
         )
         return self._plain(
             message,
-            "🆘 Support\n\nChoose one option. Tickets are created in Dashboard so context "
-            "and screenshots stay attached.",
+            "🆘 Support\n\nNeed help? Create a support ticket on the website. Your account "
+            "details are attached to it, so we can help you faster.",
             buttons=buttons,
         )
 
@@ -1296,8 +1385,8 @@ class TelegramBotService:
             "the website to be considered. If you have already been invited, use the "
             "buttons below to link this Telegram chat to your account."
             if self.settings.waitlist_mode
-            else "Sign up or sign in on the Dashboard, then Telegram will link to that "
-            "account for trial status, monitor counts, subscription dates and alerts."
+            else "Create an account or sign in on the website. This chat is then connected "
+            "to that account, so your alerts, monitors, trial and plan show up here."
         )
         return self._plain_callback(
             callback,
@@ -1387,8 +1476,8 @@ class TelegramBotService:
         if not await self._has_email_identity(user_id):
             return self._plain_callback(
                 callback,
-                "Claiming a trial requires a Dashboard account first so trial limits, "
-                "subscription ending date and account recovery are tied to you safely.",
+                "To start a trial, first create a Hilal Markets account or sign in. The trial "
+                "then belongs to that account, so you can never lose it.",
                 buttons=[
                     TelegramButton("Sign up", "account:signup"),
                     TelegramButton("Sign in", "account:signin"),
@@ -1422,39 +1511,36 @@ class TelegramBotService:
     async def _activate_free_plan_message(
         self, message: TelegramInboundMessage, conversation: TelegramConversationState
     ) -> TelegramOutboundMessage:
-        user_id = self._require_user_id(conversation)
-        if not await self._has_email_identity(user_id):
-            return self._plain(
-                message,
-                "Activate Free Plan requires sign up/sign in first so usage and account recovery "
-                "are tied to your profile.",
-                buttons=[
-                    TelegramButton("Sign up", "account:signup"),
-                    TelegramButton("Sign in", "account:signin"),
-                ],
-                menu=["Sign up", "Sign in", "Go Back"],
-            )
-        try:
-            await BillingService(self.session, self.settings).activate_free_plan(
-                user_id=user_id,
-                plan_code="demo",
-            )
-            await self.session.commit()
-            await AdminNotificationService(self.settings).send(f"Free plan: user:{user_id}")
-        except BillingError as exc:
-            await self.session.rollback()
-            return self._plain(message, f"Free plan could not be activated: {escape(str(exc))}")
-        return self._plain(
-            message,
-            "Free plan activated. You can create one live monitor within Demo limits.",
-            menu=["Create Monitor", "My Monitors", "Subscription", "Go Back"],
-        )
+        """Kept for the "Activate Free Plan" key already sitting in people's chats.
+
+        It used to switch the account onto the ``demo`` plan from Telegram, outside the one
+        place that decides which plan a person may take. It goes to that place now.
+        """
+
+        return await self._subscription_page_message(message, conversation)
 
     async def _billing_checkout_message(
         self,
         message: TelegramInboundMessage,
         conversation: TelegramConversationState,
         plan_code: str,
+    ) -> TelegramOutboundMessage:
+        """Kept for the "Upgrade ..." keys and ``billing:checkout:*`` buttons already sent.
+
+        This built a payment link for ``trader``, ``pro`` or ``creator`` straight from the
+        bot. It never asked ``services/billing.plan_is_on_sale`` — the one owner of
+        "may somebody be offered this plan today" — so the bot could open a payment for a
+        plan the Subscription page would refuse, and it named no way of paying at all.
+        Plans are chosen on the Subscription page, which asks that owner.
+        """
+
+        del plan_code
+        return await self._subscription_page_message(message, conversation)
+
+    async def _subscription_page_message(
+        self,
+        message: TelegramInboundMessage,
+        conversation: TelegramConversationState,
     ) -> TelegramOutboundMessage:
         user_id = self._require_user_id(conversation)
         if not await self._has_email_identity(user_id):
@@ -1475,38 +1561,23 @@ class TelegramBotService:
                 return self._plain(message, f"Could not create account link: {escape(str(exc))}")
             return self._plain(
                 message,
-                "Connect a Dashboard account first. Payment links require sign up/sign in so "
-                "the subscription attaches to the correct account.",
+                "Connect a Dashboard account first. A plan belongs to an account, so sign up "
+                "or sign in, then choose your plan on the Subscription page.",
                 buttons=[
                     TelegramButton("Open Sign Up", "external:signup", url=signup_url),
                     TelegramButton("Open Sign In", "external:signin", url=signin_url),
                 ],
                 menu=["Sign up", "Sign in", "Go Back"],
             )
-        base = str(self.settings.public_base_url).rstrip("/")
-        try:
-            checkout = await BillingService(self.session, self.settings).checkout_session(
-                user_id=user_id,
-                plan_code=plan_code,
-                success_url=f"{base}/billing/success",
-                cancel_url=f"{base}/billing/cancel",
-            )
-            await self.session.commit()
-            await AdminNotificationService(self.settings).send(
-                f"Payment link: user:{user_id} {plan_code}"
-            )
-        except BillingError as exc:
-            await self.session.rollback()
-            return self._plain(message, f"Payment link failed: {escape(str(exc))}")
         return self._plain(
             message,
-            f"Payment link created for {plan_code.title()}.\n\n"
-            "Payment confirmation comes from the billing provider webhook.",
+            "💳 Plans and payment\n\n"
+            "Choose or change your plan on the Subscription page. It shows only the plans "
+            "and ways to pay that are open to you right now.",
             buttons=[
-                TelegramButton("Open Payment Link", "external:payment", url=checkout.checkout_url),
-                self._dashboard_button("Subscription", "/dashboard/billing"),
+                self._dashboard_button("Subscription page", SUBSCRIPTION_PATH),
+                TelegramButton("🏠 Main Menu", "back:main"),
             ],
-            menu=["Subscription", "Support", "Go Back"],
         )
 
     async def _prepare_monitor_creation(self, conversation: TelegramConversationState) -> None:
@@ -1660,8 +1731,7 @@ class TelegramBotService:
         if not self._definition_has_executable_conditions(preview.strategy):
             return self._plain(
                 message,
-                "Action needed: Quick Scan needs at least one supported deterministic "
-                "condition.\n\n"
+                "Action needed: Quick Scan needs at least one condition it can check.\n\n"
                 "<b>Unsupported or unclear:</b>\n"
                 + "\n".join(
                     f"<b>- {escape(issue.message)}</b>" for issue in preview.unsupported_conditions
@@ -2097,10 +2167,10 @@ class TelegramBotService:
             "Explain rules\n\n"
             "This screen explains the draft you are reviewing. It does not edit the monitor. "
             "Use Edit if you want to change the setup text and generate a new interpretation.\n\n"
-            "Current deterministic rules:\n"
+            "The rules as they will be checked:\n"
             + "\n".join(rule_lines)
-            + "\n\nEvery alert later includes actual value, required value, pass/fail/pending "
-            "state, timeframe, candle timestamp and data freshness.",
+            + "\n\nEvery alert shows the real value, the value your rule needs, whether it "
+            "passed, the timeframe, the candle time and how fresh the prices are.",
             buttons=[
                 TelegramButton("Approve", "approve_strategy"),
                 TelegramButton("Edit", "mode_describe"),
@@ -2210,8 +2280,8 @@ class TelegramBotService:
         provider = (conversation.state_data or {}).get("scan_provider", "binance")
         return self._plain(
             message,
-            "Quick Scan\n\nChoose how to run an on-demand scan. Quotas and plan limits "
-            "are enforced by the API and worker layer.\n\n"
+            "Quick Scan\n\nChoose how to check the market once. Your plan decides how many "
+            "checks you can run each day.\n\n"
             f"Data provider: {str(provider).title()}",
             buttons=[
                 TelegramButton("Provider: Binance", "scan_provider:binance"),
@@ -2325,41 +2395,6 @@ class TelegramBotService:
     ) -> TelegramOutboundMessage:
         return await self._latest_setups(message, conversation)
 
-    async def _subscription(
-        self, message: TelegramInboundMessage, conversation: TelegramConversationState
-    ) -> TelegramOutboundMessage:
-        trial = await self.session.scalar(
-            select(Trial).where(Trial.user_id == conversation.user_id)
-        )
-        subscription = await self.session.scalar(
-            select(Subscription).where(Subscription.user_id == conversation.user_id)
-        )
-        if subscription:
-            text = f"Subscription status: {subscription.status.value}"
-        elif trial:
-            text = f"Trial status: {trial.status.value}\nTrial ends: {trial.ends_at.isoformat()}"
-        else:
-            text = "No active trial or subscription found."
-        return self._plain(
-            message,
-            "Subscription\n\n" + text,
-            buttons=[
-                TelegramButton("Activate Free Plan", "billing:free"),
-                TelegramButton("Upgrade Trader", "billing:checkout:trader"),
-                TelegramButton("Upgrade Pro", "billing:checkout:pro"),
-                TelegramButton("Upgrade Creator", "billing:checkout:creator"),
-                self._dashboard_button("Usage and Limits", "/dashboard/billing"),
-                TelegramButton("Go Back", "back:previous"),
-            ],
-            menu=[
-                "Activate Free Plan",
-                "Upgrade Trader",
-                "Upgrade Pro",
-                "Upgrade Creator",
-                "Go Back",
-            ],
-        )
-
     async def _trial(
         self, message: TelegramInboundMessage, conversation: TelegramConversationState
     ) -> TelegramOutboundMessage:
@@ -2432,9 +2467,7 @@ class TelegramBotService:
         if action == "menu:performance":
             return self._plain(
                 message,
-                "Performance\n\nForward-test analytics and setup-performance summaries are "
-                "available in the dashboard. Telegram will show a compact summary once live "
-                "results exist.",
+                RESULTS_TEXT,
                 buttons=self._back_buttons("dashboard:performance"),
             )
         if action == "menu:about":
@@ -2922,8 +2955,7 @@ class TelegramBotService:
                 "Describe the setup in one message. Example: bullish liquidity sweep, "
                 "price above the 4h 200 EMA, volume at least 1.5x average."
                 if action == "mode_describe"
-                else "Paste your strategy description or JSON-like rules. I will convert it "
-                "into a draft for approval before it can monitor live."
+                else IMPORT_STRATEGY_TEXT
             )
             return self._plain_callback(callback, prompt, buttons=self._back_buttons("back:create"))
         if action == "mode_template":
@@ -2966,15 +2998,22 @@ class TelegramBotService:
                 "Draft monitors remain inactive until you approve and activate them."
             ),
             "monitors:paused": "Paused monitors stay saved and can be resumed from the dashboard.",
-            "scan:existing": "Open the dashboard Quick Scan page to choose an approved strategy.",
-            "scan:new": "Describe a one-off condition and run a deterministic Quick Scan.",
+            "scan:existing": (
+                "Open the Create a monitor page on the website to check the market with one "
+                "of your monitors."
+            ),
+            "scan:new": "Describe a condition and check the market for it once.",
             "scan:template": "Choose a saved template and run a one-off Quick Scan.",
-            "scan:previous": "Previous scans are shown on the Scan Results dashboard page.",
-            "near:top": "Showing closest setups uses the Lifecycles view.",
-            "near:one_left": "One-condition-remaining results are filtered by proof receipts.",
+            "scan:previous": (
+                "Check the market again from the Create a monitor page on the website."
+            ),
+            "near:top": "The closest setups are on the Lifecycles page.",
+            "near:one_left": "Setups with one condition left are on the Lifecycles page.",
             "near:strategy": "Filter lifecycle cards by strategy in the dashboard.",
             "near:symbol": "Filter lifecycle cards by symbol in the dashboard.",
-            "latest:confirmed": "Confirmed setups appear after deterministic rule confirmation.",
+            "latest:confirmed": (
+                "A setup is confirmed when every one of your conditions has passed."
+            ),
             "latest:forming": "Forming setups appear when conditions are close but incomplete.",
             "latest:invalidated": "Invalidated setup history is preserved in lifecycle tracking.",
             "latest:expired": (
@@ -2984,7 +3023,7 @@ class TelegramBotService:
             "settings:frequency": "Alert frequency and cooldowns can be managed in Settings.",
             "settings:threshold": "Near-Miss thresholds can be managed in Settings.",
             "settings:timezone": "Timezone preferences can be managed in Settings.",
-            "proof:view": "Use Lifecycles for deterministic proof context.",
+            "proof:view": "Open Lifecycles to see which conditions passed and why.",
             "mute_strategy": "Strategy mute controls are managed in Settings.",
             "ignore_symbol": "Symbol ignore lists are managed in Settings.",
         }
@@ -3084,9 +3123,9 @@ class TelegramBotService:
             )
         return self._plain_callback(
             callback,
-            "Open this secure Dashboard link. It expires shortly.\n\n"
-            "After you submit the form, come back to Telegram. I will recognize the linked "
-            "Dashboard account for trial status, subscription dates and monitor stats.",
+            "Open this secure Dashboard link. It works once and expires in 30 minutes.\n\n"
+            "When you have signed up or signed in, come back to this chat. It will be "
+            "connected to your account.",
             buttons=[
                 TelegramButton(
                     "Open Sign Up" if target == "signup" else "Open Sign In",
@@ -3239,128 +3278,336 @@ class TelegramBotService:
         raw_token: str,
     ) -> TelegramOutboundMessage:
         try:
-            user, email = await TelegramAccountLinkService(
+            offer = await TelegramAccountLinkService(
                 self.session,
                 self.settings,
-            ).pending_dashboard_start_link(raw_token)
+            ).pending_dashboard_start_link(raw_token, telegram_user_id=message.telegram_user_id)
         except TelegramAccountLinkError as exc:
             await self.session.rollback()
             return self._plain(
                 message,
                 f"This Telegram connection link is not available: {escape(str(exc))}\n\n"
-                "Open the dashboard Integrations page and request a fresh Telegram link.",
-                buttons=[self._dashboard_button("Dashboard")],
+                f"Ask for a new one on the Connections page: "
+                f"{self._dashboard_url(CONNECTIONS_PATH)}",
+                buttons=[self._dashboard_button("Connections page", CONNECTIONS_PATH)],
             )
         conversation = await self._upsert_conversation(
             message,
-            user_id=user.id,
+            user_id=offer.user.id,
             onboarding_session_id=None,
             flow="telegram_link",
             step="confirm",
             state_data={
                 "telegram_dashboard_link_token": raw_token,
-                "dashboard_email": email,
+                "dashboard_email": offer.email,
+                "dashboard_replaces": offer.replaces,
             },
         )
         await self.session.commit()
-        visible_email = email or "this dashboard account"
-        return TelegramOutboundMessage(
+        return self._telegram_link_prompt(
             chat_id=message.chat_id,
-            text=(
-                "🔗 Telegram connection\n\n"
-                f"Connect this Telegram account to {visible_email}?\n\n"
-                "After confirmation, this Telegram chat can receive Hilal Markets notifications."
-            ),
-            buttons=[
-                TelegramButton("✅ Yes, connect", "telegram_link:confirm"),
-                TelegramButton("Cancel", "telegram_link:cancel"),
-            ],
+            email=offer.email,
+            replaces=offer.replaces,
             correlation_id=conversation.correlation_id,
         )
 
-    def _telegram_link_confirmation_message(
+    def _telegram_link_prompt(
+        self,
+        *,
+        chat_id: str,
+        email: str | None,
+        replaces: str | None,
+        correlation_id: str | None,
+    ) -> TelegramOutboundMessage:
+        """The one question, with one Confirm and one Cancel attached to it.
+
+        Written as the same message from both doors — the ``/start link_...`` itself, and
+        a plain ``/start`` sent while the question is still open — so the words a person
+        confirms cannot differ between the two.
+        """
+
+        visible_email = email or "this dashboard account"
+        lines = [
+            "🔗 Telegram connection",
+            "",
+            f"Connect this Telegram account to {visible_email}?",
+            "",
+            "Once connected, this Telegram chat receives your Hilal Markets alerts. "
+            "Nothing is sent before you confirm, and connecting never places a trade "
+            "or moves money.",
+        ]
+        if replaces:
+            lines += ["", f"This replaces {replaces}, which is connected to that account now."]
+        lines += ["", "Press Confirm to connect, or Cancel to leave it."]
+        return TelegramOutboundMessage(
+            chat_id=chat_id,
+            text="\n".join(lines),
+            buttons=self._telegram_link_buttons(),
+            menu=[],
+            correlation_id=correlation_id,
+            keyboard=KEYBOARD_INLINE,
+        )
+
+    @staticmethod
+    def _telegram_link_buttons() -> list[TelegramButton]:
+        """The two buttons of the open question. One owner, so no copy drifts."""
+
+        return [
+            TelegramButton("Confirm", "telegram_link:confirm"),
+            TelegramButton("Cancel", "telegram_link:cancel"),
+        ]
+
+    def _telegram_link_reminder_message(
         self,
         message: TelegramInboundMessage,
         conversation: TelegramConversationState,
     ) -> TelegramOutboundMessage:
-        visible_email = str(
-            (conversation.state_data or {}).get("dashboard_email") or "this dashboard account"
-        )
+        """One line, pointing at the buttons — never the whole question again.
+
+        Re-sending the prompt for every message that was not an exact match is how a
+        person got the same message over and over. Anything the shared yes/no reader
+        cannot answer still leaves the question open, but it is answered with a line and
+        the two buttons, not with the prompt.
+        """
+
         return TelegramOutboundMessage(
             chat_id=message.chat_id,
             text=(
-                "Telegram connection\n\n"
-                f"Connect this Telegram account to {visible_email}?\n\n"
-                "After confirmation, this Telegram chat can receive Hilal Markets notifications."
+                "Press Confirm to connect, or Cancel to stop. "
+                "Nothing has been connected yet."
             ),
-            buttons=[
-                TelegramButton("Yes, connect", "telegram_link:confirm"),
-                TelegramButton("Cancel", "telegram_link:cancel"),
-            ],
+            buttons=self._telegram_link_buttons(),
+            menu=[],
             correlation_id=conversation.correlation_id,
+            keyboard=KEYBOARD_INLINE,
+        )
+
+    @classmethod
+    def _telegram_link_decision(cls, text: str) -> ConfirmationReply:
+        """Read one typed reply against the open connect question.
+
+        The words that mean yes and no are the product's one vocabulary, in
+        ``engine/active_question.py`` — the same reader the setup questions use, so a
+        person who answers "ok" here is not being read by a stricter list over there.
+        Two things are checked first because they are not vocabulary at all: the words
+        this screen prints on its own buttons ("Confirm", "Cancel", "Connect"), and the
+        app-wide back labels, which mean "leave this step" everywhere in this bot.
+        """
+
+        label = normalize_answer_text(cls._normalize_menu_text(text))
+        if label in _TELEGRAM_LINK_LABELS:
+            return _TELEGRAM_LINK_LABELS[label]
+        return resolve_confirmation(text)
+
+    def _telegram_link_answer(
+        self,
+        *,
+        chat_id: str,
+        edit_message_id: str | None,
+        text: str,
+        buttons: list[TelegramButton],
+    ) -> TelegramOutboundMessage:
+        """Answer a decided connect question, on the message that asked it.
+
+        A tap carries the message to edit, so the question and its two buttons are
+        replaced by the answer. A typed reply has no message of ours to edit: it goes out
+        as a new message and takes the leftover reply keyboard with it, because a message
+        cannot clear a keyboard and carry buttons at the same time — Telegram allows one
+        interface per message. Every answer therefore writes its next step into the text
+        as well, which is the half that works on both paths.
+        """
+
+        if edit_message_id is not None:
+            return TelegramOutboundMessage(
+                chat_id=chat_id,
+                text=text,
+                buttons=buttons,
+                menu=[],
+                edit_message_id=edit_message_id,
+                keyboard=KEYBOARD_INLINE,
+            )
+        return TelegramOutboundMessage(
+            chat_id=chat_id,
+            text=text,
+            menu=[],
+            keyboard=KEYBOARD_REMOVE_REPLY_KEYBOARD,
+        )
+
+    def _telegram_link_connections_button(self) -> TelegramButton:
+        """Where to go next: the Connections page, as a real link rather than a guess."""
+
+        return self._dashboard_button("Connections page", CONNECTIONS_PATH)
+
+    def _telegram_link_refusal_text(self, code: str, *, email: str | None) -> str:
+        connections = self._dashboard_url(CONNECTIONS_PATH)
+        if code == "telegram_already_linked":
+            return (
+                "⚠️ This Telegram is already connected to another Hilal Markets account. "
+                f"Remove it there first on the Connections page:\n{connections}"
+            )
+        if code == "telegram_link_expired":
+            return (
+                "⏳ This Telegram connection expired before it was confirmed.\n\n"
+                f"Ask for a new one on the Connections page:\n{connections}"
+            )
+        if code == "telegram_link_used":
+            return (
+                "ℹ️ This Telegram connection link has already been used.\n\n"
+                f"If this chat is not connected yet, start again on the Connections page:\n"
+                f"{connections}"
+            )
+        if code == "telegram_link_invalid":
+            return (
+                "⚠️ This Telegram connection link is not one I can use, so nothing was "
+                f"connected.\n\nStart again on the Connections page:\n{connections}"
+            )
+        return (
+            "⚠️ Telegram could not be connected, so nothing was changed.\n\n"
+            f"Start again on the Connections page:\n{connections}"
         )
 
     async def _confirm_dashboard_telegram_link(
         self,
         callback: TelegramCallback,
         conversation: TelegramConversationState,
+        *,
+        edited_message_id: str | None = None,
     ) -> TelegramOutboundMessage:
-        raw_token = str((conversation.state_data or {}).get("telegram_dashboard_link_token") or "")
+        """Answer the connect question. Every outcome leaves the step behind.
+
+        The step used to survive every failure, which is what made the prompt come back
+        for the rest of the conversation: an expired link, a Telegram belonging to someone
+        else and an unexpected error all answered the person and then left the question
+        open underneath. Whatever happens here, the step ends, the pending token is
+        forgotten, and the answer names one way forward.
+        """
+
+        state = conversation.state_data or {}
+        raw_token = str(state.get("telegram_dashboard_link_token") or "")
+        email = str(state.get("dashboard_email") or "") or None
+        links = TelegramAccountLinkService(self.session, self.settings)
+        if not raw_token:
+            # The question was already answered, or was never opened in this conversation.
+            # Say which, instead of pretending a fresh decision was made or asking again.
+            holder = await links.account_holding(callback.telegram_user_id)
+            if holder is not None and holder == conversation.user_id:
+                return await self._finish_telegram_link_step(
+                    callback,
+                    conversation,
+                    edited_message_id=edited_message_id,
+                    text=self._telegram_link_connected_text(email),
+                    buttons=[],
+                )
+            return await self._finish_telegram_link_step(
+                callback,
+                conversation,
+                edited_message_id=edited_message_id,
+                text=self._telegram_link_refusal_text("telegram_link_invalid", email=email),
+                buttons=[self._telegram_link_connections_button()],
+                owner_id=holder,
+            )
         try:
-            user, email = await TelegramAccountLinkService(
-                self.session,
-                self.settings,
-            ).complete_dashboard_start_link(
+            completion = await links.complete_dashboard_start_link(
                 raw_token=raw_token,
                 telegram_user_id=callback.telegram_user_id,
                 chat_id=callback.chat_id,
                 username=conversation.username,
             )
         except TelegramAccountLinkError as exc:
-            return self._plain_callback(
+            await self.session.rollback()
+            # The conversation was pointed at the account named in the link when the
+            # question was asked. If the answer is no, it goes back to the account this
+            # Telegram is actually on: a chat that was refused must not keep acting as the
+            # account that refused it.
+            holder = await links.account_holding(callback.telegram_user_id)
+            return await self._finish_telegram_link_step(
                 callback,
-                f"Could not connect Telegram: {escape(str(exc))}\n\n"
-                "Open the dashboard Integrations page and request a fresh link.",
-                buttons=[self._dashboard_button("Dashboard")],
+                await self._conversation(callback.telegram_user_id),
+                edited_message_id=edited_message_id,
+                text=self._telegram_link_refusal_text(exc.code, email=email),
+                buttons=[self._telegram_link_connections_button()],
+                owner_id=holder,
             )
-        conversation.user_id = user.id
-        conversation.flow = "main_menu"
-        conversation.step = "idle"
-        conversation.state_data = {
-            **(conversation.state_data or {}),
-            "dashboard_linked_at": datetime.now(UTC).isoformat(),
-            "dashboard_email": email,
-        }
-        await self.session.flush()
-        return self._plain_callback(
+        except Exception:  # noqa: BLE001 - a step that outlives its own crash is the trap
+            await self.session.rollback()
+            holder = await links.account_holding(callback.telegram_user_id)
+            return await self._finish_telegram_link_step(
+                callback,
+                await self._conversation(callback.telegram_user_id),
+                edited_message_id=edited_message_id,
+                text=self._telegram_link_refusal_text("unexpected", email=email),
+                buttons=[self._telegram_link_connections_button()],
+                owner_id=holder,
+            )
+        return await self._finish_telegram_link_step(
             callback,
-            (
-                "✅ Telegram connected\n\n"
-                f"Linked to {email or 'your dashboard account'}.\n"
-                "Your dashboard will refresh the Integrations status automatically."
-            ),
-            buttons=[
-                self._dashboard_button("Dashboard"),
-                TelegramButton("Main Menu", "back:main"),
-            ],
-            menu=PRIMARY_MENU,
+            conversation,
+            edited_message_id=edited_message_id,
+            text=self._telegram_link_connected_text(completion.email),
+            buttons=[],
+            owner_id=completion.user.id,
+        )
+
+    def _telegram_link_connected_text(self, email: str | None) -> str:
+        return (
+            "✅ Telegram connected\n\n"
+            "This chat now receives your Hilal Markets alerts"
+            f"{f' for {email}' if email else ''}.\n\n"
+            "You can change this any time on the Connections page: "
+            f"{self._dashboard_url(CONNECTIONS_PATH)}"
         )
 
     async def _cancel_dashboard_telegram_link(
         self,
         callback: TelegramCallback,
         conversation: TelegramConversationState,
+        *,
+        edited_message_id: str | None = None,
     ) -> TelegramOutboundMessage:
-        conversation.flow = "main_menu"
-        conversation.step = "idle"
-        state = dict(conversation.state_data or {})
-        state.pop("telegram_dashboard_link_token", None)
-        conversation.state_data = state
-        await self.session.flush()
-        return self._plain_callback(
+        return await self._finish_telegram_link_step(
             callback,
-            "Telegram connection cancelled.",
-            buttons=[TelegramButton("Main Menu", "back:main")],
+            conversation,
+            edited_message_id=edited_message_id,
+            text=(
+                "Cancelled — nothing was connected.\n\n"
+                "To connect later, start again on the Connections page: "
+                f"{self._dashboard_url(CONNECTIONS_PATH)}"
+            ),
+            buttons=[],
+        )
+
+    async def _finish_telegram_link_step(
+        self,
+        callback: TelegramCallback,
+        conversation: TelegramConversationState | None,
+        *,
+        edited_message_id: str | None,
+        text: str,
+        buttons: list[TelegramButton],
+        owner_id: UUID | None = None,
+    ) -> TelegramOutboundMessage:
+        """End the connect step, and answer it in the same breath.
+
+        The commit is here rather than left to the caller on purpose: a step ended only in
+        the session's pending state is still open tomorrow if the message after it fails,
+        and an open step is the prompt coming back.
+        """
+
+        if conversation is not None:
+            state = dict(conversation.state_data or {})
+            state.pop("telegram_dashboard_link_token", None)
+            state.pop("dashboard_replaces", None)
+            conversation.flow = "main_menu"
+            conversation.step = "idle"
+            conversation.state_data = state
+            if owner_id is not None:
+                conversation.user_id = owner_id
+            await self.session.commit()
+        return self._telegram_link_answer(
+            chat_id=callback.chat_id,
+            edit_message_id=edited_message_id,
+            text=text,
+            buttons=buttons,
         )
 
     async def _upsert_conversation(
@@ -3425,22 +3672,7 @@ class TelegramBotService:
                 action=callback.data.split(":", 1)[0],
                 payload_hash=payload_hash,
                 status="processed",
-                result_payload={
-                    "chat_id": response.chat_id,
-                    "text": response.text,
-                    "buttons": [
-                        {
-                            "text": button.text,
-                            "callback_data": button.callback_data,
-                            "url": button.url,
-                        }
-                        for button in response.buttons
-                    ],
-                    "menu": response.menu,
-                    "parse_mode": response.parse_mode,
-                    "correlation_id": response.correlation_id,
-                    "edit_message_id": response.edit_message_id,
-                },
+                result_payload=response.to_payload(),
                 consumed_at=datetime.now(UTC),
                 expires_at=datetime.now(UTC) + timedelta(days=7),
                 created_at=datetime.now(UTC),
@@ -3592,23 +3824,31 @@ class TelegramBotService:
             )
         return conversation.user_id
 
-    def _dashboard_url(self, path: str = "/dashboard") -> str:
+    def _dashboard_url(self, path: str = HOME_PATH) -> str:
+        """An address in a message. ``path`` is always a name from ``core/dashboard_paths``.
+
+        ``tests/integration/test_telegram_links_resolve.py`` refuses a path typed into a
+        call here, and opens every one the bot can send against the real app.
+        """
+
         normalized = path if path.startswith("/") else f"/{path}"
         return f"{str(self.settings.public_base_url).rstrip('/')}{normalized}"
 
-    def _dashboard_button(
-        self, label: str = "Dashboard", path: str = "/dashboard"
-    ) -> TelegramButton:
+    def _dashboard_button(self, label: str = "Dashboard", path: str = HOME_PATH) -> TelegramButton:
         return TelegramButton(label, "external:dashboard", url=self._dashboard_url(path))
 
     @staticmethod
     def _dashboard_path_for_page(page: str) -> str:
         return {
-            "home": "/dashboard",
-            "how": "/how-it-works",
-            "about": "/about",
-            "billing": "/dashboard/billing",
-            "trial": "/dashboard/trial",
+            # Home. "/dashboard" only redirects here now.
+            "home": HOME_PATH,
+            "how": HOW_IT_WORKS_PATH,
+            "about": ABOUT_PATH,
+            # The plan page the redesigned dashboard uses. "/dashboard/billing" is the older
+            # billing screen; both names stay because they are in buttons already sent.
+            "billing": SUBSCRIPTION_PATH,
+            "trial": SUBSCRIPTION_PATH,
+            "subscription": SUBSCRIPTION_PATH,
             # One page authors a monitor: the canvas. Both names are kept because both
             # are already written into buttons in messages that have been sent.
             "builder": MONITOR_PATH,
@@ -3625,10 +3865,12 @@ class TelegramBotService:
             "settings": SETTINGS_PATH,
             "support": SUPPORT_PATH,
             "connections": CONNECTIONS_PATH,
-            "performance": "/dashboard",
+            # What the monitors found. There is no separate performance page.
+            "performance": OPPORTUNITIES_PATH,
+            "opportunities": OPPORTUNITIES_PATH,
             "setup_replay": LIFECYCLES_PATH,
             "why_no_alert": LIFECYCLES_PATH,
-        }.get(page, "/dashboard")
+        }.get(page, HOME_PATH)
 
     @staticmethod
     def _chart_url(result: EvaluationResult) -> str:
@@ -3658,8 +3900,8 @@ class TelegramBotService:
             await self.session.commit()
             return self._plain_callback(
                 callback,
-                "Connect a Dashboard account first. This secure link binds Dashboard to "
-                "Telegram so monitor stats, trial status and subscription dates stay in sync.",
+                "Connect a Dashboard account first. Sign up or sign in with a secure link "
+                "below, and this chat is connected to your account.",
                 buttons=[
                     TelegramButton("Open Sign Up", "external:signup", url=signup_url),
                     TelegramButton("Open Sign In", "external:signin", url=signin_url),
@@ -3667,7 +3909,7 @@ class TelegramBotService:
             )
         return self._plain_callback(
             callback,
-            "Open Dashboard in your browser.",
+            "Open this page on the website.",
             buttons=[self._dashboard_button("Dashboard", path)],
             menu=PRIMARY_MENU,
         )
@@ -3786,19 +4028,6 @@ class TelegramBotService:
 
     @staticmethod
     def _outbound_from_payload(payload: dict) -> TelegramOutboundMessage:
-        return TelegramOutboundMessage(
-            chat_id=str(payload["chat_id"]),
-            text=str(payload["text"]),
-            buttons=[
-                TelegramButton(
-                    text=str(button["text"]),
-                    callback_data=str(button.get("callback_data") or ""),
-                    url=button.get("url"),
-                )
-                for button in payload.get("buttons", [])
-            ],
-            menu=[str(item) for item in payload.get("menu", [])],
-            parse_mode=payload.get("parse_mode"),
-            correlation_id=payload.get("correlation_id"),
-            edit_message_id=payload.get("edit_message_id"),
-        )
+        """Read back an answer kept for a replay. One reader: see ``TelegramOutboundMessage``."""
+
+        return TelegramOutboundMessage.from_payload(payload)

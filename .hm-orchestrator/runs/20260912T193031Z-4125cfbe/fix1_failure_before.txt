@@ -1,0 +1,12 @@
+﻿
+=================================== ERRORS ====================================
+_________ ERROR collecting tests/unit/test_operational_issue_queue.py _________
+ImportError while importing test module 'C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_operational_issue_queue.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+tests\unit\test_operational_issue_queue.py:16: in <module>
+    from ai_market_monitor.observability.issues import (
+E   ImportError: cannot import name 'sanitize_dedupe_key' from 'ai_market_monitor.observability.issues' (C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\observability\issues.py)
+=========================== short test summary info ===========================
+ERROR tests/unit/test_operational_issue_queue.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!

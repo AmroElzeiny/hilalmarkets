@@ -34,6 +34,13 @@
      identical — `test_invariant_focus_visibility.py` fails the build if they drift. */
   --hm-focus-ring: 3px solid #202329;
   --hm-focus-halo: 0 0 0 6px #cbfa4d;
+  /* The Ask AI sky blue, for the "Ask AI" label above the assistant's button
+     (`hm-ask-tag.css`). `hilalmarkets-brand.css` owns these; this is the copy the public
+     pages get, for the same reason as the focus ring above. The two must stay identical —
+     `test_invariant_ask_ai_corner_tag.py` fails the build if they drift. */
+  --hm-sky: #0e78af;
+  --hm-sky-strong: #0a6086;
+  --hm-sky-soft: #e6f4fb;
 }
 *{box-sizing:border-box}
 .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
@@ -281,7 +288,7 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .pricing-money-back strong{color:#2b2e35;font-family:var(--hm-font-display);font-size:1rem;font-weight:500;line-height:1.35}
 .pricing-money-back span{color:#2b2e35;font-size:.78rem;line-height:1.5}
 .annual-soon{display:block;margin-top:-12px;color:var(--muted);font-size:.78rem}
-.offer-countdown{margin:-8px 0 18px;padding:12px 14px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;border:1px solid var(--line);border-radius:16px;background:var(--ivory-2)}
+.offer-countdown{margin:10px 0 18px;padding:12px 14px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;border:1px solid var(--line);border-radius:16px;background:var(--ivory-2)}
 /* Three separate facts decide whether the launch offer shows, and each has one owner:
    the server renders `hidden` until the script has a real count, the offer script marks
    `data-offer-live` while the deadline is still ahead and `data-offer-ended` once it is
@@ -309,10 +316,14 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .checkout-facts dt,.billing-result-facts dt{color:var(--muted)}
 .checkout-facts dd,.billing-result-facts dd{margin:0;text-align:right;font-weight:600;color:var(--ink)}
 .checkout-limit-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:20px}
-.checkout-limit-grid article{display:grid;grid-template-columns:auto 1fr;column-gap:10px;align-items:center;padding:14px;border:1px solid var(--line);border-radius:15px;background:var(--ivory)}
+/* `minmax(min-content,1fr)` and `min-width:0`, not a plain `1fr`: a plain `1fr` track never
+   shrinks below its longest word, so at 1024px a tile's number ran out of its own box.
+   `overflow-wrap: anywhere` would shrink the min-content to one character and make the
+   second column collapse, so the number and label use `break-word` instead. */
+.checkout-limit-grid article{display:grid;grid-template-columns:auto minmax(min-content,1fr);column-gap:10px;align-items:center;min-width:0;padding:14px;border:1px solid var(--line);border-radius:15px;background:var(--ivory)}
 .checkout-limit-grid article>.icon{grid-row:1/3;color:var(--emerald-700)}
-.checkout-limit-grid strong{font-family:var(--hm-font-display);font-size:18px}
-.checkout-limit-grid article>span:last-child{font-size:12px;color:var(--muted)}
+.checkout-limit-grid article>strong{grid-column:2;grid-row:1;font-family:var(--hm-font-display);font-size:18px;overflow-wrap:break-word}
+.checkout-limit-grid article>span:last-child{grid-column:2;grid-row:2;font-size:12px;color:var(--muted);overflow-wrap:break-word}
 .checkout-action-card{position:sticky;top:92px}
 .checkout-total{display:flex;justify-content:space-between;gap:16px;margin:16px 0;padding:16px 0;border-block:1px solid var(--line);font-size:17px}
 .checkout-total strong{font-family:var(--hm-font-display)}

@@ -1,0 +1,158 @@
+﻿........................................................................ [ 13%]
+........................................................................ [ 27%]
+........................................................................ [ 41%]
+..............................................................FF........ [ 55%]
+........................................................................ [ 68%]
+........................................................................ [ 82%]
+........................................................................ [ 96%]
+...................                                                      [100%]
+================================== FAILURES ===================================
+______________ test_open_plan_held_by_account_tells_user[trader] ______________
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x000002223E824950>, 'client': <httpx.AsyncClient object at 0x00000222...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+held_plan = 'trader'
+
+    @pytest.mark.parametrize("held_plan", PURCHASABLE_PLAN_CODES)
+    async def test_open_plan_held_by_account_tells_user(test_context, held_plan):
+        """A refused plan carries the server's reason; an open plan carries none.
+    
+        Two halves of one rule, and both matter. A plan that cannot be bought must
+        arrive with a sentence the server wrote, so the dialog never invents its own
+        in the browser. A plan that *can* be bought must arrive with no sentence at
+        all — a refusal printed beside a live Pay button tells somebody they cannot
+        buy the thing they are about to buy.
+    
+        The account here pays by an outside invoice, so it holds no card. Only the
+        plan it already has is refused; the other paid plan is a purchase it is
+        allowed to make, which is the defect this whole file was written for.
+        """
+    
+        email = f"billing-reason-{held_plan}@example.com"
+        settings = test_context["settings"]
+        client = test_context["client"]
+        await _signup(client, settings, email)
+        user_id = await _user_id_for_email(test_context["session_factory"], email)
+        await _grant_paid_plan(test_context["session_factory"], user_id, held_plan)
+    
+        enabled = settings.model_copy(update=live_billing_overrides())
+        test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+    
+        page = await client.get("/dashboard/billing")
+        assert page.status_code == 200, page.text
+    
+        plan_data = _billing_plan_data(page.text)
+        for code in PURCHASABLE_PLAN_CODES:
+            plan_entry = plan_data["plans"][code]
+            assert "refusal" in plan_entry, (
+                f"Plan={code}: billing_plan_data carries no server-owned refusal field"
+            )
+            refusal = plan_entry["refusal"]
+            assert isinstance(refusal, str), f"Plan={code}: refusal is not a sentence"
+            purchasable = bool(plan_entry["availability"]["purchasable"])
+    
+            if purchasable:
+                assert not refusal.strip(), (
+                    f"Plan={code}: the page offers this plan for sale and also carries "
+                    f"a refusal for it: {refusal!r}"
+                )
+            else:
+                assert refusal.strip(), (
+                    f"Plan={code}: the page refuses this plan with no server-owned reason"
+                )
+    
+            if code == held_plan:
+                assert not purchasable, (
+                    f"Plan={code}: offered for sale to an account that already holds it"
+                )
+                explains = "already" in refusal.casefold() or plan_name(held_plan) in refusal
+                assert explains, (
+                    f"Plan={code}: refusal sentence does not explain the held plan"
+                )
+            else:
+                # No card is held, so nothing can be re-priced and nothing can be
+                # charged twice. Buying is the only route to this plan, and it must
+                # be open. This is the reported defect, stated as a rule.
+>               assert purchasable, (
+                    f"Plan={code}: an account holding {held_plan} by outside invoice "
+                    f"cannot buy it, so the only route to it is closed"
+                )
+E               AssertionError: Plan=pro: an account holding trader by outside invoice cannot buy it, so the only route to it is closed
+E               assert False
+
+tests\unit\test_invariant_billing_offers.py:340: AssertionError
+_______________ test_open_plan_held_by_account_tells_user[pro] ________________
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x000002223E2F93D0>, 'client': <httpx.AsyncClient object at 0x00000222...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+held_plan = 'pro'
+
+    @pytest.mark.parametrize("held_plan", PURCHASABLE_PLAN_CODES)
+    async def test_open_plan_held_by_account_tells_user(test_context, held_plan):
+        """A refused plan carries the server's reason; an open plan carries none.
+    
+        Two halves of one rule, and both matter. A plan that cannot be bought must
+        arrive with a sentence the server wrote, so the dialog never invents its own
+        in the browser. A plan that *can* be bought must arrive with no sentence at
+        all — a refusal printed beside a live Pay button tells somebody they cannot
+        buy the thing they are about to buy.
+    
+        The account here pays by an outside invoice, so it holds no card. Only the
+        plan it already has is refused; the other paid plan is a purchase it is
+        allowed to make, which is the defect this whole file was written for.
+        """
+    
+        email = f"billing-reason-{held_plan}@example.com"
+        settings = test_context["settings"]
+        client = test_context["client"]
+        await _signup(client, settings, email)
+        user_id = await _user_id_for_email(test_context["session_factory"], email)
+        await _grant_paid_plan(test_context["session_factory"], user_id, held_plan)
+    
+        enabled = settings.model_copy(update=live_billing_overrides())
+        test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+    
+        page = await client.get("/dashboard/billing")
+        assert page.status_code == 200, page.text
+    
+        plan_data = _billing_plan_data(page.text)
+        for code in PURCHASABLE_PLAN_CODES:
+            plan_entry = plan_data["plans"][code]
+            assert "refusal" in plan_entry, (
+                f"Plan={code}: billing_plan_data carries no server-owned refusal field"
+            )
+            refusal = plan_entry["refusal"]
+            assert isinstance(refusal, str), f"Plan={code}: refusal is not a sentence"
+            purchasable = bool(plan_entry["availability"]["purchasable"])
+    
+            if purchasable:
+                assert not refusal.strip(), (
+                    f"Plan={code}: the page offers this plan for sale and also carries "
+                    f"a refusal for it: {refusal!r}"
+                )
+            else:
+                assert refusal.strip(), (
+                    f"Plan={code}: the page refuses this plan with no server-owned reason"
+                )
+    
+            if code == held_plan:
+                assert not purchasable, (
+                    f"Plan={code}: offered for sale to an account that already holds it"
+                )
+                explains = "already" in refusal.casefold() or plan_name(held_plan) in refusal
+                assert explains, (
+                    f"Plan={code}: refusal sentence does not explain the held plan"
+                )
+            else:
+                # No card is held, so nothing can be re-priced and nothing can be
+                # charged twice. Buying is the only route to this plan, and it must
+                # be open. This is the reported defect, stated as a rule.
+>               assert purchasable, (
+                    f"Plan={code}: an account holding {held_plan} by outside invoice "
+                    f"cannot buy it, so the only route to it is closed"
+                )
+E               AssertionError: Plan=trader: an account holding pro by outside invoice cannot buy it, so the only route to it is closed
+E               assert False
+
+tests\unit\test_invariant_billing_offers.py:340: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_invariant_billing_offers.py::test_open_plan_held_by_account_tells_user[trader]
+FAILED tests/unit/test_invariant_billing_offers.py::test_open_plan_held_by_account_tells_user[pro]

@@ -1,0 +1,1731 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="18" skipped="0" tests="19" time="15.850" timestamp="2026-09-13T13:54:26.889479+03:00" hostname="WIN-FOVCL5KBJ2M"><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-monthly-card-monthly-creem-trader]" time="1.357"><failure message="Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021A9FFD6960&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA0D7C740&gt;
+plan_code = 'trader', card_provider = 'creem', card_cycle = 'monthly'
+attempt_cycle = 'monthly_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+&gt;           with pytest.raises(BillingError) as reopened_refusal:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;
+
+tests\unit\test_invariant_one_held_plan_owner.py:242: Failed</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-monthly-card-monthly-creem-pro]" time="0.839"><failure message="Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA2300530&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA23241A0&gt;
+plan_code = 'pro', card_provider = 'creem', card_cycle = 'monthly'
+attempt_cycle = 'monthly_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+&gt;           with pytest.raises(BillingError) as reopened_refusal:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;
+
+tests\unit\test_invariant_one_held_plan_owner.py:242: Failed</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-monthly-card-monthly-stripe-trader]" time="0.781"><failure message="Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA23032C0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA0D94260&gt;
+plan_code = 'trader', card_provider = 'stripe', card_cycle = 'monthly'
+attempt_cycle = 'monthly_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+&gt;           with pytest.raises(BillingError) as reopened_refusal:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;
+
+tests\unit\test_invariant_one_held_plan_owner.py:242: Failed</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-monthly-card-monthly-stripe-pro]" time="0.829"><failure message="Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA2969EB0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2A855E0&gt;
+plan_code = 'pro', card_provider = 'stripe', card_cycle = 'monthly'
+attempt_cycle = 'monthly_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+&gt;           with pytest.raises(BillingError) as reopened_refusal:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;
+
+tests\unit\test_invariant_one_held_plan_owner.py:242: Failed</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-monthly-card-annual-creem-trader]" time="0.810"><failure message="Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA229F590&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2969EE0&gt;
+plan_code = 'trader', card_provider = 'creem', card_cycle = 'annual'
+attempt_cycle = 'monthly_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+&gt;           with pytest.raises(BillingError) as reopened_refusal:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;
+
+tests\unit\test_invariant_one_held_plan_owner.py:242: Failed</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-monthly-card-annual-creem-pro]" time="0.779"><failure message="Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA226A900&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2A57230&gt;
+plan_code = 'pro', card_provider = 'creem', card_cycle = 'annual'
+attempt_cycle = 'monthly_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+&gt;           with pytest.raises(BillingError) as reopened_refusal:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;
+
+tests\unit\test_invariant_one_held_plan_owner.py:242: Failed</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-monthly-card-annual-stripe-trader]" time="1.185"><failure message="Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA2AFB410&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2B633E0&gt;
+plan_code = 'trader', card_provider = 'stripe', card_cycle = 'annual'
+attempt_cycle = 'monthly_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+&gt;           with pytest.raises(BillingError) as reopened_refusal:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;
+
+tests\unit\test_invariant_one_held_plan_owner.py:242: Failed</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-monthly-card-annual-stripe-pro]" time="1.033"><failure message="Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA2AFA120&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2BAFE00&gt;
+plan_code = 'pro', card_provider = 'stripe', card_cycle = 'annual'
+attempt_cycle = 'monthly_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+&gt;           with pytest.raises(BillingError) as reopened_refusal:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE &lt;class 'ai_market_monitor.services.billing.BillingError'&gt;
+
+tests\unit\test_invariant_one_held_plan_owner.py:242: Failed</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-annual-card-monthly-creem-trader]" time="0.933"><failure message="AssertionError: the opener asked 'may this account buy trader' while handing the owner a held set without trader: [frozenset()]&#10;assert False&#10; +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2C07D30&gt;)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA2BF9640&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2B61670&gt;
+plan_code = 'trader', card_provider = 'creem', card_cycle = 'monthly'
+attempt_cycle = 'annual_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+            with pytest.raises(BillingError) as reopened_refusal:
+                await billing.open_checkout_attempt(
+                    attempt_id=attempt_id,
+                    user_id=user_id,
+                    success_url="http://testserver/billing/success",
+                    cancel_url="http://testserver/billing/cancel",
+                )
+            # The opener's own refusal code, the same one the resume route redirects
+            # with: nothing was charged, go back to billing.
+            assert reopened_refusal.value.code == "plan_not_available"
+    
+            # (ca) And it refused because the answer it built *saw* the held plan. The
+            # no-grace set would have arrived here empty, and the refusal would have
+            # been luck (a withdrawn cycle) rather than the rule.
+            assert seen_sets, "the opener never asked the availability owner at all"
+&gt;           assert all(plan_code in recorded for recorded in seen_sets), (
+                f"the opener asked 'may this account buy {plan_code}' while handing the "
+                f"owner a held set without {plan_code}: {seen_sets!r}"
+            )
+E           AssertionError: the opener asked 'may this account buy trader' while handing the owner a held set without trader: [frozenset()]
+E           assert False
+E            +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2C07D30&gt;)
+
+tests\unit\test_invariant_one_held_plan_owner.py:257: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-annual-card-monthly-creem-pro]" time="1.135"><failure message="AssertionError: the opener asked 'may this account buy pro' while handing the owner a held set without pro: [frozenset()]&#10;assert False&#10; +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2D4C860&gt;)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA2CAFFB0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2AFBB30&gt;
+plan_code = 'pro', card_provider = 'creem', card_cycle = 'monthly'
+attempt_cycle = 'annual_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+            with pytest.raises(BillingError) as reopened_refusal:
+                await billing.open_checkout_attempt(
+                    attempt_id=attempt_id,
+                    user_id=user_id,
+                    success_url="http://testserver/billing/success",
+                    cancel_url="http://testserver/billing/cancel",
+                )
+            # The opener's own refusal code, the same one the resume route redirects
+            # with: nothing was charged, go back to billing.
+            assert reopened_refusal.value.code == "plan_not_available"
+    
+            # (ca) And it refused because the answer it built *saw* the held plan. The
+            # no-grace set would have arrived here empty, and the refusal would have
+            # been luck (a withdrawn cycle) rather than the rule.
+            assert seen_sets, "the opener never asked the availability owner at all"
+&gt;           assert all(plan_code in recorded for recorded in seen_sets), (
+                f"the opener asked 'may this account buy {plan_code}' while handing the "
+                f"owner a held set without {plan_code}: {seen_sets!r}"
+            )
+E           AssertionError: the opener asked 'may this account buy pro' while handing the owner a held set without pro: [frozenset()]
+E           assert False
+E            +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2D4C860&gt;)
+
+tests\unit\test_invariant_one_held_plan_owner.py:257: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-annual-card-monthly-stripe-trader]" time="0.970"><failure message="AssertionError: the opener asked 'may this account buy trader' while handing the owner a held set without trader: [frozenset()]&#10;assert False&#10; +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2CC3920&gt;)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA2C8EC00&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2CADBB0&gt;
+plan_code = 'trader', card_provider = 'stripe', card_cycle = 'monthly'
+attempt_cycle = 'annual_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+            with pytest.raises(BillingError) as reopened_refusal:
+                await billing.open_checkout_attempt(
+                    attempt_id=attempt_id,
+                    user_id=user_id,
+                    success_url="http://testserver/billing/success",
+                    cancel_url="http://testserver/billing/cancel",
+                )
+            # The opener's own refusal code, the same one the resume route redirects
+            # with: nothing was charged, go back to billing.
+            assert reopened_refusal.value.code == "plan_not_available"
+    
+            # (ca) And it refused because the answer it built *saw* the held plan. The
+            # no-grace set would have arrived here empty, and the refusal would have
+            # been luck (a withdrawn cycle) rather than the rule.
+            assert seen_sets, "the opener never asked the availability owner at all"
+&gt;           assert all(plan_code in recorded for recorded in seen_sets), (
+                f"the opener asked 'may this account buy {plan_code}' while handing the "
+                f"owner a held set without {plan_code}: {seen_sets!r}"
+            )
+E           AssertionError: the opener asked 'may this account buy trader' while handing the owner a held set without trader: [frozenset()]
+E           assert False
+E            +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2CC3920&gt;)
+
+tests\unit\test_invariant_one_held_plan_owner.py:257: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-annual-card-monthly-stripe-pro]" time="0.783"><failure message="AssertionError: the opener asked 'may this account buy pro' while handing the owner a held set without pro: [frozenset()]&#10;assert False&#10; +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2DC5A40&gt;)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA2CDEF30&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2CEF620&gt;
+plan_code = 'pro', card_provider = 'stripe', card_cycle = 'monthly'
+attempt_cycle = 'annual_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+            with pytest.raises(BillingError) as reopened_refusal:
+                await billing.open_checkout_attempt(
+                    attempt_id=attempt_id,
+                    user_id=user_id,
+                    success_url="http://testserver/billing/success",
+                    cancel_url="http://testserver/billing/cancel",
+                )
+            # The opener's own refusal code, the same one the resume route redirects
+            # with: nothing was charged, go back to billing.
+            assert reopened_refusal.value.code == "plan_not_available"
+    
+            # (ca) And it refused because the answer it built *saw* the held plan. The
+            # no-grace set would have arrived here empty, and the refusal would have
+            # been luck (a withdrawn cycle) rather than the rule.
+            assert seen_sets, "the opener never asked the availability owner at all"
+&gt;           assert all(plan_code in recorded for recorded in seen_sets), (
+                f"the opener asked 'may this account buy {plan_code}' while handing the "
+                f"owner a held set without {plan_code}: {seen_sets!r}"
+            )
+E           AssertionError: the opener asked 'may this account buy pro' while handing the owner a held set without pro: [frozenset()]
+E           assert False
+E            +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2DC5A40&gt;)
+
+tests\unit\test_invariant_one_held_plan_owner.py:257: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-annual-card-annual-creem-trader]" time="0.748"><failure message="AssertionError: the opener asked 'may this account buy trader' while handing the owner a held set without trader: [frozenset()]&#10;assert False&#10; +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2DC4930&gt;)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA2CED7F0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2C74C20&gt;
+plan_code = 'trader', card_provider = 'creem', card_cycle = 'annual'
+attempt_cycle = 'annual_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+            with pytest.raises(BillingError) as reopened_refusal:
+                await billing.open_checkout_attempt(
+                    attempt_id=attempt_id,
+                    user_id=user_id,
+                    success_url="http://testserver/billing/success",
+                    cancel_url="http://testserver/billing/cancel",
+                )
+            # The opener's own refusal code, the same one the resume route redirects
+            # with: nothing was charged, go back to billing.
+            assert reopened_refusal.value.code == "plan_not_available"
+    
+            # (ca) And it refused because the answer it built *saw* the held plan. The
+            # no-grace set would have arrived here empty, and the refusal would have
+            # been luck (a withdrawn cycle) rather than the rule.
+            assert seen_sets, "the opener never asked the availability owner at all"
+&gt;           assert all(plan_code in recorded for recorded in seen_sets), (
+                f"the opener asked 'may this account buy {plan_code}' while handing the "
+                f"owner a held set without {plan_code}: {seen_sets!r}"
+            )
+E           AssertionError: the opener asked 'may this account buy trader' while handing the owner a held set without trader: [frozenset()]
+E           assert False
+E            +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2DC4930&gt;)
+
+tests\unit\test_invariant_one_held_plan_owner.py:257: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-annual-card-annual-creem-pro]" time="0.810"><failure message="AssertionError: the opener asked 'may this account buy pro' while handing the owner a held set without pro: [frozenset()]&#10;assert False&#10; +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2E3EA80&gt;)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA2C74890&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2D55790&gt;
+plan_code = 'pro', card_provider = 'creem', card_cycle = 'annual'
+attempt_cycle = 'annual_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+            with pytest.raises(BillingError) as reopened_refusal:
+                await billing.open_checkout_attempt(
+                    attempt_id=attempt_id,
+                    user_id=user_id,
+                    success_url="http://testserver/billing/success",
+                    cancel_url="http://testserver/billing/cancel",
+                )
+            # The opener's own refusal code, the same one the resume route redirects
+            # with: nothing was charged, go back to billing.
+            assert reopened_refusal.value.code == "plan_not_available"
+    
+            # (ca) And it refused because the answer it built *saw* the held plan. The
+            # no-grace set would have arrived here empty, and the refusal would have
+            # been luck (a withdrawn cycle) rather than the rule.
+            assert seen_sets, "the opener never asked the availability owner at all"
+&gt;           assert all(plan_code in recorded for recorded in seen_sets), (
+                f"the opener asked 'may this account buy {plan_code}' while handing the "
+                f"owner a held set without {plan_code}: {seen_sets!r}"
+            )
+E           AssertionError: the opener asked 'may this account buy pro' while handing the owner a held set without pro: [frozenset()]
+E           assert False
+E            +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2E3EA80&gt;)
+
+tests\unit\test_invariant_one_held_plan_owner.py:257: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-annual-card-annual-stripe-trader]" time="0.771"><failure message="AssertionError: the opener asked 'may this account buy trader' while handing the owner a held set without trader: [frozenset()]&#10;assert False&#10; +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2E3D8A0&gt;)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA2D3F8C0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2C752B0&gt;
+plan_code = 'trader', card_provider = 'stripe', card_cycle = 'annual'
+attempt_cycle = 'annual_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+            with pytest.raises(BillingError) as reopened_refusal:
+                await billing.open_checkout_attempt(
+                    attempt_id=attempt_id,
+                    user_id=user_id,
+                    success_url="http://testserver/billing/success",
+                    cancel_url="http://testserver/billing/cancel",
+                )
+            # The opener's own refusal code, the same one the resume route redirects
+            # with: nothing was charged, go back to billing.
+            assert reopened_refusal.value.code == "plan_not_available"
+    
+            # (ca) And it refused because the answer it built *saw* the held plan. The
+            # no-grace set would have arrived here empty, and the refusal would have
+            # been luck (a withdrawn cycle) rather than the rule.
+            assert seen_sets, "the opener never asked the availability owner at all"
+&gt;           assert all(plan_code in recorded for recorded in seen_sets), (
+                f"the opener asked 'may this account buy {plan_code}' while handing the "
+                f"owner a held set without {plan_code}: {seen_sets!r}"
+            )
+E           AssertionError: the opener asked 'may this account buy trader' while handing the owner a held set without trader: [frozenset()]
+E           assert False
+E            +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2E3D8A0&gt;)
+
+tests\unit\test_invariant_one_held_plan_owner.py:257: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route[attempt-annual-card-annual-stripe-pro]" time="0.785"><failure message="AssertionError: the opener asked 'may this account buy pro' while handing the owner a held set without pro: [frozenset()]&#10;assert False&#10; +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2EB5150&gt;)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000021AA2D3EDE0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000021A...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021AA2D54FE0&gt;
+plan_code = 'pro', card_provider = 'stripe', card_cycle = 'annual'
+attempt_cycle = 'annual_auto_renewal'
+
+    @pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+    @pytest.mark.parametrize("card_provider", RECURRING_CARD_PROVIDERS)
+    @pytest.mark.parametrize("card_cycle", tuple(CARD_PERIOD_DAYS), ids=("card-monthly", "card-annual"))
+    @pytest.mark.parametrize("attempt_cycle", ATTEMPT_CYCLES, ids=("attempt-monthly", "attempt-annual"))
+    async def test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route(
+        test_context,
+        monkeypatch: pytest.MonkeyPatch,
+        plan_code: str,
+        card_provider: str,
+        card_cycle: str,
+        attempt_cycle: str,
+    ) -&gt; None:
+        """Inside the grace window, `open_checkout_attempt` holds the plan the route holds.
+    
+        Before the fix the monthly-attempt cases failed with ``DID NOT RAISE``: the
+        opener read the no-grace set, saw no held plan, and returned a freshly created
+        payment page for the very plan the account is still scheduled to be charged
+        for. The annual-attempt cases refused for the wrong reason — a withdrawn
+        annual cycle — and failed assert (ca): the held plan never reached the
+        availability answer.
+        """
+    
+        # The seed itself is what the rule is about: an ACTIVE recurring card whose
+        # period ended inside the window, with no cancellation booked.
+        assert timedelta(days=DAYS_SINCE_PERIOD_ENDED) &lt; RECURRING_LAPSED_GRACE_WINDOW
+    
+        settings = test_context["settings"].model_copy(update={"billing_enabled": True})
+        session_factory = test_context["session_factory"]
+    
+        # A spy on the one owner of the availability answer, recording the held set the
+        # opener hands it. This is how "the held plan must be visible to the opener's
+        # availability answer" is asserted: not by trusting the refusal's code, which an
+        # unrelated withdrawal could also produce, but by reading the answer's own input.
+        seen_sets: list[object] = []
+        real_availability = billing_module.plan_checkout_availability
+    
+        def spy_availability(*args: object, **kwargs: object) -&gt; object:
+            seen_sets.append(kwargs.get("active_paid_plan_codes"))
+            return real_availability(*args, **kwargs)  # type: ignore[arg-type]
+    
+        monkeypatch.setattr(billing_module, "plan_checkout_availability", spy_availability)
+    
+        async with session_factory() as session:
+            user, reopened = await _hold_a_lapsed_recurring_card(
+                session,
+                plan_code=plan_code,
+                card_provider=card_provider,
+                card_cycle=card_cycle,
+                attempt_cycle=attempt_cycle,
+            )
+            user_id = user.id
+            attempt_id = reopened.id
+    
+            # (a) The mechanism, stated once so a future reader of a red assert knows
+            # which reader drifted: the grace-aware owner holds the lapsed card; the
+            # no-grace reader, correctly, does not — it answers a different question.
+            held_for_purchase = await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user_id
+            )
+            assert plan_code in held_for_purchase, (
+                f"the purchase/replacement owner dropped a {card_provider} {card_cycle} "
+                f"card that ended {DAYS_SINCE_PERIOD_ENDED} days ago; the seed is no "
+                "longer inside the grace window it claims to be"
+            )
+            assert plan_code not in await active_paid_plan_codes(session, user_id=user_id), (
+                "access must NOT be granted to a card whose paid period has ended — if "
+                "this fails, the no-grace reader's access semantics changed"
+            )
+    
+            billing = BillingService(session, settings)
+    
+            # (b) The checkout route's refusal, unchanged by this fix, kept in the same
+            # test so "refused exactly as prepare_checkout refuses it" is a comparison,
+            # not two separate claims.
+            with pytest.raises(BillingError) as refused:
+                await billing.prepare_checkout(
+                    user_id=user_id,
+                    plan_code=plan_code,
+                    billing_cycle="monthly",
+                    request_key=uuid4().hex,
+                    terms_accepted=True,
+                )
+            assert refused.value.code == "already_subscribed"
+    
+            # (c) The opener must refuse too. It sells through the static local
+            # adapter, so an unfixed opener really does create a payment page here
+            # instead of touching the network — that is the defect being refused.
+            with pytest.raises(BillingError) as reopened_refusal:
+                await billing.open_checkout_attempt(
+                    attempt_id=attempt_id,
+                    user_id=user_id,
+                    success_url="http://testserver/billing/success",
+                    cancel_url="http://testserver/billing/cancel",
+                )
+            # The opener's own refusal code, the same one the resume route redirects
+            # with: nothing was charged, go back to billing.
+            assert reopened_refusal.value.code == "plan_not_available"
+    
+            # (ca) And it refused because the answer it built *saw* the held plan. The
+            # no-grace set would have arrived here empty, and the refusal would have
+            # been luck (a withdrawn cycle) rather than the rule.
+            assert seen_sets, "the opener never asked the availability owner at all"
+&gt;           assert all(plan_code in recorded for recorded in seen_sets), (
+                f"the opener asked 'may this account buy {plan_code}' while handing the "
+                f"owner a held set without {plan_code}: {seen_sets!r}"
+            )
+E           AssertionError: the opener asked 'may this account buy pro' while handing the owner a held set without pro: [frozenset()]
+E           assert False
+E            +  where False = all(&lt;generator object test_a_lapsed_recurring_card_is_held_by_the_checkout_opener_exactly_like_the_checkout_route.&lt;locals&gt;.&lt;genexpr&gt; at 0x0000021AA2EB5150&gt;)
+
+tests\unit\test_invariant_one_held_plan_owner.py:257: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_no_purchase_answer_is_built_from_the_no_grace_reader" time="0.353"><failure message="AssertionError: These build a purchase answer from the no-grace access reader. A lapsed recurring card would vanish from it, and the path would sell a plan the account holds. Use paid_plan_codes_for_replacement_decisions:&#10;  services\billing.py:2073: active_paid_plan_codes=await active_paid_plan_codes(&#10;assert not ['services\\billing.py:2073: active_paid_plan_codes=await active_paid_plan_codes(']">def test_no_purchase_answer_is_built_from_the_no_grace_reader() -&gt; None:
+        """Nowhere in ``src`` may the availability answer be fed by the access reader.
+    
+        This scans the whole tree, not just billing, because the defect class is a call
+        site further on from any one page: the resume router had the same shape before
+        it was fixed, and ``open_checkout_attempt`` still did.
+        """
+    
+        offenders = []
+        for path in _python_files():
+            text = path.read_text(encoding="utf-8")
+            for number, line in enumerate(text.splitlines(), start=1):
+                if _NO_GRACE_INTO_PURCHASE_ANSWER.search(line):
+                    offenders.append(f"{path.relative_to(_SRC_ROOT)}:{number}: {line.strip()}")
+&gt;       assert not offenders, (
+            "These build a purchase answer from the no-grace access reader. A lapsed "
+            "recurring card would vanish from it, and the path would sell a plan the "
+            "account holds. Use paid_plan_codes_for_replacement_decisions:\n"
+            + "\n".join(offenders)
+        )
+E       AssertionError: These build a purchase answer from the no-grace access reader. A lapsed recurring card would vanish from it, and the path would sell a plan the account holds. Use paid_plan_codes_for_replacement_decisions:
+E         services\billing.py:2073: active_paid_plan_codes=await active_paid_plan_codes(
+E       assert not ['services\\billing.py:2073: active_paid_plan_codes=await active_paid_plan_codes(']
+
+tests\unit\test_invariant_one_held_plan_owner.py:304: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_the_scan_would_notice_the_defect_it_exists_for" time="0.002" /><testcase classname="tests.unit.test_invariant_one_held_plan_owner" name="test_the_checkout_opener_reads_the_one_held_plan_owner" time="0.005"><failure message="AssertionError: the checkout opener no longer reads the one owner of the held-plan question for purchase decisions&#10;assert None&#10; +  where None = &lt;function search at 0x0000021A949A94E0&gt;('paid_plan_codes_for_replacement_decisions\\s*\\(', '    async def open_checkout_attempt(\n        self,\n        *,\n        attempt_id: UUID,\n        user_id: UUID,\n ...     &quot;plan_code&quot;: plan.code,\n            },\n        )\n        await self.session.flush()\n        return checkout\n')&#10; +    where &lt;function search at 0x0000021A949A94E0&gt; = re.search">def test_the_checkout_opener_reads_the_one_held_plan_owner() -&gt; None:
+        """``open_checkout_attempt`` answers "who holds what" from the same owner
+        ``prepare_checkout`` reads — the grace-aware one — and from no other.
+    
+        The scans cannot follow a value through a renamed local. This one reads the
+        function itself.
+        """
+    
+        source = inspect.getsource(BillingService.open_checkout_attempt)
+&gt;       assert re.search(r"paid_plan_codes_for_replacement_decisions\s*\(", source), (
+            "the checkout opener no longer reads the one owner of the held-plan "
+            "question for purchase decisions"
+        )
+E       AssertionError: the checkout opener no longer reads the one owner of the held-plan question for purchase decisions
+E       assert None
+E        +  where None = &lt;function search at 0x0000021A949A94E0&gt;('paid_plan_codes_for_replacement_decisions\\s*\\(', '    async def open_checkout_attempt(\n        self,\n        *,\n        attempt_id: UUID,\n        user_id: UUID,\n ...     "plan_code": plan.code,\n            },\n        )\n        await self.session.flush()\n        return checkout\n')
+E        +    where &lt;function search at 0x0000021A949A94E0&gt; = re.search
+
+tests\unit\test_invariant_one_held_plan_owner.py:339: AssertionError</failure></testcase></testsuite></testsuites>

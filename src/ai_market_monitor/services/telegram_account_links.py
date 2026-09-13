@@ -1,3 +1,39 @@
+"""Putting a Telegram account on a Hilal Markets account — one rule, two doors.
+
+A person connects Telegram through one of two doors. They press **Connect Telegram** on
+the Connections page and confirm in the bot, or they press a button in the bot and finish
+on the sign-up or sign-in form. Until now each door decided for itself who was allowed to
+hold a Telegram account: the dashboard path moved a Telegram from *any* account to any
+other without a word, and the bot path refused to move it from *any* account, including
+the throwaway one the bot itself had made for that same person. Two owners of one rule is
+how a person was told their own Telegram "already belongs to another account", and then
+kept being asked to confirm it.
+
+:meth:`TelegramAccountLinkService.attach` is the rule now, and both doors ask it. It says
+yes in three cases and no in one:
+
+* **(a) move** — the Telegram is held by an account with no sign-in of its own, which is
+  the shell the bot creates the moment somebody presses Start. The identity, the
+  connection and the conversation go to the account being signed into; everything else
+  that shell holds stays where it is, and an audit event names both accounts.
+* **(b) refuse** — the Telegram is held by a different account that *does* have a sign-in.
+  That is a different person's account, and nothing is changed.
+* **(c) replace** — the account being signed into already holds a different Telegram. The
+  person was told the prompt would do this, so the old one is taken off first and the new
+  one attached, in one transaction and with no uniqueness error.
+* **(d) already there** — the same Telegram is already on this same account: success, and
+  no second row of anything.
+
+Every row this rule reads is read with ``with_for_update()``. SQLite ignores it and
+PostgreSQL does not, so the same code that is testable offline is the code that serialises
+two taps that arrive at the same moment in production.
+
+Nothing in this module decides what a person is *told*: :class:`TelegramAccountLinkError`
+carries a code and one plain sentence, and the caller — the bot, or the sign-in page —
+puts it in front of the person.
+"""
+
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -5,6 +41,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.dashboard_paths import CONNECTIONS_PATH
 from ai_market_monitor.core.platforms import Platform
 from ai_market_monitor.core.security import (
     DashboardLinkTokenService,
@@ -22,6 +59,10 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import ConnectionStatus, IdentityProvider
 
+#: What makes an account a person's own rather than a placeholder the bot made: an email
+#: address. Google sign-in writes the same kind of row, so one name covers both doors.
+SIGN_IN_PROVIDERS: frozenset[IdentityProvider] = frozenset({IdentityProvider.EMAIL})
+
 
 class TelegramAccountLinkError(ValueError):
     def __init__(self, code: str, message: str):
@@ -29,10 +70,47 @@ class TelegramAccountLinkError(ValueError):
         self.code = code
 
 
+@dataclass(frozen=True, slots=True)
+class TelegramLinkOffer:
+    """What a ``/start link_...`` is offering, before the person has answered."""
+
+    user: User
+    email: str | None
+    #: A Telegram already connected to that account, which confirming would replace.
+    replaces: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramLinkCompletion:
+    """The answer to a confirmed ``/start link_...``."""
+
+    user: User
+    email: str | None
+    #: True when this Telegram was already on this account, so nothing had to change.
+    already_connected: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramOwnership:
+    """What :meth:`TelegramAccountLinkService.attach` did."""
+
+    identity: UserIdentity
+    connection: TelegramConnection | None
+    #: Telegram-only accounts that gave this Telegram up, if any.
+    moved_from: tuple[UUID, ...] = field(default_factory=tuple)
+    #: The Telegram that was taken off the account, if this confirm replaced one.
+    replaced: str | None = None
+    already_connected: bool = False
+
+
 class TelegramAccountLinkService:
     def __init__(self, session: AsyncSession, settings: Settings):
         self.session = session
         self.settings = settings
+
+    # ------------------------------------------------------------------
+    # Doors into the rule
+    # ------------------------------------------------------------------
 
     async def create(
         self,
@@ -84,7 +162,9 @@ class TelegramAccountLinkService:
             user_id=user_id,
             telegram_user_id="pending",
             token_digest=token_digest(raw),
-            target_path="/dashboard/integrations",
+            # The page this link came from. It was the old Integrations address, which
+            # only survives as a redirect to this one.
+            target_path=CONNECTIONS_PATH,
             created_at=datetime.now(UTC),
             expires_at=datetime.now(UTC) + timedelta(minutes=ttl_minutes),
         )
@@ -95,12 +175,30 @@ class TelegramAccountLinkService:
     async def pending_dashboard_start_link(
         self,
         raw_token: str,
-    ) -> tuple[User, str | None]:
+        *,
+        telegram_user_id: str | None = None,
+    ) -> TelegramLinkOffer:
+        """What a ``/start link_...`` is offering, before the person has answered.
+
+        ``telegram_user_id`` is the chat that asked, when it is already known: the offer
+        then leaves that account alone and only warns about a *different* Telegram the
+        dashboard account holds.
+        """
+
         link = await self._pending_link_from_raw_token(raw_token)
         user = await self.session.get(User, link.user_id)
         if user is None:
             raise TelegramAccountLinkError("user_missing", "The linked user no longer exists.")
-        return user, await self._primary_email(user.id)
+        email = await self._primary_email(user.id)
+        previous = await self._replaced_connection(
+            user_id=user.id,
+            telegram_user_id=telegram_user_id,
+        )
+        return TelegramLinkOffer(
+            user=user,
+            email=email,
+            replaces=_connection_label(previous),
+        )
 
     async def complete_dashboard_start_link(
         self,
@@ -109,25 +207,170 @@ class TelegramAccountLinkService:
         telegram_user_id: str,
         chat_id: str,
         username: str | None,
-    ) -> tuple[User, str | None]:
-        link = await self._pending_link_from_raw_token(raw_token)
+    ) -> TelegramLinkCompletion:
+        """The bot's door: the person confirmed a ``/start link_...`` in Telegram."""
+
+        link = await self._pending_link_from_raw_token(
+            raw_token,
+            for_update=True,
+            refuse_spent=False,
+        )
         user = await self.session.get(User, link.user_id)
         if user is None:
             raise TelegramAccountLinkError("user_missing", "The linked user no longer exists.")
+        if link.consumed_at is not None:
+            # Read *after* the lock was taken. When the link was already spent by this
+            # Telegram onto this account, the answer is the success the first tap already
+            # got: a second row, a second audit event or an exception would all be wrong.
+            if await self._spent_by_this_telegram(link=link, telegram_user_id=telegram_user_id):
+                return TelegramLinkCompletion(
+                    user=user,
+                    email=await self._primary_email(user.id),
+                    already_connected=True,
+                )
+            raise TelegramAccountLinkError("telegram_link_used", "Telegram link was already used.")
+        ownership = await self.attach(
+            target=user,
+            telegram_user_id=telegram_user_id,
+            chat_id=chat_id,
+            username=username,
+        )
+        link.telegram_user_id = f"{Platform.TELEGRAM.value}:{telegram_user_id}"
+        link.consumed_at = datetime.now(UTC)
+        if not ownership.already_connected:
+            self._record_linked(
+                user=user,
+                telegram_user_id=telegram_user_id,
+                link=link,
+                source="telegram_start",
+            )
+        await self.session.flush()
+        return TelegramLinkCompletion(
+            user=user,
+            email=await self._primary_email(user.id),
+            already_connected=ownership.already_connected,
+        )
+
+    async def complete(self, token: str, *, user: User) -> str:
+        """The dashboard's door: a sign-up or sign-in finished with a bot-issued link."""
+
+        link = await self._link_from_token(token, for_update=True, refuse_spent=False)
+        telegram_user_id = link.telegram_user_id.split(":", 1)[-1]
+        if link.consumed_at is not None:
+            # The same answer for the same reason: a form posted twice must not connect
+            # twice, report a failure, or spend a second audit event.
+            if await self._spent_by_this_telegram(link=link, telegram_user_id=telegram_user_id):
+                return telegram_user_id
+            raise TelegramAccountLinkError("telegram_link_used", "Telegram link was already used.")
+        ownership = await self.attach(
+            target=user,
+            telegram_user_id=telegram_user_id,
+            chat_id=None,
+            username=None,
+        )
+        if not ownership.already_connected:
+            self._record_linked(
+                user=user,
+                telegram_user_id=telegram_user_id,
+                link=link,
+                source="dashboard_form",
+            )
+        link.consumed_at = datetime.now(UTC)
+        await self.session.flush()
+        return telegram_user_id
+
+    # ------------------------------------------------------------------
+    # The rule
+    # ------------------------------------------------------------------
+
+    async def attach(
+        self,
+        *,
+        target: User,
+        telegram_user_id: str,
+        chat_id: str | None,
+        username: str | None,
+    ) -> TelegramOwnership:
+        """Put this Telegram account on ``target``. The only place that decision is made.
+
+        Raises :class:`TelegramAccountLinkError` with code ``telegram_already_linked``
+        when the Telegram is held by a different account that has a sign-in of its own,
+        and changes nothing in that case.
+        """
+
         identity = await self.session.scalar(
-            select(UserIdentity).where(
+            select(UserIdentity)
+            .where(
                 UserIdentity.provider == IdentityProvider.TELEGRAM,
                 UserIdentity.provider_subject == telegram_user_id,
             )
+            .with_for_update()
         )
-        if identity is not None and identity.user_id != user.id:
-            raise TelegramAccountLinkError(
-                "telegram_already_linked",
-                "This Telegram account is already linked to another dashboard user.",
+        connection = await self.session.scalar(
+            select(TelegramConnection)
+            .where(TelegramConnection.telegram_user_id == telegram_user_id)
+            .with_for_update()
+        )
+
+        holders = {
+            holder
+            for holder in (
+                identity.user_id if identity is not None else None,
+                connection.user_id if connection is not None else None,
             )
+            if holder is not None and holder != target.id
+        }
+        # Read before anything is written: this Telegram was already on this account, so
+        # the confirm changes no rows and must not be reported as a second connection.
+        was_already_connected = (
+            identity is not None
+            and identity.user_id == target.id
+            and connection is not None
+            and connection.user_id == target.id
+        )
+        stale_chat_owner: TelegramConnection | None = None
+        if chat_id:
+            stale_chat_owner = await self.session.scalar(
+                select(TelegramConnection)
+                .where(
+                    TelegramConnection.chat_id == chat_id,
+                    TelegramConnection.telegram_user_id != telegram_user_id,
+                )
+                .with_for_update()
+            )
+            if stale_chat_owner is not None:
+                holders.add(stale_chat_owner.user_id)
+        for holder in holders:
+            if await self._is_signed_up(holder):
+                raise TelegramAccountLinkError(
+                    "telegram_already_linked",
+                    "This Telegram is already connected to another Hilal Markets account. "
+                    "Remove it there first on the Connections page.",
+                )
+        moved_from = tuple(sorted(holders, key=str))
+
+        # (c) The account being signed into may hold a different Telegram. It was promised
+        # in the prompt; taking it off first is what makes the attach fit the constraints.
+        previous = await self._replaced_connection(
+            user_id=target.id, telegram_user_id=telegram_user_id
+        )
+        replaced: str | None = None
+        if previous is not None:
+            replaced = previous.telegram_user_id
+            await self._take_off(previous, target=target)
+            # The old Telegram's chat id may be the one about to be written (the same
+            # person, a new Telegram account): the row is gone, so the value is free.
+            await self.session.flush()
+        if stale_chat_owner is not None:
+            # A shell account holding this chat under a different Telegram id can only be
+            # stale data — a Telegram chat belongs to the one account speaking in it. The
+            # chat is the incoming account's; the placeholder gives it up.
+            stale_chat_owner.chat_id = None
+            await self.session.flush()
+
         if identity is None:
             identity = UserIdentity(
-                user_id=user.id,
+                user_id=target.id,
                 provider=IdentityProvider.TELEGRAM,
                 provider_subject=telegram_user_id,
                 display_identifier=username or telegram_user_id,
@@ -138,7 +381,7 @@ class TelegramAccountLinkService:
             )
             self.session.add(identity)
         else:
-            identity.user_id = user.id
+            identity.user_id = target.id
             identity.display_identifier = username or identity.display_identifier
             identity.is_verified = True
             identity.verified_at = identity.verified_at or datetime.now(UTC)
@@ -146,19 +389,14 @@ class TelegramAccountLinkService:
                 **(identity.profile_data or {}),
                 **({"username": username} if username else {}),
             }
-        connection = await self.session.scalar(
-            select(TelegramConnection).where(
-                TelegramConnection.telegram_user_id == telegram_user_id
-            )
-        )
-        if connection is not None and connection.user_id != user.id:
-            raise TelegramAccountLinkError(
-                "telegram_already_linked",
-                "This Telegram account is already connected to another dashboard user.",
-            )
+
         if connection is None:
+            # The dashboard's door has no chat to write: the person is not speaking to the
+            # bot right now. The row is made without one and the bot fills it in the first
+            # time the person messages, rather than an alert being promised a chat nobody
+            # named.
             connection = TelegramConnection(
-                user_id=user.id,
+                user_id=target.id,
                 telegram_user_id=telegram_user_id,
                 chat_id=chat_id,
                 username=username,
@@ -167,81 +405,139 @@ class TelegramAccountLinkService:
             )
             self.session.add(connection)
         else:
-            connection.user_id = user.id
-            connection.chat_id = chat_id
-            connection.username = username
+            connection.user_id = target.id
+            if chat_id is not None:
+                connection.chat_id = chat_id
+            if username is not None:
+                connection.username = username
             connection.status = ConnectionStatus.ACTIVE
             connection.connected_at = connection.connected_at or datetime.now(UTC)
+
         conversation = await self.session.scalar(
-            select(TelegramConversationState).where(
-                TelegramConversationState.telegram_user_id == telegram_user_id
-            )
+            select(TelegramConversationState)
+            .where(TelegramConversationState.telegram_user_id == telegram_user_id)
+            .with_for_update()
         )
         if conversation is not None:
             state = dict(conversation.state_data or {})
             state["dashboard_linked_at"] = datetime.now(UTC).isoformat()
-            conversation.user_id = user.id
+            conversation.user_id = target.id
             conversation.state_data = state
-        link.telegram_user_id = f"{Platform.TELEGRAM.value}:{telegram_user_id}"
-        link.consumed_at = datetime.now(UTC)
-        self.session.add(
-            AuditEvent(
-                actor_user_id=user.id,
-                actor_type="dashboard_user",
-                action="telegram.account_linked",
-                target_type="telegram_connection",
-                target_id=telegram_user_id,
-                metadata_redacted={"source_link_id": str(link.id), "source": "telegram_start"},
-                created_at=datetime.now(UTC),
-            )
-        )
-        await self.session.flush()
-        return user, await self._primary_email(user.id)
 
-    async def complete(self, token: str, *, user: User) -> str:
-        link = await self._link_from_token(token)
-        telegram_user_id = link.telegram_user_id.split(":", 1)[-1]
-        identity = await self.session.scalar(
-            select(UserIdentity).where(
+        if moved_from:
+            # (a) The shell gave the Telegram up. Naming both accounts is the point of the
+            # event: without it, a moved identity looks like an identity that appeared.
+            self.session.add(
+                AuditEvent(
+                    actor_user_id=target.id,
+                    actor_type="dashboard_user",
+                    action="telegram.identity_moved",
+                    target_type="telegram_identity",
+                    target_id=telegram_user_id,
+                    metadata_redacted={
+                        "from_user_ids": [str(item) for item in moved_from],
+                        "to_user_id": str(target.id),
+                    },
+                    created_at=datetime.now(UTC),
+                )
+            )
+        await self.session.flush()
+        return TelegramOwnership(
+            identity=identity,
+            connection=connection,
+            moved_from=moved_from,
+            replaced=replaced,
+            already_connected=was_already_connected,
+        )
+
+    async def account_holding(self, telegram_user_id: str) -> UUID | None:
+        """Which account, if any, this Telegram is on right now.
+
+        The bot asks this when a tap arrives for a request it has already finished, so it
+        can tell "already connected" from "that link is gone" instead of guessing.
+        """
+
+        return await self.session.scalar(
+            select(UserIdentity.user_id).where(
                 UserIdentity.provider == IdentityProvider.TELEGRAM,
                 UserIdentity.provider_subject == telegram_user_id,
             )
         )
-        if identity is None:
-            identity = UserIdentity(
-                user_id=user.id,
-                provider=IdentityProvider.TELEGRAM,
-                provider_subject=telegram_user_id,
-                display_identifier=telegram_user_id,
-                is_verified=True,
-                is_primary=False,
-                verified_at=datetime.now(UTC),
-                profile_data={},
+
+    async def _is_signed_up(self, user_id: UUID) -> bool:
+        identity_id = await self.session.scalar(
+            select(UserIdentity.id)
+            .where(
+                UserIdentity.user_id == user_id,
+                UserIdentity.provider.in_(SIGN_IN_PROVIDERS),
             )
-            self.session.add(identity)
-        else:
-            identity.user_id = user.id
-            identity.is_verified = True
-            identity.verified_at = identity.verified_at or datetime.now(UTC)
-        connection = await self.session.scalar(
-            select(TelegramConnection).where(
-                TelegramConnection.telegram_user_id == telegram_user_id
+            .limit(1)
+        )
+        return identity_id is not None
+
+    async def _replaced_connection(
+        self, *, user_id: UUID, telegram_user_id: str | None
+    ) -> TelegramConnection | None:
+        """The other Telegram this account holds, which a confirm would replace."""
+
+        clauses = [TelegramConnection.user_id == user_id]
+        if telegram_user_id is not None:
+            clauses.append(TelegramConnection.telegram_user_id != telegram_user_id)
+        return await self.session.scalar(
+            select(TelegramConnection).where(*clauses).with_for_update()
+        )
+
+    async def _take_off(self, connection: TelegramConnection, *, target: User) -> None:
+        """Take a Telegram off an account, exactly as unlinking it from the page does.
+
+        The connection, the sign-in row and the bot conversation all go: leaving any of
+        them behind keeps a chat that is no longer connected acting as this account, and
+        ``user_id`` is unique on the connection, so a half-removed row also blocks the
+        next one from being written at all.
+        """
+
+        telegram_user_id = connection.telegram_user_id
+        identities = (
+            await self.session.scalars(
+                select(UserIdentity).where(
+                    UserIdentity.user_id == target.id,
+                    UserIdentity.provider == IdentityProvider.TELEGRAM,
+                    UserIdentity.provider_subject == telegram_user_id,
+                )
+            )
+        ).all()
+        conversations = (
+            await self.session.scalars(
+                select(TelegramConversationState).where(
+                    TelegramConversationState.telegram_user_id == telegram_user_id
+                )
+            )
+        ).all()
+        for conversation in conversations:
+            await self.session.delete(conversation)
+        for identity in identities:
+            await self.session.delete(identity)
+        await self.session.delete(connection)
+        self.session.add(
+            AuditEvent(
+                actor_user_id=target.id,
+                actor_type="dashboard_user",
+                action="telegram.connection_replaced",
+                target_type="telegram_connection",
+                target_id=telegram_user_id,
+                metadata_redacted={"replaced_by": "telegram_start", "user_id": str(target.id)},
+                created_at=datetime.now(UTC),
             )
         )
-        if connection is not None:
-            connection.user_id = user.id
-            connection.status = ConnectionStatus.ACTIVE
-        conversation = await self.session.scalar(
-            select(TelegramConversationState).where(
-                TelegramConversationState.telegram_user_id == telegram_user_id
-            )
-        )
-        if conversation is not None:
-            state = dict(conversation.state_data or {})
-            state["dashboard_linked_at"] = datetime.now(UTC).isoformat()
-            conversation.user_id = user.id
-            conversation.state_data = state
-        link.consumed_at = datetime.now(UTC)
+
+    def _record_linked(
+        self,
+        *,
+        user: User,
+        telegram_user_id: str,
+        link: TelegramDashboardLink,
+        source: str,
+    ) -> None:
         self.session.add(
             AuditEvent(
                 actor_user_id=user.id,
@@ -249,14 +545,22 @@ class TelegramAccountLinkService:
                 action="telegram.account_linked",
                 target_type="telegram_connection",
                 target_id=telegram_user_id,
-                metadata_redacted={"source_link_id": str(link.id)},
+                metadata_redacted={"source_link_id": str(link.id), "source": source},
                 created_at=datetime.now(UTC),
             )
         )
-        await self.session.flush()
-        return telegram_user_id
 
-    async def _link_from_token(self, token: str) -> TelegramDashboardLink:
+    # ------------------------------------------------------------------
+    # The link rows both doors read
+    # ------------------------------------------------------------------
+
+    async def _link_from_token(
+        self,
+        token: str,
+        *,
+        for_update: bool = False,
+        refuse_spent: bool = True,
+    ) -> TelegramDashboardLink:
         try:
             payload = DashboardLinkTokenService(self.settings).decode(token)
             link_id = UUID(payload["link_id"])
@@ -266,42 +570,79 @@ class TelegramAccountLinkService:
                 "telegram_link_invalid",
                 "Telegram account link is invalid or expired.",
             ) from exc
-        link = await self.session.get(TelegramDashboardLink, link_id)
-        now = datetime.now(UTC)
+        statement = select(TelegramDashboardLink).where(TelegramDashboardLink.id == link_id)
+        if for_update:
+            statement = statement.with_for_update()
+        link = await self.session.scalar(statement)
         if link is None or link.token_digest != digest:
             raise TelegramAccountLinkError("telegram_link_invalid", "Telegram link is invalid.")
-        if link.consumed_at is not None:
-            raise TelegramAccountLinkError("telegram_link_used", "Telegram link was already used.")
-        expires_at = (
-            link.expires_at.replace(tzinfo=UTC)
-            if link.expires_at.tzinfo is None
-            else link.expires_at
-        )
-        if expires_at <= now:
-            raise TelegramAccountLinkError("telegram_link_expired", "Telegram link has expired.")
+        if for_update:
+            # The lock is held now, so what is read next is what the other writer left.
+            await self.session.refresh(link)
+        self._refuse_an_unusable_link(link, refuse_spent=refuse_spent)
         return link
 
-    async def _pending_link_from_raw_token(self, raw_token: str) -> TelegramDashboardLink:
+    async def _pending_link_from_raw_token(
+        self,
+        raw_token: str,
+        *,
+        for_update: bool = False,
+        refuse_spent: bool = True,
+    ) -> TelegramDashboardLink:
         if not raw_token or len(raw_token) > 128:
             raise TelegramAccountLinkError("telegram_link_invalid", "Telegram link is invalid.")
-        link = await self.session.scalar(
-            select(TelegramDashboardLink).where(
-                TelegramDashboardLink.token_digest == token_digest(raw_token)
-            )
+        statement = select(TelegramDashboardLink).where(
+            TelegramDashboardLink.token_digest == token_digest(raw_token)
         )
-        now = datetime.now(UTC)
+        if for_update:
+            statement = statement.with_for_update()
+        link = await self.session.scalar(statement)
         if link is None:
             raise TelegramAccountLinkError("telegram_link_invalid", "Telegram link is invalid.")
-        if link.consumed_at is not None:
+        if for_update:
+            # The lock is held now, so what is read next is what the other writer left.
+            await self.session.refresh(link)
+        self._refuse_an_unusable_link(link, refuse_spent=refuse_spent)
+        return link
+
+    @staticmethod
+    def _refuse_an_unusable_link(
+        link: TelegramDashboardLink, *, refuse_spent: bool = True
+    ) -> None:
+        """Refuse a link that cannot be answered: spent, or out of its own lifetime.
+
+        ``refuse_spent=False`` is for the doors that hold the row locked and decide the
+        spent case themselves — a second tap of a link that already connected this person
+        answers with the success the first tap got, not with an error.
+        """
+
+        if link.consumed_at is not None and refuse_spent:
             raise TelegramAccountLinkError("telegram_link_used", "Telegram link was already used.")
         expires_at = (
             link.expires_at.replace(tzinfo=UTC)
             if link.expires_at.tzinfo is None
             else link.expires_at
         )
-        if expires_at <= now:
+        if link.consumed_at is None and expires_at <= datetime.now(UTC):
             raise TelegramAccountLinkError("telegram_link_expired", "Telegram link has expired.")
-        return link
+
+    async def _spent_by_this_telegram(
+        self, *, link: TelegramDashboardLink, telegram_user_id: str
+    ) -> bool:
+        """Was the spent link spent by this Telegram, onto the account it names?
+
+        Asked of the database rather than of anything held in memory, because the answer
+        is what makes a double tap, a redelivered update or two taps that raced each other
+        resolve to one connection instead of two decisions.
+        """
+
+        owner = await self.session.scalar(
+            select(UserIdentity.user_id).where(
+                UserIdentity.provider == IdentityProvider.TELEGRAM,
+                UserIdentity.provider_subject == telegram_user_id,
+            )
+        )
+        return owner is not None and owner == link.user_id
 
     async def _primary_email(self, user_id: UUID) -> str | None:
         identity = await self.session.scalar(
@@ -316,3 +657,13 @@ class TelegramAccountLinkService:
         if identity is None:
             return None
         return identity.display_identifier or identity.normalized_identifier
+
+
+def _connection_label(connection: TelegramConnection | None) -> str | None:
+    """How to call the Telegram a person is being warned about, in the words they know."""
+
+    if connection is None:
+        return None
+    if connection.username:
+        return f"@{connection.username}"
+    return connection.telegram_user_id

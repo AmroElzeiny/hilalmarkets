@@ -1,0 +1,67 @@
+﻿opencode.exe : [0m
+At C:\Users\amroe\AppData\Roaming\npm\opencode.ps1:14 char:3
++   & "$basedir/node_modules/opencode-ai/bin/opencode.exe"   $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([0m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+> hm-direct-read ┬╖ deepseek-v4-flash-vision-exp
+[0m
+I reviewed the four attached images. All four are the **Halal Assets** market page. None is a SETTINGS page and none is a SUBSCRIPTION page, so questions 3 and 4 are not answerable from these images. I report only what I can see; I cannot read the tiny clipped hint text in full, so I quote the visible portion.
+
+---
+
+**IMAGE 1: market-1440x900.png**
+1. Yes. A small blue pill "Ask AI" (white text, sparkle icon) sits left-aligned *below* the "Cards / Table / Favorites" row, inside the filter card. A second small blue "Ask AI" tab also sits at the top-right of the lower panel, and a floating hint row runs along the right edge.
+2. Yes. The floating hint at the right edge is cut off by the screen edge (visible text ends "...here to"). The green round button and the small "Ask AI" tab sit on top of the lower panel.
+3. N/A тАФ this is the market page, not a SETTINGS page.
+4. N/A тАФ this is the market page, not a SUBSCRIPTION page.
+5. Yes. A green round assistant button is at the bottom-right, over the lower panel near its top-right corner; it covers a small part of that panel. A blue "Ask AI" tab sits just above it.
+6. The floating assistant hint is clipped; the same "Ask AI" action appears in three places on one screen (pill, tab, floating hint).
+
+**VERDICT: FAIL** тАФ clipped floating hint and overlapping assistant controls.
+
+---
+
+**IMAGE 2: market-1024x768.png**
+1. Yes. A blue pill "Ask AI" sits below the "Cards / Table / Favorites" row, on the left. A second blue "Ask AI" tab sits at the right and overlaps the "What is the Hilal Markets Methodology?" button.
+2. Yes. The floating hint "тАФ your AI assistant ┬╖ sees the page you are on ┬╖ here to" is cut off at the right edge and overlaps the methodology button. The green round button sits directly below the "Ask AI" tab, over the filter card.
+3. N/A тАФ market page.
+4. N/A тАФ market page.
+5. Yes. The green round assistant button is at the bottom-right over the filter card, covering part of the right side near "Favorites".
+6. The stat cards wrap badly at this width: "All screened", "No conditions", "With a condition" stay on row one and "You follow" drops to a second row. The methodology button text is truncated ("What is the Hilal Markets Methodo...").
+
+**VERDICT: FAIL** тАФ overlap, clipped hint, and truncated text.
+
+---
+
+**IMAGE 3: market-390x844.png**
+1. Yes. A blue pill "Ask AI" sits below the "Favorites" row, left-aligned.
+2. Yes. The floating hint "тАФ your AI assistant ┬╖ sees the page you are o..." is cut off at the right edge and sits over the "You follow" card. The blue "Ask AI" tab and the green round button overlap the same card.
+3. N/A тАФ market page.
+4. N/A тАФ market page.
+5. Yes. The green round assistant button is over the right side of the "You follow" card, covering part of it. The blue "Ask AI" tab sits above it.
+6. On mobile the assistant controls sit on top of card content, and the hint text is clipped.
+
+**VERDICT: FAIL** тАФ assistant controls overlap the "You follow" card; hint clipped.
+
+---
+
+**IMAGE 4: market-reduced-motion-1440x900.png**
+1. Yes. Same layout as Image 1: blue pill "Ask AI" below the "Cards / Table / Favorites" row, plus a small blue "Ask AI" tab at the lower panel top-right and a green round button.
+2. Yes. The floating hint "Hilal тАФ your AI assistant ┬╖ sees the page you are on" is cut off at the right edge. The green round button and the "Ask AI" tab sit over the lower panel.
+3. N/A тАФ market page.
+4. N/A тАФ market page.
+5. Yes. The green round assistant button is at the bottom-right over the lower panel, covering a small part of it.
+6. Same clipped hint as Image 1; the same action is duplicated in three places.
+
+**VERDICT: FAIL** тАФ clipped floating hint and overlapping assistant controls.
+
+---
+
+**What I verified vs. what is uncertain**
+- Verified: the four images are market pages; each shows a blue "Ask AI" pill, a floating hint that is clipped at the right edge, and a green round assistant button overlapping content.
+- Uncertain: I cannot read the full clipped hint sentence, so I quoted only the visible words. I cannot confirm the exact pixel overlap; I describe what is visibly covered.
+- Not in scope of these images: the SETTINGS group-heading count (Q3) and the SUBSCRIPTION page checks (Q4). No screenshot for either was attached, so I did not guess.
+
+**Concise result:** All four images FAIL for the same defect class тАФ the floating assistant hint is cut off at the screen edge, and the "Ask AI" pill / "Ask AI" tab / green round button overlap neighbouring controls or card content. Image 2 adds a wrapping/truncation layout defect at 1024px. No settings or subscription screenshot was provided to answer Q3 or Q4.

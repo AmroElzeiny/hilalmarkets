@@ -255,6 +255,8 @@ def test_final_authenticated_styles_use_only_approved_brand_hex_colors():
         Path("src/ai_market_monitor/static/hilalmarkets-auth.css"),
         # The cookie banner, now that one stylesheet draws it for every surface.
         Path("src/ai_market_monitor/static/hilalmarkets-cookie.css"),
+        # The "Ask AI" label above the assistant's button, on every signed-in page.
+        Path("src/ai_market_monitor/static/hm-ask-tag.css"),
     )
     unexpected: dict[str, list[str]] = {}
     for path in files:

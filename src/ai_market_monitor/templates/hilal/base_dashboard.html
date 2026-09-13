@@ -5,7 +5,7 @@
   {#- First script on the page, deliberately. It puts a time limit on every request this
       product sends to its own server, and it can only do that for a request sent after
       it has run. See `static/hm-request.js`. -#}
-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260910-pay-now"></script>
+  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20260913-corner-clear"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
@@ -33,22 +33,23 @@
   <meta name="description" content="Hilal Markets - Shariah-screened crypto spot intelligence and guided monitoring.">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260910-pay-now">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20260913-corner-clear">
   {# One owner for the cookie banner and its settings window, which this template includes below. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260910-pay-now">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260910-pay-now">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20260913-corner-clear">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20260913-corner-clear">
   {% block page_styles %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260910-pay-now">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260910-pay-now">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260913-corner-clear">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20260913-corner-clear">
   {#- The shell — the side menu and the topbar — after the sheet it replaces, because it
       is the one owner of both and nothing above may still be describing them. -#}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260910-pay-now">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260910-pay-now">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20260913-corner-clear">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20260913-corner-clear">
   {#- A page whose styles must win over the shared dashboard sheets loads them here.
       `page_styles` above is deliberately kept before them for pages that only add. -#}
   {% block page_styles_late %}{% endblock %}
   {% if hilal_chat_gate(hilal_chat|default(false), settings) %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260910-pay-now">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20260913-corner-clear">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-ask-tag.css') }}?v=20260913-corner-clear">
   {% endif %}
 </head>
 {#- The page guide's identity is decided on the server, not parsed from the URL. -#}
@@ -76,8 +77,14 @@
       {% include "hilal/partials/dashboard_topbar.html" %}
       <div class="app-content">
         {% include "hilal/partials/status_banners.html" %}
+        {#- `plan_change_needs_payment` below: every move to a different paid plan now goes
+            through the normal payment page, for a card as well as for crypto. That line used
+            to say "you paid with crypto", which was the only case that could reach it before.
+            A card customer now reads it too, and it told them something untrue about how they
+            had paid. This note lives out here because Jinja allows no comment inside the
+            dictionary below: one written there stopped every dashboard page from rendering. -#}
         {% set dashboard_error_messages = {
-          'billing_disabled': 'Paid subscriptions are not available yet. Your selected plan was kept and no charge was created.',
+          'billing_disabled':'Paid subscriptions are not available yet. Your selected plan was kept and no charge was created.',
           'billing_cycle_not_available': 'That checkout option is not available. Paying month by month is the only option open right now.',
           'plan_not_available': 'That plan is not available for checkout.',
           'no_paid_plan': 'There is no paid plan on this account to change.',
@@ -88,10 +95,6 @@
           'timing_invalid': 'Choose when the change should start.',
           'plan_change_not_needed': 'You are already on that plan.',
           'downgrade_is_period_end': 'A smaller plan starts at the end of the period you have already paid for, so nothing you paid for is taken away early.',
-          {# Every move to a different paid plan now goes through the normal payment page,
-             for a card as well as for crypto. This line used to say "you paid with crypto",
-             which was the only case that could reach it before. A card customer now reads
-             it too, and it told them something untrue about how they had paid. #}
           'plan_change_needs_payment': 'A different plan is bought on the normal payment page. Go back to billing, choose the plan you want, and press Pay. Your plan today keeps working until that payment is confirmed.',
           'plan_product_missing': 'That plan is not set up for card payments yet, so nothing was changed.',
           'billing_not_configured': 'Card billing is not finished being set up, so nothing was changed.',
@@ -107,7 +110,7 @@
           'payment_method_invalid': 'Choose card or crypto before paying. Nothing was charged.',
           'billing_terms_required': 'Tick the agreement box before paying. Nothing was charged.',
           'already_subscribed': 'You are already on this plan. Nothing was charged.',
-          'change_plan_instead': 'You are on a paid plan already. Nothing was charged. Use the plan switch buttons on this page to move to another plan.',
+          'change_plan_instead': 'That payment page can no longer be used for this plan. Nothing was charged. Check the plans on this page and press Pay on the one you want.',
           'checkout_expired': 'That payment page timed out. Nothing was charged. Start again from your plan.',
           'checkout_not_resumable': 'That payment page cannot be opened again. Nothing was charged. Start again from your plan.',
           'checkout_request_invalid': 'That payment page timed out. Nothing was charged. Start again from your plan.',
@@ -155,8 +158,6 @@
           'webhook_confirmation_delayed': 'We have not received the payment confirmation from the payment company yet. Your plan stays unchanged until it arrives.',
           'plan_selected': 'Your plan choice was saved.',
           'plan_cancelled': 'Your plan is cancelled. Your card will not be charged again, and everything keeps working until the end of the period you have already paid for.',
-          'plan_upgraded': 'Your plan is changing. Nothing else is needed from you — the payment company already has your card.',
-          'plan_downgraded': 'Your smaller plan is booked. You keep what you have until the end of the period you have already paid for, and the new price starts on your renewal day.',
           'trial_started': 'Your trial has started.',
           'telegram_connected': 'Telegram is connected. We can reach you there now.',
           'account_created': 'Your account is ready.',
@@ -168,7 +169,7 @@
             here: which messages make that promise, and what they say instead, is a
             product decision and a template cannot be tested on one. -#}
         {% if message %}<div class="notice notice-success" role="status" tabindex="-1" data-page-status><span data-icon="check" data-icon-class="icon"></span><div><strong>Done</strong><p>{{ (dashboard_message_overrides or {}).get(message) or dashboard_messages.get(message, message.replace('_', ' ').title()) }}</p></div></div>{% endif %}
-        {% if error %}<div class="notice notice-error" role="alert" tabindex="-1" data-page-status><span data-icon="alert" data-icon-class="icon"></span><div><strong>Needs attention</strong><p>{{ dashboard_error_messages.get(error, error.replace('_', ' ').title()) }}</p></div></div>{% endif %}
+        {% if error %}<div class="notice notice-error" role="alert" tabindex="-1" data-page-status><span data-icon="alert" data-icon-class="icon"></span><div><strong>Needs attention</strong><p>{{ dashboard_error_messages.get(error) or plan_replacement_refusals.get(error, error.replace('_', ' ').title()) }}</p></div></div>{% endif %}
         {% block content %}{% endblock %}
       </div>
     </main>
@@ -186,19 +187,19 @@
   {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
   {% include "hilal/partials/cookie_banner.html" %}
   <div class="dash-toast" id="dash-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260910-pay-now"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260910-pay-now"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20260913-corner-clear"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20260913-corner-clear"></script>
   {#- The side menu and the topbar. One owner for their state: `hilalmarkets.js` and
       `dashboard.js` each used to run their own copy of the minimize logic against the
       same class, from two different stored values. -#}
-  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260910-pay-now"></script>
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260910-pay-now"></script>
-  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260910-pay-now"></script>
-  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260910-pay-now"></script>{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260910-pay-now"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260910-pay-now" defer></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260910-pay-now" defer></script>
-  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260910-pay-now"></script>{% endif %}
+  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20260913-corner-clear"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260913-corner-clear"></script>
+  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20260913-corner-clear"></script>
+  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20260913-corner-clear"></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20260913-corner-clear"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20260913-corner-clear" defer></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20260913-corner-clear" defer></script>
+  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20260913-corner-clear"></script>{% endif %}
   <script>
     (() => {
       const pageStatus = document.querySelector("[data-page-status]");

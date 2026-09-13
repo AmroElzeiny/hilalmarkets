@@ -1,0 +1,2 @@
+﻿PASS: every /api/v1 route is authenticated or explicitly annotated.
+

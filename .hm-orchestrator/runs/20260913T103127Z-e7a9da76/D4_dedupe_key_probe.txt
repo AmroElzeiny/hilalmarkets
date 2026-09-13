@@ -1,0 +1,6 @@
+stored  'billing:plan-move-failed:evt_01JABCdefGHI' -> 'billing:plan-move-failed:evt_01jabcdefghi'
+RAISES  'billing:plan-move-failed:the provider returned a 500 bod'
+stored  'billing:plan-move-failed:{"code":500}' -> 'billing:plan-move-failed:--code-:500-'
+stored  'billing:plan-move-failed:support@example.com' -> 'billing:plan-move-failed:support-example.com'
+stored  'billing:plan-move-failed:https://api.p.test/cb?token=abc' -> 'billing:plan-move-failed:https://api.p.test/cb-token-abc123'
+stored  'billing:plan-move-failed:sk-abcdefghijklmnopqrstuvwxyz01' -> 'billing:plan-move-failed:sk-abcdefghijklmnopqrstuvwxyz012345'

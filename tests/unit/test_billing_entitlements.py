@@ -74,9 +74,36 @@ from ai_market_monitor.services.plan_limits import plan_limit_notice
 from ai_market_monitor.services.referrals import ReferralError, ReferralService
 from ai_market_monitor.services.trials import TrialLifecycleService
 from tests.factories import load_strategy
+from tests.support.billing_config import live_billing_overrides
 
 MONITOR_CHECKOUT_AMOUNT = effective_monthly_price("trader")
 MONITOR_CHECKOUT_AMOUNT_TEXT = f"{MONITOR_CHECKOUT_AMOUNT:.2f}"
+
+
+def _crypto_only_server(**overrides: object) -> Settings:
+    """A test server that takes crypto through NOWPayments and has card payments off.
+
+    Built from `live_billing_overrides`, the one description of a server that can take
+    money, rather than written out here. Six tests in this file each wrote their own
+    copy, and none of the six had a NOWPayments key or had billing switched on. They
+    broke together the day checkout started asking the plan page's own question — can
+    this server really sell this plan this way? — and got the honest answer: no.
+
+    The IPN tests sign with the shared ``billing_webhook_secret``. NOWPayments uses that
+    secret only when it has no IPN secret of its own, so the IPN secret is left out.
+    """
+
+    values: dict[str, object] = {
+        "app_env": "test",
+        "app_secret_key": "test-secret-key-with-at-least-thirty-two-characters",
+        **live_billing_overrides(),
+        "billing_provider": "nowpayments",
+        "billing_card_provider": "disabled",
+        "billing_webhook_secret": "secret",
+        "nowpayments_ipn_secret": None,
+    }
+    values.update(overrides)
+    return Settings(**values)  # type: ignore[arg-type]
 
 
 async def create_user(session, display_name: str = "Trader") -> User:
@@ -644,14 +671,7 @@ async def test_webhook_signature_verification(test_context):
 
 
 async def test_nowpayments_finished_ipn_creates_subscription(test_context):
-    settings = Settings(
-        app_env="test",
-        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
-        billing_webhook_secret="secret",
-        billing_provider="nowpayments",
-        billing_card_provider="disabled",
-        billing_crypto_provider="nowpayments",
-    )
+    settings = _crypto_only_server()
     async with test_context["session_factory"]() as session:
         user = await create_user(session)
         service = BillingService(session, settings)
@@ -726,13 +746,7 @@ async def test_nowpayments_finished_ipn_creates_subscription(test_context):
 
 
 async def test_nowpayments_partial_payment_never_grants_access(test_context):
-    settings = Settings(
-        app_env="test",
-        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
-        billing_provider="nowpayments",
-        billing_card_provider="disabled",
-        billing_crypto_provider="nowpayments",
-    )
+    settings = _crypto_only_server()
     async with test_context["session_factory"]() as session:
         user = await create_user(session, "Partial payment user")
         service = BillingService(session, settings)
@@ -778,12 +792,7 @@ async def test_nowpayments_settlement_uses_actual_crypto_received(
     actually_paid,
     expected_code,
 ):
-    settings = Settings(
-        app_env="test",
-        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
-        billing_provider="nowpayments",
-        billing_card_provider="disabled",
-        billing_crypto_provider="nowpayments",
+    settings = _crypto_only_server(
         billing_payment_amount_tolerance_percent=0,
         billing_allow_overpayment=False,
     )
@@ -845,13 +854,7 @@ async def test_checkout_allows_both_paid_plans_monthly_and_nothing_else(test_con
     or closing a plan cannot leave this test agreeing with the old shape of the shop.
     """
 
-    settings = Settings(
-        app_env="test",
-        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
-        billing_provider="nowpayments",
-        billing_card_provider="disabled",
-        billing_crypto_provider="nowpayments",
-    )
+    settings = _crypto_only_server()
     async with test_context["session_factory"]() as session:
         user = await create_user(session, "Monthly only")
         service = BillingService(session, settings)
@@ -888,6 +891,59 @@ async def test_checkout_allows_both_paid_plans_monthly_and_nothing_else(test_con
                     terms_accepted=True,
                 )
             assert error.value.code == expected_code, (plan_code, billing_cycle)
+
+
+#: One thing a crypto server can lack, and the setting that takes it away.
+_CRYPTO_SERVER_GAPS: dict[str, dict[str, object]] = {
+    "nothing_missing": {},
+    "billing_switched_off": {"billing_enabled": False},
+    "no_nowpayments_key": {"nowpayments_api_key": None},
+    "no_way_to_prove_a_payment": {"billing_webhook_secret": None},
+}
+
+
+@pytest.mark.parametrize("gap", list(_CRYPTO_SERVER_GAPS))
+@pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+async def test_checkout_takes_crypto_exactly_when_the_plan_page_offers_it(
+    test_context, plan_code: str, gap: str
+):
+    """The page and checkout give one answer, for every plan and every way a server can
+    be unable to sell by crypto.
+
+    The page reads `plan_checkout_availability`. Checkout used to read only the price
+    list, so a server with crypto switched on and no NOWPayments key — or with billing
+    switched off, or with no secret to prove a payment arrived — opened a checkout the
+    page would never offer. The customer then met the refusal at NOWPayments, or paid
+    and was never confirmed.
+    """
+
+    from ai_market_monitor.services.billing import plan_checkout_availability
+
+    settings = _crypto_only_server(**_CRYPTO_SERVER_GAPS[gap])
+    offered = plan_checkout_availability(
+        settings, plan_code=plan_code, active_paid_plan_codes=frozenset()
+    )["crypto_monthly"]
+    # Pinned, so the rule cannot pass by both sides saying no to everything.
+    assert offered is (gap == "nothing_missing")
+
+    async with test_context["session_factory"]() as session:
+        user = await create_user(session, f"Crypto {plan_code} {gap}")
+        service = BillingService(session, settings)
+        request: dict[str, object] = {
+            "user_id": user.id,
+            "plan_code": plan_code,
+            "billing_cycle": "monthly",
+            "request_key": f"crypto-{plan_code}-{gap}",
+            "terms_accepted": True,
+        }
+        if offered:
+            prepared = await service.prepare_checkout(**request)  # type: ignore[arg-type]
+            assert prepared.attempt.amount == effective_monthly_price(plan_code)
+            return
+        with pytest.raises(BillingError) as refused:
+            await service.prepare_checkout(**request)  # type: ignore[arg-type]
+        assert refused.value.code == "plan_not_available"
+        assert await session.scalar(select(func.count(BillingCheckoutAttempt.id))) == 0
 
 
 async def test_creem_creates_a_unique_server_bound_checkout(monkeypatch):
@@ -1122,12 +1178,7 @@ async def test_verified_payment_must_match_checkout_amount_and_currency(
     currency,
     expected_code,
 ):
-    settings = Settings(
-        app_env="test",
-        app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
-        billing_provider="nowpayments",
-        billing_card_provider="disabled",
-        billing_crypto_provider="nowpayments",
+    settings = _crypto_only_server(
         billing_payment_amount_tolerance_percent=0,
         billing_allow_overpayment=False,
     )
@@ -1244,15 +1295,7 @@ async def test_nowpayments_webhook_sends_single_admin_payment_notification(
                 profile_data={},
             )
         )
-        nowpayments_settings = Settings(
-            app_env="test",
-            app_secret_key="test-secret-key-with-at-least-thirty-two-characters",
-            billing_enabled=True,
-            billing_webhook_secret="secret",
-            billing_provider="nowpayments",
-            billing_card_provider="disabled",
-            billing_crypto_provider="nowpayments",
-        )
+        nowpayments_settings = _crypto_only_server()
         prepared = await BillingService(session, nowpayments_settings).prepare_checkout(
             user_id=user.id,
             plan_code="trader",

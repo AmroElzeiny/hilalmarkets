@@ -2,8 +2,8 @@
 {% from "hilal/macros/payment_provider_badge.html" import payment_provider_badge %}
 {% from "hilal/macros/discount_code_box.html" import discount_code_box %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260910-pay-now">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260910-pay-now">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260913-corner-clear">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260913-corner-clear">
 {% endblock %}
 {% block content %}
 
@@ -459,7 +459,7 @@
 
           <label class="s-agree" data-s-field>
             <input type="checkbox" name="terms_accepted" value="true" required data-s-agree>
-            <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, the <a href="/privacy" target="_blank" rel="noopener">Privacy policy</a> and the <a href="/risk-disclosure" target="_blank" rel="noopener">Risk disclosure</a>, and to the price shown above.</span>
+            <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, the <a href="/privacy" target="_blank" rel="noopener">Privacy policy</a> and the <a href="/risk-disclosure" target="_blank" rel="noopener">Risk disclosure</a>, and to the price shown above.{% if replacing_paid_plan %} {{ consent_plan_replacement }}{% endif %}</span>
           </label>
 
           <p class="s-safe">
@@ -486,6 +486,6 @@
 <script id="s-plan-facts" type="application/json">{{ plan_cards|tojson }}</script>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260910-pay-now"></script>
-<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260910-pay-now"></script>
+<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260913-corner-clear"></script>
+<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260913-corner-clear"></script>
 {% endblock %}

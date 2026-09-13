@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from hashlib import sha256, sha512
-from typing import Any, Final, Protocol
+from typing import Any, Final, Literal, Protocol
 from uuid import UUID, uuid4
 
 import httpx
@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.money import wire_json_body
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PUBLIC_PLAN_PRESENTATIONS,
@@ -29,12 +30,17 @@ from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
     BillingEvent,
     Plan,
+    PlanMoveMoneyOwed,
     Subscription,
     UserIdentity,
 )
 from ai_market_monitor.db.models.enums import IdentityProvider, SubscriptionStatus
 from ai_market_monitor.services.discount_codes import DiscountedPrice
-from ai_market_monitor.services.entitlements import EntitlementService, PlanCatalogService
+from ai_market_monitor.services.entitlements import (
+    EntitlementContext,
+    EntitlementService,
+    PlanCatalogService,
+)
 from ai_market_monitor.services.provider_reliability import ProviderCallError
 from ai_market_monitor.services.provider_runtime import provider_request
 from ai_market_monitor.services.trials import TrialLifecycleService
@@ -67,6 +73,15 @@ class BillingError(ValueError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+
+class PlanMoveFailed(BillingError):
+    """A new plan was paid for, and the plan it replaces could not be ended safely.
+
+    Every such failure rolls the whole payment back, so the customer keeps the old plan,
+    and is saved as a critical issue a person sees. It used to be only a failed cancel
+    that was saved; a move refused for any other reason failed without an alert.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -579,6 +594,79 @@ def plan_sale_payload(settings: Settings, plan_code: str) -> dict[str, object]:
 #: One owner, here, because two very different rules depend on it: whether a plan change
 #: is a form or a purchase, and whether a purchase may be offered at all.
 RECURRING_PROVIDERS: frozenset[str] = frozenset({"creem", "stripe"})
+#: How long after a recurring subscription's period end it may still be the plan that is
+#: replaced. A recurring card subscription stays ``ACTIVE`` at the payment company until
+#: the renewal decision happens, so treating it as already ended in this window leaves
+#: the old card charging next to a new plan.
+RECURRING_LAPSED_GRACE_WINDOW: Final[timedelta] = timedelta(days=30)
+
+#: The refund names that also say the paid plan is over: the company returned the money
+#: for it, so the access it bought ends with it.
+REFUND_ENDS_PLAN_EVENT_TYPES: Final[frozenset[str]] = frozenset(
+    {"payment.refunded", "refund.created"}
+)
+
+#: The names that say a charge is being contested or was reversed by the card network.
+#: The payment is recorded like any other return, but the plan is **not** ended here: a
+#: dispute can still be won back, and switching a customer off on an event the card
+#: company may yet reverse is a product decision, not a webhook detail. That is why these
+#: three names have always been audit-only in ``_apply_event``, and still are.
+REFUND_CHARGEBACK_EVENT_TYPES: Final[frozenset[str]] = frozenset(
+    {"charge.refunded", "charge.dispute.created", "dispute.created"}
+)
+
+#: Every event that says money this product already took is coming back, or has come
+#: back: a refund, or a charge the card network settled against us.
+#:
+#: One list, made of the two named above, because the whole product asks one question
+#: about it — "is this payment still money we hold?" — and reads the answer out of
+#: :attr:`BillingCheckoutAttempt.status`. Before this existed the reading was split three
+#: ways and each copy knew a different subset: ``payment.refunded`` was the only name the
+#: attempt writer knew, ``refund.created`` and the three dispute names were routed to
+#: ``_apply_event`` and stopped there, and the settled attempt was left saying
+#: ``completed`` after the money had gone back. Every reader of ``completed`` then kept
+#: counting a returned payment as a sale: the money-owed valuation, the affiliate
+#: commission, the operations count of completed checkouts. A refund that is not written
+#: down is a payment that can be given back twice.
+#:
+#: Add a new company's word for "refunded" to whichever of the two sets above it means —
+#: this list is built from them, so it cannot drift behind them.
+REFUND_EVENT_TYPES: Final[frozenset[str]] = (
+    REFUND_ENDS_PLAN_EVENT_TYPES | REFUND_CHARGEBACK_EVENT_TYPES
+)
+
+#: Marks a refund event whose payment this system could not find, and what a person is
+#: told about each kind of gap. The key is what :class:`BillingService` records as
+#: evidence; the sentence is the whole alert body.
+#:
+#: Fixed sentences written once at module level, the way ``REPLACEMENT_REFUSALS`` does it
+#: for the checkout route. Two reasons. The issue queue refuses a summary longer than its
+#: own cap, so a sentence built at the call site can destroy the alert that exists to
+#: report lost money; and ``payment.refunded`` reaching nobody and a matched payment whose
+#: plan cannot be found are different problems for the person reading the queue.
+REFUND_RECONCILIATION_ALERTS: Final[dict[str, str]] = {
+    "payment": (
+        "A payment company returned money, but no checkout of ours matched the message. "
+        "That payment may still read as money kept. A person must find it and correct "
+        "the record."
+    ),
+    "plan": (
+        "A payment company returned money and the checkout was found, but the "
+        "subscription to end was not named. The plan may still be live. A person must "
+        "check the access against the refund."
+    ),
+}
+
+#: The attempt status a refund writes. Not ``failed``: money did move and came back, and
+#: "no money was taken" is the wrong sentence to leave beside it. This is the value the
+#: payment page already has words for ("Refunded" / "The money went back to you") and the
+#: value the billing history already treats as settled, so no surface needed a new case.
+REFUNDED_ATTEMPT_STATUS: Final[str] = "refunded"
+
+#: The attempt status that says money moved and stayed moved. The money-owed reader
+#: (:func:`ai_market_monitor.services.plan_replacements.payment_that_bought`) asks for
+#: exactly this, which is why a refund has to leave it.
+SETTLED_ATTEMPT_STATUS: Final[str] = "completed"
 
 
 async def paid_access_can_be_repriced(
@@ -617,6 +705,92 @@ async def paid_access_can_be_repriced(
     return any((provider or "") in RECURRING_PROVIDERS for provider in providers)
 
 
+#: What becomes of the access somebody holds today when its period ends.
+RenewalKind = Literal["free", "trial", "grant", "renews", "stopped", "fixed_period"]
+
+
+@dataclass(frozen=True, slots=True)
+class HeldRenewal:
+    """How the access somebody holds today goes on, or ends.
+
+    ``kind`` is one of:
+
+    ``free``          the free plan - no end, nothing to cancel;
+    ``trial``         a trial - it ends on its day, and nothing renews;
+    ``grant``         given by Hilal Markets - nothing is charged, and nothing renews;
+    ``renews``        a card plan the payment company charges again, each ``every``;
+    ``stopped``       a card plan whose renewal was stopped - it ends with its period;
+    ``fixed_period``  a payment that holds no card, such as crypto - it ends with its period.
+    """
+
+    kind: RenewalKind
+    ends_at: datetime | None = None
+    #: ``"month"`` or ``"year"`` for a plan that renews by itself, when the payment that
+    #: bought it says which; ``None`` otherwise, rather than a guess.
+    every: str | None = None
+
+
+def held_renewal(
+    entitlement: EntitlementContext,
+    subscription: Subscription | None,
+    *,
+    paid_cycle: str | None = None,
+) -> HeldRenewal:
+    """The one answer to "will the plan I hold renew by itself?".
+
+    Read from the plan held - the payment company that sold it, and whether its renewal
+    was stopped - never from the company this server would use for a new sale. Those are
+    different questions. Two pages asked the server's company, so on a server that sells
+    by card a customer who paid by crypto read that their plan "renews by itself each
+    month", and on a server with no card company a card customer read that it would not.
+
+    ``subscription`` is the row the access comes from. ``paid_cycle`` is the billing cycle
+    of the payment that bought it, the only record of monthly or yearly.
+    """
+
+    if entitlement.plan.code == "demo":
+        return HeldRenewal("free")
+    if entitlement.source == "trial":
+        return HeldRenewal("trial", entitlement.ends_at)
+    provider = (subscription.provider if subscription is not None else None) or ""
+    if provider == "trial":
+        return HeldRenewal("trial", entitlement.ends_at)
+    if provider in {"admin", "free"}:
+        return HeldRenewal("grant", entitlement.ends_at)
+    if subscription is not None and provider in RECURRING_PROVIDERS:
+        if subscription.cancel_at_period_end:
+            return HeldRenewal("stopped", entitlement.ends_at)
+        every = {"monthly": "month", "annual": "year"}.get(_cycle_key(paid_cycle or ""))
+        return HeldRenewal("renews", entitlement.ends_at, every)
+    # A crypto invoice or a local test payment holds no card, so nothing can charge it
+    # again. With no row at all, nothing on our side could either.
+    return HeldRenewal("fixed_period", entitlement.ends_at)
+
+
+async def held_access_renewal(
+    session: AsyncSession, entitlement: EntitlementContext
+) -> HeldRenewal:
+    """`held_renewal` for the access `EntitlementService.current` returned."""
+
+    from ai_market_monitor.services.plan_replacements import payment_that_bought
+
+    subscription = (
+        await session.get(Subscription, entitlement.source_id)
+        if entitlement.source == "subscription" and entitlement.source_id is not None
+        else None
+    )
+    payment = (
+        await payment_that_bought(session, subscription)
+        if subscription is not None and (subscription.provider or "") in RECURRING_PROVIDERS
+        else None
+    )
+    return held_renewal(
+        entitlement,
+        subscription,
+        paid_cycle=payment.billing_cycle if payment is not None else None,
+    )
+
+
 async def active_paid_plan_codes(
     session: AsyncSession,
     *,
@@ -625,9 +799,16 @@ async def active_paid_plan_codes(
     """The codes of all provider-backed active paid plans for one account.
 
     Administrative grants, the free plan and trials are not "paid" in the sense that a
-    checkout can conflict with them. This is the single source for that question: the
-    billing page, the checkout route and the plan-change service all read it rather than
-    writing their own query.
+    checkout can conflict with them. This is the single source for the **access**
+    question — is the person entitled to a paid plan right now — and a recurring card
+    whose paid period has ended answers *no* there.
+
+    It is **not** the answer to "which plans does this account hold for a purchase or
+    replacement decision": a lapsed recurring card is still held until the renewal
+    decision arrives, and that question has one owner,
+    :func:`paid_plan_codes_for_replacement_decisions`. Reading the purchase answer
+    from this function is how a payment page came to be opened for a plan the account
+    was still scheduled to be charged for.
     """
 
     codes = list(
@@ -651,6 +832,50 @@ async def active_paid_plan_codes(
     return frozenset(codes)
 
 
+async def paid_plan_codes_for_replacement_decisions(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+) -> frozenset[str]:
+    """The paid plans that a new checkout may need to replace, including a grace window.
+
+    A recurring card subscription stays ``ACTIVE`` at the payment company for a short
+    time after its paid period ends, until the renewal decision arrives. During that
+    grace window a purchase of a different paid plan must replace it, or the old card
+    keeps charging next to the new plan. This helper is for replacement decisions only:
+    access still comes from ``active_paid_plan_codes`` and entitlements.
+    """
+
+    now = datetime.now(UTC)
+    grace_start = now - RECURRING_LAPSED_GRACE_WINDOW
+    codes = list(
+        (
+            await session.scalars(
+                select(Plan.code)
+                .join(Subscription, Subscription.plan_id == Plan.id)
+                .where(
+                    Subscription.user_id == user_id,
+                    Plan.code.in_(PURCHASABLE_PLAN_CODES),
+                    Subscription.provider.notin_(("admin", "free", "trial")),
+                    Subscription.status.in_(
+                        (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
+                    ),
+                    (Subscription.current_period_end.is_(None))
+                    | (Subscription.current_period_end > now)
+                    | (
+                        Subscription.provider.in_(RECURRING_PROVIDERS)
+                        & (Subscription.cancel_at_period_end.is_(False))
+                        & (Subscription.current_period_end >= grace_start)
+                        & (Subscription.current_period_end <= now)
+                    ),
+                )
+                .order_by(Subscription.updated_at.desc())
+            )
+        ).all()
+    )
+    return frozenset(codes)
+
+
 def plan_checkout_availability(
     settings: Settings,
     plan_code: str,
@@ -659,6 +884,7 @@ def plan_checkout_availability(
     held_access_can_be_repriced: bool = True,
     billing_cycle: str | None = None,
     payment_method: str | None = None,
+    replacement_refusal: str = "",
 ) -> dict[str, Any]:
     """One owner for "can this account buy this plan today, by which method".
 
@@ -674,6 +900,11 @@ def plan_checkout_availability(
     offer. Unknown values fail closed. The returned shape still carries every page-facing
     flag so a page can draw the whole choice. ``held_access_can_be_repriced`` remains in
     the signature while older callers are moved over; it no longer changes the answer.
+
+    ``replacement_refusal`` is `PaidPlanReplacementService.replacement_refusal`'s sentence,
+    read by the caller because this function reads no database. When the account holds a
+    different paid plan and that sentence is not empty, nothing can be bought and the
+    sentence is the refusal — the one the checkout route would give when Pay is pressed.
     """
 
     name = plan_name(plan_code)
@@ -681,7 +912,11 @@ def plan_checkout_availability(
     holds_this = plan_code in active_paid_plan_codes
     holds_other = bool(paid_held) and not holds_this
     del held_access_can_be_repriced
-    account_may_buy = not holds_this
+    # Replacing a paid plan needs the payment that bought it, to value the unused time.
+    # When that cannot be found the checkout route refuses (`paid_amount_missing` and its
+    # two siblings), so the answer here is no as well, with the route's own sentence.
+    replacement_blocked = holds_other and bool(replacement_refusal)
+    account_may_buy = not holds_this and not replacement_blocked
 
     card_monthly = account_may_buy and payment_method_available(
         settings, method="card", plan_code=plan_code, billing_cycle="monthly"
@@ -709,6 +944,8 @@ def plan_checkout_availability(
             f"You already have the {name} plan. "
             "You can change it or cancel it on this billing page."
         )
+    elif replacement_blocked:
+        refusal = replacement_refusal
     elif not purchasable:
         # One sentence, one branch. There used to be two branches here with the
         # identical string — nothing but a place for them to drift apart.
@@ -1144,8 +1381,18 @@ class NowPaymentsBillingProvider:
                 "NOWPayments API key is missing.",
             )
         order_id = f"hm|{checkout_attempt_id.hex}|{plan_code}"
-        payload = {
-            "price_amount": float(amount),
+        # The exact money, written as a JSON number: ``core/money.py`` is the one
+        # owner of how a decided amount leaves this system. NOWPayments' published
+        # OpenAPI types ``price_amount`` for ``POST /invoice`` as a number
+        # (``format: double``), its official client takes int|float and its own
+        # request examples send ``"price_amount": 3999.5``; the help-centre article
+        # carries one Number row and one String row for the same field, so it
+        # settles nothing. It used to go out through ``float``, which is not the
+        # same value for most cents and prints 9.00 as 9.0 — the D3 defect. The fix
+        # for that sent the digits quoted, an unverified wire-type change on every
+        # crypto checkout — the H-3 defect. ``wire_json_body`` is the one owner that
+        # keeps both halves: the provider's number, this product's exact digits.
+        payload: dict[str, object] = {
             "price_currency": currency.lower(),
             "order_id": order_id,
             "order_description": f"Hilal Markets {plan_name} 30-day access",
@@ -1157,6 +1404,12 @@ class NowPaymentsBillingProvider:
             "cancel_url": cancel_url,
             "is_fee_paid_by_user": False,
         }
+        invoice_body = wire_json_body(
+            payload,
+            number_field="price_amount",
+            amount=amount,
+            currency=currency,
+        )
         response = await provider_request(
             self.settings,
             "POST",
@@ -1171,7 +1424,11 @@ class NowPaymentsBillingProvider:
                 "Content-Type": "application/json",
                 "User-Agent": "AI-Market-Monitor/0.1",
             },
-            json=payload,
+            # ``content=`` and not ``json=``: the finished body is already exact
+            # bytes, and letting httpx encode the payload instead would put a float
+            # or a quoted string back into the amount. The Content-Type header
+            # above is what says so, because ``content=`` carries no type of its own.
+            content=invoice_body,
         )
         body = self._json_response(response)
         invoice_url = body.get("invoice_url") or body.get("url")
@@ -1578,27 +1835,24 @@ class BillingService:
         plan = await PlanCatalogService(self.session).get_or_sync(plan_code)
         if not plan.is_active or plan.price_monthly <= 0:
             raise BillingError("plan_not_available", "This paid plan is not available.")
-        current_plans = set(await active_paid_plan_codes(self.session, user_id=user_id))
+        current_plans = set(
+            await paid_plan_codes_for_replacement_decisions(
+                self.session, user_id=user_id
+            )
+        )
         if plan_code in current_plans:
             raise BillingError(
                 "already_subscribed",
                 f"Your {plan.name} plan is already active.",
             )
-        # Somebody already paying for one plan may not buy a second one here. Moving
-        # between paid plans is a form and a tick box on the billing page — Creem
-        # re-prices the subscription they already have — so a checkout would leave two
-        # live subscriptions and two charges every month.
+        # Somebody already paying for a different plan buys the new one here, at its full
+        # price (the owner's rule of 2026-09-10). The plan held now is frozen onto this
+        # checkout below and ends only after the new payment is confirmed; the value of
+        # its unused days is recorded and returned by hand (`plan_replacements.py`).
         #
-        # This could not happen while Pro was closed: the only paid plan was the one
-        # they were on, and the guard above caught it. Opening Pro made the second half
-        # of the rule necessary, and nothing else was checking it.
-        #
-        # The reason is the whole rule. It holds for a card, which really would be
-        # charged twice; it does not hold for crypto access, which holds no card, cannot
-        # be re-priced, and charges once for a fixed period. This guard used to refuse
-        # both, so the billing page's own advice to a crypto customer — "buy the plan you
-        # want and it starts when the payment arrives" — led to a Pay button that could
-        # never be pressed. The one owner of that question answers it here too.
+        # Whether this account may buy this plan at all is one question with one owner,
+        # `plan_checkout_availability`, and the pages ask it too — so a Pay button and
+        # this route can never give different answers.
         other_paid = sorted(current_plans & set(PURCHASABLE_PLAN_CODES))
         availability = plan_checkout_availability(
             self.settings,
@@ -1845,7 +2099,14 @@ class BillingService:
         availability = plan_checkout_availability(
             self.settings,
             plan_code=plan.code,
-            active_paid_plan_codes=await active_paid_plan_codes(
+            # The same held set `prepare_checkout` and the resume route read — the
+            # grace-aware owner. A recurring card whose paid period ended but whose
+            # renewal decision has not arrived is still held, and the card will
+            # charge again beside any new payment. The no-grace reader answers the
+            # access question, not this one: on it this line computed "holds nothing"
+            # for a plan the account holds, said it was purchasable, and opened a
+            # second payment page for it.
+            active_paid_plan_codes=await paid_plan_codes_for_replacement_decisions(
                 self.session, user_id=user_id
             ),
             billing_cycle=attempt.billing_cycle,
@@ -2281,9 +2542,13 @@ class BillingService:
         await self._hydrate_checkout_data(
             data,
             provider=provider,
+            event_id=event_id,
             event_type=event_type,
         )
-        user_id = self._parse_uuid(data.get("user_id"))
+        # Read without raising: an unreadable person id must not cost the product the
+        # stored event. A payment whose checkout cannot be matched has already been
+        # refused by ``_hydrate_checkout_data`` above, which runs first.
+        user_id = self._uuid_if_readable(data.get("user_id"))
         event = BillingEvent(
             user_id=user_id,
             provider=provider,
@@ -2315,14 +2580,23 @@ class BillingService:
                     data=data,
                 )
         except Exception as exc:
-            if getattr(exc, "code", "") == "old_subscription_cancel_failed":
+            if isinstance(exc, PlanMoveFailed):
                 await self._save_replacement_failure(
                     provider=provider,
                     event_id=event_id,
                     event_type=event_type,
                     payload=payload,
                     user_id=user_id,
-                    error_code="old_subscription_cancel_failed",
+                    error_code=exc.code,
+                )
+                raise
+            if (
+                isinstance(exc, BillingError)
+                and exc.code == "subscription_resurrected_after_cancel"
+            ):
+                await self._save_resurrection_alert(
+                    event=event,
+                    error_code=exc.code,
                 )
                 raise
             event.processing_status = "failed"
@@ -2364,6 +2638,7 @@ class BillingService:
             await self._hydrate_checkout_data(
                 data,
                 provider=event.provider,
+                event_id=event.provider_event_id,
                 event_type=event.event_type,
             )
             subscription = await self._apply_event(
@@ -2388,14 +2663,23 @@ class BillingService:
                     data=data,
                 )
         except Exception as exc:
-            if getattr(exc, "code", "") == "old_subscription_cancel_failed":
+            if isinstance(exc, PlanMoveFailed):
                 await self._save_replacement_failure(
                     provider=event.provider,
                     event_id=event.provider_event_id,
                     event_type=event.event_type,
                     payload=payload,
                     user_id=event.user_id,
-                    error_code="old_subscription_cancel_failed",
+                    error_code=exc.code,
+                )
+                raise
+            if (
+                isinstance(exc, BillingError)
+                and exc.code == "subscription_resurrected_after_cancel"
+            ):
+                await self._save_resurrection_alert(
+                    event=event,
+                    error_code=exc.code,
                 )
                 raise
             event.processing_status = "failed"
@@ -2404,6 +2688,7 @@ class BillingService:
             raise
         event.processing_status = "processed"
         event.processed_at = datetime.now(UTC)
+        await self._close_replacement_failure(event.provider_event_id)
         await self.session.flush()
         return BillingWebhookResult(
             event_id=event.provider_event_id,
@@ -2439,7 +2724,7 @@ class BillingService:
                     billing_event=billing_event,
                 )
             except PlanReplacementError as exc:
-                raise BillingError(exc.code, str(exc)) from exc
+                raise PlanMoveFailed(exc.code, str(exc)) from exc
         await PaymentEmailOutboxService(self.session, self.settings).enqueue(
             billing_event=billing_event,
             subscription=subscription,
@@ -2450,6 +2735,47 @@ class BillingService:
             provider_event_id=billing_event.provider_event_id,
             subscription=subscription,
             data=data,
+        )
+
+    @staticmethod
+    def _plan_move_failure_key(event_id: str) -> str:
+        """The one staff alert for one payment whose plan move could not be finished.
+
+        Built through the issue queue's own sanitizer, so a provider event id in any
+        shape — Stripe's uppercase ``evt_01JABCdefGHI``, NOWPayments' colons, an id
+        longer than the queue can store — still produces a key that can be written.
+        ``_close_replacement_failure`` reads the key back through this same function,
+        so the write and the lookup can never disagree.
+        """
+
+        from ai_market_monitor.observability.issues import sanitize_dedupe_key
+
+        return sanitize_dedupe_key(f"billing:plan-move-failed:{event_id}")
+
+    async def _close_replacement_failure(self, event_id: str) -> None:
+        """Close the alert a failed paid move raised, once the same event goes through.
+
+        A later try — Creem sending the event again, or a person reprocessing it — that
+        finishes the move leaves nothing to do. Left open, the critical alert would send a
+        person to reprocess an event that is already done. The money-owed notice the move
+        wrote stays open: that sum still has to be sent by hand.
+        """
+
+        from ai_market_monitor.db.models.operations import OperationalIssue
+        from ai_market_monitor.observability.issues import OperationalIssueService
+
+        issue = await self.session.scalar(
+            select(OperationalIssue).where(
+                OperationalIssue.dedupe_key == self._plan_move_failure_key(event_id)
+            )
+        )
+        if issue is None or issue.state == "resolved":
+            return
+        await OperationalIssueService(self.session).transition(
+            issue_id=issue.id,
+            to_state="resolved",
+            actor="system",
+            reason="The same payment event went through on a later try.",
         )
 
     async def _save_replacement_failure(
@@ -2488,19 +2814,77 @@ class BillingService:
             event.error_code = error_code
             event.processed_at = None
         await OperationalIssueService(self.session).record_occurrence(
-            dedupe_key=f"billing:replacement-cancel:{event_id}"[:160],
+            dedupe_key=self._plan_move_failure_key(event_id),
             category="billing",
             severity="critical",
+            # Fixed sentences. With the error code written into the sentence, one code made
+            # it longer than a record may be, and the alert itself failed. The code is kept
+            # as evidence instead, where its length cannot matter.
             summary=(
-                "A new plan was paid for, but the old recurring charge could not be "
-                "stopped after retries. Reprocess the failed billing event."
+                "A customer paid for a new plan, but the old recurring charge could not be "
+                "stopped after retries. Money was taken and a new subscription may exist. "
+                "Reprocess the failed billing event."
+                if error_code == "old_subscription_cancel_failed"
+                else "A customer paid for a new plan, but the plan it replaces could not be "
+                "ended safely. Money was taken and a new subscription may exist. Check the "
+                "account, then reprocess the failed billing event."
             ),
             affected_scope="billing.plan_replacement",
-            evidence_refs=(f"billing_event:{event_id}"[:134],),
+            evidence_refs=(
+                f"billing_event:{event_id}"[:134],
+                f"billing_error:{error_code}"[:134],
+            ),
             source="billing_webhook",
         )
         # The calling route rolls back ordinary failures. Commit this alert first so a
         # person can see it and the saved event can be deliberately reprocessed.
+        await self.session.commit()
+
+    async def _save_resurrection_alert(
+        self,
+        *,
+        event: BillingEvent,
+        error_code: str,
+    ) -> None:
+        """Keep any event that tried to make an ended subscription live again visible.
+
+        The provider sent an update naming a subscription our database already shows
+        as ended. The subscription row is left ended, but a person must know: if the
+        event came with a charge, that money moved against a plan we ended on purpose,
+        and it has to be refunded or reconciled by hand. Whether money moved is the
+        provider's, not ours to assume from the event type, so the alert asks rather
+        than claims.
+        """
+
+        from ai_market_monitor.observability.issues import (
+            OperationalIssueService,
+            sanitize_dedupe_key,
+        )
+
+        event.processing_status = "failed"
+        event.error_code = error_code
+        await self.session.flush()
+        await OperationalIssueService(self.session).record_occurrence(
+            dedupe_key=sanitize_dedupe_key(
+                f"billing:subscription-resurrected:{event.provider_event_id}"
+            ),
+            category="billing",
+            severity="critical",
+            # Fixed sentences, measured at 197 characters — inside the queue's
+            # 200-character record limit. Naming the event id here would push an
+            # over-long provider id past the limit and lose the alert.
+            summary=(
+                "An event from the payment company tried to make a subscription our "
+                "system shows as ended live again. The subscription was left ended. A "
+                "person must check whether the payment company charged for it."
+            ),
+            affected_scope="billing.subscription_resurrection",
+            evidence_refs=(
+                f"billing_event:{event.provider_event_id}"[:134],
+                f"billing_error:{error_code}"[:134],
+            ),
+            source="billing_webhook",
+        )
         await self.session.commit()
 
     async def _credit_the_affiliate(
@@ -2562,7 +2946,9 @@ class BillingService:
             "subscription.update",
             "subscription.scheduled_cancel",
         }:
-            subscription = await self._upsert_subscription(provider=provider, data=data)
+            subscription = await self._upsert_subscription(
+                provider=provider, data=data, event_type=event_type
+            )
             if subscription.status in {
                 SubscriptionStatus.ACTIVE,
                 SubscriptionStatus.TRIALING,
@@ -2626,43 +3012,315 @@ class BillingService:
                 {},
             )
             return subscription
-        if event_type in {"payment.refunded", "refund.created"}:
-            subscription = await self._upsert_subscription(
-                provider=provider,
-                data=data,
-                forced_status=SubscriptionStatus.CANCELED,
+        if event_type in REFUND_EVENT_TYPES:
+            # The money is going back, so the plan it bought is over — for the refund
+            # names. A dispute is money frozen while the card network decides, and
+            # ending a plan on a decision that can still be reversed is not this
+            # function's call to make, so those names stay audit-only.
+            #
+            # Neither kind may be *refused*. A payment event that names a checkout we
+            # cannot see has to be refused, because accepting it would hand out a plan for
+            # money nobody paid. A refund carries no plan to hand out, and raising here
+            # rolls the whole webhook back: the record of money leaving is lost with it,
+            # and the provider stops retrying eventually and stops at that loss. So when
+            # the event names nobody, the attempt is still marked below and a person is
+            # told, instead of an error being returned.
+            refunded_plan = await self._end_refunded_plan(
+                provider=provider, event_id=event_id, event_type=event_type, data=data
             )
-            subscription.canceled_at = datetime.now(UTC)
-            await EntitlementService(self.session).snapshot(subscription.user_id)
+            if refunded_plan is None:
+                # Either a chargeback name, which has never touched the plan, or a refund
+                # that named no subscription to end. The audit line is kept exactly as it
+                # was for those names; the payment itself is settled by
+                # ``_record_checkout_event`` a moment later.
+                if event_type in REFUND_CHARGEBACK_EVENT_TYPES:
+                    user_id = self._uuid_if_readable(data.get("user_id"))
+                    if user_id:
+                        self._audit(user_id, f"billing.{event_type}", "user", user_id, {})
+                return None
+            await EntitlementService(self.session).snapshot(refunded_plan.user_id)
             await EntitlementService(self.session).pause_excess_after_downgrade(
-                subscription.user_id
+                refunded_plan.user_id
             )
             self._audit(
-                subscription.user_id,
+                refunded_plan.user_id,
                 "billing.payment_refunded",
                 "subscription",
-                subscription.id,
+                refunded_plan.id,
                 {},
             )
-            return subscription
+            return refunded_plan
         if event_type in {"payment.expired", "payment.failed"}:
             user_id = self._parse_uuid(data.get("user_id"))
             if user_id:
                 self._audit(user_id, f"billing.{event_type}", "user", user_id, {})
-            return None
-        if event_type in {"charge.refunded", "charge.dispute.created", "dispute.created"}:
-            user_id = self._parse_uuid(data.get("user_id"))
-            if user_id:
-                self._audit(user_id, f"billing.{event_type}", "user", user_id, {})
         return None
+
+    async def _end_refunded_plan(
+        self,
+        *,
+        provider: str,
+        event_id: str,
+        event_type: str,
+        data: dict[str, Any],
+    ) -> Subscription | None:
+        """End the paid plan a refund returned the money for, when the event names it.
+
+        Returns ``None`` when the event cannot be tied to a subscription — and the
+        caller must treat that as "recorded, not refused". Which attempt the money came
+        back for is what the money readers ask, and that is settled by
+        :meth:`_attach_refund_to_attempt` on the way in; this is only the access half.
+
+        A named-but-unknown subscription is one of those ``None``s: the event says a
+        plan this system has never heard of was refunded, and inventing a real CANCELED
+        row from that claim pollutes the customer's record with a plan that never
+        existed — the next event naming the same reference would then be met by the
+        resurrection alert over a row nobody can explain. The honest answer is the
+        same one the code already gives when the event names nothing at all: leave the
+        row unwritten, place the money, and tell a person the plan could not be found.
+        """
+
+        if event_type not in REFUND_ENDS_PLAN_EVENT_TYPES:
+            return None
+        user_id = self._uuid_if_readable(data.get("user_id"))
+        reference = data.get("provider_subscription_id") or data.get("subscription_id")
+        if user_id is None or not reference:
+            # Nothing names the plan, so nothing is ended. If the checkout was matched
+            # the money truth is already safe, and the unattached-refund alert covers the
+            # case where neither half could be placed.
+            if data.get("checkout_attempt_id") not in (None, ""):
+                await self._save_refund_alert(
+                    event_id=event_id,
+                    event_type=event_type,
+                    reason="plan",
+                )
+            return None
+        held = await self.session.scalar(
+            select(Subscription.id)
+            .where(
+                Subscription.provider == provider,
+                Subscription.provider_subscription_id == str(reference),
+            )
+            .limit(1)
+        )
+        if held is None:
+            # The same lookup :meth:`_upsert_subscription` would make — asked here
+            # first, because an answer of "no such row" must not create one.
+            if data.get("checkout_attempt_id") not in (None, ""):
+                await self._save_refund_alert(
+                    event_id=event_id,
+                    event_type=event_type,
+                    reason="plan",
+                )
+            return None
+        subscription = await self._upsert_subscription(
+            provider=provider,
+            data=data,
+            forced_status=SubscriptionStatus.CANCELED,
+        )
+        subscription.canceled_at = datetime.now(UTC)
+        return subscription
+
+    @staticmethod
+    def _refund_alert_key(event_id: str, reason: str) -> str:
+        """The one key for one refund this system could not place.
+
+        The provider's own event id is hashed instead of written in. The issue queue
+        refuses a key containing whitespace, and an event id is exactly whatever the
+        company produced — a refund alert that cannot be written is a refund that
+        vanished without a trace, which is the failure this alert exists to prevent. The
+        raw id is still kept as an evidence pointer, where the queue's own sanitizer
+        truncates and cleans it.
+        """
+
+        from ai_market_monitor.observability.issues import sanitize_dedupe_key
+
+        digest = sha256(event_id.encode("utf-8")).hexdigest()[:32]
+        return sanitize_dedupe_key(f"billing:refund-unattached:{digest}:{reason}")
+
+    async def _save_refund_alert(
+        self, *, event_id: str, event_type: str, reason: str
+    ) -> None:
+        """Tell a person that money went back and this system could not place it.
+
+        Two things can be missing. ``payment``: no checkout attempt could be matched, so
+        a payment that is no longer money held still reads as one — that is the row the
+        money-owed valuation and the completed-sale count read. ``plan``: the payment was
+        matched but no subscription could be, so the access it bought may still be live.
+
+        Fixed sentences: an over-long summary fails the queue's own check, and an alert
+        that cannot be written is a refund that left no trace at all. The provider's event
+        id never enters the sentence — see :meth:`_refund_alert_key`.
+        """
+
+        from ai_market_monitor.observability.issues import OperationalIssueService
+
+        await OperationalIssueService(self.session).record_occurrence(
+            dedupe_key=self._refund_alert_key(event_id, reason),
+            category="billing",
+            severity="critical",
+            summary=REFUND_RECONCILIATION_ALERTS[reason],
+            affected_scope="billing.refund_reconciliation",
+            evidence_refs=(
+                f"billing_event:{event_id}"[:134],
+                f"billing_error:refund_{reason}_unmatched"[:134],
+                f"billing_event_type:{event_type}"[:134],
+            ),
+            source="billing_webhook",
+        )
+        await self.session.flush()
+
+    async def _attach_refund_to_attempt(
+        self,
+        *,
+        provider: str,
+        event_id: str,
+        event_type: str,
+        data: dict[str, Any],
+    ) -> None:
+        """Point a refund or chargeback at the checkout attempt whose money came back.
+
+        Providers are inconsistent about echoing the reference they were given: a Stripe
+        charge carries the charge and the subscription, a Creem refund names the
+        subscription, and a crypto order can arrive with nothing but the person. Skipping
+        those was how a refund came to be applied to the plan and never to the payment.
+
+        Nothing is guessed. When the event carries no reference the person, the plan or
+        the subscription behind it has to leave exactly one settled payment standing;
+        where the payload supports two readings, no payment is picked and a person is
+        asked instead. Marking the wrong payment refunded takes a real sale away from the
+        money-owed path, which is the same mistake wearing the other sign.
+        """
+
+        attempt: BillingCheckoutAttempt | None = None
+        raw_attempt_id = data.get("checkout_attempt_id")
+        if raw_attempt_id in (None, ""):
+            attempt = await self._resolve_refund_attempt(provider=provider, data=data)
+        else:
+            # An unreadable reference says this event is not safe to apply to any payment.
+            # It does not say the refund did not happen, so it is a question for a person,
+            # not a reason to fail the webhook.
+            attempt_id = self._uuid_if_readable(raw_attempt_id)
+            if attempt_id is not None:
+                candidate = await self.session.get(BillingCheckoutAttempt, attempt_id)
+                if candidate is not None and self._refund_matches_attempt(
+                    candidate, provider=provider, data=data
+                ):
+                    attempt = candidate
+        if attempt is None:
+            # Drop the unusable reference rather than pass it on: it is the same string
+            # the money-in path would refuse, and the next reader would only choke on it.
+            data.pop("checkout_attempt_id", None)
+            await self._save_refund_alert(
+                event_id=event_id, event_type=event_type, reason="payment"
+            )
+            return
+        data["checkout_attempt_id"] = str(attempt.id)
+        data["user_id"] = str(attempt.user_id)
+        plan = await self.session.get(Plan, attempt.plan_id)
+        if plan is not None:
+            data["plan_code"] = plan.code
+
+    @staticmethod
+    def _refund_matches_attempt(
+        attempt: BillingCheckoutAttempt, *, provider: str, data: Mapping[str, Any]
+    ) -> bool:
+        """May this event alter that payment record, on the evidence it carries?
+
+        Only two things are checked, and both are identity: the company must be the one
+        that took the money, and a person named by the event must be the person the
+        checkout belongs to. The plan is deliberately not compared — a subscription keeps
+        the metadata it was created with, so after an upgrade the refund of a new plan's
+        charge still names the old checkout, which is exactly right rather than a
+        mismatch. A money *event* keeps its stricter reading in ``_hydrate_checkout_data``.
+        """
+
+        if attempt.provider not in {provider, "static"}:
+            return False
+        supplied_user_id = data.get("user_id")
+        if supplied_user_id in (None, ""):
+            return True
+        return BillingService._uuid_if_readable(supplied_user_id) == attempt.user_id
+
+    async def _resolve_refund_attempt(
+        self, *, provider: str, data: Mapping[str, Any]
+    ) -> BillingCheckoutAttempt | None:
+        """Which settled payment a refund that names no checkout belongs to, or ``None``.
+
+        Narrowed in the order the evidence goes: the subscription the event names, then
+        the person and the plan it names, then the person alone when they hold one
+        settled payment with this company. ``None`` when nothing fits or when two do.
+        """
+
+        user_id = self._uuid_if_readable(data.get("user_id"))
+        if user_id is None:
+            return None
+        plan_id: UUID | None = None
+        reference = data.get("provider_subscription_id") or data.get("subscription_id")
+        if reference not in (None, ""):
+            subscription = await self.session.scalar(
+                select(Subscription)
+                .where(
+                    Subscription.provider == provider,
+                    Subscription.provider_subscription_id == str(reference),
+                )
+                .order_by(Subscription.updated_at.desc())
+                .limit(1)
+            )
+            if subscription is not None:
+                user_id = subscription.user_id
+                plan_id = subscription.plan_id
+        if plan_id is None:
+            plan_code = self._optional_str(data.get("plan_code"))
+            if plan_code is not None:
+                plan = await self.session.scalar(
+                    select(Plan).where(Plan.code == plan_code)
+                )
+                plan_id = plan.id if plan is not None else None
+        conditions = [
+            BillingCheckoutAttempt.user_id == user_id,
+            BillingCheckoutAttempt.provider == provider,
+            BillingCheckoutAttempt.status.in_(
+                {SETTLED_ATTEMPT_STATUS, REFUNDED_ATTEMPT_STATUS}
+            ),
+        ]
+        if plan_id is not None:
+            conditions.append(BillingCheckoutAttempt.plan_id == plan_id)
+        candidates = list(
+            (
+                await self.session.scalars(
+                    select(BillingCheckoutAttempt)
+                    .where(*conditions)
+                    .order_by(BillingCheckoutAttempt.completed_at.desc())
+                    .limit(2)
+                )
+            ).all()
+        )
+        return candidates[0] if len(candidates) == 1 else None
 
     async def _hydrate_checkout_data(
         self,
         data: dict[str, Any],
         *,
         provider: str,
+        event_id: str,
         event_type: str,
     ) -> None:
+        if event_type in REFUND_EVENT_TYPES:
+            # Money coming back is read by its own rules, and they are looser on purpose.
+            # Everything below this point checks a *payment* against what was owed before
+            # access is granted: an unreadable checkout reference, the wrong company, the
+            # wrong person, the wrong plan or the wrong amount all refuse the event, and
+            # each of those refusals protects a plan somebody could otherwise get for
+            # nothing. A refund grants nothing. Refusing one for a bad reference threw the
+            # record of money leaving away with the error, which is how a refunded payment
+            # stayed a sale on our books: so a refund is attached where the payload allows
+            # and alerted where it does not, and never refused here. The money-in checks
+            # below are untouched.
+            await self._attach_refund_to_attempt(
+                provider=provider, event_id=event_id, event_type=event_type, data=data
+            )
+            return
         raw_attempt_id = data.get("checkout_attempt_id")
         if raw_attempt_id in (None, ""):
             requires_checkout = provider == "nowpayments" or event_type in {
@@ -2699,8 +3357,14 @@ class BillingService:
         if (
             provider == "nowpayments"
             and event_type == "payment.finished"
-            and attempt.status == "completed"
+            and attempt.status in {SETTLED_ATTEMPT_STATUS, REFUNDED_ATTEMPT_STATUS}
         ):
+            # ``refunded`` is in this check because the money behind a one-time crypto
+            # invoice came back after it was paid. Without it, a re-delivered
+            # ``payment.finished`` — NOWPayments sends the invoice status again — would
+            # pass as never-settled, because the refund has just moved the row off
+            # ``completed``, and would hand out a second 30-day period for money this
+            # product no longer holds.
             raise BillingError(
                 "checkout_already_completed",
                 "This one-time checkout has already granted its access period.",
@@ -2737,6 +3401,7 @@ class BillingService:
             raise BillingError(
                 "checkout_plan_mismatch", "The paid plan does not match the checkout attempt."
             )
+        renewal_price: Decimal | None = None
         if plan_changed and charged_plan_code is not None:
             expected_amount = effective_monthly_price(charged_plan_code)
         else:
@@ -2745,6 +3410,16 @@ class BillingService:
                 if attempt.billing_cycle == "trial_7_day" and event_type == "subscription.paid"
                 else attempt.amount
             )
+            if attempt.status == "completed":
+                # A renewal: the first payment for this checkout already landed, so
+                # `attempt.amount` is the LAST confirmed figure, not a promise about
+                # this one. If the first period was discounted — a code typed on the
+                # payment company's own page — the stored figure is the discounted
+                # one, and a later full-price charge for the same plan is exactly
+                # right, not an overpayment. Accept either the stored figure or the
+                # plan's current effective price; anything above both is still
+                # refused below.
+                renewal_price = effective_monthly_price(plan.code)
         # A discount Creem itself applied on its own checkout page. It is only ever read
         # from the provider's own report of this order, never from anything a buyer can
         # type, and it moves the accepted amount by exactly the figure Creem states.
@@ -2761,6 +3436,7 @@ class BillingService:
                 expected_amount=expected_amount,
                 expected_currency=attempt.currency,
                 provider_discount=provider_discount,
+                also_expected=renewal_price,
             )
             # This row is the record of what really moved. A discount entered on the
             # payment company's page is known only now, so replace the earlier quote
@@ -2803,6 +3479,7 @@ class BillingService:
         expected_amount: Decimal,
         expected_currency: str,
         provider_discount: Decimal = Decimal("0"),
+        also_expected: Decimal | None = None,
     ) -> Decimal:
         """Check what was paid against what was owed, and answer which figure was met.
 
@@ -2815,6 +3492,12 @@ class BillingService:
         can type a Creem discount code. The payment then arrives smaller than the amount
         recorded when the checkout was created, and every one of those buyers used to pay
         and receive nothing.
+
+        ``also_expected`` widens the answer by one further figure, and only on a renewal
+        the caller has already confirmed: the plan's current effective price beside the
+        amount stored on the attempt. A first period bought with a code leaves the stored
+        figure discounted, and the next month's full-price charge is right, not an
+        overpayment. Nothing larger than both candidates is ever let through.
         """
 
         try:
@@ -2829,9 +3512,14 @@ class BillingService:
                 "payment_currency_mismatch",
                 "The paid currency does not match the checkout attempt.",
             )
-        candidates = [expected_amount]
+        bases = [expected_amount]
+        if also_expected is not None and also_expected != expected_amount:
+            bases.append(also_expected)
+        candidates = list(bases)
         if provider_discount > 0:
-            candidates.append(max(expected_amount - provider_discount, Decimal("0.00")))
+            candidates.extend(
+                max(base - provider_discount, Decimal("0.00")) for base in bases
+            )
         percent = Decimal(str(self.settings.billing_payment_amount_tolerance_percent))
         too_small = True
         for candidate in candidates:
@@ -2888,22 +3576,50 @@ class BillingService:
         event_type: str,
         data: Mapping[str, Any],
     ) -> None:
+        """Write what one payment event says about the checkout attempt behind it.
+
+        Three readings, in this order: the money came back, the money arrived, the money
+        did not arrive. The first and the third are easy to confuse and they are opposites
+        — which is exactly how this function came to treat ``payment.refunded`` like a
+        failed payment and a settled one stayed a sale.
+        """
+
         attempt_id = self._parse_uuid(data.get("checkout_attempt_id"))
         if attempt_id is None:
+            # A refund with nothing here was already reported by
+            # ``_attach_refund_to_attempt``, which is where the searching happens. Every
+            # event reaches this function through that one, so alerting again would count
+            # one refund twice.
             return
         attempt = await self.session.get(BillingCheckoutAttempt, attempt_id)
         if attempt is None:
             return
         attempt.provider_event_id = provider_event_id
         normalized_status = self._status_from_provider(str(data.get("status") or "pending"))
-        if event_type in {
+        current_status = attempt.status
+        if event_type in REFUND_EVENT_TYPES:
+            # The money came back. This is the one reading of a settled payment that is
+            # not a downgrade-by-accident, and the R2-6 guard below must not swallow it:
+            # leaving the row ``completed`` is how a refunded payment keeps counting as a
+            # sale to the money-owed valuation, the affiliate commission and the
+            # operations count. Idempotent — a second refund event changes nothing.
+            if current_status != REFUNDED_ATTEMPT_STATUS:
+                attempt.status = REFUNDED_ATTEMPT_STATUS
+                # Writing this word can also retire a promise made beside it. A plan
+                # move paid for earlier may have left a manual-payout record valued
+                # from this very payment; with the money now back from the company, a
+                # person must not also send it. Voiding lives in the one place that
+                # writes ``refunded``, and runs inside this transaction: the refund and
+                # the void of what it refunded are one fact, never one-without-the-other.
+                await self._void_manual_payout_for_refund(attempt)
+        elif event_type in {
             "checkout.session.completed",
             "invoice.payment_succeeded",
             "payment.finished",
             "subscription.paid",
             "subscription.trialing",
         } and normalized_status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING}:
-            attempt.status = "completed"
+            attempt.status = SETTLED_ATTEMPT_STATUS
             attempt.completed_at = datetime.now(UTC)
             attempt.last_error = None
         elif event_type in {
@@ -2911,13 +3627,84 @@ class BillingService:
             "payment.failed",
             "payment.expired",
             "payment.partially_paid",
-            "payment.refunded",
         }:
-            attempt.status = event_type.split(".", 1)[1]
-            attempt.last_error = event_type
-        else:
+            # A settled attempt must never be downgraded to failed by a later event,
+            # such as a cancellation webhook that still carries its metadata.
+            if current_status in {"creating", "pending", "processing"}:
+                attempt.status = event_type.split(".", 1)[1]
+                attempt.last_error = event_type
+        elif current_status in {"creating", "pending"}:
             attempt.status = "processing"
         await self.session.flush()
+
+    async def _void_manual_payout_for_refund(
+        self, attempt: BillingCheckoutAttempt
+    ) -> None:
+        """Retire the promise to send money back once that money came back.
+
+        A paid plan move writes a :class:`PlanMoveMoneyOwed` row — "a person sends
+        this sum by hand" — and opens the ``billing:money-owed:{id}`` ticket that is
+        how staff hear about it. When the payment the row was valued from is
+        refunded after the move, the company has already returned that money: a row
+        still pending would have a person send it a second time, and the customer
+        would hold two refunds for one period. So this voids the row and resolves
+        its ticket, in the same transaction that records the refund.
+
+        It decides nothing else. Nothing here moves money: no payment is created or
+        reversed, the old plan stays ended (it really was replaced), and the row
+        keeps its figures — voiding is a word on the record, not a deletion of it.
+        A duplicate refund reaches this with nothing pending and changes nothing
+        further: the search takes only ``pending_manual`` rows, and
+        :meth:`OperationalIssueService.transition` is never asked to resolve a
+        ticket that already reads resolved. The two status words are the plan-move
+        service's own constants, so the question "is this payout still open?" can
+        never be answered from a second, drifting copy.
+        """
+
+        from ai_market_monitor.db.models.operations import OperationalIssue
+        from ai_market_monitor.observability.issues import (
+            OperationalIssueService,
+            sanitize_dedupe_key,
+        )
+        from ai_market_monitor.services.plan_replacements import (
+            MONEY_OWED_PENDING_STATUS,
+            MONEY_OWED_VOID_STATUS,
+        )
+
+        owed_rows = list(
+            (
+                await self.session.scalars(
+                    select(PlanMoveMoneyOwed).where(
+                        PlanMoveMoneyOwed.source_checkout_attempt_id == attempt.id,
+                        PlanMoveMoneyOwed.status == MONEY_OWED_PENDING_STATUS,
+                    )
+                )
+            ).all()
+        )
+        if not owed_rows:
+            return
+        for owed in owed_rows:
+            owed.status = MONEY_OWED_VOID_STATUS
+        await self.session.flush()
+        service = OperationalIssueService(self.session)
+        for owed in owed_rows:
+            issue = await self.session.scalar(
+                select(OperationalIssue).where(
+                    OperationalIssue.dedupe_key
+                    == sanitize_dedupe_key(f"billing:money-owed:{owed.id}")
+                )
+            )
+            if issue is None or issue.state == "resolved":
+                continue
+            await service.transition(
+                issue_id=issue.id,
+                to_state="resolved",
+                actor="system",
+                reason=(
+                    "The payment this payout was valued from has been refunded; the "
+                    "money came back from the payment company instead."
+                ),
+            )
 
     @staticmethod
     def _is_completed_payment_event(
@@ -2953,6 +3740,7 @@ class BillingService:
         provider: str,
         data: dict[str, Any],
         forced_status: SubscriptionStatus | None = None,
+        event_type: str = "",
     ) -> Subscription:
         user_id = self._parse_uuid(data.get("user_id"))
         if user_id is None:
@@ -2988,6 +3776,33 @@ class BillingService:
                 provider_subscription_id=provider_subscription_id,
             )
             self.session.add(subscription)
+        elif (
+            subscription.status
+            in {
+                SubscriptionStatus.CANCELED,
+                SubscriptionStatus.EXPIRED,
+            }
+            and status
+            in {
+                SubscriptionStatus.ACTIVE,
+                SubscriptionStatus.TRIALING,
+            }
+        ):
+            # A legitimate re-subscribe creates a new provider subscription id, so an
+            # event naming an already-ended id and a live status is never a genuine
+            # start. This must be refused for EVERY event that can arrive here, not
+            # only the ones that move money: an in-flight `subscription.updated`
+            # (or `.update`, `customer.subscription.updated`, `scheduled_cancel`,
+            # `trialing`) landing after our cancel used to set the ended row back to
+            # ACTIVE, because the old guard checked the paid event types only — two
+            # live subscriptions charging, the exact outcome alerts exist for. Keep
+            # the row ended and raise a critical alert; the event itself is recorded
+            # as failed so a person can reconcile any money behind it.
+            raise BillingError(
+                "subscription_resurrected_after_cancel",
+                "An event tried to make a subscription that our system already shows "
+                "as ended live again. The subscription stays ended on our side.",
+            )
         subscription.user_id = user_id
         subscription.plan_id = plan.id
         subscription.status = status
@@ -3024,6 +3839,23 @@ class BillingService:
         if value in (None, ""):
             return None
         return value if isinstance(value, UUID) else UUID(str(value))
+
+    @classmethod
+    def _uuid_if_readable(cls, value: Any) -> UUID | None:
+        """A provider id, read without raising: ``None`` means "nothing readable here".
+
+        ``_parse_uuid`` raising is right for a payment — a checkout that cannot be found
+        must be refused, because accepting it would hand out a plan for money nobody paid.
+        It is wrong wherever the event only has to be *written down*: on a refund the same
+        raise throws away the record of money leaving and answers the company with a
+        failure it will keep retrying, and on the stored event it loses the row altogether.
+        Those callers read through here and report the gap instead.
+        """
+
+        try:
+            return cls._parse_uuid(value)
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _parse_datetime(value: Any) -> datetime | None:

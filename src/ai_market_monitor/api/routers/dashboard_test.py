@@ -68,6 +68,7 @@ from ai_market_monitor.core.dashboard_paths import (
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
+    PLAN_LIMIT_WORDS,
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
@@ -86,7 +87,6 @@ from ai_market_monitor.db.models import (
     Strategy,
     SupportRequest,
     TelegramConnection,
-    Trial,
     User,
     UserIdentity,
     WhatsAppConnection,
@@ -111,9 +111,9 @@ from ai_market_monitor.services.automated_research_reader import AutomatedResear
 from ai_market_monitor.services.billing import (
     CHARGE_STORY_BEFORE_CHOOSING,
     DISCOUNT_CODE_METHODS,
-    BillingService,
-    active_paid_plan_codes,
+    held_access_renewal,
     paid_access_can_be_repriced,
+    paid_plan_codes_for_replacement_decisions,
     payment_method_offers_by_method,
     payment_method_payload,
     plan_checkout_availability,
@@ -127,6 +127,10 @@ from ai_market_monitor.services.notification_preferences import (
     alert_channel_choices,
     deliverable_channels,
     offered_channels,
+)
+from ai_market_monitor.services.plan_replacements import (
+    CONSENT_PLAN_REPLACEMENT,
+    PaidPlanReplacementService,
 )
 from ai_market_monitor.services.product_language import (
     check_presentation,
@@ -1433,15 +1437,19 @@ async def opportunities_page(
 #: Keyed by the limit's stored name, so a plan whose limits change cannot leave this
 #: page describing an allowance that no longer exists. A limit with no entry here is not
 #: shown at all — an unexplained number is worse than a missing one.
-_ALLOWANCE_WORDS: tuple[tuple[str, str, str, str], ...] = (
+_ALLOWANCE_WORDS: tuple[tuple[str, str, str, str], ...] = tuple(
     # "Monitor" is what the product calls the thing that runs, on its own page, in the
     # side menu and in every message it sends. These two rows called it a Watchlist,
-    # which is the word for a saved list of coins — a different object entirely.
-    ("active_strategies", "Monitors running at once", "radar", "watchlists"),
-    ("symbols_per_strategy", "Coins in one monitor", "coins", ""),
-    ("on_demand_scans_per_month", "Market checks a month", "scan", ""),
-    ("user_initiated_scans_per_week", "Market checks a week", "scan", ""),
-    ("detailed_history_days", "Days of history kept", "history", ""),
+    # which is the word for a saved list of coins — a different object entirely. The
+    # names come from `PLAN_LIMIT_WORDS`, which the checkout and the receipt read too.
+    (key, PLAN_LIMIT_WORDS[key], icon, counter)
+    for key, icon, counter in (
+        ("active_strategies", "radar", "watchlists"),
+        ("symbols_per_strategy", "coins", ""),
+        ("on_demand_scans_per_month", "scan", ""),
+        ("user_initiated_scans_per_week", "scan", ""),
+        ("detailed_history_days", "history", ""),
+    )
 )
 
 #: Two caps on the same thing, and only the one that really binds is shown.
@@ -1620,7 +1628,11 @@ def _plan_card(
     # "Change plan on the billing page" is only true advice when a change is really the
     # route. Crypto access cannot be changed, only replaced by a purchase, and sending
     # that person to the switch buttons sends them nowhere.
-    holds_other_paid_plan = bool(availability.get("must_switch_instead"))
+    #
+    # Since 2026-09-10 nobody is sent to switch buttons (there are none). The one refusal
+    # that is about the plan held now is the checkout route's own: the paid plan cannot
+    # be replaced safely, and its sentence says why and what to do.
+    replacement_refused = bool(availability.get("holds_other") and availability.get("refusal"))
     return {
         "code": code,
         "name": plan.name,
@@ -1654,8 +1666,8 @@ def _plan_card(
                 if offer["monthlyPrice"] == 0
                 else f"{plan.name} is not open for new subscriptions yet."
                 if not offer["monthlyAvailable"]
-                else "Change plan on the billing page"
-                if holds_other_paid_plan
+                else str(availability["refusal"])
+                if replacement_refused
                 else "Paid subscriptions are switched off just now. Nothing was charged."
             )
         ),
@@ -1696,8 +1708,12 @@ async def subscription_page(
 
     await PlanCatalogService(session).sync_defaults()
     entitlement = await EntitlementService(session).current(user.id)
-    trial = await session.scalar(select(Trial).where(Trial.user_id == user.id))
-    user_active_paid_plan_codes = await active_paid_plan_codes(session, user_id=user.id)
+    # The same grace-aware held set the checkout route reads: a recurring card whose
+    # paid period just ended is still held until the renewal decision arrives, and this
+    # page must refuse that plan exactly as the route does.
+    user_held_plan_codes = await paid_plan_codes_for_replacement_decisions(
+        session, user_id=user.id
+    )
     watchlists_running = int(
         await session.scalar(
             select(func.count(Strategy.id)).where(
@@ -1710,12 +1726,18 @@ async def subscription_page(
     )
 
     held_access_repriceable = await paid_access_can_be_repriced(session, user_id=user.id)
+    # The checkout route's own reason for refusing to replace the paid plan held now, so
+    # this page never offers "Choose" to somebody that route would then refuse.
+    replacement_refusal = await PaidPlanReplacementService(
+        session, settings
+    ).replacement_refusal(user_id=user.id)
     availability = {
         code: plan_checkout_availability(
             settings,
             plan_code=code,
-            active_paid_plan_codes=user_active_paid_plan_codes,
+            active_paid_plan_codes=user_held_plan_codes,
             held_access_can_be_repriced=held_access_repriceable,
+            replacement_refusal=replacement_refusal,
         )
         for code in PURCHASABLE_PLAN_CODES
     }
@@ -1757,28 +1779,54 @@ async def subscription_page(
         .limit(1)
     )
     name_parts = (user.display_name or "").strip().split(maxsplit=1)
-    billing = BillingService(session, settings)
+    # Whether the plan held renews is read from that plan, never from the payment company
+    # this server would use for a new sale: on a server that sells by card, a customer who
+    # paid by crypto was told their plan "renews by itself each month".
+    held = await held_access_renewal(session, entitlement)
     await session.commit()
 
     # How this access ends, in one sentence. Three different facts used to be spread
     # across three tiles reading "Access source: Trial", "Trial access until", and
     # "Renewal: No automatic renewal" — which is the same sentence said three times in
     # a vocabulary nobody uses out loud.
-    if entitlement.plan.code == "demo":
+    #
+    # The day it ends, not the second. The trial sentence read "ends on 2026-10-10
+    # 07:07:46 UTC", which asks a beginner to read four numbers to find the one day they
+    # need — and prints it in a timezone that is not theirs.
+    ends_on = _day_only(held.ends_at, user.timezone or "UTC") if held.ends_at else ""
+    if held.kind == "free":
         renewal = "Free, with no end date and nothing to cancel."
-    elif entitlement.source == "trial" and trial is not None:
-        # The day it ends, not the second. This sentence read "ends on 2026-10-10
-        # 07:07:46 UTC", which asks a beginner to read four numbers to find the one day
-        # they need — and prints it in a timezone that is not theirs.
+    elif held.kind == "trial":
         renewal = (
-            "Your trial access ends on "
-            f"{_day_only(trial.ends_at, user.timezone or 'UTC')}. "
-            "Nothing renews by itself."
+            f"Your trial access ends on {ends_on}. Nothing renews by itself."
+            if ends_on
+            else "Your trial access ends by itself. Nothing renews by itself."
         )
-    elif billing.provider_capabilities.supports_recurring_billing:
-        renewal = "This renews by itself each month until you stop it."
+    elif held.kind == "grant":
+        renewal = (
+            f"Hilal Markets gave you this plan until {ends_on}. "
+            "Nothing is charged, and nothing renews by itself."
+            if ends_on
+            else "Hilal Markets gave you this plan, with no end date. Nothing is charged."
+        )
+    elif held.kind == "renews":
+        renewal = (
+            f"This renews by itself each {held.every} until you stop it."
+            if held.every
+            else "This renews by itself until you stop it."
+        )
+    elif held.kind == "stopped":
+        renewal = (
+            f"This ends on {ends_on}. It will not renew."
+            if ends_on
+            else "This ends with the period you paid for. It will not renew."
+        )
     else:
-        renewal = "This lasts 30 days. It does not renew by itself."
+        renewal = (
+            f"This lasts until {ends_on}. It does not renew by itself."
+            if ends_on
+            else "This lasts 30 days. It does not renew by itself."
+        )
 
     cards = [
         _plan_card(
@@ -1842,6 +1890,12 @@ async def subscription_page(
         charge_story_before_choosing=CHARGE_STORY_BEFORE_CHOOSING,
         promotion_ends_at=PROMOTION_ENDS_AT.isoformat(),
         open_for_plan=open_for_plan,
+        # Whether a payment in the popup would replace a paid plan held now. Read from
+        # `plan_checkout_availability`, the one owner of "a different paid plan", and
+        # never worked out here from plan codes. When true, the tick box carries the
+        # owner's plan-replacement sentence.
+        replacing_paid_plan=any(entry["holds_other"] for entry in availability.values()),
+        consent_plan_replacement=CONSENT_PLAN_REPLACEMENT,
         settings_path=SETTINGS_PATH,
         support_path=SUPPORT_PATH,
         watchlists_path=MONITORS_PATH,

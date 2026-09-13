@@ -1,0 +1,87 @@
+/* "Ask AI" — the label above the assistant's round button, on every page that has one.
+ *
+ * Three families of page draw a round assistant button in the bottom-right corner:
+ *
+ *   * every public page and the landing page — `.public-chat-launcher`
+ *     (templates/hilal/partials/public_chat.html);
+ *   * every signed-in dashboard page — `.hilal-orb`
+ *     (templates/hilal/dashboard_test/partials/hilal_chat.html);
+ *   * every System Brain page — `.brain-agent-orb`
+ *     (templates/system_brain_agent_dock.html).
+ *
+ * Each carries the same label, drawn by this one rule, so the three can never disagree
+ * about how it looks. `tests/unit/test_invariant_ask_ai_corner_tag.py` holds the list.
+ *
+ * The fill is the Ask AI sky blue, the same `--hm-sky` as the "Ask AI" buttons inside the
+ * dashboard, so the label and those buttons read as one thing. White on it measures
+ * 4.86:1 (`tests/unit/test_invariant_ask_ai_contrast.py`). The public pages never load
+ * `hilalmarkets-brand.css`, so `hilalmarkets.css` carries the same three tokens for them,
+ * and the test above fails if the two ever say different things.
+ *
+ * A rectangle with rounded corners, not a pill: 8px corners on a 26px-tall box.
+ *
+ * It breathes the way the Ask AI buttons do: a gentle scale up and back. `brand guide.md`
+ * rules out looping movement *without meaning*; this one means "you can ask here", the
+ * same promise the approved Ask AI buttons already make. It stops for a pointer or the
+ * keyboard on the button, and it never starts for anybody who asked for less motion
+ * (WCAG 2.2.2). The animation moves the `scale` property only, so the `translate` that
+ * centres the label over the button is never overwritten by it.
+ *
+ * The label is for eyes. The button's own accessible name begins with the same two words,
+ * "Ask AI" (WCAG 2.5.3), so the label itself is `aria-hidden`.
+ */
+
+:is(.public-chat-launcher, .hilal-orb, .brain-agent-orb) > .hm-ask-tag {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--hm-sky);
+  color: var(--white);
+  box-shadow: 0 10px 22px -12px rgba(43, 46, 53, .55);
+  font: 600 .75rem/1 var(--hm-font-ui);
+  letter-spacing: .01em;
+  white-space: nowrap;
+  /* The public launcher sets `pointer-events: none` on everything inside it. The label
+     sits outside the circle, so without this a click on it would fall through to the
+     page underneath. With it, the click reaches the button like any other. */
+  pointer-events: auto;
+  translate: -50% 0;
+  transform-origin: 50% 100%;
+  animation: hm-ask-tag-breathe 2600ms ease-in-out infinite;
+  transition: background-color 160ms ease;
+}
+
+/* A pointer or the keyboard on the button: the label holds still and deepens, the same
+   rest-to-hover step as the Ask AI buttons. */
+:is(.public-chat-launcher, .hilal-orb, .brain-agent-orb):is(:hover, :focus-visible) > .hm-ask-tag {
+  background: var(--hm-sky-strong);
+  animation-play-state: paused;
+}
+
+/* Once the window is open, the button is the way back, not the way in. */
+:is(.public-chat-launcher, .hilal-orb, .brain-agent-orb)[aria-expanded="true"] > .hm-ask-tag {
+  display: none;
+}
+
+@keyframes hm-ask-tag-breathe {
+  0%, 100% { scale: 1; }
+  50% { scale: 1.08; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.public-chat-launcher, .hilal-orb, .brain-agent-orb) > .hm-ask-tag {
+    animation: none;
+    scale: none;
+  }
+}
+
+@media print {
+  .hm-ask-tag { display: none !important; }
+}

@@ -1,23 +1,38 @@
-"""End-to-end plan change journeys.
+"""End-to-end plan change journeys, under the owner's rule of 2026-09-10.
 
-A customer on a paid plan must be able to move up or down through the billing
-page. The route, the service, and the page must agree on what is allowed, when
-it takes effect, and what the payment company is asked to do. These tests drive
-the real route with the real service and fake only the outbound Creem call.
+A customer on a paid plan moves to a different paid plan by buying it, at its full price,
+on the normal payment page. The old plan ends only after that payment is confirmed; the
+money side of that is proved in ``test_paid_plan_replacement.py``. The switch route that
+used to re-price the card already held refuses every move now, records nothing, and never
+reaches the payment company.
+
+These tests drive the real routes with the real services and fake only the outbound
+payment-company calls. For every pair of paid plans they hold three things together:
+
+* the billing page offers a Pay button for the other plan, and no switch control;
+* the switch route refuses, with the sentence that sends the person to that Pay button;
+* the real checkout route accepts exactly the plans the page offers a Pay button for.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ai_market_monitor.core.config import get_settings
+from ai_market_monitor.core.plans import (
+    PURCHASABLE_PLAN_CODES,
+    effective_monthly_price,
+    plan_name,
+)
 from ai_market_monitor.db.models import (
+    BillingCheckoutAttempt,
     Subscription,
     SubscriptionPlanChange,
     UserIdentity,
@@ -29,8 +44,27 @@ from ai_market_monitor.services.plan_changes import (
     TIMING_IMMEDIATE,
     TIMING_PERIOD_END,
     PlanChangeService,
+    switch_label_booked,
 )
-from tests.support.billing_config import live_billing_overrides
+from ai_market_monitor.services.plan_replacements import (
+    CONSENT_PLAN_REPLACEMENT,
+    REPLACEMENT_REFUSALS,
+    manual_return_window_words,
+)
+from tests.support.billing_config import live_billing_overrides, stub_payment_companies
+
+#: Every ordered pair of different paid plans: every move up and every move down.
+PLAN_PAIRS = tuple(
+    (held, target)
+    for held in PURCHASABLE_PLAN_CODES
+    for target in PURCHASABLE_PLAN_CODES
+    if held != target
+)
+
+#: Words from the billing page's sentence for ``plan_change_needs_payment`` — the refusal
+#: that sends the person to the Pay button. Checked on the page, because a refusal whose
+#: sentence never reaches the screen tells nobody where to go.
+NEEDS_PAYMENT_WORDS = "normal payment page"
 
 
 async def _signup_and_verify(client, settings, email: str) -> None:
@@ -77,8 +111,15 @@ async def _grant_paid_plan(
     *,
     provider: str = "creem",
     period_days: int = 30,
+    with_payment_record: bool = True,
 ) -> Subscription:
-    """Give the account an active paid subscription, Creem by default."""
+    """Give the account an active paid subscription, Creem by default.
+
+    With the completed checkout that paid for it, as a real subscription has. A move to a
+    different plan values the unused time from that payment, and refuses to open a
+    payment page when it cannot find one — so an account seeded without it is an account
+    no real customer has.
+    """
 
     async with session_factory() as session:
         plan = await PlanCatalogService(session).get_or_sync(plan_code)
@@ -94,8 +135,63 @@ async def _grant_paid_plan(
             current_period_end=now + timedelta(days=period_days),
         )
         session.add(subscription)
+        if with_payment_record:
+            session.add(
+                BillingCheckoutAttempt(
+                    user_id=user_id,
+                    plan_id=plan.id,
+                    billing_cycle="monthly_auto_renewal",
+                    provider=provider,
+                    status="completed",
+                    idempotency_key=f"paid-{user_id}-{plan_code}",
+                    terms_version="test",
+                    amount=effective_monthly_price(plan_code),
+                    currency="USD",
+                    terms_accepted_at=now,
+                    expires_at=now,
+                    completed_at=now,
+                    billing_profile={"first_name": "Amina"},
+                )
+            )
         await session.commit()
     return subscription
+
+
+async def _book_change_made_before_the_rule(
+    session_factory,
+    *,
+    user_id: UUID,
+    subscription: Subscription,
+    kind: str,
+    from_plan_code: str,
+    to_plan_code: str,
+) -> SubscriptionPlanChange:
+    """A change booked through the old switch form, before 2026-09-10.
+
+    Nobody can book one now, but rows booked before the rule are still in the database
+    waiting for the end of their paid period, and they must still behave.
+    """
+
+    async with session_factory() as session:
+        change = SubscriptionPlanChange(
+            user_id=user_id,
+            subscription_id=subscription.id,
+            kind=kind,
+            from_plan_code=from_plan_code,
+            to_plan_code=to_plan_code,
+            timing=TIMING_PERIOD_END,
+            status="scheduled",
+            reason_code="too_expensive" if kind == "downgrade" else None,
+            reason_text=None,
+            consent_text="I agreed to this change before 2026-09-10.",
+            consented_at=datetime.now(UTC) - timedelta(days=3),
+            effective_at=subscription.current_period_end,
+            provider=subscription.provider,
+            metadata_json={},
+        )
+        session.add(change)
+        await session.commit()
+    return change
 
 
 def _csrf(html: str) -> str:
@@ -106,19 +202,38 @@ def _csrf(html: str) -> str:
     return match.group(1)
 
 
-def _recorded_creem_payload(calls: list[dict]) -> dict:
-    """The Creem upgrade payload captured by the fake provider_request."""
+def _pay_buttons(html: str) -> set[str]:
+    """The plans the billing page draws a live Pay button for, read from the page."""
 
-    upgrade_calls = [
-        call for call in calls if "/v1/subscriptions/" in call["url"] and "upgrade" in call["url"]
-    ]
-    assert len(upgrade_calls) == 1, f"Expected exactly one Creem upgrade call, got {upgrade_calls}"
-    return upgrade_calls[0]["payload"]
+    return set(
+        re.findall(r'data-dashboard-purchase-button\s+data-plan-code="([a-z_]+)"', html)
+    )
+
+
+def _assert_no_switch_control(html: str) -> None:
+    """No switch button, and no form that posts to the route that refuses every switch."""
+
+    assert "data-plan-switch" not in html, "the page draws a plan-switch control"
+    assert 'action="/dashboard/billing/switch"' not in html, (
+        "the page carries a form that posts to the switch route, which refuses everything"
+    )
+
+
+async def _plan_change_rows(session_factory) -> int:
+    async with session_factory() as session:
+        return int(
+            await session.scalar(select(func.count()).select_from(SubscriptionPlanChange))
+            or 0
+        )
 
 
 @pytest.fixture
 def fake_creem(monkeypatch):
-    """Capture the Creem upgrade call instead of sending it over the network."""
+    """Record any call the plan-change service sends to the payment company.
+
+    Every test here expects it to stay empty: the switch route may refuse, but it may
+    never ask the payment company for anything.
+    """
 
     calls: list[dict] = []
 
@@ -133,7 +248,6 @@ def fake_creem(monkeypatch):
     ) -> httpx.Response:
         calls.append(
             {
-                "settings": settings,
                 "method": method,
                 "url": url,
                 "provider": provider,
@@ -141,11 +255,7 @@ def fake_creem(monkeypatch):
                 "payload": kwargs.get("json", {}),
             }
         )
-        # Return a Creem-shaped success body.
-        return httpx.Response(
-            200,
-            json={"id": f"creem_upgrade_{uuid4().hex[:12]}"},
-        )
+        return httpx.Response(200, json={"id": f"creem_change_{uuid4().hex[:12]}"})
 
     monkeypatch.setattr(plan_changes_module, "provider_request", fake_provider_request)
     return calls
@@ -153,17 +263,25 @@ def fake_creem(monkeypatch):
 
 @pytest.mark.parametrize("timing", [TIMING_IMMEDIATE, TIMING_PERIOD_END])
 @pytest.mark.parametrize("period_days", [30, 365], ids=["monthly", "annual"])
-async def test_upgrade_trader_to_pro_records_intent_and_moves_access(
+@pytest.mark.parametrize(("held_code", "target_code"), PLAN_PAIRS)
+async def test_every_paid_plan_move_is_a_payment_and_the_switch_route_takes_nothing(
     test_context,
     fake_creem,
+    held_code: str,
+    target_code: str,
     timing: str,
     period_days: int,
 ):
-    """Trader -> Pro: the right record, the right Creem instruction, and access
-    moves immediately only when the customer chose now.
+    """Every move up and every move down, for a monthly and a yearly period.
+
+    The page offers the other plan as a full-price payment, says what happens to the plan
+    held now, and draws no switch control. An old form posted to the switch route anyway
+    — from a tab left open since before the rule — is refused with the sentence that
+    sends the person to the Pay button, records nothing, reaches no payment company, and
+    leaves the plan they hold exactly as it was.
     """
 
-    email = f"upgrade-{timing}-{period_days}@example.com"
+    email = f"move-{held_code}-{target_code}-{timing}-{period_days}@example.com"
     settings = test_context["settings"]
     client = test_context["client"]
     session_factory = test_context["session_factory"]
@@ -171,183 +289,122 @@ async def test_upgrade_trader_to_pro_records_intent_and_moves_access(
     await _signup_and_verify(client, settings, email)
     user_id = await _user_id_for_email(session_factory, email)
     subscription = await _grant_paid_plan(
-        session_factory,
-        user_id,
-        "trader",
-        period_days=period_days,
+        session_factory, user_id, held_code, period_days=period_days
     )
 
     enabled = settings.model_copy(update=live_billing_overrides())
     test_context["app"].dependency_overrides[get_settings] = lambda: enabled
 
-    before_page = await client.get("/dashboard/billing")
-    assert before_page.status_code == 200, before_page.text
-    assert 'data-plan-switch="upgrade"' in before_page.text
-    assert "Upgrade" in before_page.text
+    page = await client.get("/dashboard/billing")
+    assert page.status_code == 200, page.text
+    offered = _pay_buttons(page.text)
+    assert target_code in offered, f"no Pay button for {target_code}: {offered}"
+    assert held_code not in offered, f"a Pay button for the plan already held: {offered}"
+    _assert_no_switch_control(page.text)
+    assert f"You pay the {plan_name(target_code)} price today" in page.text
+    assert manual_return_window_words() in page.text
+    assert CONSENT_PLAN_REPLACEMENT in page.text
 
-    csrf = _csrf(before_page.text)
     post = await client.post(
         "/dashboard/billing/switch",
         data={
-            "plan_code": "pro",
+            "plan_code": target_code,
             "timing": timing,
+            "reason_code": "too_expensive",
             "switch_consent": "true",
-            "csrf_token": csrf,
+            "csrf_token": _csrf(page.text),
         },
         follow_redirects=False,
     )
     assert post.status_code == 303, post.text
-    assert post.headers["location"] == "/dashboard/billing?message=plan_upgraded"
+    location = post.headers["location"]
+    assert "error=plan_change_needs_payment" in location
+    assert f"selected_plan={target_code}" in location
 
-    after_page = await client.get(post.headers["location"])
-    assert after_page.status_code == 200, after_page.text
-    assert "Your plan is changing" in after_page.text
-    if timing == TIMING_PERIOD_END:
-        assert "starts" in after_page.text.lower() or "end of the period" in after_page.text.lower()
+    error_page = await client.get(location)
+    assert NEEDS_PAYMENT_WORDS in error_page.text
 
+    assert await _plan_change_rows(session_factory) == 0
     async with session_factory() as session:
-        change = await session.scalar(
-            select(SubscriptionPlanChange)
-            .where(SubscriptionPlanChange.user_id == user_id)
-            .order_by(SubscriptionPlanChange.created_at.desc())
-        )
-        assert change is not None
-        assert change.kind == "upgrade"
-        assert change.from_plan_code == "trader"
-        assert change.to_plan_code == "pro"
-        assert change.timing == timing
-        assert change.provider == "creem"
-
-        refreshed_sub = await session.get(Subscription, subscription.id)
+        refreshed = await session.get(Subscription, subscription.id)
+        held_plan = await PlanCatalogService(session).get_or_sync(held_code)
+        assert refreshed is not None
+        assert refreshed.plan_id == held_plan.id
+        assert refreshed.status == SubscriptionStatus.ACTIVE
         entitlement = await EntitlementService(session).current(user_id)
+        assert entitlement.plan.code == held_code
 
-        if timing == TIMING_IMMEDIATE:
-            assert change.status == "applied"
-            effective_at = (
-                change.effective_at.replace(tzinfo=UTC)
-                if change.effective_at.tzinfo is None
-                else change.effective_at
-            )
-            assert effective_at <= datetime.now(UTC)
-            pro = await PlanCatalogService(session).get_or_sync("pro")
-            assert refreshed_sub.plan_id == pro.id
-            assert entitlement.plan.code == "pro"
-        else:
-            assert change.status == "scheduled"
-            effective_at = (
-                change.effective_at.replace(tzinfo=UTC)
-                if change.effective_at.tzinfo is None
-                else change.effective_at
-            )
-            assert effective_at == subscription.current_period_end
-            trader = await PlanCatalogService(session).get_or_sync("trader")
-            assert refreshed_sub.plan_id == trader.id
-            assert entitlement.plan.code == "trader"
-
-    payload = _recorded_creem_payload(fake_creem)
-    expected_behaviour = (
-        "proration-charge-immediately"
-        if timing == TIMING_IMMEDIATE
-        else "proration-none"
-    )
-    assert payload["update_behavior"] == expected_behaviour
-    assert payload["product_id"] == "prod_test_pro_monthly"
+    assert fake_creem == []
 
 
-async def test_downgrade_pro_to_trader_is_scheduled_and_applies_at_period_end(
+async def test_a_change_booked_before_the_rule_still_applies_at_period_end(
     test_context,
     fake_creem,
 ):
-    """Pro -> Trader: never immediate, stays Pro until the paid period ends, then
-    apply_due_changes moves access and pauses any excess monitors.
+    """A move down booked before 2026-09-10 happens on the day it was booked for.
+
+    This test used to book the change itself through the switch form. That form is gone
+    and the switch route refuses every move, but changes booked before the rule may still
+    be waiting in the database. The page must say so, must not offer to buy the plan
+    already booked, and the scheduler must move access on that day — never earlier, and
+    without asking the payment company for anything.
     """
 
-    email = "downgrade-pro-to-trader@example.com"
+    email = "booked-downgrade-pro-to-trader@example.com"
     settings = test_context["settings"]
     client = test_context["client"]
     session_factory = test_context["session_factory"]
 
     await _signup_and_verify(client, settings, email)
     user_id = await _user_id_for_email(session_factory, email)
-    subscription = await _grant_paid_plan(
-        session_factory,
-        user_id,
-        "pro",
-        period_days=30,
-    )
+    subscription = await _grant_paid_plan(session_factory, user_id, "pro", period_days=30)
     period_end = subscription.current_period_end
+    change = await _book_change_made_before_the_rule(
+        session_factory,
+        user_id=user_id,
+        subscription=subscription,
+        kind="downgrade",
+        from_plan_code="pro",
+        to_plan_code="trader",
+    )
 
     enabled = settings.model_copy(update=live_billing_overrides())
     test_context["app"].dependency_overrides[get_settings] = lambda: enabled
 
-    before_page = await client.get("/dashboard/billing")
-    assert 'data-plan-switch="downgrade"' in before_page.text
-
-    csrf = _csrf(before_page.text)
-    post = await client.post(
-        "/dashboard/billing/switch",
-        data={
-            "plan_code": "trader",
-            "timing": TIMING_PERIOD_END,
-            "reason_code": "too_expensive",
-            "switch_consent": "true",
-            "csrf_token": csrf,
-        },
-        follow_redirects=False,
-    )
-    assert post.status_code == 303, post.text
-    assert post.headers["location"] == "/dashboard/billing?message=plan_downgraded"
-
-    after_page = await client.get(post.headers["location"])
-    assert after_page.status_code == 200, after_page.text
-    assert "Your smaller plan is booked" in after_page.text
-    assert "You are moving to Plus" in after_page.text
+    page = await client.get("/dashboard/billing")
+    assert page.status_code == 200, page.text
+    assert f"You are moving to {plan_name('trader')}" in page.text
+    assert switch_label_booked(plan_name("trader")) in page.text
+    assert "trader" not in _pay_buttons(page.text)
+    _assert_no_switch_control(page.text)
 
     async with session_factory() as session:
-        change = await session.scalar(
-            select(SubscriptionPlanChange)
-            .where(SubscriptionPlanChange.user_id == user_id)
-            .order_by(SubscriptionPlanChange.created_at.desc())
-        )
-        assert change is not None
-        assert change.kind == "downgrade"
-        assert change.from_plan_code == "pro"
-        assert change.to_plan_code == "trader"
-        assert change.timing == TIMING_PERIOD_END
-        assert change.status == "scheduled"
-        effective_at = (
-            change.effective_at.replace(tzinfo=UTC)
-            if change.effective_at.tzinfo is None
-            else change.effective_at
-        )
-        assert effective_at == period_end
-        assert change.reason_code == "too_expensive"
+        assert (await EntitlementService(session).current(user_id)).plan.code == "pro"
 
-        entitlement = await EntitlementService(session).current(user_id)
-        assert entitlement.plan.code == "pro"
+        service = PlanChangeService(session, settings)
+        assert await service.apply_due_changes(now=period_end - timedelta(seconds=1)) == 0
+        assert (await EntitlementService(session).current(user_id)).plan.code == "pro"
 
-        # Simulate the scheduler running one second after the period ends.
-        await PlanChangeService(session, settings).apply_due_changes(
-            now=period_end + timedelta(seconds=1)
-        )
-
+        assert await service.apply_due_changes(now=period_end + timedelta(seconds=1)) == 1
         refreshed_sub = await session.get(Subscription, subscription.id)
-        entitlement_after = await EntitlementService(session).current(user_id)
-        assert refreshed_sub.plan_id == (await PlanCatalogService(session).get_or_sync("trader")).id
-        assert entitlement_after.plan.code == "trader"
+        trader = await PlanCatalogService(session).get_or_sync("trader")
+        assert refreshed_sub is not None
+        assert refreshed_sub.plan_id == trader.id
+        assert (await EntitlementService(session).current(user_id)).plan.code == "trader"
 
         refreshed_change = await session.get(SubscriptionPlanChange, change.id)
+        assert refreshed_change is not None
         assert refreshed_change.status == "applied"
         assert refreshed_change.applied_at is not None
 
-    payload = _recorded_creem_payload(fake_creem)
-    assert payload["update_behavior"] == "proration-none"
-    assert payload["product_id"] == "prod_test_trader_monthly"
+    assert fake_creem == []
 
 
 async def test_downgrade_immediate_is_refused(test_context, fake_creem):
-    """A downgrade sent with timing=immediate must be refused, not silently
-    turned into a period-end change.
+    """A downgrade sent with timing=immediate is refused, and nothing is recorded or sent.
+
+    It is refused for the same reason as every other switch now: a different paid plan is
+    bought on the payment page. The sentence on the page says where to go.
     """
 
     email = "downgrade-immediate-refused@example.com"
@@ -363,7 +420,6 @@ async def test_downgrade_immediate_is_refused(test_context, fake_creem):
     test_context["app"].dependency_overrides[get_settings] = lambda: enabled
 
     page = await client.get("/dashboard/billing")
-    csrf = _csrf(page.text)
     post = await client.post(
         "/dashboard/billing/switch",
         data={
@@ -371,54 +427,84 @@ async def test_downgrade_immediate_is_refused(test_context, fake_creem):
             "timing": TIMING_IMMEDIATE,
             "reason_code": "too_expensive",
             "switch_consent": "true",
-            "csrf_token": csrf,
+            "csrf_token": _csrf(page.text),
         },
         follow_redirects=False,
     )
     assert post.status_code == 303, post.text
-    assert "error=downgrade_is_period_end" in post.headers["location"]
+    assert "error=plan_change_needs_payment" in post.headers["location"]
 
     error_page = await client.get(post.headers["location"])
-    assert "end of the period you have already paid for" in error_page.text
+    assert NEEDS_PAYMENT_WORDS in error_page.text
 
-    async with session_factory() as session:
-        assert await session.scalar(select(SubscriptionPlanChange)) is None
-
+    assert await _plan_change_rows(session_factory) == 0
     assert fake_creem == []
 
 
-async def test_every_plan_card_button_matches_the_server(test_context, fake_creem):
-    """What a plan card offers is exactly what the server accepts..."""
+@pytest.mark.parametrize("held_code", PURCHASABLE_PLAN_CODES)
+async def test_every_plan_card_button_matches_the_server(
+    test_context,
+    monkeypatch,
+    held_code: str,
+):
+    """What a plan card offers is exactly what the server accepts, for every paid plan held.
 
-    email = f"drift-check-{uuid4().hex[:8]}@example.com"
+    The codes are read from the page, not from the plan catalogue: the server decides the
+    buttons, so an offered Pay button must open a real checkout and a plan with no button
+    must be refused by the same route. The switch route is checked too — it refuses every
+    plan, so the page must never offer it.
+    """
+
+    email = f"drift-check-{held_code}-{uuid4().hex[:8]}@example.com"
     settings = test_context["settings"]
     client = test_context["client"]
     session_factory = test_context["session_factory"]
 
     await _signup_and_verify(client, settings, email)
     user_id = await _user_id_for_email(session_factory, email)
-    await _grant_paid_plan(session_factory, user_id, "trader")
+    await _grant_paid_plan(session_factory, user_id, held_code)
 
     enabled = settings.model_copy(update=live_billing_overrides())
     test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+    calls = stub_payment_companies(monkeypatch)
 
     page = await client.get("/dashboard/billing")
     assert page.status_code == 200, page.text
-    # The page draws exactly one live switch button per plan it offers a change to.
-    # Reading the codes from the page, not from the plan catalog, is the point: the
-    # server decides the buttons, so an offered button must also be accepted, and a
-    # refused plan must have no button to press.
-    offered = set(
-        re.findall(
-            r'data-plan-switch-trigger data-plan-switch="(?:upgrade|downgrade)" '
-            r'data-plan-code="([a-z]+)"',
-            page.text,
-        )
-    )
-    assert offered, "the page drew no plan switch buttons at all"
+    offered = _pay_buttons(page.text)
+    assert offered, "the page drew no Pay buttons at all"
+    _assert_no_switch_control(page.text)
+    csrf = _csrf(page.text)
 
-    for plan_code in ("trader", "pro", "demo"):
-        csrf = _csrf(page.text)
+    for plan_code in PURCHASABLE_PLAN_CODES:
+        response = await client.post(
+            "/dashboard/billing/checkout",
+            data={
+                "plan_code": plan_code,
+                "billing_cycle": "monthly",
+                "payment_method": "card",
+                "checkout_request_id": uuid4().hex,
+                "terms_accepted": "true",
+                "first_name": "Amina",
+                "last_name": "Trader",
+                "address_line1": "1 Market Street",
+                "city": "Cairo",
+                "country": "Egypt",
+                "csrf_token": csrf,
+            },
+            headers={"accept": "application/json", "x-requested-with": "XMLHttpRequest"},
+        )
+        accepted = response.status_code == 200 and "checkout_url" in response.json()
+        if plan_code in offered:
+            assert accepted, (
+                f"the page offers a Pay button for {plan_code}, but checkout refuses: "
+                f"{response.status_code} {response.text[:300]}"
+            )
+        else:
+            assert not accepted, (
+                f"the page offers no Pay button for {plan_code}, but checkout accepted it"
+            )
+
+    for plan_code in (*PURCHASABLE_PLAN_CODES, "demo"):
         post = await client.post(
             "/dashboard/billing/switch",
             data={
@@ -429,28 +515,272 @@ async def test_every_plan_card_button_matches_the_server(test_context, fake_cree
             },
             follow_redirects=False,
         )
-        location = post.headers["location"]
-        if plan_code in offered:
-            assert post.status_code == 303
-            assert "error=" not in location, (
-                f"the page offers switching to {plan_code}, but the server refuses: "
-                f"{location}"
+        assert "error=" in post.headers["location"], (
+            f"the switch route accepted {plan_code}: {post.headers['location']}"
+        )
+
+    # A checkout was opened, and nothing else: no subscription was re-priced or changed.
+    assert calls, "no checkout reached the (stubbed) payment company"
+    assert all("/subscriptions/" not in call["url"] for call in calls), calls
+    assert await _plan_change_rows(session_factory) == 0
+
+
+async def _let_the_card_period_lapse(
+    session_factory,
+    subscription: Subscription,
+    *,
+    days_ago: int = 3,
+) -> None:
+    """Move a recurring card plan's paid period into the grace window.
+
+    A Creem subscription stays ``ACTIVE`` at the payment company for up to 30 days after
+    its paid period ends, until the renewal decision arrives, and ``cancel_at_period_end``
+    is still false — the card will charge again. In that window the checkout route still
+    holds the plan: buying it again is refused (`already_subscribed`) and buying a
+    different one replaces it. This is what makes a seeded subscription a *lapsed
+    recurring card* rather than an ordinary one.
+    """
+
+    async with session_factory() as session:
+        held = await session.get(Subscription, subscription.id)
+        assert held is not None
+        now = datetime.now(UTC)
+        held.current_period_start = now - timedelta(days=30 + days_ago)
+        held.current_period_end = now - timedelta(days=days_ago)
+        held.cancel_at_period_end = False
+        await session.commit()
+
+
+def _billing_page_availability(html_text: str, plan_code: str) -> dict:
+    """What the billing page tells the browser about "may this account buy this plan".
+
+    The popup and the live state of every Pay button read the availability the server
+    computed, carried in the page's `billing-plan-data` JSON. The offline suite runs no
+    JavaScript, so the payload itself is the page's answer — a payload that says
+    "purchasable" is a live Pay button in a real browser.
+    """
+
+    match = re.search(
+        r'<script id="billing-plan-data" type="application/json">(.*?)</script>',
+        html_text,
+        re.S,
+    )
+    assert match is not None, "the billing page carried no plan payload"
+    payload = json.loads(match.group(1))
+    availability = payload["plans"][plan_code]["availability"]
+    assert isinstance(availability, dict)
+    return availability
+
+
+async def _post_checkout(client, csrf: str, plan_code: str) -> httpx.Response:
+    """Press Pay the way the popup does: the real checkout route, asking for JSON."""
+
+    return await client.post(
+        "/dashboard/billing/checkout",
+        data={
+            "plan_code": plan_code,
+            "billing_cycle": "monthly",
+            "payment_method": "card",
+            "checkout_request_id": uuid4().hex,
+            "terms_accepted": "true",
+            "first_name": "Amina",
+            "last_name": "Trader",
+            "address_line1": "1 Market Street",
+            "city": "Cairo",
+            "country": "Egypt",
+            "csrf_token": csrf,
+        },
+        headers={"accept": "application/json", "x-requested-with": "XMLHttpRequest"},
+    )
+
+
+@pytest.mark.parametrize("held_code", PURCHASABLE_PLAN_CODES)
+async def test_a_lapsed_recurring_card_plan_is_held_by_every_page_exactly_like_the_route(
+    test_context,
+    monkeypatch,
+    held_code: str,
+):
+    """In the 30-day grace window the pages hold the plan the route holds.
+
+    The checkout route asks `paid_plan_codes_for_replacement_decisions` — the grace-aware
+    owner: a card subscription whose period just ended is still held, because the card
+    will charge again next to a new plan. The billing page, the review page and the
+    subscription page used to answer the same question from `active_paid_plan_codes`,
+    which drops that plan. The lapsed plan then drew a live Pay button on all three, and
+    pressing it reached a route that refuses `already_subscribed` — the page offering
+    what the server will not do, which is the exact defect class every other fix in this
+    file exists to prevent.
+    """
+
+    other_code = next(code for code in PURCHASABLE_PLAN_CODES if code != held_code)
+    email = f"lapsed-grace-{held_code}-{uuid4().hex[:8]}@example.com"
+    settings = test_context["settings"]
+    client = test_context["client"]
+    session_factory = test_context["session_factory"]
+
+    await _signup_and_verify(client, settings, email)
+    user_id = await _user_id_for_email(session_factory, email)
+    subscription = await _grant_paid_plan(session_factory, user_id, held_code)
+    await _let_the_card_period_lapse(session_factory, subscription)
+
+    enabled = settings.model_copy(update=live_billing_overrides())
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+    calls = stub_payment_companies(monkeypatch)
+
+    page = await client.get("/dashboard/billing")
+    assert page.status_code == 200, page.text
+
+    # The seed really is what the review described: an ACTIVE recurring card plan whose
+    # period ended inside the grace window, with no cancellation booked and the payment
+    # that bought it on record.
+    async with session_factory() as session:
+        held = await session.get(Subscription, subscription.id)
+        assert held is not None
+        assert held.status == SubscriptionStatus.ACTIVE
+        assert held.provider == "creem"
+        assert held.cancel_at_period_end is False
+        assert held.current_period_end is not None
+        ended = held.current_period_end
+        if ended.tzinfo is None:
+            # SQLite stores the value and reads it back without the offset, like every
+            # other date check in this file.
+            ended = ended.replace(tzinfo=UTC)
+        assert ended < datetime.now(UTC)
+
+    # (a) The plan they hold: the page says NOT purchasable, with the held-plan flag and
+    # the refusal the route's rejection is built from.
+    held_availability = _billing_page_availability(page.text, held_code)
+    assert held_availability["holds_this"] is True, (
+        f"the page says this account does not hold {held_code}, whose card is still "
+        "scheduled to charge — the checkout route holds it and refuses the purchase"
+    )
+    assert held_availability["purchasable"] is False, held_availability
+    assert plan_name(held_code) in held_availability["refusal"], held_availability
+    # The other plan stays a replacement purchase on the page — fixing the held plan
+    # must not hide it.
+    other_availability = _billing_page_availability(page.text, other_code)
+    assert other_availability["holds_this"] is False, other_availability
+    assert other_availability["holds_other"] is True, other_availability
+    assert other_availability["purchasable"] is True, other_availability
+
+    # The same answer on the other two surfaces that sell a plan.
+    review_held = await client.get(f"/dashboard/billing/checkout?plan_code={held_code}")
+    assert review_held.status_code == 200, review_held.text
+    assert "checkout-confirm-form" not in review_held.text, (
+        f"the review page asks for a name and address for {held_code}, which checkout "
+        "refuses as already held"
+    )
+    subscription_page = await client.get("/dashboard/subscription")
+    assert subscription_page.status_code == 200, subscription_page.text
+    assert f'data-s-choose="{held_code}"' not in subscription_page.text, (
+        f"the subscription page offers to choose {held_code}, which checkout refuses"
+    )
+    review_other = await client.get(f"/dashboard/billing/checkout?plan_code={other_code}")
+    assert "checkout-confirm-form" in review_other.text, (
+        "the fix must not hide the plan the route really does sell"
+    )
+    assert f'data-s-choose="{other_code}"' in subscription_page.text
+
+    # (b) Pressing Pay for the held plan meets the route's refusal; the other plan is
+    # accepted and frozen onto the lapsed subscription, so its old card is the one the
+    # confirmed payment will end.
+    csrf = _csrf(page.text)
+    refused = await _post_checkout(client, csrf, held_code)
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["error"]["code"] == "already_subscribed"
+
+    accepted = await _post_checkout(client, csrf, other_code)
+    assert accepted.status_code == 200, accepted.text
+    assert "checkout_url" in accepted.json()
+    async with session_factory() as session:
+        attempt = await session.scalar(
+            select(BillingCheckoutAttempt).where(
+                BillingCheckoutAttempt.user_id == user_id,
+                BillingCheckoutAttempt.status == "pending",
             )
-        else:
-            assert "error=" in location, (
-                f"the page offers no way to switch to {plan_code}, but the server "
-                f"accepted it: {location}"
-            )
+        )
+        assert attempt is not None
+        assert attempt.replaces_subscription_id == subscription.id
+    assert calls, "no checkout reached the (stubbed) payment company"
+    assert all("/subscriptions/" not in call["url"] for call in calls), calls
+
+
+@pytest.mark.parametrize("held_code", PURCHASABLE_PLAN_CODES)
+async def test_a_lapsed_plan_with_no_payment_record_refuses_replacement_on_every_surface(
+    test_context,
+    monkeypatch,
+    held_code: str,
+):
+    """A lapsed card plan also carries its refusal to the *other* plan's button.
+
+    Replacing a paid plan values its unused days from the payment that bought it; with
+    no payment on record the route refuses `paid_amount_missing`. The pages show that
+    sentence only while they know a plan is held (`holds_other`). With the no-grace set
+    a lapsed plan was not held at all, so every page offered a clean full-price purchase
+    for the other plan and the refusal appeared only after pressing Pay. The grace-aware
+    set makes the page say the route's sentence before anybody presses anything.
+    """
+
+    other_code = next(code for code in PURCHASABLE_PLAN_CODES if code != held_code)
+    email = f"lapsed-nopay-{held_code}-{uuid4().hex[:8]}@example.com"
+    settings = test_context["settings"]
+    client = test_context["client"]
+    session_factory = test_context["session_factory"]
+
+    await _signup_and_verify(client, settings, email)
+    user_id = await _user_id_for_email(session_factory, email)
+    subscription = await _grant_paid_plan(
+        session_factory, user_id, held_code, with_payment_record=False
+    )
+    await _let_the_card_period_lapse(session_factory, subscription)
+
+    enabled = settings.model_copy(update=live_billing_overrides())
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+    calls = stub_payment_companies(monkeypatch)
+    refusal = REPLACEMENT_REFUSALS["paid_amount_missing"]
+
+    page = await client.get("/dashboard/billing")
+    assert page.status_code == 200, page.text
+    other_availability = _billing_page_availability(page.text, other_code)
+    assert other_availability["holds_other"] is True, other_availability
+    assert other_availability["purchasable"] is False, other_availability
+    assert other_availability["refusal"] == refusal, other_availability
+    held_availability = _billing_page_availability(page.text, held_code)
+    assert held_availability["holds_this"] is True, held_availability
+    assert held_availability["purchasable"] is False, held_availability
+
+    review = await client.get(f"/dashboard/billing/checkout?plan_code={other_code}")
+    assert review.status_code == 200, review.text
+    assert "checkout-confirm-form" not in review.text, (
+        "the review page asks for a name and address it will then refuse"
+    )
+    assert refusal in review.text
+
+    subscription_page = await client.get("/dashboard/subscription")
+    assert subscription_page.status_code == 200, subscription_page.text
+    assert f'data-s-choose="{other_code}"' not in subscription_page.text
+    assert refusal in subscription_page.text
+
+    response = await _post_checkout(client, _csrf(page.text), other_code)
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == "paid_amount_missing"
+    # The held plan itself is still refused by the route exactly as the page says.
+    held_response = await _post_checkout(client, _csrf(page.text), held_code)
+    assert held_response.status_code == 400, held_response.text
+    assert held_response.json()["error"]["code"] == "already_subscribed"
+    assert calls == [], f"a refused checkout reached the payment company: {calls}"
 
 
 async def test_timeout_on_immediate_upgrade_never_invites_a_retry(
     test_context, monkeypatch
 ):
-    """The payment company may have charged before its answer was lost.
+    """The switch route cannot lose a charge's answer, because it never asks for a charge.
 
-    A timeout on an immediate upgrade has an unknown outcome, so the refusal must
-    not say "please try again": trying again would ask Creem for the difference a
-    second time. It must send the customer to the billing page instead.
+    This was written when an immediate upgrade asked Creem for the price difference: a
+    timeout left the charge's outcome unknown, so the refusal must not say "try again".
+    Since 2026-09-10 the switch route sends nothing to the payment company, so a company
+    that would time out is never reached, and the refusal still never says "try again" —
+    it sends the person to the Pay button.
     """
 
     email = "upgrade-timeout@example.com"
@@ -465,8 +795,10 @@ async def test_timeout_on_immediate_upgrade_never_invites_a_retry(
     enabled = settings.model_copy(update=live_billing_overrides())
     test_context["app"].dependency_overrides[get_settings] = lambda: enabled
 
+    reached: list[str] = []
+
     async def timeout_provider_request(*args, **kwargs):
-        # The upgrade may already have taken the money before the answer was lost.
+        reached.append(str(kwargs.get("operation") or ""))
         raise httpx.TimeoutException("connection read timed out")
 
     monkeypatch.setattr(
@@ -474,36 +806,32 @@ async def test_timeout_on_immediate_upgrade_never_invites_a_retry(
     )
 
     page = await client.get("/dashboard/billing")
-    csrf = _csrf(page.text)
     response = await client.post(
         "/dashboard/billing/switch",
         data={
             "plan_code": "pro",
             "timing": TIMING_IMMEDIATE,
             "switch_consent": "true",
-            "csrf_token": csrf,
+            "csrf_token": _csrf(page.text),
         },
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert "error=billing_timeout_needs_check" in response.headers["location"]
+    assert "error=plan_change_needs_payment" in response.headers["location"]
 
     error_page = await client.get(response.headers["location"])
-    assert "did not answer in time" in error_page.text
+    assert NEEDS_PAYMENT_WORDS in error_page.text
     assert "try again" not in error_page.text.casefold(), (
-        "the refusal asked the customer to retry a charge of unknown outcome"
+        "the refusal asked the customer to retry"
     )
-    assert "do not repeat this request" in error_page.text.casefold()
 
-    async with session_factory() as session:
-        change = await session.scalar(select(SubscriptionPlanChange))
-        assert change is not None
-        assert change.status == "failed"
+    assert reached == [], f"the switch route reached the payment company: {reached}"
+    assert await _plan_change_rows(session_factory) == 0
 
 
-async def test_crypto_paid_account_is_told_to_buy_not_switch(test_context):
-    """A NOWPayments customer has no card on file, so the switch route refuses and
-    the page explains the checkout path instead of showing a dead upgrade form.
+async def test_crypto_paid_account_is_told_to_buy_not_switch(test_context, fake_creem):
+    """A NOWPayments customer is offered the Pay button, like everybody else, and the
+    switch route refuses with the sentence that sends them to it.
     """
 
     email = "crypto-switch-refused@example.com"
@@ -526,18 +854,17 @@ async def test_crypto_paid_account_is_told_to_buy_not_switch(test_context):
 
     page = await client.get("/dashboard/billing")
     assert page.status_code == 200, page.text
-    assert "You paid with crypto" in page.text
-    assert 'data-dashboard-purchase-button' in page.text
-    assert 'data-plan-switch-trigger' not in page.text
+    assert f"You pay the {plan_name('pro')} price today" in page.text
+    assert "pro" in _pay_buttons(page.text)
+    assert "data-plan-switch-trigger" not in page.text
 
-    csrf = _csrf(page.text)
     post = await client.post(
         "/dashboard/billing/switch",
         data={
             "plan_code": "pro",
             "timing": TIMING_IMMEDIATE,
             "switch_consent": "true",
-            "csrf_token": csrf,
+            "csrf_token": _csrf(page.text),
         },
         follow_redirects=False,
     )
@@ -545,10 +872,10 @@ async def test_crypto_paid_account_is_told_to_buy_not_switch(test_context):
     assert "error=plan_change_needs_payment" in post.headers["location"]
 
     error_page = await client.get(post.headers["location"])
-    assert "no card to change" in error_page.text.lower()
+    assert NEEDS_PAYMENT_WORDS in error_page.text
 
-    async with session_factory() as session:
-        assert await session.scalar(select(SubscriptionPlanChange)) is None
+    assert await _plan_change_rows(session_factory) == 0
+    assert fake_creem == []
 
 
 async def test_switch_to_free_plan_is_not_offered_and_is_refused(test_context):
@@ -643,7 +970,12 @@ async def test_invalid_or_denied_switches_are_refused(
 
 
 async def test_switch_with_already_pending_change_is_refused(test_context, fake_creem):
-    """Only one future change can be booked at a time."""
+    """Only one future change can be booked at a time.
+
+    The booked change is one made before 2026-09-10, because nobody can book one through
+    the switch route now. A second request is refused as already booked, the booking is
+    left exactly as it was, and nothing is sent to the payment company.
+    """
 
     email = "pending-change-refused@example.com"
     settings = test_context["settings"]
@@ -652,33 +984,27 @@ async def test_switch_with_already_pending_change_is_refused(test_context, fake_
 
     await _signup_and_verify(client, settings, email)
     user_id = await _user_id_for_email(session_factory, email)
-    await _grant_paid_plan(session_factory, user_id, "trader")
+    subscription = await _grant_paid_plan(session_factory, user_id, "trader")
+    await _book_change_made_before_the_rule(
+        session_factory,
+        user_id=user_id,
+        subscription=subscription,
+        kind="upgrade",
+        from_plan_code="trader",
+        to_plan_code="pro",
+    )
 
     enabled = settings.model_copy(update=live_billing_overrides())
     test_context["app"].dependency_overrides[get_settings] = lambda: enabled
 
     page = await client.get("/dashboard/billing")
-    csrf = _csrf(page.text)
-
-    first = await client.post(
-        "/dashboard/billing/switch",
-        data={
-            "plan_code": "pro",
-            "timing": TIMING_PERIOD_END,
-            "switch_consent": "true",
-            "csrf_token": csrf,
-        },
-        follow_redirects=False,
-    )
-    assert first.status_code == 303
-
     second = await client.post(
         "/dashboard/billing/switch",
         data={
             "plan_code": "pro",
             "timing": TIMING_PERIOD_END,
             "switch_consent": "true",
-            "csrf_token": csrf,
+            "csrf_token": _csrf(page.text),
         },
         follow_redirects=False,
     )
@@ -691,9 +1017,9 @@ async def test_switch_with_already_pending_change_is_refused(test_context, fake_
         )
         assert len(changes) == 1
         assert changes[0].to_plan_code == "pro"
+        assert changes[0].status == "scheduled"
 
-    # Only the first Creem call was made.
-    assert len(fake_creem) == 1
+    assert fake_creem == []
 
 
 async def test_switch_without_paid_plan_is_refused(test_context, fake_creem):
@@ -731,7 +1057,12 @@ async def test_switch_without_paid_plan_is_refused(test_context, fake_creem):
 
 
 async def test_upgrade_without_consent_is_refused(test_context, fake_creem):
-    """The consent checkbox is required; without it nothing is recorded or sent."""
+    """Without the tick box nothing is recorded or sent — and with it neither, now.
+
+    The switch route refuses before it reads the tick box: no switch is possible, so
+    there is nothing to agree to there. Agreement is asked for where money is taken, in
+    the tick box of the checkout.
+    """
 
     email = "upgrade-no-consent@example.com"
     settings = test_context["settings"]
@@ -758,9 +1089,171 @@ async def test_upgrade_without_consent_is_refused(test_context, fake_creem):
         follow_redirects=False,
     )
     assert post.status_code == 303, post.text
-    assert "error=consent_required" in post.headers["location"]
+    assert "error=plan_change_needs_payment" in post.headers["location"]
 
     async with session_factory() as session:
         assert await session.scalar(select(SubscriptionPlanChange)) is None
 
     assert fake_creem == []
+
+
+@pytest.mark.parametrize(("held_code", "target_code"), PLAN_PAIRS)
+async def test_every_checkout_tick_box_says_what_happens_to_the_plan_held(
+    test_context,
+    held_code: str,
+    target_code: str,
+):
+    """The owner's sentence is in the tick box of all three checkouts, for every move.
+
+    The billing popup, the review page and the subscription popup can each take the
+    payment that replaces a paid plan. Each one's tick box must carry the same sentence —
+    full price today, the old plan ends only when the payment is confirmed, the unused
+    time is sent back by a person within the window — word for word from its one owner.
+    """
+
+    email = f"tick-box-{held_code}-{target_code}@example.com"
+    settings = test_context["settings"]
+    client = test_context["client"]
+    session_factory = test_context["session_factory"]
+
+    await _signup_and_verify(client, settings, email)
+    user_id = await _user_id_for_email(session_factory, email)
+    await _grant_paid_plan(session_factory, user_id, held_code)
+
+    enabled = settings.model_copy(update=live_billing_overrides())
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+
+    for path in (
+        "/dashboard/billing",
+        f"/dashboard/billing/checkout?plan_code={target_code}",
+        "/dashboard/subscription",
+    ):
+        response = await client.get(path)
+        assert response.status_code == 200, (path, response.text[:300])
+        assert CONSENT_PLAN_REPLACEMENT in response.text, (
+            f"{path} takes a payment that replaces {held_code} without saying so"
+        )
+
+    review = await client.get(f"/dashboard/billing/checkout?plan_code={target_code}")
+    assert "checkout-confirm-form" in review.text
+
+
+@pytest.mark.parametrize("provider", [None, "admin", "trial"], ids=["none", "admin", "trial"])
+async def test_nobody_without_a_paid_plan_is_promised_money_back(
+    test_context,
+    provider: str | None,
+):
+    """A free account, an administrator's grant and a trial owe nothing back.
+
+    So none of the three checkouts may promise them the value of unused time: that
+    sentence would be a promise the product does not keep.
+    """
+
+    email = f"owes-nothing-{provider or 'none'}@example.com"
+    settings = test_context["settings"]
+    client = test_context["client"]
+    session_factory = test_context["session_factory"]
+
+    await _signup_and_verify(client, settings, email)
+    user_id = await _user_id_for_email(session_factory, email)
+    if provider is not None:
+        await _grant_paid_plan(
+            session_factory, user_id, "trader", provider=provider, with_payment_record=False
+        )
+
+    enabled = settings.model_copy(update=live_billing_overrides())
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+
+    for path in (
+        "/dashboard/billing",
+        "/dashboard/billing/checkout?plan_code=pro",
+        "/dashboard/subscription",
+    ):
+        response = await client.get(path)
+        assert response.status_code == 200, (path, response.text[:300])
+        assert CONSENT_PLAN_REPLACEMENT not in response.text, (
+            f"{path} promises money back to an account that paid nothing"
+        )
+        assert manual_return_window_words() not in response.text, path
+
+
+@pytest.mark.parametrize(("held_code", "target_code"), PLAN_PAIRS)
+async def test_a_paid_plan_with_no_payment_record_is_refused_alike_on_every_page(
+    test_context,
+    monkeypatch,
+    held_code: str,
+    target_code: str,
+):
+    """No page offers a payment the checkout route would refuse.
+
+    Replacing a paid plan values its unused time from the payment that bought it. A
+    subscription with no completed payment on record — an old row, or one written by hand
+    — cannot be valued, so the checkout route refuses with `paid_amount_missing`. The
+    billing page used to offer Pay anyway: the person typed their name and address and
+    was refused only when they pressed it.
+
+    Now the plan card, the review page and the subscription page give the route's own
+    sentence, with no way to press Pay; the route refuses with the same code; and nothing
+    reaches the payment company.
+    """
+
+    email = f"no-payment-record-{held_code}-{target_code}@example.com"
+    settings = test_context["settings"]
+    client = test_context["client"]
+    session_factory = test_context["session_factory"]
+
+    await _signup_and_verify(client, settings, email)
+    user_id = await _user_id_for_email(session_factory, email)
+    await _grant_paid_plan(session_factory, user_id, held_code, with_payment_record=False)
+
+    enabled = settings.model_copy(update=live_billing_overrides())
+    test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+    calls = stub_payment_companies(monkeypatch)
+    refusal = REPLACEMENT_REFUSALS["paid_amount_missing"]
+
+    billing = await client.get("/dashboard/billing")
+    assert billing.status_code == 200, billing.text
+    assert target_code not in _pay_buttons(billing.text), (
+        f"the billing page offers Pay for {target_code}, which checkout refuses"
+    )
+    assert refusal in billing.text
+    _assert_no_switch_control(billing.text)
+
+    review = await client.get(f"/dashboard/billing/checkout?plan_code={target_code}")
+    assert review.status_code == 200, review.text
+    assert "checkout-confirm-form" not in review.text, (
+        "the review page asks for a name and address it will then refuse"
+    )
+    assert refusal in review.text
+    assert review.text.count("Nothing was charged") == 1
+
+    subscription = await client.get("/dashboard/subscription")
+    assert subscription.status_code == 200, subscription.text
+    assert f'data-s-choose="{target_code}"' not in subscription.text
+    assert refusal in subscription.text
+
+    response = await client.post(
+        "/dashboard/billing/checkout",
+        data={
+            "plan_code": target_code,
+            "billing_cycle": "monthly",
+            "payment_method": "card",
+            "checkout_request_id": uuid4().hex,
+            "terms_accepted": "true",
+            "first_name": "Amina",
+            "last_name": "Trader",
+            "address_line1": "1 Market Street",
+            "city": "Cairo",
+            "country": "Egypt",
+            "csrf_token": _csrf(billing.text),
+        },
+        headers={"accept": "application/json", "x-requested-with": "XMLHttpRequest"},
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == "paid_amount_missing"
+    assert calls == [], f"a refused checkout reached the payment company: {calls}"
+
+    # The notice after a redirect carrying the code says the sentence, not the code.
+    notice = await client.get("/dashboard/billing?error=paid_amount_missing")
+    assert refusal in notice.text
+    assert "Paid Amount Missing" not in notice.text

@@ -1,0 +1,2 @@
+......................                                                   [100%]
+- generated xml file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260912T193031Z-4125cfbe\browser_checkout_junit.xml -

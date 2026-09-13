@@ -2049,14 +2049,14 @@ body.hilal-dashboard .billing-current-meta > span {
   line-height: 1.25;
 }
 
+/* Wraps, never cut. It was one line ending in "…", and these are money words: "Automatic
+   renewal, every month" cut short hides the one fact the tile is there to give. */
 body.hilal-dashboard .billing-current-meta strong {
   margin-top: 5px;
-  overflow: hidden;
   color: var(--hm-ink);
   font-family: var(--hm-font-ui);
   font-size: .88rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 body.hilal-dashboard .billing-plan-panel .dashboard-pricing-grid {
@@ -2607,7 +2607,10 @@ body.hilal-dashboard .billing-method-options label {
 body.hilal-dashboard .billing-method-card {
   min-height: 96px;
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  /* `minmax(0, 1fr)` let the text column collapse to one character when
+     `overflow-wrap: anywhere` was applied. `minmax(min-content, 1fr)` keeps the
+     column at least as wide as the longest word while still allowing it to grow. */
+  grid-template-columns: 28px minmax(min-content, 1fr);
   grid-template-rows: auto auto;
   align-content: center;
   gap: 3px 10px;
@@ -2625,9 +2628,29 @@ body.hilal-dashboard .billing-method-card .icon {
   color: var(--hm-apple-deep);
 }
 
+body.hilal-dashboard .billing-method-card strong {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+/* Wraps. It was `nowrap`, which held a whole sentence such as "Paying by crypto is switched
+   off just now." on one line and pushed it out of the card at 1024px.
+
+   `overflow-wrap: anywhere` was tried next, but it shrinks the min-content width of the
+   text column to one character, so inside `grid-template-columns: 28px minmax(0,1fr)` the
+   second column collapsed and every word broke mid-character ("Han dled by a test pay men
+   t pag e"). `break-word` keeps the column wide enough for the longest word — preventing
+   mid-word breaks — and still wraps an individual word if it genuinely overflows.
+
+   The label and note are explicitly placed in the second column. Left on auto-placement,
+   the note could land in the 28px icon column on some renderings, which is exactly the
+   one-character width seen in the broken screenshot. */
 body.hilal-dashboard .billing-method-card small {
+  grid-column: 2;
+  grid-row: 2;
   color: var(--hm-muted);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 body.hilal-dashboard .billing-method-options input:checked + .billing-method-card {
@@ -2636,10 +2659,18 @@ body.hilal-dashboard .billing-method-options input:checked + .billing-method-car
   box-shadow: 0 0 0 1px var(--hm-apple-deep);
 }
 
+/* A way of paying that cannot be used is marked, never faded out of reach of reading: the
+   rule the plan popup already follows (`hm-account-test.css`). The sentence under its name
+   is the only place that says why, and the whole card at 55% opacity took it to 2.2:1.
+   The dashed edge, the soft ground and the dimmed icon carry the state; the words stay. */
 body.hilal-dashboard .billing-method-options .is-unavailable .billing-method-card {
   cursor: not-allowed;
-  opacity: .55;
   background: var(--hm-surface-soft);
+  border-style: dashed;
+}
+
+body.hilal-dashboard .billing-method-options .is-unavailable .billing-method-card .icon {
+  opacity: .45;
 }
 
 /* ── "Payments secured by …" ──────────────────────────────────────────────────
@@ -2725,13 +2756,19 @@ body.hilal-dashboard .hm-pay-secured-mark .icon-sm {
   height: 14px;
 }
 
-/* An interval nobody can buy yet stays visible and readable, but not selectable. */
+/* An interval nobody can buy yet stays visible and readable, but not selectable. It was
+   faded to 55%, which took its words, and the "coming soon" line that says why, to about
+   2:1. Marked the way an unavailable way of paying is marked instead. */
 body.hilal-dashboard :is(.billing-toggle, .billing-period-options) label.is-unavailable {
   cursor: not-allowed;
-  opacity: .55;
 }
 body.hilal-dashboard :is(.billing-toggle, .billing-period-options) label.is-unavailable span {
   pointer-events: none;
+}
+body.hilal-dashboard .billing-period-options label.is-unavailable > span {
+  color: var(--hm-muted);
+  background: var(--hm-surface-soft);
+  border-style: dashed;
 }
 
 body.hilal-dashboard :is(.billing-period-options, .billing-method-options) input:focus-visible + span,
@@ -2958,12 +2995,12 @@ body.hilal-dashboard .billing-history-primary {
   gap: 3px;
 }
 
+/* Wraps, never cut. This names what was paid for ("Card via Stripe"), and at 1024px
+   an ellipsis left "Card via St…", which hid how the money was taken. */
 body.hilal-dashboard .billing-history-primary strong {
-  overflow: hidden;
   color: var(--hm-ink);
   font-size: .96rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 body.hilal-dashboard .billing-history-primary span {
@@ -2996,14 +3033,14 @@ body.hilal-dashboard .billing-history-facts dt {
   font-size: .68rem;
 }
 
+/* Wraps, never cut: an amount, a plan or a renewal word ("Monthly Au…") is a fact about
+   money, and half of one reads as a different fact. */
 body.hilal-dashboard .billing-history-facts dd {
   margin: 3px 0 0;
-  overflow: hidden;
   color: var(--hm-ink);
   font-size: .8rem;
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 body.hilal-dashboard .billing-history-empty {
@@ -3745,8 +3782,9 @@ body.hilal-dashboard .dashboard-cancel-plan:hover {
   color: var(--hm-danger);
 }
 
-body.hilal-dashboard .plan-reason-options,
-body.hilal-dashboard .plan-timing-options {
+/* The cancel form's reasons. The switch form's timing choices shared these rules until
+   that form was removed on 2026-09-11; its `.plan-timing-*` selectors went with it. */
+body.hilal-dashboard .plan-reason-options {
   display: grid;
   gap: 8px;
   margin: 0 0 18px;
@@ -3754,8 +3792,7 @@ body.hilal-dashboard .plan-timing-options {
   border: 0;
 }
 
-body.hilal-dashboard .plan-reason-options legend,
-body.hilal-dashboard .plan-timing-options legend {
+body.hilal-dashboard .plan-reason-options legend {
   margin-bottom: 10px;
   padding: 0;
   color: var(--hm-ink);
@@ -3764,8 +3801,7 @@ body.hilal-dashboard .plan-timing-options legend {
   font-weight: 500;
 }
 
-body.hilal-dashboard .plan-reason-option,
-body.hilal-dashboard .plan-timing-option {
+body.hilal-dashboard .plan-reason-option {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 10px;
@@ -3780,13 +3816,11 @@ body.hilal-dashboard .plan-timing-option {
   line-height: 1.5;
 }
 
-body.hilal-dashboard .plan-reason-option:hover,
-body.hilal-dashboard .plan-timing-option:hover {
+body.hilal-dashboard .plan-reason-option:hover {
   background: var(--hm-surface-soft);
 }
 
-body.hilal-dashboard .plan-reason-option input,
-body.hilal-dashboard .plan-timing-option input {
+body.hilal-dashboard .plan-reason-option input {
   width: 18px;
   height: 18px;
   margin-top: 2px;
@@ -3794,26 +3828,9 @@ body.hilal-dashboard .plan-timing-option input {
 }
 
 /* The chosen row is marked by its edge and its fill, not by colour alone. */
-body.hilal-dashboard .plan-reason-option:has(input:checked),
-body.hilal-dashboard .plan-timing-option:has(input:checked) {
+body.hilal-dashboard .plan-reason-option:has(input:checked) {
   border-color: var(--hm-apple-deep);
   background: var(--hm-apple-soft);
-}
-
-body.hilal-dashboard .plan-timing-option strong {
-  display: block;
-  color: var(--hm-ink);
-  font-family: var(--hm-font-display);
-  font-size: .95rem;
-  font-weight: 500;
-}
-
-body.hilal-dashboard .plan-timing-option small {
-  display: block;
-  margin-top: 4px;
-  color: var(--hm-muted);
-  font-size: .8rem;
-  line-height: 1.5;
 }
 
 body.hilal-dashboard .plan-reason-text {
@@ -3836,5 +3853,4 @@ body.hilal-dashboard .plan-reason-text textarea {
 }
 
 body.hilal-dashboard .plan-reason-text[hidden],
-body.hilal-dashboard .plan-reason-options[hidden],
-body.hilal-dashboard .plan-timing-options[hidden] { display: none; }
+body.hilal-dashboard .plan-reason-options[hidden] { display: none; }

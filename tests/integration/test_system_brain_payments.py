@@ -31,9 +31,15 @@ from ai_market_monitor.db.models.enums import (
     UserRole,
 )
 from ai_market_monitor.services.entitlements import PlanCatalogService
-from ai_market_monitor.services.plan_changes import (
-    CONSENT_CANCEL,
-    CONSENT_DOWNGRADE,
+from ai_market_monitor.services.plan_changes import CONSENT_CANCEL
+
+#: The sentence a customer ticked when they booked a downgrade before 2026-09-10. Written
+#: out, not imported: the switch form and its sentences are gone, and a stored consent
+#: keeps the words that were on the screen that day whatever the product says now. That
+#: is exactly what the page is checked for below.
+BOOKED_DOWNGRADE_CONSENT = (
+    "I understand my plan moves to the smaller plan at the end of the period I have "
+    "already paid for, and the smaller price starts on my renewal day."
 )
 
 #: What Plus cost before the launch offer. Deliberately not read from `core.plans`: the
@@ -150,7 +156,7 @@ async def _paying_customer(test_context, *, email: str) -> User:
                 status="scheduled",
                 reason_code="too_expensive",
                 reason_text=None,
-                consent_text=CONSENT_DOWNGRADE,
+                consent_text=BOOKED_DOWNGRADE_CONSENT,
                 consented_at=now - timedelta(days=2),
                 effective_at=now + timedelta(days=27),
                 provider="creem",
@@ -231,7 +237,7 @@ async def test_one_customer_shows_payments_forms_and_a_timelog(test_context):
     # The forms, with the reason in words and the sentence they ticked word for word.
     assert "Pro is too expensive for me" in page
     assert "I am taking a break from the markets" in page
-    assert CONSENT_DOWNGRADE in page
+    assert BOOKED_DOWNGRADE_CONSENT in page
     assert CONSENT_CANCEL in page
     assert "Creem said the subscription was already cancelled" in page
 

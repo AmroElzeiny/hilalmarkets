@@ -29,6 +29,7 @@ any call that was not stubbed fail loudly instead of quietly going out.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
@@ -220,7 +221,16 @@ def stub_payment_companies(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, An
             return await real(
                 settings, method, url, provider=provider, operation=operation, **kwargs
             )
-        payload = kwargs.get("json") or kwargs.get("data") or {}
+        payload = kwargs.get("json") or kwargs.get("data")
+        if not payload:
+            content = kwargs.get("content")
+            if content is not None:
+                # The crypto invoice sends its finished body as exact bytes
+                # through ``content=`` (``core/money.wire_json_body``). Record
+                # those real bytes, parsed, not an empty dict. ``json.loads``
+                # accepts both ``bytes`` and ``str``.
+                payload = json.loads(content)
+        payload = payload or {}
         calls.append(
             {
                 "method": method,

@@ -23,10 +23,11 @@ from ai_market_monitor.api.template_env import day_only
 from ai_market_monitor.core.config import get_settings
 from ai_market_monitor.core.plans import (
     PURCHASABLE_PLAN_CODES,
+    effective_monthly_price,
     plan_name,
     plan_offer,
 )
-from ai_market_monitor.db.models import Subscription, UserIdentity
+from ai_market_monitor.db.models import BillingCheckoutAttempt, Subscription, UserIdentity
 from ai_market_monitor.db.models.enums import IdentityProvider, SubscriptionStatus
 from ai_market_monitor.services.entitlements import PlanCatalogService
 from tests.support.billing_config import (
@@ -102,7 +103,15 @@ async def _user_id_for_email(session_factory, email: str) -> UUID:
 
 
 async def _grant_paid_plan(session_factory, user_id: UUID, plan_code: str) -> None:
-    """Give the account an active paid subscription to plan_code."""
+    """Give the account an active paid subscription to plan_code.
+
+    With the completed payment that bought it, as every real paid subscription has. A
+    move to a different plan values the unused time from that payment, and the checkout
+    route refuses (`paid_amount_missing`) when there is none — so a subscription seeded
+    without it is an account no customer has, and the rules below would be measuring the
+    refusal for a broken record instead of the offer a real customer sees. That refusal
+    has its own test: `test_a_paid_plan_with_no_payment_record_is_refused_alike_on_every_page`.
+    """
 
     async with session_factory() as session:
         plan = await PlanCatalogService(session).get_or_sync(plan_code)
@@ -116,6 +125,23 @@ async def _grant_paid_plan(session_factory, user_id: UUID, plan_code: str) -> No
                 provider_subscription_id=f"test-{plan_code}-{user_id}",
                 current_period_start=now,
                 current_period_end=now + timedelta(days=30),
+            )
+        )
+        session.add(
+            BillingCheckoutAttempt(
+                user_id=user_id,
+                plan_id=plan.id,
+                billing_cycle="monthly_auto_renewal",
+                provider="test",
+                status="completed",
+                idempotency_key=f"paid-test-{plan_code}-{user_id}",
+                terms_version="test",
+                amount=effective_monthly_price(plan_code),
+                currency="USD",
+                terms_accepted_at=now,
+                expires_at=now,
+                completed_at=now,
+                billing_profile={"first_name": "Amina"},
             )
         )
         await session.commit()
@@ -377,41 +403,55 @@ async def test_no_test_can_reach_a_payment_company_by_accident():
             )
 
 
-def test_the_plan_switch_form_names_no_plan_of_its_own():
-    """Every sentence in the switch form is rebuilt from the button that opened it.
+def test_the_plan_change_sentences_name_no_plan_of_their_own():
+    """Every sentence about moving plans takes the plan's name and the window from the
+    server, and no form on the page posts to the switch route the server refuses.
 
-    The form is one dialog reused for every move up and every move down. Two of its
-    labels had a plan name written straight into the page — "I want Pro now" — which is
-    correct only for as long as the single upgrade anybody can make happens to be the one
-    to Pro. Open it for any other plan and somebody agrees to a timing for a plan they
-    are not buying.
+    This began as the switch form's test. That form reused one dialog for every move, and
+    two of its labels had "Pro" written into the page — right only while the single
+    upgrade anybody could make was the one to Pro. The rule outlived the form: since
+    2026-09-10 a different paid plan is bought with the Pay button on its card, so the
+    sentences about a move live in two places now — the note under that button and the
+    tick box of the checkout it opens. Both are checked here, for every paid plan.
 
-    The rule, not the instance: no plan's name appears anywhere inside this form.
+    The second half is why the form went. `request_switch` refuses every move with
+    `plan_change_needs_payment`, so any form that posts to it is the page offering what
+    the server will not do. That half fails the moment such a form comes back.
     """
 
     html = BILLING_TEMPLATE.read_text(encoding="utf-8")
-    match = re.search(
-        r'<dialog\s+id="plan-switch-dialog".*?</dialog>',
-        html,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
-    assert match is not None, "the plan switch dialog is not on the billing page"
-    dialog = match.group(0)
-    # A Jinja comment reaches nobody, and the one above these labels has to name the plan
-    # it is explaining. Only what is really sent to a browser is checked.
-    shown = re.sub(r"\{#.*?#\}", "", dialog, flags=re.DOTALL)
-    for code in PURCHASABLE_PLAN_CODES:
-        assert plan_name(code) not in shown, (
-            f"the switch form has {plan_name(code)!r} written into the page; it must "
-            f"come from the button that opened the form, like every other sentence here"
-        )
+    # A Jinja comment reaches nobody, and the ones here have to name the plans and the
+    # form they explain. Only what is really sent to a browser is checked.
+    shown = re.sub(r"\{#.*?#\}", "", html, flags=re.DOTALL)
 
-    # And the script really does write both of them, so removing the name from the page
-    # cannot leave the label empty.
-    script = PLAN_CHANGE_JS.read_text(encoding="utf-8")
-    for handle in ("data-plan-switch-timing-now", "data-plan-switch-timing-later"):
-        assert handle in dialog, f"{handle} is not on the form"
-        assert handle in script, f"{handle} is never written by the script"
+    note = re.search(
+        r"switch\.needs_checkout\s*%\}(.*?)\{%-?\s*else\s*-?%\}", shown, flags=re.DOTALL
+    )
+    assert note is not None, "the plan card has no Pay branch for a move between paid plans"
+    consent = re.search(
+        r'<label class="checkout-consent">\s*<input[^>]*name="terms_accepted".*?</label>',
+        shown,
+        flags=re.DOTALL,
+    )
+    assert consent is not None, "the billing checkout has no terms tick box"
+
+    for where, surface in (("Pay note", note.group(1)), ("tick box", consent.group(0))):
+        # What the browser shows before the server fills anything in.
+        written = re.sub(r"\{\{.*?\}\}|\{%.*?%\}", "", surface, flags=re.DOTALL)
+        for code in PURCHASABLE_PLAN_CODES:
+            assert plan_name(code) not in written, (
+                f"the {where} has {plan_name(code)!r} written into the page; the name "
+                f"must come from the plan card the server drew"
+            )
+    # The note really names the plan, from the server, and the promise has one owner.
+    assert "{{ plan.name }}" in note.group(1)
+    assert "{{ manual_return_window }}" in note.group(1)
+    assert "{{ consent_plan_replacement }}" in consent.group(0)
+
+    # No switch form, no switch button, and no script that could open either.
+    assert 'action="/dashboard/billing/switch"' not in shown
+    assert "data-plan-switch" not in shown
+    assert "data-plan-switch" not in PLAN_CHANGE_JS.read_text(encoding="utf-8")
 
 
 def test_a_money_day_is_shown_as_a_day():

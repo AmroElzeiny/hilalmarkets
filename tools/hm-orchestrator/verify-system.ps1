@@ -127,8 +127,8 @@ if (Get-Command opencode -ErrorAction SilentlyContinue) {
     Check "OpenCode Go connected/models visible" (($modelProbe.ExitCode -eq 0) -and ($go.Count -gt 0)) "($($go.Count) models)"
     foreach ($need in @(
         "opencode-go/minimax-m3",
-        "opencode-go/kimi-k2.7-code",
-        "opencode-go/deepseek-v4-pro",
+        "opencode-go/qwen3.8-flash",
+        "opencode-go/deepseek-v4.1-flash",
         "opencode-go/deepseek-v4-flash-vision-exp"
     )) {
         Check "Default model $need" ($go -contains $need)

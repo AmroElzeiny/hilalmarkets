@@ -13,6 +13,16 @@ $promptPath = (Resolve-Path $PromptFile).Path
 # Exact availability check from locally selectable Go models.
 $available = @(& opencode models opencode-go | Where-Object { $_ -match '^opencode-go/' } | ForEach-Object { $_.Trim() })
 $modelRef = if ($Model.StartsWith("opencode-go/")) { $Model } else { "opencode-go/$Model" }
+$normalModels = @(
+    "opencode-go/minimax-m3",
+    "opencode-go/qwen3.8-flash",
+    "opencode-go/deepseek-v4.1-flash",
+    "opencode-go/deepseek-v4-flash-vision-exp"
+)
+
+if ($modelRef -notin $normalModels) {
+    throw "Model '$modelRef' is outside the normal cost-controlled routing set. Use the configured agents or perform a documented cost escalation."
+}
 if ($modelRef -notin $available) {
     throw "Model is not currently selectable through OpenCode Go: $modelRef"
 }

@@ -43,7 +43,6 @@ from ai_market_monitor.core.dashboard_paths import (
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     COMING_SOON_LABEL,
-    PLAN_CHANGE_UPGRADE,
     PLAN_DEFINITIONS,
     PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
@@ -143,13 +142,14 @@ from ai_market_monitor.services.billing import (
     PAYMENT_METHODS,
     BillingError,
     BillingService,
-    active_paid_plan_codes,
     billing_method_provider,
     billing_provider_capabilities,
     configured_billing_provider,
     creem_product_id_for,
+    held_access_renewal,
     method_takes_discount_code,
     paid_access_can_be_repriced,
+    paid_plan_codes_for_replacement_decisions,
     payment_method_available,
     payment_method_offers,
     payment_method_offers_by_method,
@@ -182,10 +182,6 @@ from ai_market_monitor.services.payment_emails import PaymentEmailRenderer
 from ai_market_monitor.services.plan_changes import (
     CANCELLATION_REASONS,
     CONSENT_CANCEL,
-    CONSENT_DOWNGRADE,
-    CONSENT_UPGRADE_NOW,
-    CONSENT_UPGRADE_PERIOD_END,
-    DOWNGRADE_REASONS,
     OTHER_REASON_CODE,
     SWITCH_LABEL_BUY,
     SWITCH_LABEL_BUY_ANNUAL,
@@ -194,6 +190,11 @@ from ai_market_monitor.services.plan_changes import (
     PlanChangeError,
     PlanChangeService,
     reason_words,
+)
+from ai_market_monitor.services.plan_replacements import (
+    CONSENT_PLAN_REPLACEMENT,
+    PaidPlanReplacementService,
+    manual_return_window_words,
 )
 from ai_market_monitor.services.product_language import (
     checking_message_overrides,
@@ -3428,17 +3429,30 @@ async def billing_page(
     billing = BillingService(session, settings)
     card_provider = billing_method_provider(settings, "card")
     crypto_provider = billing_method_provider(settings, "crypto")
-    user_active_paid_plan_codes = await active_paid_plan_codes(session, user_id=user.id)
+    # The same grace-aware held set the checkout route reads
+    # (`BillingService.prepare_checkout`): a recurring card whose paid period just ended
+    # is still held until the renewal decision arrives, so a page reading a smaller set
+    # draws a live Pay button for a plan the route then refuses with `already_subscribed`.
+    user_held_plan_codes = await paid_plan_codes_for_replacement_decisions(
+        session, user_id=user.id
+    )
     # Whether the paid access they hold sits on a card. It decides which route to another
     # plan exists at all: a re-price through the switch buttons, or a purchase.
     held_access_repriceable = await paid_access_can_be_repriced(session, user_id=user.id)
+    # Why replacing the paid plan held now would be refused, asked once and handed to both
+    # answers below, so the popup and the plan cards say what the checkout route would
+    # say if Pay were pressed — instead of offering Pay and then refusing it.
+    replacement_refusal = await PaidPlanReplacementService(
+        session, settings
+    ).replacement_refusal(user_id=user.id)
     display_name_parts = (user.display_name or "").strip().split(maxsplit=1)
     billing_selection_availability = {
         code: plan_checkout_availability(
             settings,
             plan_code=code,
-            active_paid_plan_codes=user_active_paid_plan_codes,
+            active_paid_plan_codes=user_held_plan_codes,
             held_access_can_be_repriced=held_access_repriceable,
+            replacement_refusal=replacement_refusal,
         )
         for code in PURCHASABLE_PLAN_CODES
     }
@@ -3446,20 +3460,25 @@ async def billing_page(
     # the service that also carries out the change, so the button and the route it posts
     # to can never disagree about whether this is a purchase, a step up or a step down.
     plan_changes = PlanChangeService(session, settings)
+    # A plan card is buyable when any billing cycle is on sale. The popup asks the server
+    # for each cycle separately, so a monthly-only card never offers a monthly checkout
+    # the server would refuse.
     plan_switch_offers = await plan_changes.switch_offers(
         user.id,
         purchasable={
-            code: plan_is_on_sale(settings, code) for code in PURCHASABLE_PLAN_CODES
+            code: plan_is_on_sale(settings, code, billing_cycle="monthly")
+            or plan_is_on_sale(settings, code, billing_cycle="annual")
+            for code in PURCHASABLE_PLAN_CODES
         },
+        replacement_refusal=replacement_refusal,
     )
     plan_change_pending = await plan_changes.pending_change(user.id)
     held_plan = await plan_changes.paid_subscription(user.id)
     current_paid_plan_code = held_plan[1].code if held_plan else None
     selected_checkout_plan = str(request.query_params.get("selected_plan") or "")
-    if selected_checkout_plan not in PURCHASABLE_PLAN_CODES or not plan_is_on_sale(
-        settings,
-        selected_checkout_plan,
-        billing_cycle="monthly",
+    if selected_checkout_plan not in PURCHASABLE_PLAN_CODES or not (
+        plan_is_on_sale(settings, selected_checkout_plan, billing_cycle="monthly")
+        or plan_is_on_sale(settings, selected_checkout_plan, billing_cycle="annual")
     ):
         selected_checkout_plan = ""
     # The page swaps the buy button's word when the monthly/yearly switch moves, so it is
@@ -3541,7 +3560,9 @@ async def billing_page(
             whatsapp_operational=settings.whatsapp_enabled,
             billing_enabled=settings.billing_enabled,
             billing_provider=billing.provider.provider_name,
-            billing_capabilities=billing.provider_capabilities,
+            # Whether the plan held renews by itself, from that plan. The page used to ask
+            # the payment company this server would use for a new sale instead.
+            held_renewal=await held_access_renewal(session, entitlement),
             billing_cycle_code=billing.billing_cycle_code,
             checkout_selected_plan=selected_checkout_plan or None,
             checkout_selected_interval="monthly",
@@ -3598,14 +3619,16 @@ async def billing_page(
             ),
             current_paid_plan_code=current_paid_plan_code,
             cancellation_reasons=CANCELLATION_REASONS,
-            downgrade_reasons=DOWNGRADE_REASONS,
             other_reason_code=OTHER_REASON_CODE,
             consent_cancel=CONSENT_CANCEL,
-            consent_downgrade=CONSENT_DOWNGRADE,
-            consent_upgrade_now=CONSENT_UPGRADE_NOW,
-            consent_upgrade_period_end=CONSENT_UPGRADE_PERIOD_END,
+            # The tick-box sentence for a checkout that replaces the paid plan held now,
+            # and the 48-hour window on its own for the plan cards' note. Both from the
+            # one owner, so the card and the tick box cannot promise different windows.
+            consent_plan_replacement=CONSENT_PLAN_REPLACEMENT,
+            manual_return_window=manual_return_window_words(),
+            # Still read by the "already booked" notice: a change booked before
+            # 2026-09-10 may still be waiting for the end of its paid period.
             timing_immediate=TIMING_IMMEDIATE,
-            timing_period_end=TIMING_PERIOD_END,
             billing_plan_data={
                 "plans": {
                     code: {
@@ -3792,13 +3815,18 @@ async def resume_billing_checkout(
     # passes in between: somebody can start a checkout, take a card subscription by some
     # other route, and then come back to this link. Sending them on would charge them
     # for a plan the rule says they may not buy - the same question, on a third surface,
-    # answered by the same owner rather than assumed from the older answer.
+    # answered by the same owner rather than assumed from the older answer. The held set
+    # is the route's own, grace included: `attach_source` just below treats a lapsed
+    # recurring card as the plan to replace, and an answer built on the smaller set
+    # would sell the very plan that card is still charging for.
     resume_plan = await session.get(Plan, attempt.plan_id)
     if resume_plan is not None:
         resume_availability = plan_checkout_availability(
             settings,
             plan_code=resume_plan.code,
-            active_paid_plan_codes=await active_paid_plan_codes(session, user_id=user.id),
+            active_paid_plan_codes=await paid_plan_codes_for_replacement_decisions(
+                session, user_id=user.id
+            ),
             held_access_can_be_repriced=await paid_access_can_be_repriced(
                 session, user_id=user.id
             ),
@@ -3993,7 +4021,12 @@ async def billing_checkout_review(
         checkout_attempt = await session.get(BillingCheckoutAttempt, attempt_id)
         if checkout_attempt is None or checkout_attempt.user_id != user.id:
             raise HTTPException(status_code=404, detail="Checkout not found")
-    review_active_paid_plan_codes = await active_paid_plan_codes(session, user_id=user.id)
+    # The same held set the checkout route reads, grace window included - the page and
+    # the route must hold the same plans, or this page draws a form for a plan the
+    # route refuses as already held.
+    review_held_plan_codes = await paid_plan_codes_for_replacement_decisions(
+        session, user_id=user.id
+    )
     # Whether *this account* may buy this plan today, by which method - the one owner of
     # that question. This page used to work it out for itself from "do they hold this
     # very plan", so a trader holder opening the Pro review page was handed the full
@@ -4003,10 +4036,13 @@ async def billing_checkout_review(
     checkout_availability = plan_checkout_availability(
         settings,
         plan_code=plan.code,
-        active_paid_plan_codes=review_active_paid_plan_codes,
+        active_paid_plan_codes=review_held_plan_codes,
         held_access_can_be_repriced=await paid_access_can_be_repriced(
             session, user_id=user.id
         ),
+        replacement_refusal=await PaidPlanReplacementService(
+            session, settings
+        ).replacement_refusal(user_id=user.id),
     )
     billing = BillingService(session, settings)
     primary_email = await _primary_email(session, user.id)
@@ -4051,6 +4087,9 @@ async def billing_checkout_review(
             checkout_state=state,
             already_subscribed=checkout_availability["holds_this"],
             checkout_availability=checkout_availability,
+            # Shown in the tick box only when `holds_other`: paying here replaces the paid
+            # plan this person holds now, and they agree to how that works.
+            consent_plan_replacement=CONSENT_PLAN_REPLACEMENT,
             billing_profile_defaults={
                 "first_name": display_name_parts[0] if display_name_parts else "",
                 "last_name": display_name_parts[1] if len(display_name_parts) > 1 else "",
@@ -4332,7 +4371,7 @@ async def billing_switch_plan(
     if not csrf_token_matches(settings, user.id, csrf_token_value):
         raise HTTPException(status_code=403, detail="Invalid form token")
     try:
-        change = await PlanChangeService(session, settings).request_switch(
+        await PlanChangeService(session, settings).request_switch(
             user_id=user.id,
             to_plan_code=plan_code,
             timing=timing,
@@ -4345,14 +4384,11 @@ async def billing_switch_plan(
         return _redirect(
             "/dashboard/billing?" + urlencode({"selected_plan": plan_code, "error": exc.code})
         )
-    return await _finish_plan_change(
-        session=session,
-        settings=settings,
-        user=user,
-        change=change,
-        message=(
-            "plan_upgraded" if change.kind == PLAN_CHANGE_UPGRADE else "plan_downgraded"
-        ),
+    # request_switch always raises plan_change_needs_payment, so this path is only
+    # reachable if that contract changes. Failing closed keeps a surprise success from
+    # flashing a stale message.
+    raise HTTPException(
+        status_code=500, detail="Unexpected success from plan switch request."
     )
 
 
@@ -4423,6 +4459,7 @@ async def billing_success(
         "cancelled": ("Payment cancelled", "payment_canceled"),
         "expired": ("Checkout expired", "checkout_expired"),
         "provider_unavailable": ("We could not reach the payment company", "provider_unavailable"),
+        "refunded": ("Refunded", "payment_refunded"),
     }
     title, state_message = state_content.get(
         status,
@@ -4435,6 +4472,11 @@ async def billing_success(
     ):
         title, state_message = "Your Monitor trial is ready", "trial_started"
     plan = await session.get(Plan, checkout_attempt.plan_id) if checkout_attempt else None
+    # Which states the result page shows in its neutral (message) tone rather than the
+    # failure (error) tone. One set, read by both lines below, so they cannot drift.
+    # A refund is not a failed checkout — the money went back to the person — so it
+    # belongs here, next to the states that are still simply awaiting an outcome.
+    neutral_result_states = {"completed", "pending", "processing", "refunded"}
     entitlement = await EntitlementService(session).current(user.id)
     return templates.TemplateResponse(
         request,
@@ -4446,8 +4488,8 @@ async def billing_success(
             user=user,
             page="billing_success",
             title=title,
-            message=state_message if status in {"completed", "pending", "processing"} else None,
-            error=state_message if status not in {"completed", "pending", "processing"} else None,
+            message=state_message if status in neutral_result_states else None,
+            error=state_message if status not in neutral_result_states else None,
             checkout_attempt=checkout_attempt,
             plan=plan,
             entitlement=entitlement,
@@ -4468,7 +4510,14 @@ async def billing_cancel(
     if checkout_attempt is not None:
         if checkout_attempt.user_id != user.id:
             raise HTTPException(status_code=404, detail="Checkout not found")
-        if checkout_attempt.status not in {"completed", "failed", "expired"}:
+        # Only a checkout that is still open can be cancelled from the browser. The
+        # money-in states (completed, refunded) and the already-ended states (failed,
+        # expired) are left exactly as they are. In particular ``refunded`` must never be
+        # overwritten: the customer's own stale cancel link erased the refund record, and
+        # that word is what the NOWPayments double-grant guard reads (billing.py), so a
+        # re-delivered ``payment.finished`` then counted returned money as kept again.
+        # Allow-list, not deny-list, so no future terminal status is cancelled by accident.
+        if checkout_attempt.status in {"creating", "pending", "processing"}:
             checkout_attempt.status = "cancelled"
             await session.commit()
     return templates.TemplateResponse(

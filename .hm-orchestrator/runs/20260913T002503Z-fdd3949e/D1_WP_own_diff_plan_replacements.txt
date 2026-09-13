@@ -1,0 +1,44 @@
+﻿diff --git "a/C:\\Users\\amroe\\AppData\\Local\\Temp\\opencode\\d1_pre\\src\\ai_market_monitor\\services\\plan_replacements.py" "b/src\\ai_market_monitor\\services\\plan_replacements.py"
+index fcb7066b..3ec9b153 100644
+--- "a/C:\\Users\\amroe\\AppData\\Local\\Temp\\opencode\\d1_pre\\src\\ai_market_monitor\\services\\plan_replacements.py"
++++ "b/src\\ai_market_monitor\\services\\plan_replacements.py"
+@@ -145,7 +145,7 @@ async def payment_that_bought(
+             BillingCheckoutAttempt.user_id == subscription.user_id,
+             BillingCheckoutAttempt.plan_id == subscription.plan_id,
+             BillingCheckoutAttempt.provider == subscription.provider,
+-            BillingCheckoutAttempt.status == "completed",
++            BillingCheckoutAttempt.status == SETTLED_PAYMENT_STATUS,
+             BillingCheckoutAttempt.completed_at.is_not(None),
+         )
+         .order_by(BillingCheckoutAttempt.completed_at.desc())
+@@ -361,11 +361,25 @@ class PaidPlanReplacementService:
+             raise PlanReplacementError(
+                 "replacement_plan_missing", "A paid plan record disappeared during the move."
+             )
+-        amount = money_owed_for_unused_time(
+-            paid_amount=source.amount,
+-            period_start=period_start,
+-            period_end=period_end,
+-            ended_at=moment,
++        amount = (
++            # The frozen link above names the payment that bought the old plan, taken at
++            # the moment the new payment page was opened. A refund can land in between:
++            # the payment company has already given that money back, so the unused days
++            # are worth nothing more тАФ writing a record here would promise the same money
++            # a second time, and the customer would be paid twice for one period. The old
++            # plan still ends, because it has really been replaced by the new one.
++            #
++            # ``payment_that_bought`` excludes a refunded payment the same way; this is
++            # the same rule read off the frozen row instead of the live search, because
++            # the frozen row is what this move was priced from.
++            Decimal("0.00")
++            if source.status != SETTLED_PAYMENT_STATUS
++            else money_owed_for_unused_time(
++                paid_amount=source.amount,
++                period_start=period_start,
++                period_end=period_end,
++                ended_at=moment,
++            )
+         )
+         if amount <= 0:
+             await EntitlementService(self.session).snapshot(replacement.user_id)

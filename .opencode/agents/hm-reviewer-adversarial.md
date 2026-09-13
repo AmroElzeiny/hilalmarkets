@@ -1,50 +1,30 @@
 ---
 description: Second independent reviewer for high-risk work; attacks assumptions, scope, tests, security, and governed boundaries.
 mode: subagent
-model: opencode-go/glm-5.3-flash
-permissions:
-  - action: read
-    resource: "*"
-    effect: allow
-  - action: glob
-    resource: "*"
-    effect: allow
-  - action: grep
-    resource: "*"
-    effect: allow
-  - action: edit
-    resource: "*"
-    effect: deny
-  - action: read
-    resource: "*.env"
-    effect: deny
-  - action: read
-    resource: "*.env.*"
-    effect: deny
-  - action: shell
-    resource: "*"
-    effect: allow
-  - action: shell
-    resource: "git push *"
-    effect: deny
-  - action: shell
-    resource: "git commit *"
-    effect: deny
-  - action: shell
-    resource: "git reset *"
-    effect: deny
-  - action: shell
-    resource: "git clean *"
-    effect: deny
-  - action: shell
-    resource: "git rebase *"
-    effect: deny
-  - action: shell
-    resource: "git merge *"
-    effect: deny
-  - action: subagent
-    resource: "*"
-    effect: deny
+model: opencode-go/deepseek-v4.1-flash
+permission:
+  read:
+    "*": allow
+    "*.env": deny
+    "*.env.*": deny
+  glob:
+    "*": allow
+  grep:
+    "*": allow
+  bash:
+    "*": allow
+    "git push *": deny
+    "git commit *": deny
+    "git reset *": deny
+    "git clean *": deny
+    "git rebase *": deny
+    "git merge *": deny
+  edit:
+    "*": deny
+    ".hm-orchestrator/runs/*": allow
+  task:
+    "*": deny
+  webfetch: allow
 ---
 
 

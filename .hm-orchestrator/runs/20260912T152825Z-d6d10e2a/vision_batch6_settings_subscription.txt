@@ -1,0 +1,88 @@
+﻿opencode.exe : [0m
+At C:\Users\amroe\AppData\Roaming\npm\opencode.ps1:14 char:3
++   & "$basedir/node_modules/opencode-ai/bin/opencode.exe"   $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([0m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+> hm-direct-read ┬╖ deepseek-v4-flash-vision-exp
+[0m
+I reviewed the six attached images. I did not rely on file names; I describe what is visible. Note: the images were supplied in this order: settings desktop wide, settings desktop narrow, settings phone, subscription desktop wide, subscription desktop narrow, subscription phone.
+
+---
+
+**IMAGE 1** тАФ Settings page, wide desktop, left sidebar, "Settings" active.
+- Blue "Ask AI" pills sit at the top-right of the group cards. I count **8**: (1) Where we tell you, (2) Timing, (3) How much we send, (4) What we tell you about, (5) On this screen, (6) When a coin's Shariah status changes, (7) Which exchanges we watch, (8) Your data.
+- A **second** "Ask AI" pill appears at the right edge just below the Timing header. Its tooltip text "AI assistant - sees the page you are on - here to" is **cut off by the right edge**, and the pill overlaps the gap/edges of the "Where we tell you" and "Timing" cards.
+- A round pale-green assistant button sits at the right edge over the Timing card's "Your time zone" row, near the UTC dropdown.
+- Other: the "Ask AI" pill in the Timing header and the floating pill are close together and visually crowded.
+
+VERDICT: **FAIL** тАФ the floating "Ask AI" pill and round assistant button overlap card content and are clipped at the right screen edge.
+
+---
+
+**IMAGE 2** тАФ Settings page, narrower desktop (1024-wide).
+- Same structure. I count **8** group headings with an "Ask AI" pill (same list as IMAGE 1).
+- The tab row shows Where, When, How much, About what, On this screen, Shariah updates (Exchanges / Your data are off the visible row).
+- The floating "Ask AI" pill + tooltip "AI assistant - sees the page you are on - here to" again sit at the right edge, overlapping the boundary between "Where we tell you" and "Timing", and the tooltip is clipped.
+- Round pale-green assistant button at the right edge overlapping the Timing card near the UTC dropdown.
+
+VERDICT: **FAIL** тАФ same overlap and right-edge clipping of the floating Ask AI pill and round button.
+
+---
+
+**IMAGE 3** тАФ Settings page, phone (390-wide).
+- Top tab row is **cut off** on the right ("About w..." is truncated).
+- I count **8** group headings with an "Ask AI" pill (same list).
+- The floating assistant tooltip "AI assistant - sees the page you are on" and its "Ask AI" pill overlap the "Where we tell you" card (WhatsApp row area) and the Timing card top; the pill sits at the right edge.
+- Round pale-green assistant button overlaps the "Timing" card header / time-zone area.
+
+VERDICT: **FAIL** тАФ floating Ask AI/assistant overlap content, and the tab row is truncated at the screen edge.
+
+---
+
+**IMAGE 4** тАФ Plan and billing (subscription) page, wide desktop.
+- Shows "Your plan", an "Ask us about billing" pill, and Explore / Plus / Pro cards.
+- A blue **"Ask AI" pill is present at the right edge**, overlapping the **Pro** plan card (near its price / "Launch price ends in" box). Its tooltip text "...your AI assistant - sees the page you are on - here to" is **truncated at the right edge**.
+- A round pale-green assistant button sits below it at the right edge, overlapping the Pro card.
+- I do **not** see a jump bar reading "What you have ┬╖ Other plans ┬╖ Your payments".
+
+VERDICT: **FAIL** тАФ an "Ask AI" button is visible on a subscription page (the requirement says none), and it overlaps/crowds the Pro card and is clipped at the edge.
+
+---
+
+**IMAGE 5** тАФ Plan and billing (subscription) page, narrower desktop.
+- Explore and Plus cards side by side; **Pro card wraps to a second row** below.
+- A blue **"Ask AI" pill is present at the right edge**, overlapping between the "Messages a week" card and the "What each plan gives you" heading; its tooltip text is truncated at the edge.
+- Round pale-green assistant button below it, overlapping card content.
+- No "What you have ┬╖ Other plans ┬╖ Your payments" jump bar seen.
+
+VERDICT: **FAIL** тАФ "Ask AI" button present on subscription page, overlapping content and clipped at the edge.
+
+---
+
+**IMAGE 6** тАФ Plan and billing (subscription) page, phone (390-wide).
+- A blue **"Ask AI" pill is present at the right edge**, overlapping the "Market checks a week" card (over the "1" value / tooltip line "AI assistant - sees the page you are on"), and is clipped at the edge.
+- Round pale-green assistant button overlaps the card below.
+- No "What you have ┬╖ Other plans ┬╖ Your payments" jump bar seen.
+
+VERDICT: **FAIL** тАФ "Ask AI" button present on subscription page, overlapping content and clipped at the edge.
+
+---
+
+## Summary
+
+| Image | Page | "Ask AI" group buttons | Ask AI on subscription? | Overlap/clipping | Verdict |
+|---|---|---|---|---|---|
+| 1 | Settings wide | 8 | n/a | Yes (floating pill + round button) | FAIL |
+| 2 | Settings narrow | 8 | n/a | Yes | FAIL |
+| 3 | Settings phone | 8 | n/a | Yes + tab row cut off | FAIL |
+| 4 | Subscription wide | n/a | **Yes (visible)** | Yes, over Pro card | FAIL |
+| 5 | Subscription narrow | n/a | **Yes (visible)** | Yes | FAIL |
+| 6 | Subscription phone | n/a | **Yes (visible)** | Yes | FAIL |
+
+**What is consistent:** the floating assistant "Ask AI" pill and the round assistant button are anchored too far right. They overlap card content and their tooltip text is clipped by the right viewport edge on every screen size.
+
+**Uncertainty I am flagging:** I cannot tell from a static image whether the floating "Ask AI" pill is the assistant launcher's tooltip or a separate control. I report it as visible. On the subscription pages I saw no *group-heading* Ask AI buttons, but the floating "Ask AI" pill is visible, so an absolute "no Ask AI anywhere" requirement is not met.
+
+**No image returned "CANNOT SEE."**

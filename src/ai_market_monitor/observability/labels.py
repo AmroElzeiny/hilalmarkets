@@ -32,6 +32,7 @@ __all__ = [
     "ENUMERATED_LABELS",
     "IDENTIFIER_LABEL_BUDGET",
     "IDENTIFIER_LABELS",
+    "MAX_RECORD_VALUE_LENGTH",
     "MetricLabelError",
     "SensitiveValueError",
     "assert_no_sensitive_content",
@@ -177,7 +178,7 @@ _SEED_PHRASE_PATTERN: Final[re.Pattern[str]] = re.compile(
 #: Anything longer than this is prose, and prose in an operational record is a
 #: prompt, a model reply or a customer's own words. None of the three belongs here,
 #: so length alone is enough to refuse it.
-_MAX_RECORD_VALUE_LENGTH: Final[int] = 200
+MAX_RECORD_VALUE_LENGTH: Final[int] = 200
 
 
 def known_label_names() -> frozenset[str]:
@@ -257,7 +258,7 @@ def assert_no_sensitive_content(
     value: object,
     *,
     field: str,
-    max_length: int = _MAX_RECORD_VALUE_LENGTH,
+    max_length: int = MAX_RECORD_VALUE_LENGTH,
 ) -> None:
     """Raise when a value carries a secret, a prompt, model output or customer text.
 

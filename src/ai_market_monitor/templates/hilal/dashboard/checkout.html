@@ -46,9 +46,12 @@
       {% endfor %}
     </dl>
     <div class="checkout-limit-grid">
-      <article><span data-icon="watchlist" data-icon-class="icon"></span><strong>{{ plan_limits.get('active_strategies', 0)|plan_limit }}</strong><span>Active Watchlists</span></article>
-      <article><span data-icon="market" data-icon-class="icon"></span><strong>{{ plan_limits.get('on_demand_scans_per_month', 0)|plan_limit }}</strong><span>Market checks / month</span></article>
-      <article><span data-icon="passport" data-icon-class="icon"></span><strong>{{ plan_limits.get('detailed_history_days', 'Plan default')|plan_limit }}</strong><span>Evidence-history days</span></article>
+      {# Limit names come from `plan_limit_words` (core/plans.py PLAN_LIMIT_WORDS), the words
+         the subscription page and the receipt use. This grid wrote its own and called a
+         monitor a Watchlist. #}
+      <article><span data-icon="radar" data-icon-class="icon"></span><strong>{{ plan_limits.get('active_strategies', 0)|plan_limit }}</strong><span>{{ plan_limit_words['active_strategies'] }}</span></article>
+      <article><span data-icon="market" data-icon-class="icon"></span><strong>{{ plan_limits.get('on_demand_scans_per_month', 0)|plan_limit }}</strong><span>{{ plan_limit_words['on_demand_scans_per_month'] }}</span></article>
+      <article><span data-icon="passport" data-icon-class="icon"></span><strong>{{ plan_limits.get('detailed_history_days', 'Plan default')|plan_limit }}</strong><span>{{ plan_limit_words['detailed_history_days'] }}</span></article>
       <article><span data-icon="telegram" data-icon-class="icon"></span><strong>{{ 'Telegram' if plan_features.get('telegram') else 'In-app' }}</strong><span>Notification access</span></article>
     </div>
   </section>
@@ -87,7 +90,9 @@
         <span data-icon="alert" data-icon-class="icon"></span>
         <div>
           <strong>You cannot buy this plan on this page</strong>
-          <p>{{ checkout_availability.refusal }} Nothing was charged.</p>
+          {#- The refusal for replacing a paid plan already says that nothing was charged;
+              the page adds it only when the sentence does not, so it is never said twice. -#}
+          <p>{{ checkout_availability.refusal }}{% if 'Nothing was charged' not in checkout_availability.refusal %} Nothing was charged.{% endif %}</p>
         </div>
       </div>
       <a class="btn btn-secondary" href="/dashboard/billing">Open billing</a>
@@ -127,7 +132,7 @@
           <label><span>City</span><input type="text" name="city" maxlength="100" autocomplete="address-level2"></label>
           <label><span>Country</span><input type="text" name="country" maxlength="80" autocomplete="country-name" required></label>
         </div>
-        <label class="checkout-consent"><input type="checkbox" name="terms_accepted" value="true" required><span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, and <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>, including the access, renewal, and cancellation terms shown above for my chosen payment method.</span></label>
+        <label class="checkout-consent"><input type="checkbox" name="terms_accepted" value="true" required><span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, and <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>, including the access, renewal, and cancellation terms shown above for my chosen payment method.{% if checkout_availability.holds_other %} {{ consent_plan_replacement }}{% endif %}</span></label>
         <button class="btn btn-primary" type="submit"><span data-icon="shield" data-icon-class="icon-sm"></span>Continue to secure payment</button>
       </form>
     {% endif %}
@@ -144,6 +149,6 @@
   data-event-scope="{{ checkout_attempt.id if checkout_attempt else checkout_request_id }}"
   hidden
 ></div>
-<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260910-pay-now"></script>
-<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260910-pay-now"></script>
+<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260913-corner-clear"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260913-corner-clear"></script>
 {% endblock %}

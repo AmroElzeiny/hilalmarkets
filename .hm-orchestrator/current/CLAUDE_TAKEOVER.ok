@@ -1,0 +1,28 @@
+﻿{
+    "allowed_files":  [
+                          "src\\ai_market_monitor\\telegram\\*",
+                          "src\\ai_market_monitor\\services\\telegram_account_links.py",
+                          "src\\ai_market_monitor\\api\\routers\\telegram.py",
+                          "src\\ai_market_monitor\\api\\routers\\dashboard.py",
+                          "src\\ai_market_monitor\\api\\routers\\dashboard_test.py",
+                          "src\\ai_market_monitor\\worker.py",
+                          "src\\ai_market_monitor\\templates\\hilal\\dashboard_test\\connections.html",
+                          "src\\ai_market_monitor\\core\\auth_pages.py",
+                          "src\\ai_market_monitor\\core\\dashboard_paths.py",
+                          "src\\ai_market_monitor\\services\\onboarding.py",
+                          "src\\ai_market_monitor\\services\\notifications.py",
+                          "src\\ai_market_monitor\\services\\compliance_watch.py",
+                          "src\\ai_market_monitor\\services\\admin_notifications.py",
+                          "src\\ai_market_monitor\\observability\\alert_delivery.py",
+                          "scripts\\telegram_bot_profile.py",
+                          "tests\\integration\\test_telegram*",
+                          "tests\\integration\\test_dashboard_test_connections.py",
+                          "tests\\unit\\test_telegram*",
+                          "tests\\unit\\test_invariant_telegram*",
+                          "pyproject.toml"
+                      ],
+    "run_id":  "20260913T162923Z-feaaeb73",
+    "source_escalation":  "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.hm-orchestrator\\runs\\20260913T162923Z-feaaeb73\\ESCALATION.json",
+    "expires_utc":  "2026-09-14T07:15:04.0452594Z",
+    "granted_utc":  "2026-09-13T21:15:04.0388785Z"
+}

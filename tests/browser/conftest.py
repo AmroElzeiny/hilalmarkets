@@ -1283,12 +1283,21 @@ def seed_telegram_connection(database_url: str, email: str) -> None:
 
 
 def seed_paid_monitor_access(
-    database_url: str, email: str, provider: str = "browser_test"
+    database_url: str,
+    email: str,
+    provider: str = "browser_test",
+    plan_code: str = "trader",
 ) -> None:
     """Seed a paid plan subscription for the given email.
 
     The provider parameter lets a test hand the account a card subscription;
-    creem or stripe are the recurring kinds plan_changes.py:181 knows.
+    creem or stripe are the recurring kinds plan_changes.py knows. ``plan_code`` lets a
+    test start from a plan other than Plus, so a move down can be pictured too.
+
+    The completed payment that bought the plan is written with it, as every real paid plan
+    has one. A move to a different plan values the unused time from that payment and
+    refuses when it cannot find it, so a plan seeded without it is an account no real
+    customer has, and every page would show that refusal instead of the state under test.
     """
     if not database_url:
         pytest.skip("Paid-plan browser coverage requires the auto-started database URL.")
@@ -1296,11 +1305,13 @@ def seed_paid_monitor_access(
     async def _seed() -> None:
         from datetime import timedelta
 
-        from ai_market_monitor.db.models import Subscription, UserIdentity
+        from ai_market_monitor.core.plans import effective_monthly_price
+        from ai_market_monitor.db.models import BillingCheckoutAttempt, Subscription, UserIdentity
         from ai_market_monitor.db.models.enums import (
             IdentityProvider,
             SubscriptionStatus,
         )
+        from ai_market_monitor.services.billing import RECURRING_PROVIDERS
         from ai_market_monitor.services.entitlements import PlanCatalogService
 
         engine = create_async_engine(database_url)
@@ -1314,7 +1325,7 @@ def seed_paid_monitor_access(
             )
             if identity is None:
                 raise AssertionError(f"No browser test user identity found for {email}.")
-            plan = await PlanCatalogService(session).get_or_sync("trader")
+            plan = await PlanCatalogService(session).get_or_sync(plan_code)
             now = datetime.now(UTC)
             session.add(
                 Subscription(
@@ -1325,6 +1336,29 @@ def seed_paid_monitor_access(
                     provider_subscription_id=f"browser-monitor-{uuid4()}",
                     current_period_start=now,
                     current_period_end=now + timedelta(days=30),
+                )
+            )
+            session.add(
+                BillingCheckoutAttempt(
+                    user_id=identity.user_id,
+                    plan_id=plan.id,
+                    # What a payment through this company really is: a card payment renews
+                    # by itself, a crypto invoice or a local test payment does not.
+                    billing_cycle=(
+                        "monthly_auto_renewal"
+                        if provider in RECURRING_PROVIDERS
+                        else "one_time_30_day"
+                    ),
+                    provider=provider,
+                    status="completed",
+                    idempotency_key=f"browser-paid-{uuid4()}",
+                    terms_version="test",
+                    amount=effective_monthly_price(plan_code),
+                    currency="USD",
+                    terms_accepted_at=now,
+                    expires_at=now,
+                    completed_at=now,
+                    billing_profile={"first_name": "Amina"},
                 )
             )
             await session.commit()

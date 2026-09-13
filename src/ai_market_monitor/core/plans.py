@@ -45,6 +45,22 @@ FULL_ACCESS_LIMITS: dict[str, int] = {
     "detailed_history_days": UNLIMITED_SYMBOL_CAP,
 }
 
+#: What each plan limit is called wherever a plan's allowance is listed in words: the
+#: subscription page, the checkout review and the payment receipt.
+#:
+#: A monitor is the thing that runs; a Watchlist is a saved list of coins, a different
+#: object. The checkout review and the receipt each kept their own labels, and both
+#: called a monitor a Watchlist ("Active Watchlists", "Markets per Watchlist") while the
+#: subscription page did not. The comparison table's row names are table headings and
+#: stay in `_comparison_rows`.
+PLAN_LIMIT_WORDS: dict[str, str] = {
+    "active_strategies": "Monitors running at once",
+    "symbols_per_strategy": "Coins in one monitor",
+    "on_demand_scans_per_month": "Market checks a month",
+    "user_initiated_scans_per_week": "Market checks a week",
+    "detailed_history_days": "Days of history kept",
+}
+
 FULL_ACCESS_WITHOUT_WHATSAPP: dict[str, bool] = {
     "telegram": True,
     "whatsapp": False,

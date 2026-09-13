@@ -1,74 +1,37 @@
 ---
 description: Stronger cheap supervisor for architecture-heavy, repeated-failure, or high-risk delegated missions.
 mode: primary
-model: opencode-go/glm-5.3-flash
-permissions:
-  - action: read
-    resource: "*"
-    effect: allow
-  - action: glob
-    resource: "*"
-    effect: allow
-  - action: grep
-    resource: "*"
-    effect: allow
-  - action: shell
-    resource: "*"
-    effect: allow
-  - action: shell
-    resource: "git push *"
-    effect: deny
-  - action: shell
-    resource: "git commit *"
-    effect: deny
-  - action: shell
-    resource: "git reset *"
-    effect: deny
-  - action: shell
-    resource: "git clean *"
-    effect: deny
-  - action: shell
-    resource: "git rebase *"
-    effect: deny
-  - action: shell
-    resource: "git merge *"
-    effect: deny
-  - action: read
-    resource: "*.env"
-    effect: deny
-  - action: read
-    resource: "*.env.*"
-    effect: deny
-  - action: edit
-    resource: "*"
-    effect: deny
-  - action: edit
-    resource: ".hm-orchestrator/runs/*"
-    effect: allow
-  - action: subagent
-    resource: "*"
-    effect: deny
-  - action: subagent
-    resource: "hm-explorer"
-    effect: allow
-  - action: subagent
-    resource: "hm-worker-fast"
-    effect: allow
-  - action: subagent
-    resource: "hm-worker-strong"
-    effect: allow
-  - action: subagent
-    resource: "hm-test-debugger"
-    effect: allow
-  - action: subagent
-    resource: "hm-reviewer-logic"
-    effect: allow
-  - action: subagent
-    resource: "hm-reviewer-adversarial"
-    effect: allow
-  - action: subagent
-    resource: "hm-reviewer-visual"
-    effect: allow
+model: opencode-go/deepseek-v4.1-flash
+permission:
+  read:
+    "*": allow
+    "*.env": deny
+    "*.env.*": deny
+  glob:
+    "*": allow
+  grep:
+    "*": allow
+  bash:
+    "*": allow
+    "git push *": deny
+    "git commit *": deny
+    "git reset *": deny
+    "git clean *": deny
+    "git rebase *": deny
+    "git merge *": deny
+  edit:
+    "*": deny
+    ".hm-orchestrator/runs/*": allow
+  task:
+    "*": deny
+    "hm-explorer": allow
+    "hm-worker-fast": allow
+    "hm-worker-strong": allow
+    "hm-test-debugger": allow
+    "hm-reviewer-logic": allow
+    "hm-reviewer-adversarial": allow
+    "hm-reviewer-visual": allow
+  webfetch: allow
 ---
 
 

@@ -5,7 +5,11 @@ import httpx
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.services.provider_runtime import provider_request
-from ai_market_monitor.telegram.types import TelegramOutboundMessage
+from ai_market_monitor.telegram.types import (
+    KEYBOARD_INLINE,
+    KEYBOARD_REMOVE_REPLY_KEYBOARD,
+    TelegramOutboundMessage,
+)
 
 #: What the connection pool is keyed by. The bot token lives in the path, never in the
 #: pool key, the provider label or any log line.
@@ -65,41 +69,9 @@ class TelegramHttpAdapter:
         }
         if message.parse_mode:
             payload["parse_mode"] = message.parse_mode
-        if message.buttons:
-            url_buttons = [button for button in message.buttons if button.url]
-            action_buttons = [button for button in message.buttons if not button.url]
-            if url_buttons and action_buttons:
-                payload["reply_markup"] = {
-                    "inline_keyboard": [
-                        [
-                            {
-                                "text": button.text,
-                                **(
-                                    {"url": button.url}
-                                    if button.url
-                                    else {"callback_data": button.callback_data}
-                                ),
-                            }
-                        ]
-                        for button in message.buttons
-                    ]
-                }
-            elif url_buttons:
-                payload["reply_markup"] = {
-                    "inline_keyboard": [
-                        [{"text": button.text, "url": button.url}] for button in url_buttons
-                    ]
-                }
-            else:
-                menu = [button.text for button in action_buttons]
-                for item in message.menu:
-                    if item not in menu:
-                        menu.append(item)
-                payload["reply_markup"] = self._menu_markup(menu)
-        elif message.menu:
-            payload["reply_markup"] = {
-                **self._menu_markup(message.menu),
-            }
+        markup = self._reply_markup(message, editing=message.edit_message_id is not None)
+        if markup is not None:
+            payload["reply_markup"] = markup
 
         if message.edit_message_id:
             edit_payload = {**payload, "message_id": message.edit_message_id}
@@ -120,6 +92,69 @@ class TelegramHttpAdapter:
             message_ids.append(message_id)
 
         return TelegramDeliveryResult(message_ids=message_ids)
+
+    def _reply_markup(
+        self, message: TelegramOutboundMessage, *, editing: bool
+    ) -> dict[str, Any] | None:
+        """The keyboard this message asked for, or ``None`` for no keyboard at all.
+
+        The message says which keyboard it wants. When it says nothing, the answer is what
+        this adapter has always done, so no other screen changes shape: a link is an
+        inline button, buttons without a link become the app menu, and a bare ``menu`` is
+        the persistent keyboard underneath the composer.
+
+        ``editing`` carries the one rule Telegram's own API imposes and this adapter used
+        to ignore: ``editMessageText`` accepts an inline keyboard and nothing else. A
+        button that is not a link therefore becomes an inline button when the message is
+        an edit — the choice stays usable — and the app menu, which has no inline form, is
+        left off. Nothing in the product edits a message without saying so today, so this
+        only governs the messages that ask to be edited.
+        """
+
+        if message.keyboard == KEYBOARD_INLINE:
+            return self._inline_markup(message.buttons)
+        if message.keyboard == KEYBOARD_REMOVE_REPLY_KEYBOARD:
+            if message.buttons:
+                raise ValueError(
+                    "A Telegram message that removes the reply keyboard cannot also carry "
+                    "buttons: Telegram accepts one interface per message. Put the next step "
+                    "in the text, or send the buttons on an inline keyboard instead."
+                )
+            # An edit cannot remove a keyboard it cannot address: clearing the inline
+            # buttons is the only thing an edit interface can do here.
+            return {"inline_keyboard": []} if editing else {"remove_keyboard": True}
+        if message.buttons:
+            has_link = any(button.url for button in message.buttons)
+            if has_link or editing:
+                return self._inline_markup(message.buttons)
+            menu = [button.text for button in message.buttons]
+            for item in message.menu:
+                if item not in menu:
+                    menu.append(item)
+            return self._menu_markup(menu)
+        if message.menu and not editing:
+            return self._menu_markup(message.menu)
+        return None
+
+    @staticmethod
+    def _inline_markup(buttons: list[Any]) -> dict[str, Any]:
+        """One row per button. An empty list is Telegram's way of saying "no buttons"."""
+
+        return {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": button.text,
+                        **(
+                            {"url": button.url}
+                            if button.url
+                            else {"callback_data": button.callback_data}
+                        ),
+                    }
+                ]
+                for button in buttons
+            ]
+        }
 
     async def answer_callback(
         self,
@@ -158,6 +193,21 @@ class TelegramHttpAdapter:
             "deleteWebhook",
             {"drop_pending_updates": drop_pending_updates},
         )
+
+    async def set_my_commands(self, commands: list[dict[str, str]]) -> None:
+        """The command list Telegram shows when somebody types ``/`` in the chat."""
+
+        await self._call("setMyCommands", {"commands": commands})
+
+    async def set_my_description(self, description: str) -> None:
+        """The text in an empty chat, above the Start button."""
+
+        await self._call("setMyDescription", {"description": description})
+
+    async def set_my_short_description(self, short_description: str) -> None:
+        """The line on the bot's profile page and in shared links."""
+
+        await self._call("setMyShortDescription", {"short_description": short_description})
 
     async def send_photo(
         self,

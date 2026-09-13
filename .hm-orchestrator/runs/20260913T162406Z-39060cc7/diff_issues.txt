@@ -1,0 +1,272 @@
+﻿diff --git a/src/ai_market_monitor/observability/issues.py b/src/ai_market_monitor/observability/issues.py
+index 7682c558..dd2e579c 100644
+--- a/src/ai_market_monitor/observability/issues.py
++++ b/src/ai_market_monitor/observability/issues.py
+@@ -13,6 +13,7 @@ recurring problem is the thing worth keeping, and a fresh row throws it away.
+ 
+ from __future__ import annotations
+ 
++import hashlib
+ import re
+ from dataclasses import dataclass
+ from datetime import UTC, datetime, timedelta
+@@ -29,19 +30,55 @@ from ai_market_monitor.db.models.operations import (
+     OperationalIssueEvent,
+ )
+ from ai_market_monitor.observability.alerts import FiredAlert
+-from ai_market_monitor.observability.labels import assert_no_sensitive_content
++from ai_market_monitor.observability.labels import (
++    MAX_RECORD_VALUE_LENGTH,
++    SensitiveValueError,
++    assert_no_sensitive_content,
++)
+ 
+ __all__ = [
+     "IssueQueueError",
+     "OperationalIssueService",
+     "IssueSummary",
+     "dedupe_key_for_alert",
++    "sanitize_dedupe_key",
+ ]
+ 
+ _SCOPE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,119}$")
+ _DEDUPE_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_.:/-]{0,159}$")
+-_EVIDENCE_REF_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z_]+:[A-Za-z0-9_.#/-]{1,120}$")
+-_MAX_SUMMARY_LENGTH: Final[int] = 240
++#: The longest key the pattern above can hold: one start character plus 159 others.
++_MAX_DEDUPE_KEY_LENGTH: Final[int] = 160
++_DEDUPE_KEY_CHAR_PATTERN: Final[re.Pattern[str]] = re.compile(r"[a-z0-9_.:/-]")
++#: The tail an evidence pointer may hold. Named, because the rule that decides whether
++#: a ref is stored or reduced has to truncate to exactly this allowance: a real id
++#: longer than the queue can hold is cut, not refused.
++_EVIDENCE_REF_MAX_TAIL_LENGTH: Final[int] = 120
++_EVIDENCE_REF_PATTERN: Final[re.Pattern[str]] = re.compile(
++    rf"^[a-z_]+:[A-Za-z0-9_.#/-]{{1,{_EVIDENCE_REF_MAX_TAIL_LENGTH}}}$"
++)
++_EVIDENCE_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z_]+$")
++#: What a tail must look like to **be** an identifier rather than to be **made** one.
++#: The queue's own pattern above forbids ``:``, so this shape is wider by exactly that
++#: one character: a NOWPayments id holds colons inside itself, and the stored form
++#: rewrites them to ``-``. Everything else the shape allows is what the stored pattern
++#: allows, so a tail that passes here always survives the rewrite inside the pattern.
++#: A tail outside it тАФ a space, an ``@``, a ``?``, a quote, a brace тАФ is not a name at
++#: all, and is never repaired into looking like one.
++_EVIDENCE_TAIL_SHAPE_PATTERN: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_.:/#-]+")
++#: A ref that is not an identifier shape is replaced by this many hex characters of its
++#: own digest: enough to tell two payloads apart and to recognise the same payload
++#: again, short enough to always fit behind a usable prefix, and made only of characters
++#: the stored pattern allows.
++_EVIDENCE_POINTER_HASH_LENGTH: Final[int] = 16
++#: A summary or a reason is held to the one limit every operational record has. The
++#: queue once allowed 240 while the content check it then ran refused anything over 200,
++#: so a summary of 201 to 240 characters passed one rule and failed the next тАФ and an
++#: alert whose text was cut to 240 would have failed at the moment it fired.
++_MAX_SUMMARY_LENGTH: Final[int] = MAX_RECORD_VALUE_LENGTH
++#: Evidence refs are pointers, not payloads. A 13-character prefix such as
++#: ``billing_event`` plus one colon leaves 120 characters for the tail, matching the
++#: evidence-ref pattern. Anything longer is truncated at the owner, not left to callers.
++_MAX_EVIDENCE_REF_LENGTH: Final[int] = 134
+ 
+ 
+ class IssueQueueError(ValueError):
+@@ -65,6 +102,129 @@ class IssueSummary:
+         return self.open + self.acknowledged + self.mitigated
+ 
+ 
++def sanitize_dedupe_key(key: str) -> str:
++    """Make one caller's raw string into a dedupe key the queue can always store.
++
++    Providers write event ids in their own shapes: Stripe uses uppercase
++    (``evt_01JABCdefGHI``), NOWPayments uses ``:``, and some ids run past the 160
++    characters the column holds. Those are facts about providers, not reasons to lose
++    a critical billing alert, so what a key may look like is decided here тАФ once тАФ
++    instead of by each caller's string. A key is casefolded, characters the pattern
++    forbids become ``-``, the first character is made a lowercase letter or digit, and
++    the result is cut to the length the pattern allows. A key that already fits is
++    returned unchanged, so a write and the later read for the same problem agree, and
++    cleaning twice is the same as cleaning once.
++
++    A key that cannot be made safe keeps raising: an empty string, anything with
++    whitespace (a key with spaces is prose or a timestamp, not a stable identifier тАФ
++    exactly the volatile keys the queue has always refused), or a key with no
++    lowercase letter or digit anywhere left in it.
++    """
++
++    error = IssueQueueError(
++        f"Issue dedupe key {key!r} is not a stable low-cardinality key."
++    )
++    if not isinstance(key, str) or not key:
++        raise error
++    if any(character.isspace() for character in key):
++        raise error
++    safe = "".join(
++        character if _DEDUPE_KEY_CHAR_PATTERN.match(character) else "-"
++        for character in key.casefold()
++    )
++    # The pattern wants the first character to be [a-z0-9]. `. : / _ -` are allowed
++    # anywhere else but never there, so a key that starts with them loses that
++    # leading junk and keeps everything meaningful.
++    safe = safe.lstrip("_.:/-")[:_MAX_DEDUPE_KEY_LENGTH]
++    if not safe or not _DEDUPE_KEY_PATTERN.match(safe):
++        raise error
++    return safe
++
++
++def _sanitize_evidence_ref(ref: str) -> str:
++    """Keep an evidence ref a pointer, or reduce it to one. Never store a payload.
++
++    A ref is ``prefix:identifier`` тАФ a name the reviewer can follow, not the content
++    found next to the failure. Some provider ids genuinely hold a character the stored
++    pattern reserves for the separator, such as the ``:`` in
++    ``nowpayments:90313222:finished``; some are longer than the pattern can hold. Those
++    are facts about providers, not payloads, so a tail that has an identifier's shape
++    (``[A-Za-z0-9_.:/#-]+``: no whitespace, no ``@``, no ``?``, no ``=``, no quote, no
++    brace, no backslash) is kept тАФ its colons rewritten to ``-`` so the stored form
++    still matches :data:`_EVIDENCE_REF_PATTERN`, and its length cut to that pattern's
++    allowance rather than refused.
++
++    A tail outside that shape is prose, a response body, a stack line, an address or a
++    URL. Repairing it character by character was the old bug: a sentence written behind
++    ``billing_event:`` survived as the same sentence with ``-`` where its spaces were,
++    a payload wearing a prefix. Such a ref is replaced by the prefix plus
++    :data:`_EVIDENCE_POINTER_HASH_LENGTH` hex characters of its own SHA-256: the same
++    content always yields the same pointer, so a reviewer can see that two occurrences
++    carried the same body, while the body itself is never stored. A ref whose prefix is
++    usable therefore never raises here тАФ a diagnostic must not become the failure.
++
++    What does still raise is a ref that cannot name anything: no colon, an empty tail,
++    an empty ref, or a prefix outside ``[a-z_]+``. A long prefix is not one of them: the
++    tail allowance shrinks behind it, and a prefix so long that even the digest would
++    not fit keeps the digest, because losing a usable pointer is worse than a ref that
++    runs past the usual budget.
++
++    An identifier-shaped tail can still be a credential (``billing_event:sk-тАж``, a JWT).
++    It is kept only when :func:`assert_no_sensitive_content` finds nothing in it;
++    otherwise it takes the same digest route as prose. It used to be kept and then
++    refused by ``_validate_payload``, and that refusal threw away the whole issue тАФ a
++    critical billing alert lost because one of its pointers looked like a key. The
++    secret is still never stored; the alert is still written.
++
++    The refusals that remain are all about the prefix, and a prefix is written in our own
++    code (``f"billing_event:{event.id}"``), never taken from a provider. They are caught
++    by the first test that runs that caller, not by a customer's webhook.
++    """
++
++    error = (
++        f"Evidence reference {ref!r} must be a pointer such as "
++        "'slo:api_availability', never a payload."
++    )
++    if not isinstance(ref, str) or not ref:
++        raise IssueQueueError(error)
++    if ":" not in ref:
++        raise IssueQueueError(error)
++    prefix, tail = ref.split(":", 1)
++    if not _EVIDENCE_PREFIX_PATTERN.match(prefix):
++        raise IssueQueueError(error)
++    if not tail:
++        raise IssueQueueError(error)
++    # Three numbers meet here. The stored pattern allows at most
++    # ``_EVIDENCE_REF_MAX_TAIL_LENGTH`` tail characters; the pointer's usual total
++    # budget leaves ``_MAX_EVIDENCE_REF_LENGTH - len(prefix) - 1`` of them to this
++    # prefix; and the reduction needs ``_EVIDENCE_POINTER_HASH_LENGTH`` to stay
++    # distinguishable. The smaller of the first two is taken, but never below the third,
++    # so a ref with a usable prefix always has room for its own pointer тАФ which is why
++    # this line cannot raise.
++    max_tail = min(
++        _EVIDENCE_REF_MAX_TAIL_LENGTH,
++        max(_EVIDENCE_POINTER_HASH_LENGTH, _MAX_EVIDENCE_REF_LENGTH - len(prefix) - 1),
++    )
++    if _EVIDENCE_TAIL_SHAPE_PATTERN.fullmatch(tail):
++        kept = f"{prefix}:{tail.replace(':', '-')[:max_tail]}"
++        if not _carries_sensitive_content(kept):
++            return kept
++    digest = hashlib.sha256(ref.encode("utf-8")).hexdigest()
++    # Shorter than a digest only in the corner above, where the prefix has already used
++    # the budget; normally this is exactly ``_EVIDENCE_POINTER_HASH_LENGTH`` characters.
++    return f"{prefix}:{digest[:min(_EVIDENCE_POINTER_HASH_LENGTH, max_tail)]}"
++
++
++def _carries_sensitive_content(ref: str) -> bool:
++    """Ask the one content check whether a ref holds a secret, without raising."""
++
++    try:
++        assert_no_sensitive_content(ref, field="issue.evidence_ref")
++    except SensitiveValueError:
++        return True
++    return False
++
++
+ def dedupe_key_for_alert(alert: FiredAlert) -> str:
+     """The stable key for one alert rule firing about one service.
+ 
+@@ -102,19 +262,24 @@ class OperationalIssueService:
+     ) -> OperationalIssue:
+         """Create the issue, or add one occurrence to the one already open."""
+ 
+-        self._validate_payload(
+-            dedupe_key=dedupe_key,
++        # Normalise the key once, here, and use that one value for the lookup, the
++        # insert and the update below. Sanitising at the owner keeps a provider-shaped
++        # key (uppercase, colons, too long) writable, and keeps the same raw id
++        # pointing at the same row every time.
++        safe_key = sanitize_dedupe_key(dedupe_key)
++        evidence_refs = self._validate_payload(
++            dedupe_key=safe_key,
+             summary=summary,
+             affected_scope=affected_scope,
+             evidence_refs=evidence_refs,
+         )
+         moment = now or datetime.now(UTC)
+         existing = await self.session.scalar(
+-            select(OperationalIssue).where(OperationalIssue.dedupe_key == dedupe_key)
++            select(OperationalIssue).where(OperationalIssue.dedupe_key == safe_key)
+         )
+         if existing is None:
+             issue = OperationalIssue(
+-                dedupe_key=dedupe_key,
++                dedupe_key=safe_key,
+                 category=category,
+                 severity=severity,
+                 state="open",
+@@ -229,9 +394,9 @@ class OperationalIssueService:
+                 "hides a problem permanently."
+             )
+         if reason is not None:
+-            assert_no_sensitive_content(reason, field="issue.reason")
+             if len(reason) > _MAX_SUMMARY_LENGTH:
+                 raise IssueQueueError("An issue reason must be a short sentence.")
++            assert_no_sensitive_content(reason, field="issue.reason")
+         assert_no_sensitive_content(actor, field="issue.actor")
+         moment = now or datetime.now(UTC)
+         if to_state == "suppressed" and suppressed_for is not None:
+@@ -337,7 +502,7 @@ class OperationalIssueService:
+         summary: str,
+         affected_scope: str,
+         evidence_refs: tuple[str, ...],
+-    ) -> None:
++    ) -> tuple[str, ...]:
+         if not _DEDUPE_KEY_PATTERN.match(dedupe_key):
+             raise IssueQueueError(
+                 f"Issue dedupe key {dedupe_key!r} is not a stable low-cardinality key."
+@@ -355,12 +520,20 @@ class OperationalIssueService:
+             )
+         assert_no_sensitive_content(summary, field="issue.summary")
+         assert_no_sensitive_content(affected_scope, field="issue.affected_scope")
+-        for ref in evidence_refs:
++        safe_refs: list[str] = []
++        for raw_ref in evidence_refs:
++            # ``_sanitize_evidence_ref`` already reduced prose and anything the content
++            # check objects to, so this check sees a pointer and cannot fire on data. It
++            # stays as the last line of defence on the value that is actually stored.
++            ref = _sanitize_evidence_ref(raw_ref)
+             if not _EVIDENCE_REF_PATTERN.match(ref):
+                 raise IssueQueueError(
+                     f"Evidence reference {ref!r} must be a pointer such as "
+                     "'slo:api_availability', never a payload."
+                 )
++            assert_no_sensitive_content(ref, field="issue.evidence_ref")
++            safe_refs.append(ref)
++        return tuple(safe_refs)
+ 
+ 
+ def _aware(value: datetime) -> datetime:

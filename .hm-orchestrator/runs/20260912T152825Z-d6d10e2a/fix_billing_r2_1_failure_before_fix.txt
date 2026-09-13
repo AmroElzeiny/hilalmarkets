@@ -1,0 +1,17 @@
+R2-1 BLOCKER: evidence-ref pattern rejects NOWPayments event ids with colons.
+
+Test: tests/unit/test_operational_issue_queue.py::test_an_evidence_ref_with_provider_colons_is_sanitized_not_lost
+Failure before fix (sanitizer temporarily disabled):
+
+AssertionError: assert ['billing_event:nowpayments:90313222:finished'] == ['billing_event:nowpayments-90313222-finished']
+
+The queue refused to store the colon-bearing ref, so record_occurrence raised IssueQueueError.
+
+---
+
+Integration test before fix:
+tests/integration/test_paid_plan_replacement.py::test_crypto_paid_move_with_failed_cancel_leaves_alert_and_failed_event
+
+ai_market_monitor.observability.issues.IssueQueueError: Evidence reference 'billing_event:nowpayments:np-finish-111:finished' must be a pointer such as 'slo:api_availability', never a payload.
+
+The alert write raised before the commit, so neither the issue nor the failed BillingEvent row survived.

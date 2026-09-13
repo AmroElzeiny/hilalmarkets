@@ -43,10 +43,15 @@
 
   {#- The button. It is a real toggle: `aria-expanded` says whether the window is
       open, and `data-state` carries what it is doing, which the stylesheet turns into
-      a look and the label below turns into words. -#}
+      a look and the label below turns into words.
+
+      The "Ask AI" label sits just above the circle and is drawn by `hm-ask-tag.css`, the
+      one rule every corner assistant shares. The name below starts with the same two
+      words, so what a person sees is what a screen reader says first. -#}
   <button class="hilal-orb" type="button" data-hilal-open
           aria-expanded="false" aria-controls="hilal-window"
-          aria-label="Open Hilal, your AI assistant. It sees the page you are on and helps as you go.">
+          aria-label="Ask AI. Open Hilal, your AI assistant. It sees the page you are on and helps as you go.">
+    <span class="hm-ask-tag" aria-hidden="true">Ask AI</span>
     <span class="hilal-orb-ring" aria-hidden="true"></span>
     <span class="hilal-orb-face" aria-hidden="true">
       <span data-icon="spark" data-icon-class="icon"></span>

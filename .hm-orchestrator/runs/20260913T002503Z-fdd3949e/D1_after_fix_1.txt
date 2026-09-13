@@ -1,0 +1,888 @@
+﻿........................................................................ [ 56%]
+...................FFFFFFFF.........................FF.                  [100%]
+================================== FAILURES ===================================
+________ test_a_refund_that_cannot_be_matched_is_an_alert_not_a_crash _________
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000013DFB59E270>, 'client': <httpx.AsyncClient object at 0x0000013D...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+
+    async def test_a_refund_that_cannot_be_matched_is_an_alert_not_a_crash(
+        test_context,
+    ) -> None:
+        """A refund we cannot place must not raise, and must not be silent either.
+    
+        Nothing names this payment тАФ no checkout, no subscription, no person. Refusing the
+        event with an error makes the provider retry and eventually drop it, and the money
+        truth is lost with it; so the record stays a critical alert for a person instead.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            service = BillingService(session, test_context["settings"])
+>           result = await service.process_event(
+                provider="stripe",
+                payload={
+                    "id": "evt-unplaceable-refund",
+                    "type": "charge.refunded",
+                    "data": {"status": "refunded"},
+                },
+            )
+
+tests\unit\test_invariant_refund_is_recorded.py:330: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\ai_market_monitor\services\billing.py:2482: in process_event
+    await self._hydrate_checkout_data(
+src\ai_market_monitor\services\billing.py:3237: in _hydrate_checkout_data
+    await self._attach_refund_to_attempt(
+src\ai_market_monitor\services\billing.py:3125: in _attach_refund_to_attempt
+    await self._save_refund_alert(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ai_market_monitor.services.billing.BillingService object at 0x0000013DFB5C1880>
+
+    async def _save_refund_alert(
+        self, *, event_id: str, event_type: str, reason: str
+    ) -> None:
+        """Tell a person that money went back and this system could not place it.
+    
+        Two things can be missing. ``payment``: no checkout attempt could be matched, so
+        a payment that is no longer money held still reads as one тАФ that is the row the
+        money-owed valuation and the completed-sale count read. ``plan``: the payment was
+        matched but no subscription could be, so the access it bought may still be live.
+    
+        Fixed sentences, and the event id only as an evidence pointer: a provider id
+        longer than the queue's own limit used to push an over-long summary past the
+        check and lose the alert it was there to raise.
+        """
+    
+        from ai_market_monitor.observability.issues import (
+            OperationalIssueService,
+            sanitize_dedupe_key,
+        )
+    
+        summaries = {
+            "payment": (
+                "A payment company returned money, but the message did not name a "
+                "checkout this server created, and nothing matched it. The payment may "
+                "still read as money kept. A person must find it and correct the record."
+            ),
+            "plan": (
+                "A payment company returned money and the checkout was found, but the "
+                "subscription to end was not named. The plan may still be live. A person "
+                "must check the access against the refund."
+            ),
+        }
+        summary = summaries[reason]
+>       assert len(summary) <= 200, f"refund alert summary is {len(summary)} characters"
+               ^^^^^^^^^^^^^^^^^^^
+E       AssertionError: refund alert summary is 206 characters
+
+src\ai_market_monitor\services\billing.py:3066: AssertionError
+_ test_a_refund_that_names_nobody_is_accepted_and_alerted[stripe-charge-refunded] _
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000013DFAAEC0B0>, 'client': <httpx.AsyncClient object at 0x0000013D...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+provider = 'stripe', event_type = 'charge.refunded'
+
+    @pytest.mark.parametrize(
+        ("provider", "event_type"),
+        [
+            pytest.param("stripe", "charge.refunded", id="stripe-charge-refunded"),
+            pytest.param("stripe", "dispute.created", id="stripe-dispute-created"),
+            pytest.param("creem", "refund.created", id="creem-refund-created"),
+            pytest.param("nowpayments", "payment.refunded", id="crypto-payment-refunded"),
+        ],
+    )
+    async def test_a_refund_that_names_nobody_is_accepted_and_alerted(
+        test_context, provider: str, event_type: str
+    ) -> None:
+        """No company may turn a refund into a refused webhook.
+    
+        ``payment.refunded`` from NOWPayments used to be refused outright when the order did
+        not carry a checkout reference, which threw the refund away. Every provider that can
+        send money back is checked here: the event is stored, the alert is written, and the
+        call answers instead of failing.
+        """
+    
+        async with test_context["session_factory"]() as session:
+>           result = await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload={"id": f"evt-nobody-{event_type}", "type": event_type, "data": {}},
+            )
+
+tests\unit\test_invariant_refund_is_recorded.py:376: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\ai_market_monitor\services\billing.py:2482: in process_event
+    await self._hydrate_checkout_data(
+src\ai_market_monitor\services\billing.py:3237: in _hydrate_checkout_data
+    await self._attach_refund_to_attempt(
+src\ai_market_monitor\services\billing.py:3125: in _attach_refund_to_attempt
+    await self._save_refund_alert(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ai_market_monitor.services.billing.BillingService object at 0x0000013DFB74EF60>
+
+    async def _save_refund_alert(
+        self, *, event_id: str, event_type: str, reason: str
+    ) -> None:
+        """Tell a person that money went back and this system could not place it.
+    
+        Two things can be missing. ``payment``: no checkout attempt could be matched, so
+        a payment that is no longer money held still reads as one тАФ that is the row the
+        money-owed valuation and the completed-sale count read. ``plan``: the payment was
+        matched but no subscription could be, so the access it bought may still be live.
+    
+        Fixed sentences, and the event id only as an evidence pointer: a provider id
+        longer than the queue's own limit used to push an over-long summary past the
+        check and lose the alert it was there to raise.
+        """
+    
+        from ai_market_monitor.observability.issues import (
+            OperationalIssueService,
+            sanitize_dedupe_key,
+        )
+    
+        summaries = {
+            "payment": (
+                "A payment company returned money, but the message did not name a "
+                "checkout this server created, and nothing matched it. The payment may "
+                "still read as money kept. A person must find it and correct the record."
+            ),
+            "plan": (
+                "A payment company returned money and the checkout was found, but the "
+                "subscription to end was not named. The plan may still be live. A person "
+                "must check the access against the refund."
+            ),
+        }
+        summary = summaries[reason]
+>       assert len(summary) <= 200, f"refund alert summary is {len(summary)} characters"
+               ^^^^^^^^^^^^^^^^^^^
+E       AssertionError: refund alert summary is 206 characters
+
+src\ai_market_monitor\services\billing.py:3066: AssertionError
+_ test_a_refund_that_names_nobody_is_accepted_and_alerted[stripe-dispute-created] _
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000013DFB95FDA0>, 'client': <httpx.AsyncClient object at 0x0000013D...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+provider = 'stripe', event_type = 'dispute.created'
+
+    @pytest.mark.parametrize(
+        ("provider", "event_type"),
+        [
+            pytest.param("stripe", "charge.refunded", id="stripe-charge-refunded"),
+            pytest.param("stripe", "dispute.created", id="stripe-dispute-created"),
+            pytest.param("creem", "refund.created", id="creem-refund-created"),
+            pytest.param("nowpayments", "payment.refunded", id="crypto-payment-refunded"),
+        ],
+    )
+    async def test_a_refund_that_names_nobody_is_accepted_and_alerted(
+        test_context, provider: str, event_type: str
+    ) -> None:
+        """No company may turn a refund into a refused webhook.
+    
+        ``payment.refunded`` from NOWPayments used to be refused outright when the order did
+        not carry a checkout reference, which threw the refund away. Every provider that can
+        send money back is checked here: the event is stored, the alert is written, and the
+        call answers instead of failing.
+        """
+    
+        async with test_context["session_factory"]() as session:
+>           result = await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload={"id": f"evt-nobody-{event_type}", "type": event_type, "data": {}},
+            )
+
+tests\unit\test_invariant_refund_is_recorded.py:376: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\ai_market_monitor\services\billing.py:2482: in process_event
+    await self._hydrate_checkout_data(
+src\ai_market_monitor\services\billing.py:3237: in _hydrate_checkout_data
+    await self._attach_refund_to_attempt(
+src\ai_market_monitor\services\billing.py:3125: in _attach_refund_to_attempt
+    await self._save_refund_alert(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ai_market_monitor.services.billing.BillingService object at 0x0000013DFB4DBB00>
+
+    async def _save_refund_alert(
+        self, *, event_id: str, event_type: str, reason: str
+    ) -> None:
+        """Tell a person that money went back and this system could not place it.
+    
+        Two things can be missing. ``payment``: no checkout attempt could be matched, so
+        a payment that is no longer money held still reads as one тАФ that is the row the
+        money-owed valuation and the completed-sale count read. ``plan``: the payment was
+        matched but no subscription could be, so the access it bought may still be live.
+    
+        Fixed sentences, and the event id only as an evidence pointer: a provider id
+        longer than the queue's own limit used to push an over-long summary past the
+        check and lose the alert it was there to raise.
+        """
+    
+        from ai_market_monitor.observability.issues import (
+            OperationalIssueService,
+            sanitize_dedupe_key,
+        )
+    
+        summaries = {
+            "payment": (
+                "A payment company returned money, but the message did not name a "
+                "checkout this server created, and nothing matched it. The payment may "
+                "still read as money kept. A person must find it and correct the record."
+            ),
+            "plan": (
+                "A payment company returned money and the checkout was found, but the "
+                "subscription to end was not named. The plan may still be live. A person "
+                "must check the access against the refund."
+            ),
+        }
+        summary = summaries[reason]
+>       assert len(summary) <= 200, f"refund alert summary is {len(summary)} characters"
+               ^^^^^^^^^^^^^^^^^^^
+E       AssertionError: refund alert summary is 206 characters
+
+src\ai_market_monitor\services\billing.py:3066: AssertionError
+_ test_a_refund_that_names_nobody_is_accepted_and_alerted[creem-refund-created] _
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000013DFB6EC8F0>, 'client': <httpx.AsyncClient object at 0x0000013D...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+provider = 'creem', event_type = 'refund.created'
+
+    @pytest.mark.parametrize(
+        ("provider", "event_type"),
+        [
+            pytest.param("stripe", "charge.refunded", id="stripe-charge-refunded"),
+            pytest.param("stripe", "dispute.created", id="stripe-dispute-created"),
+            pytest.param("creem", "refund.created", id="creem-refund-created"),
+            pytest.param("nowpayments", "payment.refunded", id="crypto-payment-refunded"),
+        ],
+    )
+    async def test_a_refund_that_names_nobody_is_accepted_and_alerted(
+        test_context, provider: str, event_type: str
+    ) -> None:
+        """No company may turn a refund into a refused webhook.
+    
+        ``payment.refunded`` from NOWPayments used to be refused outright when the order did
+        not carry a checkout reference, which threw the refund away. Every provider that can
+        send money back is checked here: the event is stored, the alert is written, and the
+        call answers instead of failing.
+        """
+    
+        async with test_context["session_factory"]() as session:
+>           result = await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload={"id": f"evt-nobody-{event_type}", "type": event_type, "data": {}},
+            )
+
+tests\unit\test_invariant_refund_is_recorded.py:376: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\ai_market_monitor\services\billing.py:2482: in process_event
+    await self._hydrate_checkout_data(
+src\ai_market_monitor\services\billing.py:3237: in _hydrate_checkout_data
+    await self._attach_refund_to_attempt(
+src\ai_market_monitor\services\billing.py:3125: in _attach_refund_to_attempt
+    await self._save_refund_alert(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ai_market_monitor.services.billing.BillingService object at 0x0000013DFB433590>
+
+    async def _save_refund_alert(
+        self, *, event_id: str, event_type: str, reason: str
+    ) -> None:
+        """Tell a person that money went back and this system could not place it.
+    
+        Two things can be missing. ``payment``: no checkout attempt could be matched, so
+        a payment that is no longer money held still reads as one тАФ that is the row the
+        money-owed valuation and the completed-sale count read. ``plan``: the payment was
+        matched but no subscription could be, so the access it bought may still be live.
+    
+        Fixed sentences, and the event id only as an evidence pointer: a provider id
+        longer than the queue's own limit used to push an over-long summary past the
+        check and lose the alert it was there to raise.
+        """
+    
+        from ai_market_monitor.observability.issues import (
+            OperationalIssueService,
+            sanitize_dedupe_key,
+        )
+    
+        summaries = {
+            "payment": (
+                "A payment company returned money, but the message did not name a "
+                "checkout this server created, and nothing matched it. The payment may "
+                "still read as money kept. A person must find it and correct the record."
+            ),
+            "plan": (
+                "A payment company returned money and the checkout was found, but the "
+                "subscription to end was not named. The plan may still be live. A person "
+                "must check the access against the refund."
+            ),
+        }
+        summary = summaries[reason]
+>       assert len(summary) <= 200, f"refund alert summary is {len(summary)} characters"
+               ^^^^^^^^^^^^^^^^^^^
+E       AssertionError: refund alert summary is 206 characters
+
+src\ai_market_monitor\services\billing.py:3066: AssertionError
+_ test_a_refund_that_names_nobody_is_accepted_and_alerted[crypto-payment-refunded] _
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000013DFB4569C0>, 'client': <httpx.AsyncClient object at 0x0000013D...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+provider = 'nowpayments', event_type = 'payment.refunded'
+
+    @pytest.mark.parametrize(
+        ("provider", "event_type"),
+        [
+            pytest.param("stripe", "charge.refunded", id="stripe-charge-refunded"),
+            pytest.param("stripe", "dispute.created", id="stripe-dispute-created"),
+            pytest.param("creem", "refund.created", id="creem-refund-created"),
+            pytest.param("nowpayments", "payment.refunded", id="crypto-payment-refunded"),
+        ],
+    )
+    async def test_a_refund_that_names_nobody_is_accepted_and_alerted(
+        test_context, provider: str, event_type: str
+    ) -> None:
+        """No company may turn a refund into a refused webhook.
+    
+        ``payment.refunded`` from NOWPayments used to be refused outright when the order did
+        not carry a checkout reference, which threw the refund away. Every provider that can
+        send money back is checked here: the event is stored, the alert is written, and the
+        call answers instead of failing.
+        """
+    
+        async with test_context["session_factory"]() as session:
+>           result = await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload={"id": f"evt-nobody-{event_type}", "type": event_type, "data": {}},
+            )
+
+tests\unit\test_invariant_refund_is_recorded.py:376: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\ai_market_monitor\services\billing.py:2482: in process_event
+    await self._hydrate_checkout_data(
+src\ai_market_monitor\services\billing.py:3237: in _hydrate_checkout_data
+    await self._attach_refund_to_attempt(
+src\ai_market_monitor\services\billing.py:3125: in _attach_refund_to_attempt
+    await self._save_refund_alert(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ai_market_monitor.services.billing.BillingService object at 0x0000013DFB6EC830>
+
+    async def _save_refund_alert(
+        self, *, event_id: str, event_type: str, reason: str
+    ) -> None:
+        """Tell a person that money went back and this system could not place it.
+    
+        Two things can be missing. ``payment``: no checkout attempt could be matched, so
+        a payment that is no longer money held still reads as one тАФ that is the row the
+        money-owed valuation and the completed-sale count read. ``plan``: the payment was
+        matched but no subscription could be, so the access it bought may still be live.
+    
+        Fixed sentences, and the event id only as an evidence pointer: a provider id
+        longer than the queue's own limit used to push an over-long summary past the
+        check and lose the alert it was there to raise.
+        """
+    
+        from ai_market_monitor.observability.issues import (
+            OperationalIssueService,
+            sanitize_dedupe_key,
+        )
+    
+        summaries = {
+            "payment": (
+                "A payment company returned money, but the message did not name a "
+                "checkout this server created, and nothing matched it. The payment may "
+                "still read as money kept. A person must find it and correct the record."
+            ),
+            "plan": (
+                "A payment company returned money and the checkout was found, but the "
+                "subscription to end was not named. The plan may still be live. A person "
+                "must check the access against the refund."
+            ),
+        }
+        summary = summaries[reason]
+>       assert len(summary) <= 200, f"refund alert summary is {len(summary)} characters"
+               ^^^^^^^^^^^^^^^^^^^
+E       AssertionError: refund alert summary is 206 characters
+
+src\ai_market_monitor\services\billing.py:3066: AssertionError
+_ test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused[unknown-id] _
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000013DFB6EE990>, 'client': <httpx.AsyncClient object at 0x0000013D...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+reference = '00000000-0000-0000-0000-000000000000', label = 'no such checkout'
+
+    @pytest.mark.parametrize(
+        ("reference", "label"),
+        [
+            pytest.param("00000000-0000-0000-0000-000000000000", "no such checkout", id="unknown-id"),
+            pytest.param("not-a-uuid", "malformed reference", id="invalid-id"),
+        ],
+    )
+    async def test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused(
+        test_context, reference: str, label: str
+    ) -> None:
+        """A bad reference on a refund is a reason to ask a person, not to fail the webhook.
+    
+        Money-in events keep refusing an unreadable checkout тАФ that is a real risk of giving
+        away a plan. A refund cannot give anything away, so it is recorded and alerted.
+        """
+    
+        async with test_context["session_factory"]() as session:
+>           result = await BillingService(session, test_context["settings"]).process_event(
+                provider="creem",
+                payload={
+                    "id": f"evt-bad-ref-{label}",
+                    "type": "refund.created",
+                    "data": {"checkout_attempt_id": reference, "status": "refunded"},
+                },
+            )
+
+tests\unit\test_invariant_refund_is_recorded.py:413: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\ai_market_monitor\services\billing.py:2482: in process_event
+    await self._hydrate_checkout_data(
+src\ai_market_monitor\services\billing.py:3237: in _hydrate_checkout_data
+    await self._attach_refund_to_attempt(
+src\ai_market_monitor\services\billing.py:3125: in _attach_refund_to_attempt
+    await self._save_refund_alert(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ai_market_monitor.services.billing.BillingService object at 0x0000013DFB30FE00>
+
+    async def _save_refund_alert(
+        self, *, event_id: str, event_type: str, reason: str
+    ) -> None:
+        """Tell a person that money went back and this system could not place it.
+    
+        Two things can be missing. ``payment``: no checkout attempt could be matched, so
+        a payment that is no longer money held still reads as one тАФ that is the row the
+        money-owed valuation and the completed-sale count read. ``plan``: the payment was
+        matched but no subscription could be, so the access it bought may still be live.
+    
+        Fixed sentences, and the event id only as an evidence pointer: a provider id
+        longer than the queue's own limit used to push an over-long summary past the
+        check and lose the alert it was there to raise.
+        """
+    
+        from ai_market_monitor.observability.issues import (
+            OperationalIssueService,
+            sanitize_dedupe_key,
+        )
+    
+        summaries = {
+            "payment": (
+                "A payment company returned money, but the message did not name a "
+                "checkout this server created, and nothing matched it. The payment may "
+                "still read as money kept. A person must find it and correct the record."
+            ),
+            "plan": (
+                "A payment company returned money and the checkout was found, but the "
+                "subscription to end was not named. The plan may still be live. A person "
+                "must check the access against the refund."
+            ),
+        }
+        summary = summaries[reason]
+>       assert len(summary) <= 200, f"refund alert summary is {len(summary)} characters"
+               ^^^^^^^^^^^^^^^^^^^
+E       AssertionError: refund alert summary is 206 characters
+
+src\ai_market_monitor\services\billing.py:3066: AssertionError
+_ test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused[invalid-id] _
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000013DFB3D3EC0>, 'client': <httpx.AsyncClient object at 0x0000013D...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+reference = 'not-a-uuid', label = 'malformed reference'
+
+    @pytest.mark.parametrize(
+        ("reference", "label"),
+        [
+            pytest.param("00000000-0000-0000-0000-000000000000", "no such checkout", id="unknown-id"),
+            pytest.param("not-a-uuid", "malformed reference", id="invalid-id"),
+        ],
+    )
+    async def test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused(
+        test_context, reference: str, label: str
+    ) -> None:
+        """A bad reference on a refund is a reason to ask a person, not to fail the webhook.
+    
+        Money-in events keep refusing an unreadable checkout тАФ that is a real risk of giving
+        away a plan. A refund cannot give anything away, so it is recorded and alerted.
+        """
+    
+        async with test_context["session_factory"]() as session:
+>           result = await BillingService(session, test_context["settings"]).process_event(
+                provider="creem",
+                payload={
+                    "id": f"evt-bad-ref-{label}",
+                    "type": "refund.created",
+                    "data": {"checkout_attempt_id": reference, "status": "refunded"},
+                },
+            )
+
+tests\unit\test_invariant_refund_is_recorded.py:413: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\ai_market_monitor\services\billing.py:2482: in process_event
+    await self._hydrate_checkout_data(
+src\ai_market_monitor\services\billing.py:3237: in _hydrate_checkout_data
+    await self._attach_refund_to_attempt(
+src\ai_market_monitor\services\billing.py:3125: in _attach_refund_to_attempt
+    await self._save_refund_alert(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ai_market_monitor.services.billing.BillingService object at 0x0000013DFB4DBFB0>
+
+    async def _save_refund_alert(
+        self, *, event_id: str, event_type: str, reason: str
+    ) -> None:
+        """Tell a person that money went back and this system could not place it.
+    
+        Two things can be missing. ``payment``: no checkout attempt could be matched, so
+        a payment that is no longer money held still reads as one тАФ that is the row the
+        money-owed valuation and the completed-sale count read. ``plan``: the payment was
+        matched but no subscription could be, so the access it bought may still be live.
+    
+        Fixed sentences, and the event id only as an evidence pointer: a provider id
+        longer than the queue's own limit used to push an over-long summary past the
+        check and lose the alert it was there to raise.
+        """
+    
+        from ai_market_monitor.observability.issues import (
+            OperationalIssueService,
+            sanitize_dedupe_key,
+        )
+    
+        summaries = {
+            "payment": (
+                "A payment company returned money, but the message did not name a "
+                "checkout this server created, and nothing matched it. The payment may "
+                "still read as money kept. A person must find it and correct the record."
+            ),
+            "plan": (
+                "A payment company returned money and the checkout was found, but the "
+                "subscription to end was not named. The plan may still be live. A person "
+                "must check the access against the refund."
+            ),
+        }
+        summary = summaries[reason]
+>       assert len(summary) <= 200, f"refund alert summary is {len(summary)} characters"
+               ^^^^^^^^^^^^^^^^^^^
+E       AssertionError: refund alert summary is 206 characters
+
+src\ai_market_monitor\services\billing.py:3066: AssertionError
+_______ test_a_refund_that_could_belong_to_two_payments_is_not_guessed ________
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000013DFB3D3080>, 'client': <httpx.AsyncClient object at 0x0000013D...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+
+    async def test_a_refund_that_could_belong_to_two_payments_is_not_guessed(
+        test_context,
+    ) -> None:
+        """Two settled payments, one refund naming neither: the answer is a question, not a guess.
+    
+        Attaching it to the newer one would mark a payment refunded that the provider did
+        not refund, and take that money away from the plan-move reading. So nothing moves and
+        a person is asked.
+        """
+    
+        provider = "creem"
+        async with test_context["session_factory"]() as session:
+            user_a, sub_a, attempt_a = await _seed_paid_plan(
+                session, provider=provider, plan_code="pro"
+            )
+            _user_b, sub_b, attempt_b = await _seed_paid_plan(
+                session, provider=provider, plan_code="trader"
+            )
+            # Same person, same company, two settled payments, no subscription named.
+            sub_b.user_id = user_a.id
+            attempt_b.user_id = user_a.id
+            await session.commit()
+    
+        async with test_context["session_factory"]() as session:
+>           result = await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload={
+                    "id": "evt-two-payments",
+                    "type": "refund.created",
+                    "data": {
+                        "user_id": str(user_a.id),
+                        "provider_customer_id": "cus_shared",
+                        "status": "refunded",
+                    },
+                },
+            )
+
+tests\unit\test_invariant_refund_is_recorded.py:461: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\ai_market_monitor\services\billing.py:2482: in process_event
+    await self._hydrate_checkout_data(
+src\ai_market_monitor\services\billing.py:3237: in _hydrate_checkout_data
+    await self._attach_refund_to_attempt(
+src\ai_market_monitor\services\billing.py:3125: in _attach_refund_to_attempt
+    await self._save_refund_alert(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ai_market_monitor.services.billing.BillingService object at 0x0000013DFB95F770>
+
+    async def _save_refund_alert(
+        self, *, event_id: str, event_type: str, reason: str
+    ) -> None:
+        """Tell a person that money went back and this system could not place it.
+    
+        Two things can be missing. ``payment``: no checkout attempt could be matched, so
+        a payment that is no longer money held still reads as one тАФ that is the row the
+        money-owed valuation and the completed-sale count read. ``plan``: the payment was
+        matched but no subscription could be, so the access it bought may still be live.
+    
+        Fixed sentences, and the event id only as an evidence pointer: a provider id
+        longer than the queue's own limit used to push an over-long summary past the
+        check and lose the alert it was there to raise.
+        """
+    
+        from ai_market_monitor.observability.issues import (
+            OperationalIssueService,
+            sanitize_dedupe_key,
+        )
+    
+        summaries = {
+            "payment": (
+                "A payment company returned money, but the message did not name a "
+                "checkout this server created, and nothing matched it. The payment may "
+                "still read as money kept. A person must find it and correct the record."
+            ),
+            "plan": (
+                "A payment company returned money and the checkout was found, but the "
+                "subscription to end was not named. The plan may still be live. A person "
+                "must check the access against the refund."
+            ),
+        }
+        summary = summaries[reason]
+>       assert len(summary) <= 200, f"refund alert summary is {len(summary)} characters"
+               ^^^^^^^^^^^^^^^^^^^
+E       AssertionError: refund alert summary is 206 characters
+
+src\ai_market_monitor\services\billing.py:3066: AssertionError
+____ test_a_refund_that_lands_between_freeze_and_payment_owes_nothing_back ____
+
+self = <ai_market_monitor.services.billing.BillingService object at 0x0000013DFCFF8440>
+
+    async def _after_completed_payment(
+        self,
+        *,
+        billing_event: BillingEvent,
+        subscription: Subscription,
+        data: dict[str, Any],
+    ) -> None:
+        """Run every durable result of one confirmed payment in one transaction."""
+    
+        from ai_market_monitor.services.payment_emails import PaymentEmailOutboxService
+        from ai_market_monitor.services.plan_replacements import (
+            PaidPlanReplacementService,
+            PlanReplacementError,
+        )
+    
+        attempt_id = self._parse_uuid(data.get("checkout_attempt_id"))
+        if attempt_id is not None:
+            try:
+>               await PaidPlanReplacementService(
+                    self.session, self.settings
+                ).apply_after_payment(
+                    checkout_attempt_id=attempt_id,
+                    replacement=subscription,
+                    billing_event=billing_event,
+                )
+
+src\ai_market_monitor\services\billing.py:2655: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\ai_market_monitor\services\plan_replacements.py:352: in apply_after_payment
+    await self._cancel_old_recurring_plan(old)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ai_market_monitor.services.plan_replacements.PaidPlanReplacementService object at 0x0000013DFCFD4B60>
+subscription = <ai_market_monitor.db.models.commercial.Subscription object at 0x0000013DFD05D130>
+
+    async def _cancel_old_recurring_plan(self, subscription: Subscription) -> None:
+        provider = subscription.provider or ""
+        if provider not in {"creem", "stripe"}:
+            return
+        reference = subscription.provider_subscription_id
+        if not reference:
+            raise PlanReplacementError(
+                "old_subscription_cancel_failed",
+                "The old recurring plan has no payment reference.",
+            )
+        try:
+            if provider == "creem":
+                secret = self.settings.creem_api_key
+                if secret is None:
+>                   raise PlanReplacementError(
+                        "old_subscription_cancel_failed",
+                        "Card cancellation is not configured.",
+                    )
+E                   ai_market_monitor.services.plan_replacements.PlanReplacementError: Card cancellation is not configured.
+
+src\ai_market_monitor\services\plan_replacements.py:456: PlanReplacementError
+
+The above exception was the direct cause of the following exception:
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000013DF92EFF50>, 'client': <httpx.AsyncClient object at 0x0000013D...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013DFCEC30E0>
+
+    async def test_a_refund_that_lands_between_freeze_and_payment_owes_nothing_back(
+        test_context, monkeypatch
+    ) -> None:
+        """The second window: the move was already frozen onto the payment, then it refunded.
+    
+        ``apply_after_payment`` reads the frozen link, not ``payment_that_bought``. Before
+        the fix it wrote a promise to send back money the provider had already returned. The
+        move itself must still finish тАФ the new plan is paid for.
+        """
+    
+        async def successful_cancel(*args, **kwargs):
+            return httpx.Response(200, request=httpx.Request("POST", str(args[2])))
+    
+        monkeypatch.setattr(replacement_module, "provider_request", successful_cancel)
+        settings = test_context["settings"]
+        provider = "creem"
+        async with test_context["session_factory"]() as session:
+            user, old, source = await _seed_paid_plan(
+                session, provider=provider, plan_code="pro"
+            )
+            # Freeze the move exactly as the checkout route does.
+            plan = await PlanCatalogService(session).get_or_sync("trader")
+            now = datetime.now(UTC)
+            new_attempt = BillingCheckoutAttempt(
+                user_id=user.id,
+                plan_id=plan.id,
+                billing_cycle="monthly_auto_renewal",
+                provider=provider,
+                status="pending",
+                idempotency_key=f"move-{user.id}",
+                terms_version="test",
+                amount=effective_monthly_price("trader"),
+                currency="USD",
+                terms_accepted_at=now,
+                expires_at=now + timedelta(days=1),
+                billing_profile={"first_name": "Amina"},
+            )
+            session.add(new_attempt)
+            await session.flush()
+            await PaidPlanReplacementService(session, settings).attach_source(
+                attempt=new_attempt, target_plan_code="trader"
+            )
+            assert new_attempt.replaces_checkout_attempt_id == source.id
+            await session.commit()
+    
+        async with test_context["session_factory"]() as session:
+            service = BillingService(session, settings)
+            await service.process_event(
+                provider=provider,
+                payload=_refund_payload(
+                    event_type="charge.refunded",
+                    attempt=source,
+                    user_id=user.id,
+                    subscription_reference=old.provider_subscription_id,
+                ),
+            )
+            await session.commit()
+    
+        async with test_context["session_factory"]() as session:
+            paid_at = datetime.now(UTC)
+>           await BillingService(session, settings).process_event(
+                provider=provider,
+                payload={
+                    "id": f"evt-paid-after-refund-{new_attempt.id}",
+                    "type": "subscription.paid",
+                    "data": {
+                        "checkout_attempt_id": str(new_attempt.id),
+                        "plan_code": "trader",
+                        "user_id": str(user.id),
+                        "provider_customer_id": f"cus_{user.id}",
+                        "provider_subscription_id": f"sub_new_{user.id}",
+                        "amount": str(new_attempt.amount),
+                        "currency": "USD",
+                        "status": "active",
+                        "current_period_start": paid_at.isoformat(),
+                        "current_period_end": (paid_at + timedelta(days=30)).isoformat(),
+                    },
+                },
+            )
+
+tests\unit\test_invariant_refund_is_recorded.py:636: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\ai_market_monitor\services\billing.py:2514: in process_event
+    await self._after_completed_payment(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ai_market_monitor.services.billing.BillingService object at 0x0000013DFCFF8440>
+
+    async def _after_completed_payment(
+        self,
+        *,
+        billing_event: BillingEvent,
+        subscription: Subscription,
+        data: dict[str, Any],
+    ) -> None:
+        """Run every durable result of one confirmed payment in one transaction."""
+    
+        from ai_market_monitor.services.payment_emails import PaymentEmailOutboxService
+        from ai_market_monitor.services.plan_replacements import (
+            PaidPlanReplacementService,
+            PlanReplacementError,
+        )
+    
+        attempt_id = self._parse_uuid(data.get("checkout_attempt_id"))
+        if attempt_id is not None:
+            try:
+                await PaidPlanReplacementService(
+                    self.session, self.settings
+                ).apply_after_payment(
+                    checkout_attempt_id=attempt_id,
+                    replacement=subscription,
+                    billing_event=billing_event,
+                )
+            except PlanReplacementError as exc:
+>               raise PlanMoveFailed(exc.code, str(exc)) from exc
+E               ai_market_monitor.services.billing.PlanMoveFailed: Card cancellation is not configured.
+
+src\ai_market_monitor\services\billing.py:2663: PlanMoveFailed
+__________ test_the_same_refund_arriving_twice_changes_nothing_twice __________
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000013DFCD8E750>, 'client': <httpx.AsyncClient object at 0x0000013D...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+
+    async def test_the_same_refund_arriving_twice_changes_nothing_twice(test_context) -> None:
+        """Replay: one record, one event row, nothing owed.
+    
+        A payment company that sends the same refund twice, or a person reprocessing the
+        failed event, must not produce two changes, two alerts or two money promises.
+        """
+    
+        provider = "creem"
+        async with test_context["session_factory"]() as session:
+            service = BillingService(session, test_context["settings"])
+            user, subscription, attempt = await _seed_paid_plan(session, provider=provider)
+            payload = _refund_payload(
+                event_type="payment.refunded",
+                attempt=attempt,
+                user_id=user.id,
+                subscription_reference=subscription.provider_subscription_id,
+            )
+            first = await service.process_event(provider=provider, payload=payload)
+            await session.commit()
+            completed_at = attempt.completed_at
+            second = await service.process_event(provider=provider, payload=payload)
+            await session.commit()
+            assert first.replayed is False
+            assert second.replayed is True
+    
+        async with test_context["session_factory"]() as session:
+            settled = await session.get(BillingCheckoutAttempt, attempt.id)
+            assert settled is not None
+            assert settled.status == "refunded"
+>           assert settled.completed_at == completed_at
+E           assert datetime.datetime(2026, 8, 29, 1, 46, 42, 605208) == datetime.datetime(2026, 8, 29, 1, 46, 42, 605208, tzinfo=datetime.timezone.utc)
+E            +  where datetime.datetime(2026, 8, 29, 1, 46, 42, 605208) = <ai_market_monitor.db.models.commercial.BillingCheckoutAttempt object at 0x0000013DFD0DEE10>.completed_at
+
+tests\unit\test_invariant_refund_is_recorded.py:700: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_cannot_be_matched_is_an_alert_not_a_crash
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_names_nobody_is_accepted_and_alerted[stripe-charge-refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_names_nobody_is_accepted_and_alerted[stripe-dispute-created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_names_nobody_is_accepted_and_alerted[creem-refund-created]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_names_nobody_is_accepted_and_alerted[crypto-payment-refunded]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused[unknown-id]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused[invalid-id]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_could_belong_to_two_payments_is_not_guessed
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_that_lands_between_freeze_and_payment_owes_nothing_back
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_the_same_refund_arriving_twice_changes_nothing_twice

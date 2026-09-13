@@ -1,0 +1,25 @@
+Verification runs for plan-replacement money-path fixes.
+
+1. Focused tests (all pass):
+   .venv/Scripts/python -m pytest tests/integration/test_paid_plan_replacement.py tests/unit/test_invariant_plan_replacement_money.py -q -p no:randomly
+   -> 26 passed
+
+2. Issue-queue + annual-card tests (all pass):
+   .venv/Scripts/python -m pytest tests/unit/test_operational_issue_queue.py tests/unit/test_invariant_annual_only_plan_card.py -q -p no:randomly
+   -> 28 passed
+
+3. Plan-change journey (all pass):
+   .venv/Scripts/python -m pytest tests/integration/test_plan_change_journey.py -q -p no:randomly
+   -> 28 passed
+
+4. Adjacent billing tests (all pass):
+   .venv/Scripts/python -m pytest tests/integration/test_checkout_and_payment_email.py tests/unit/test_invariant_plan_checkout_availability.py tests/unit/test_billing_entitlements.py -q -p no:randomly
+   -> 138 passed
+
+5. Lint:
+   .venv/Scripts/python -m ruff check src tests scripts
+   -> All checks passed!
+
+6. Type check (changed files only):
+   .venv/Scripts/python -m mypy src/ai_market_monitor/services/billing.py src/ai_market_monitor/services/plan_replacements.py src/ai_market_monitor/observability/issues.py src/ai_market_monitor/api/routers/dashboard.py --no-error-summary
+   -> (no output)

@@ -3,6 +3,7 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 
+from ai_market_monitor.core.dashboard_paths import HOME_PATH
 from ai_market_monitor.db.models import (
     AttributionTouch,
     DashboardPreference,
@@ -247,7 +248,9 @@ async def test_telegram_create_approve_and_activate_monitor(test_context):
         )
         assert "Explain rules" in explanation.text
         assert "does not edit the monitor" in explanation.text
-        assert "Current deterministic rules" in explanation.text
+        # The heading above the rule list. It used to read "Current deterministic rules",
+        # a word about the code that no beginner can act on.
+        assert "The rules as they will be checked" in explanation.text
         approved = await service.handle_callback(
             TelegramCallback(
                 callback_query_id="cb-approve",
@@ -759,7 +762,8 @@ async def test_telegram_approve_before_interpretation_points_to_dashboard(test_c
         # A button that says "Dashboard" opens the dashboard. It used to open the setup
         # chat's own page, which is where somebody's last conversation is reopened —
         # every other "Dashboard" button in the file already opened the dashboard.
+        # The dashboard's front page is Home; "/dashboard" only redirects there now.
         assert any(
-            button.url and button.url.endswith("/dashboard") for button in response.buttons
+            button.url and button.url.endswith(HOME_PATH) for button in response.buttons
         )
         assert not any(button.text == "Create Monitor" for button in response.buttons)

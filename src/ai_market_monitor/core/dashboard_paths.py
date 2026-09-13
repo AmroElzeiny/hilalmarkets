@@ -163,6 +163,20 @@ LIFECYCLES_PATH: Final[str] = "/dashboard/lifecycles"
 #: Where a screening change is explained, for everything that links straight to one.
 COMPLIANCE_CHANGES_PATH: Final[str] = f"{LIFECYCLES_PATH}?tab=compliance_changes"
 
+#: The public website's own pages, for the messages that send somebody to one.
+#:
+#: ``routers/public.py`` serves them, and they are not signed-in addresses. They are named
+#: here anyway because the Telegram bot writes them into messages that cannot be corrected
+#: once sent, and a path typed by hand into a button is how the bot kept sending people to
+#: ``/dashboard/billing`` and ``/dashboard/trial`` instead of the Subscription page the
+#: redesigned dashboard uses.
+#: ``tests/integration/test_telegram_links_resolve.py`` opens every address the bot can
+#: send, these included, against the real app.
+PUBLIC_HOME_PATH: Final[str] = "/"
+PRICING_PATH: Final[str] = "/pricing"
+HOW_IT_WORKS_PATH: Final[str] = "/how-it-works"
+ABOUT_PATH: Final[str] = "/about"
+
 #: What the automated screen read about coins no authority has ruled on.
 #:
 #: Deliberately **not** part of ``MARKET_PATH``. The Market page shows coins an authority

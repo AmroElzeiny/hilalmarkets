@@ -1,0 +1,33 @@
+﻿diff --git a/src/ai_market_monitor/static/hm-shell.css b/src/ai_market_monitor/static/hm-shell.css
+index 728c540e..7515eeed 100644
+--- a/src/ai_market_monitor/static/hm-shell.css
++++ b/src/ai_market_monitor/static/hm-shell.css
+@@ -52,8 +52,12 @@ body.hilal-dashboard .app-content {
+   /* The cookie banner is fixed to the bottom of the window, so the page keeps exactly
+      that much room clear underneath itself. Its real height is measured and published as
+      `--hm-cookie-banner-height` by `hilalmarkets-consent.js`; it is 0px once the banner
+-     is answered, and 0px for anyone with scripting off, who never sees it. */
+-  padding: 10px 2px calc(34px + var(--hm-cookie-banner-height, 0px));
++     is answered, and 0px for anyone with scripting off, who never sees it.
++     The corner assistant is fixed there too. `hm-hilal-chat.js` measures the room it
++     takes and publishes it as `--hm-corner-clearance`, so the last control on the page
++     can always be scrolled out from under it. The widget sits above the banner, so the
++     larger of the two is the room needed, never their sum. */
++  padding: 10px 2px calc(34px + max(var(--hm-cookie-banner-height, 0px), var(--hm-corner-clearance, 0px)));
+ }
+ 
+ /* тФАтФА The side menu тФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФА */
+@@ -1034,7 +1038,12 @@ body.hilal-dashboard .sidebar-backdrop { display: none; }
+   body.hilal-dashboard .hm-top-search-mark { inset-inline-start: 0; width: 44px; }
+   body.hilal-dashboard .hm-top-search-key { display: none; }
+   body.hilal-dashboard .hm-top-here-mark { display: none; }
+-  body.hilal-dashboard .app-content { padding-bottom: 24px; }
++  /* Smaller base room on a phone тАФ but still the room the cookie banner and the corner
++     assistant take. A flat 24px here used to drop both, so on a phone the last control
++     on a page could never be scrolled out from under either of them. */
++  body.hilal-dashboard .app-content {
++    padding-bottom: calc(24px + max(var(--hm-cookie-banner-height, 0px), var(--hm-corner-clearance, 0px)));
++  }
+ }
+ 
+ /* тФАтФА Right to left тФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФАтФА */

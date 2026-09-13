@@ -77,7 +77,6 @@ from ai_market_monitor.services.entitlements import (
     EntitlementService,
     PlanCatalogService,
 )
-from ai_market_monitor.services.plan_replacements import manual_return_window_words
 from ai_market_monitor.services.provider_reliability import ProviderCallError
 from ai_market_monitor.services.provider_runtime import provider_request
 
@@ -86,9 +85,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "CANCELLATION_REASONS",
     "CONSENT_CANCEL",
-    "CONSENT_DOWNGRADE",
-    "CONSENT_UPGRADE_NOW",
-    "CONSENT_UPGRADE_PERIOD_END",
     "DOWNGRADE_REASONS",
     "OTHER_REASON_CODE",
     "PlanChangeError",
@@ -150,21 +146,11 @@ CONSENT_CANCEL: Final[str] = (
     "I want to cancel. My card will not be charged again, and my plan keeps working "
     "until the end of the period I have already paid for."
 )
-CONSENT_DOWNGRADE: Final[str] = (
-    "I understand I pay the full price of the new plan today. It starts today and my "
-    "old paid period ends today. A person will send me the value of its unused time "
-    f"{manual_return_window_words()}."
-)
-CONSENT_UPGRADE_NOW: Final[str] = (
-    "I understand I pay the full price of the new plan today. It starts today and my "
-    "old paid period ends today. A person will send me the value of its unused time "
-    f"{manual_return_window_words()}."
-)
-CONSENT_UPGRADE_PERIOD_END: Final[str] = (
-    "I understand I pay the full price of the new plan today. It starts today and my "
-    "old paid period ends today. A person will send me the value of its unused time "
-    f"{manual_return_window_words()}."
-)
+# The three switch-form sentences (downgrade, upgrade now, upgrade at period end) used to
+# be here. After 2026-09-10 no switch form exists, and all three had become the same
+# plan-replacement promise. That promise now has one owner,
+# `plan_replacements.CONSENT_PLAN_REPLACEMENT`, and it is shown where money is really
+# taken: inside the tick box of the checkout.
 
 #: When a change takes effect.
 TIMING_IMMEDIATE: Final[str] = "immediate"
@@ -234,8 +220,10 @@ class PlanSwitchOffer:
     enabled: bool
     #: A sentence under the button when it cannot be pressed, or ``None``.
     note: str | None = None
-    #: Whether moving to this plan needs a payment page rather than a form. True only for
-    #: crypto access, which holds no card to charge.
+    #: Whether moving to this plan is done on the payment page. Since 2026-09-10 this is
+    #: true for every move between paid plans, card or crypto: the new plan is bought at
+    #: its full price and the old one ends when that payment is confirmed. The default is
+    #: False so an offer built without asking `change_needs_checkout` draws no Pay button.
     needs_checkout: bool = False
 
 
@@ -300,9 +288,14 @@ class PlanChangeService:
     def change_needs_checkout(self, subscription: Subscription) -> bool:
         """Does moving this person to another plan need a payment page?
 
-        Yes when nothing holds a card. A crypto payment buys thirty days and leaves
-        nothing behind to charge, so there is no subscription to re-price and the only way
-        to a different plan is to buy it.
+        Always, since the owner's decision of 2026-09-10. A different paid plan is bought
+        at its full price on the normal payment page, card or crypto alike, and the old
+        plan ends only when that payment is confirmed (`services/plan_replacements.py`).
+        Re-pricing the card already held is not offered: every behaviour the payment
+        company has for that charges a prorated difference, which the owner ruled out.
+
+        Kept as a method, not inlined, because two callers must give the same answer:
+        the plan cards draw a Pay button from it and `request_switch` refuses from it.
         """
 
         del subscription
@@ -313,11 +306,16 @@ class PlanChangeService:
         user_id: UUID,
         *,
         purchasable: Mapping[str, bool],
+        replacement_refusal: str = "",
     ) -> dict[str, PlanSwitchOffer]:
         """What every public plan's button should say and do for this person.
 
         ``purchasable`` is whether each plan can be paid for at all right now — the
         billing service's answer, passed in rather than worked out again here.
+        ``replacement_refusal`` is why a payment replacing the paid plan held now would be
+        refused (`PaidPlanReplacementService.replacement_refusal`), or empty. With it, a
+        move to another paid plan draws a disabled button and that sentence, never a Pay
+        button the checkout route would refuse.
         """
 
         held = await self.paid_subscription(user_id)
@@ -333,6 +331,7 @@ class PlanChangeService:
                 subscription=held[0] if held else None,
                 pending=pending,
                 purchasable=bool(purchasable.get(code, False)),
+                replacement_refusal=replacement_refusal,
             )
         return offers
 
@@ -344,6 +343,7 @@ class PlanChangeService:
         subscription: Subscription | None,
         pending: SubscriptionPlanChange | None,
         purchasable: bool,
+        replacement_refusal: str = "",
     ) -> PlanSwitchOffer:
         name = plan_name(plan_code)
         if pending is not None and pending.to_plan_code == plan_code:
@@ -399,6 +399,17 @@ class PlanChangeService:
         if kind in (PLAN_CHANGE_NEW, PLAN_CHANGE_SAME):
             return PlanSwitchOffer(
                 plan_code=plan_code, action="buy", label=SWITCH_LABEL_BUY, enabled=True
+            )
+        if replacement_refusal:
+            # The checkout would be refused, so there is no Pay button to draw — only the
+            # checkout route's own reason, under a button that cannot be pressed.
+            moving_up = kind == PLAN_CHANGE_UPGRADE
+            return PlanSwitchOffer(
+                plan_code=plan_code,
+                action="upgrade" if moving_up else "downgrade",
+                label=SWITCH_LABEL_UPGRADE if moving_up else SWITCH_LABEL_DOWNGRADE,
+                enabled=False,
+                note=replacement_refusal,
             )
         needs_checkout = subscription is not None and self.change_needs_checkout(subscription)
         if kind == PLAN_CHANGE_UPGRADE:

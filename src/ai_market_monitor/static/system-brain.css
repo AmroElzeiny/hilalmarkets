@@ -458,6 +458,8 @@ tbody tr:hover { background: var(--hm-apple-soft); }
 .brain-agent-dock { position: fixed; z-index: 520; right: 18px; bottom: 18px; }
 
 .brain-agent-orb {
+  /* The "Ask AI" label (`hm-ask-tag.css`) hangs above the circle from here. */
+  position: relative;
   display: grid;
   place-items: center;
   width: 58px;

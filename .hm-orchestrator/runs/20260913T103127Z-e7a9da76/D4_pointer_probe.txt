@@ -1,0 +1,21 @@
+stored  'billing_event:evt_01JABCdefGHI'                     -> 'billing_event:evt_01JABCdefGHI'                                 pattern=True
+stored  'billing_event:nowpayments:90313222:finished'        -> 'billing_event:nowpayments-90313222-finished'                    pattern=True
+stored  'billing_event:creem/sub_2026-08-12_001'             -> 'billing_event:creem/sub_2026-08-12_001'                         pattern=True
+stored  'plan_move_money_owed:6f1c2b3d-4e5f-6a7b-8c9d-0e1'   -> 'plan_move_money_owed:6f1c2b3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d'      pattern=True
+stored  'runbook:#api-availability'                          -> 'runbook:#api-availability'                                      pattern=True
+stored  'slo:api_availability'                               -> 'slo:api_availability'                                           pattern=True
+stored  'billing_event:the provider returned a 500 body'     -> 'billing_event:f44605347a194394'                                 pattern=True
+stored  'billing_event:{"code":500,"msg":"old_subscriptio'   -> 'billing_event:b30bda2ebb96dcea'                                 pattern=True
+stored  'billing_event:File "x.py", line 5, in process_ev'   -> 'billing_event:480428a684037087'                                 pattern=True
+stored  'billing_event:support@example.com'                  -> 'billing_event:f6a0e7bc6b036505'                                 pattern=True
+stored  'billing_event:https://api.provider.test/cb?token'   -> 'billing_event:847331397e8fb8b5'                                 pattern=True
+stored  'billing_event:sk-abcdefghijklmnopqrstuvwxyz01234'   -> 'billing_event:sk-abcdefghijklmnopqrstuvwxyz012345'              pattern=True
+stored  'slo:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'   -> 'slo:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'   pattern=True
+stored  'billing_event:XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'   -> 'billing_event:XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'   pattern=True
+stored  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'   -> 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'   pattern=True
+stored  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'   -> 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'   pattern=True
+
+refused ''                 Evidence reference '' must be a pointer such as 'slo:api_ava
+refused 'no-colon'         Evidence reference 'no-colon' must be a pointer such as 'slo
+refused '9digits:first'    Evidence reference '9digits:first' must be a pointer such as
+refused 'prefix:'          Evidence reference 'prefix:' must be a pointer such as 'slo:

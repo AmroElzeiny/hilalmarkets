@@ -1,24 +1,30 @@
-"""Browser tests for the checkout pay button and plan switch flows.
+"""Browser tests for the checkout pay button and the move between paid plans.
 
 Proves with a real headless browser that:
 1. The pay button starts disabled and becomes enabled when a method is chosen
 2. The checked state is visible to the user
 3. Pressing pay starts the handoff to the payment provider
-4. A trader holder sees no way to pay for pro in the popup
-5. The standalone checkout page refuses a trader holder
-6. Upgrading and downgrading show the right confirmation sentences
+4. Anybody holding a paid plan - crypto or card - is offered a live Pay button for the
+   other plan, and never a switch form (the owner's rule of 2026-09-10)
+5. The tick box of that payment says what happens to the plan held now
+6. Moving up and moving down each say, before payment, when the new plan starts
 
 Also captures screenshots at three viewport sizes for visual regression.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Locator, Page, expect
 
-from ai_market_monitor.core.plans import PURCHASABLE_PLAN_CODES
+from ai_market_monitor.core.plans import PURCHASABLE_PLAN_CODES, plan_name
+from ai_market_monitor.services.plan_replacements import (
+    CONSENT_PLAN_REPLACEMENT,
+    manual_return_window_words,
+)
 from tests.browser.conftest import (
     RunningApp,
     assert_no_horizontal_overflow,
@@ -28,6 +34,7 @@ from tests.browser.conftest import (
     signup,
     unique_email,
 )
+from tests.support.contrast import contrast, flatten
 
 PHONE = {"width": 390, "height": 844}
 SCREENSHOT_DIR = Path(".hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens")
@@ -96,22 +103,166 @@ def _reach_the_paying_step(
     expect(page.locator("[data-s-step-of]")).to_have_text("Step 3 of 3")
 
 
+#: The tiles on the checkout and billing pages that hold words in a box of their own. At
+#: 1024px a plan tile's number and a payment card's note ran out of their boxes, and
+#: nothing measured it: the page as a whole did not scroll sideways. The billing page's
+#: plan facts cut their words short with "…" instead, which the same check catches, and
+#: so did the payment history ("Card via St…", "Monthly Au…").
+_TILES = (
+    ".checkout-limit-grid article, .billing-method-card, .billing-current-meta > span, "
+    ".billing-history-primary, .billing-history-facts > div"
+)
+
+_POKING_OUT = """selector => {
+  const found = [];
+  for (const tile of document.querySelectorAll(selector)) {
+    const t = tile.getBoundingClientRect();
+    if (t.width <= 1) continue;
+    for (const el of [tile, ...tile.querySelectorAll('*')]) {
+      const e = el.getBoundingClientRect();
+      // Nothing drawn, or drawn 1px wide to be read aloud only.
+      if (e.width <= 1 || e.height <= 1) continue;
+      const wider = getComputedStyle(el).display !== 'inline'
+        && el.scrollWidth > el.clientWidth + 1;
+      const outside = e.left < t.left - 1 || e.right > t.right + 1;
+      if (wider || outside) {
+        found.push({
+          tile: tile.className,
+          element: el.tagName.toLowerCase(),
+          text: (el.textContent || '').trim().slice(0, 60),
+          wider,
+          outside,
+        });
+      }
+    }
+  }
+  return found;
+}"""
+
+
+def _renewal_tile(page: Page) -> Locator:
+    """The billing page's own "Renewal" tile: what it says about the plan held."""
+    return (
+        page.locator(".billing-current-meta > span")
+        .filter(has=page.locator("small", has_text=re.compile(r"^Renewal$")))
+        .locator("strong")
+    )
+
+
+#: Every word drawn on a choice that cannot be made: its colour, the opacity it is drawn
+#: at (its own times every parent's), and the first solid ground behind it.
+_UNAVAILABLE_WORDS = """() => {
+  const read = (css) => {
+    const parts = css.match(/[\\d.]+/g).map(Number);
+    return {
+      hex: '#' + parts.slice(0, 3)
+        .map(v => Math.round(v).toString(16).padStart(2, '0')).join(''),
+      alpha: parts.length > 3 ? parts[3] : 1,
+    };
+  };
+  const ground = (el) => {
+    for (let node = el; node; node = node.parentElement) {
+      const bg = read(getComputedStyle(node).backgroundColor);
+      if (bg.alpha === 1) return bg.hex;
+    }
+    return '#ffffff';
+  };
+  const found = [];
+  for (const el of document.querySelectorAll('.is-unavailable :is(strong, small, span)')) {
+    const text = (el.textContent || '').trim();
+    const box = el.getBoundingClientRect();
+    if (!text || box.width <= 1 || box.height <= 1) continue;
+    let opacity = 1;
+    for (let node = el; node; node = node.parentElement) {
+      opacity *= parseFloat(getComputedStyle(node).opacity);
+    }
+    const colour = read(getComputedStyle(el).color);
+    found.push({
+      text: text.slice(0, 60), colour: colour.hex, alpha: colour.alpha * opacity,
+      ground: ground(el),
+    });
+  }
+  return found;
+}"""
+
+
+def _assert_unavailable_words_are_readable(page: Page, where: str) -> None:
+    """The words on a way of paying, or an interval, that cannot be chosen stay readable.
+
+    They are the only place that says why it cannot be chosen, so V7's 4.5:1 applies.
+    The card they sat on was faded to 55%, which took them to 2.2:1. Measured with
+    `tests/support/contrast.py`, the one owner of this sum, never judged by eye.
+    """
+
+    for item in page.evaluate(_UNAVAILABLE_WORDS):
+        seen = flatten(item["colour"], item["alpha"], item["ground"])
+        ratio = contrast(seen, item["ground"])
+        assert ratio >= 4.5, f"{where}: {item['text']!r} is {ratio:.2f}:1 ({item})"
+
+
 def _take_screenshots(
     page: Page,
     state_name: str,
     viewports: list[dict[str, int]],
 ) -> list[Path]:
-    """Take screenshots at multiple viewport sizes and return their paths."""
+    """Take screenshots at multiple viewport sizes and return their paths.
+
+    Before the pictures, every word on a choice that cannot be made must be readable; and
+    before each one, no word may run out of the tile that holds it, at that size.
+    """
+    _assert_unavailable_words_are_readable(page, state_name)
     paths = []
     for vp in viewports:
         page.set_viewport_size(vp)
         page.wait_for_timeout(400)
+        poking_out = page.evaluate(_POKING_OUT, _TILES)
+        assert not poking_out, f"{state_name} at {vp['width']}px: {poking_out}"
         filename = f"{state_name}-{vp['width']}x{vp['height']}.png"
         path = SCREENSHOT_DIR / filename
         path.parent.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(path), full_page=True)
         paths.append(path)
     return paths
+
+
+def _open_billing_as_holder(
+    page: Page,
+    base_url: str,
+    app: RunningApp,
+    *,
+    tag: str,
+    provider: str,
+    plan_code: str = "trader",
+) -> None:
+    """Sign up, hold a paid plan, and open the billing page."""
+    email = unique_email(tag)
+    signup(page, base_url, email)
+    close_any_open_guide(page)
+    seed_paid_monitor_access(app.database_url, email, provider=provider, plan_code=plan_code)
+    page.goto(f"{base_url}/dashboard/billing", wait_until="domcontentloaded")
+    close_any_open_guide(page)
+    _settle_cookie_choice(page)
+
+
+def _pay_note(page: Page, plan_code: str):
+    """The sentence straight under a plan card's Pay button."""
+    pay = page.locator(f'[data-billing-dialog-trigger][data-plan-code="{plan_code}"]')
+    return pay.locator("xpath=following-sibling::p[contains(@class,'dashboard-trial-note')][1]")
+
+
+def _assert_the_move_is_a_payment(page: Page, target_code: str) -> None:
+    """A live Pay button, the sentence under it, and no switch control on the page."""
+    pay = page.locator(f'[data-billing-dialog-trigger][data-plan-code="{target_code}"]')
+    expect(pay).to_be_visible(timeout=15_000)
+    expect(pay).to_be_enabled()
+    note = _pay_note(page, target_code)
+    expect(note).to_be_visible()
+    expect(note).to_contain_text(f"You pay the {plan_name(target_code)} price today")
+    expect(note).to_contain_text("It starts only after that payment is confirmed")
+    expect(note).to_contain_text("stays active if you leave or the payment fails")
+    expect(note).to_contain_text(manual_return_window_words())
+    expect(page.locator("[data-plan-switch-trigger]")).to_have_count(0)
+    expect(page.locator("#plan-switch-dialog")).to_have_count(0)
 
 
 # ── Method-selection path tests ──────────────────────────────────────────────
@@ -404,34 +555,30 @@ def test_a_crypto_holder_reaches_the_payment_form_on_the_review_page(
     assert_no_raw_traceback(page)
 
 
-def test_a_card_holder_is_sent_to_the_switch_form_not_a_second_checkout(
+def test_a_card_holder_is_offered_the_payment_popup_not_a_switch_form(
     page: Page,
     paid_base_url: str,
     paid_app: RunningApp,
 ) -> None:
     """The other half of the rule, on the billing page.
 
-    A card subscription really can be re-priced, so buying a second plan would leave two
-    live subscriptions and two charges every month. That person gets an Upgrade button
-    that opens the plan-change form - and no purchase button anywhere on that card.
+    A card subscription used to be re-priced through a switch form. That charged a
+    prorated difference, which the owner ruled out on 2026-09-10: a different paid plan is
+    bought at its full price on the normal payment page, and the plan held now ends only
+    when that payment is confirmed. So a card holder gets the same live Pay button as
+    anybody else, the tick box of the popup it opens says what happens to the plan they
+    hold, and there is no switch control anywhere on the page.
     """
 
-    email = unique_email("pay-e2e-card-holder")
-    signup(page, paid_base_url, email)
-    close_any_open_guide(page)
-    seed_paid_monitor_access(paid_app.database_url, email, provider="creem")
+    _open_billing_as_holder(
+        page, paid_base_url, paid_app, tag="pay-e2e-card-holder", provider="creem"
+    )
+    _assert_the_move_is_a_payment(page, "pro")
 
-    page.goto(f"{paid_base_url}/dashboard/billing", wait_until="domcontentloaded")
-    close_any_open_guide(page)
-    _settle_cookie_choice(page)
-
-    upgrade = page.locator('[data-plan-switch-trigger][data-plan-code="pro"]')
-    expect(upgrade).to_be_visible(timeout=15_000)
-    expect(upgrade).to_be_enabled()
-    expect(page.locator('[data-billing-dialog-trigger][data-plan-code="pro"]')).to_have_count(0)
-
-    upgrade.click()
-    expect(page.locator("#plan-switch-dialog")).to_be_visible(timeout=15_000)
+    page.locator('[data-billing-dialog-trigger][data-plan-code="pro"]').click()
+    dialog = page.locator("#billing-checkout-dialog")
+    expect(dialog).to_be_visible(timeout=15_000)
+    expect(dialog.locator(".checkout-consent")).to_contain_text(CONSENT_PLAN_REPLACEMENT)
     assert_no_raw_traceback(page)
 
 
@@ -440,15 +587,17 @@ def test_the_checkout_page_offers_no_disabled_path_to_a_card_holder(
     paid_base_url: str,
     paid_app: RunningApp,
 ) -> None:
-    """The standalone review page refuses somebody who must switch instead.
+    """The standalone review page gives a card holder the real payment form.
 
-    The page shows a refusal notice and no form.
+    It used to refuse a card holder, because a card subscription was re-priced through a
+    switch form instead. Since 2026-09-10 a different paid plan is bought here at its full
+    price, so the page shows the form - and the tick box on it says, in the owner's
+    words, what happens to the plan the person holds before they agree to anything.
     """
 
-    email = unique_email("pay-e2e-checkout-refusal")
+    email = unique_email("pay-e2e-checkout-card-holder")
     signup(page, paid_base_url, email)
     close_any_open_guide(page)
-
     seed_paid_monitor_access(paid_app.database_url, email, provider="creem")
 
     page.goto(
@@ -458,109 +607,44 @@ def test_the_checkout_page_offers_no_disabled_path_to_a_card_holder(
     close_any_open_guide(page)
     _settle_cookie_choice(page)
 
-    # The refusal has to be at render time, before they type their name and address.
-    # The popup refused this purchase; this page refused it only when Pay was pressed,
-    # which was the customer's complaint alive on a second page. Both skips that used to
-    # stand here are gone: a test that skips when the product is broken can never fail,
-    # so it proved nothing while reporting green.
-    refusal = page.locator("aside .notice.notice-error")
-    expect(refusal.first).to_be_visible(timeout=15_000)
-    notice_text = refusal.first.inner_text()
-    assert notice_text.strip(), "Refusal notice should have text"
-    assert "billing page" in notice_text.lower(), (
-        f"Refusal must name what to do instead - switch plans on the billing "
-        f"page; got: {notice_text}"
-    )
-
-    # No payment form, and no way to press anything that pays. Scoped to the checkout
-    # order-summary card: the page chrome (search, account menus) is not this contract.
-    expect(page.locator("form.checkout-confirm-form")).to_have_count(0)
-    submit_buttons = page.locator(
-        ".checkout-action-card button[type='submit']:enabled"
-    )
-    expect(submit_buttons).to_have_count(0)
-
-    # The refusal sentence must be visible without scrolling at a desktop height.
-    box = refusal.first.bounding_box()
-    assert box is not None, "Refusal notice should have a bounding box"
-    assert box["y"] < 900, "Refusal notice should be visible without scrolling"
+    form = page.locator("form.checkout-confirm-form")
+    expect(form).to_have_count(1)
+    expect(page.locator("aside .notice.notice-error")).to_have_count(0)
+    expect(form.locator(".checkout-consent")).to_contain_text(CONSENT_PLAN_REPLACEMENT)
+    expect(form.locator("button[type='submit']")).to_be_enabled()
+    assert_no_raw_traceback(page)
 
 
-# ── Upgrade/downgrade tests ─────────────────────────────────────────────────
+# ── Moving up and moving down ────────────────────────────────────────────────
 
 
-def test_upgrading_trader_to_pro_shows_a_confirmation_the_person_sees(
+def test_upgrading_trader_to_pro_says_what_the_payment_does_before_it_is_taken(
     page: Page,
     paid_base_url: str,
     paid_app: RunningApp,
 ) -> None:
-    """Upgrading from trader to pro shows a confirmation sentence.
+    """Moving up, as the person sees it before any money is taken.
 
-    The person lands on a page that is not an error and sees a confirmation.
+    This used to walk the switch form to a "plan upgraded" notice. There is no switch form
+    since 2026-09-10. The Pro card carries a Pay button, and the sentence under it says
+    the full price is taken today, that Pro starts only once that payment is confirmed,
+    that Plus keeps working if they leave or the payment fails, and that a person sends
+    back the value of the unused time within the window. The popup says the same in the
+    tick box.
     """
-    email = unique_email("pay-e2e-upgrade")
-    signup(page, paid_base_url, email)
-    close_any_open_guide(page)
 
-    # Seed with stripe provider so the billing page shows upgrade buttons
-    # but doesn't try to call external APIs
-    seed_paid_monitor_access(paid_app.database_url, email, provider="stripe")
-
-    # Go to the billing page
-    page.goto(f"{paid_base_url}/dashboard/billing", wait_until="domcontentloaded")
-    close_any_open_guide(page)
-    _settle_cookie_choice(page)
-
-    # Click the Pro upgrade button
-    upgrade_button = page.locator(
-        '[data-plan-switch-trigger][data-plan-switch="upgrade"][data-plan-code="pro"]'
+    _open_billing_as_holder(
+        page, paid_base_url, paid_app, tag="pay-e2e-upgrade", provider="stripe"
     )
-    expect(upgrade_button).to_be_visible(timeout=15_000)
-    upgrade_button.click()
+    _assert_the_move_is_a_payment(page, "pro")
+    # Nothing is booked: a payment page is the only way, so nothing changes until it is paid.
+    expect(page.locator(".billing-pending-change")).to_have_count(0)
 
-    # The dialog opens
-    dialog = page.locator("[data-plan-switch-dialog]")
-    expect(dialog).to_be_visible()
-
-    # Choose timing (period_end is default and checked)
-    period_end_radio = page.locator('[data-plan-timing="period_end"]')
-    expect(period_end_radio).to_be_checked()
-
-    # Give consent
-    consent = page.locator('input[name="switch_consent"]')
-    consent.check()
-
-    # Submit
-    page.locator("[data-plan-switch-submit]").click()
-
-    # Wait for navigation - the server redirects to /dashboard/billing?message=plan_upgraded
-    page.wait_for_timeout(2000)
-    
-    # Check that we're on the billing page with the upgrade message
-    current_url = page.url
-    assert "dashboard/billing" in current_url, (
-        f"Should be on billing page, got: {current_url}"
-    )
-    assert "message=plan_upgraded" in current_url, (
-        f"Should have upgrade message, got: {current_url}"
-    )
-
-    # The page should show a confirmation
+    page.locator('[data-billing-dialog-trigger][data-plan-code="pro"]').click()
+    dialog = page.locator("#billing-checkout-dialog")
+    expect(dialog).to_be_visible(timeout=15_000)
+    expect(dialog.locator(".checkout-consent")).to_contain_text(CONSENT_PLAN_REPLACEMENT)
     assert_no_raw_traceback(page)
-
-    # The confirmation message is shown
-    message_banner = page.locator("[data-page-status]")
-    expect(message_banner).to_be_visible()
-    message_text = message_banner.inner_text()
-    assert "plan" in message_text.lower() and "chang" in message_text.lower(), (
-        f"Confirmation should mention plan change: {message_text}"
-    )
-
-    # The pending change notice is shown
-    pending_notice = page.locator(".billing-pending-change")
-    expect(pending_notice).to_be_visible()
-    pending_text = pending_notice.inner_text()
-    assert "pro" in pending_text.lower(), f"Pending notice should mention Pro: {pending_text}"
 
 
 def test_downgrading_pro_to_trader_names_the_time_it_happens(
@@ -568,136 +652,25 @@ def test_downgrading_pro_to_trader_names_the_time_it_happens(
     paid_base_url: str,
     paid_app: RunningApp,
 ) -> None:
-    """Downgrading from pro to trader shows when it happens.
+    """Moving down names when it happens: the day its payment is confirmed.
 
-    The person sees a sentence naming the end of the period.
+    This used to book the smaller plan for the end of the paid period through the switch
+    form. Since 2026-09-10 a smaller plan is bought like any other, so the Plus card on a
+    Pro holder's page says that Plus starts only once its payment is confirmed, and that
+    the unused Pro time is sent back by a person within the window.
     """
-    email = unique_email("pay-e2e-downgrade")
-    signup(page, paid_base_url, email)
-    close_any_open_guide(page)
 
-    # Seed with stripe provider so the billing page shows upgrade buttons
-    # but doesn't try to call external APIs
-    seed_paid_monitor_access(paid_app.database_url, email, provider="stripe")
-
-    # Go to the billing page
-    page.goto(f"{paid_base_url}/dashboard/billing", wait_until="domcontentloaded")
-    close_any_open_guide(page)
-    _settle_cookie_choice(page)
-
-    # First, upgrade to pro with immediate timing so we're actually on Pro
-    upgrade_button = page.locator(
-        '[data-plan-switch-trigger][data-plan-switch="upgrade"][data-plan-code="pro"]'
+    _open_billing_as_holder(
+        page,
+        paid_base_url,
+        paid_app,
+        tag="pay-e2e-downgrade",
+        provider="stripe",
+        plan_code="pro",
     )
-    expect(upgrade_button).to_be_visible(timeout=15_000)
-    upgrade_button.click()
-
-    dialog = page.locator("[data-plan-switch-dialog]")
-    expect(dialog).to_be_visible()
-
-    # Choose immediate timing so the upgrade happens now
-    immediate_radio = page.locator('[data-plan-timing="immediate"]')
-    immediate_radio.check()
-
-    consent = page.locator('input[name="switch_consent"]')
-    consent.check()
-
-    page.locator("[data-plan-switch-submit]").click()
-
-    # Wait for navigation - the server redirects to /dashboard/billing?message=plan_upgraded
-    page.wait_for_timeout(2000)
-    
-    # Check that we're on the billing page with the upgrade message
-    current_url = page.url
-    assert "dashboard/billing" in current_url, (
-        f"Should be on billing page, got: {current_url}"
-    )
-    assert "message=plan_upgraded" in current_url, (
-        f"Should have upgrade message, got: {current_url}"
-    )
+    _assert_the_move_is_a_payment(page, "trader")
+    expect(page.locator(".billing-pending-change")).to_have_count(0)
     assert_no_raw_traceback(page)
-
-    # Now downgrade to trader
-    # Reload to get the updated page
-    page.reload(wait_until="domcontentloaded")
-    _settle_cookie_choice(page)
-
-    # After upgrading to Pro, the downgrade button is on the Pro card (to go back to Trader)
-    downgrade_button = page.locator(
-        '[data-plan-switch-trigger][data-plan-switch="downgrade"][data-plan-code="trader"]'
-    )
-    expect(downgrade_button).to_be_visible(timeout=15_000)
-    downgrade_button.click()
-
-    dialog = page.locator("[data-plan-switch-dialog]")
-    expect(dialog).to_be_visible()
-
-    # Wait for the JavaScript to run
-    page.wait_for_timeout(1000)
-    
-    # The JavaScript should unhide the reason options for downgrade
-    # If it doesn't, we force-unhide them and check the first radio
-    page.evaluate(
-        """() => {
-            const dialog = document.querySelector('[data-plan-switch-dialog]');
-            const reasonBox = dialog.querySelector('[data-plan-switch-reasons]');
-            if (reasonBox) {
-                reasonBox.hidden = false;
-                reasonBox.style.display = 'block';
-            }
-            // Check the first reason radio within the dialog
-            const firstRadio = dialog.querySelector('[data-plan-reason]');
-            if (firstRadio) {
-                firstRadio.checked = true;
-                firstRadio.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        }"""
-    )
-
-    # Give consent
-    consent = page.locator('input[name="switch_consent"]')
-    consent.check()
-
-    # Submit
-    page.locator("[data-plan-switch-submit]").click()
-
-    # Wait for navigation - the server redirects to /dashboard/billing?message=plan_downgraded
-    page.wait_for_timeout(2000)
-    
-    # Check that we're on the billing page with the downgrade message
-    current_url = page.url
-    assert "dashboard/billing" in current_url, (
-        f"Should be on billing page, got: {current_url}"
-    )
-    assert "message=plan_downgraded" in current_url, (
-        f"Should have downgrade message, got: {current_url}"
-    )
-
-    # The page should show a confirmation
-    assert_no_raw_traceback(page)
-
-    # The confirmation message is shown
-    message_banner = page.locator("[data-page-status]")
-    expect(message_banner).to_be_visible()
-    message_text = message_banner.inner_text()
-    lower = message_text.lower()
-    assert (
-        "smaller plan" in lower or "downgrade" in lower or "booked" in lower
-    ), f"Confirmation should mention downgrade: {message_text}"
-
-    # The pending change notice is shown and names when
-    pending_notice = page.locator(".billing-pending-change")
-    expect(pending_notice).to_be_visible()
-    pending_text = pending_notice.inner_text()
-    # The notice should mention when the change happens - either a specific date or
-    # "end of the period"
-    assert (
-        "starts" in pending_text.lower()
-        or "end of" in pending_text.lower()
-        or "period" in pending_text.lower()
-    ), f"Pending notice should mention when the change happens: {pending_text}"
-
-    # No horizontal overflow at desktop
     assert_no_horizontal_overflow(page)
 
 
@@ -787,7 +760,7 @@ def test_screenshot_s3_pro_crypto(
     assert all(path.exists() for path in paths), f"Screenshots should exist: {paths}"
 
 
-def test_screenshot_s4_trader_refusal(
+def test_screenshot_s4_billing_pro_card_for_a_crypto_holder(
     page: Page,
     paid_base_url: str,
     paid_app: RunningApp,
@@ -798,6 +771,10 @@ def test_screenshot_s4_trader_refusal(
     state photographed twice and the billing page was never pictured at all. The two
     surfaces are different and both had to be proved: S4 is the plan card and its
     button, S7 is the review page.
+
+    The file name says what is photographed: a live Pay button and its sentence. The
+    older S4 shots ("s4-trader-refusal-*") are stale — they were named for a refusal
+    this state no longer shows, and were taken at the S7 address.
 
     The state is asserted before it is photographed. A screenshot test that only
     photographs records whatever is on the screen, a broken page included.
@@ -822,21 +799,26 @@ def test_screenshot_s4_trader_refusal(
     expect(note.first).to_be_visible()
     assert note.first.inner_text().strip(), "The plan card must say what Pay does"
     assert_no_raw_traceback(page)
+    # The plan held was not bought by card, so it must not promise a card renewal. The
+    # tile used to be decided by the company this server sells through, not by the plan
+    # held; S5 and S6 below are the card plans it got wrong.
+    expect(_renewal_tile(page)).to_have_text("Manual 30-day renewal")
 
-    paths = _take_screenshots(page, "s4-trader-refusal", VIEWPORTS)
+    paths = _take_screenshots(page, "s4-billing-pro-card-crypto-holder", VIEWPORTS)
     assert all(path.exists() for path in paths), f"Screenshots should exist: {paths}"
 
 
-def test_screenshot_s7_pro_refusal_review_page(
+def test_screenshot_s7_pro_review_page_for_a_card_holder(
     page: Page,
     paid_base_url: str,
     paid_app: RunningApp,
 ) -> None:
-    """Screenshot S7: the Pro review page opened by a card holder - the refusal, not the
-    form. Captured only after the render-time refusal fix is in.
+    """Screenshot S7: the Pro review page opened by a card holder - the payment form,
+    with the plan-replacement sentence in its tick box.
 
-    A card subscription is the case that really must be refused: it can be re-priced, so
-    a second checkout would mean two live subscriptions and two charges a month.
+    S7 used to picture a refusal on this page. That refusal ended on 2026-09-10, so the
+    older S7 shots ("s7-pro-refusal-*") are stale; this state is photographed under its
+    own name so the two can never be mistaken for each other.
     """
 
     email = unique_email("pay-e2e-s7")
@@ -851,44 +833,34 @@ def test_screenshot_s7_pro_refusal_review_page(
     close_any_open_guide(page)
     _settle_cookie_choice(page)
 
-    # The state the screenshot is supposed to record: the refusal sentence is on
-    # the page and the payment form is not.
-    refusal = page.locator("aside .notice.notice-error")
-    expect(refusal.first).to_be_visible(timeout=15_000)
-    notice_text = refusal.first.inner_text()
-    assert "billing page" in notice_text.lower(), (
-        f"Refusal must name what to do instead: {notice_text}"
-    )
-    assert page.locator("form.checkout-confirm-form").count() == 0
+    # The state the screenshot is supposed to record: the form, its tick box carrying the
+    # owner's sentence, and no refusal.
+    form = page.locator("form.checkout-confirm-form")
+    expect(form).to_have_count(1)
+    expect(form.locator(".checkout-consent")).to_contain_text(CONSENT_PLAN_REPLACEMENT)
+    expect(page.locator("aside .notice.notice-error")).to_have_count(0)
 
-    paths = _take_screenshots(page, "s7-pro-refusal", VIEWPORTS)
+    paths = _take_screenshots(page, "s7-pro-review-card-holder", VIEWPORTS)
     assert all(path.exists() for path in paths), f"Screenshots should exist: {paths}"
 
 
-def test_screenshot_s5_billing_switch_buttons(
+def test_screenshot_s5_billing_pay_buttons_for_a_card_holder(
     page: Page,
     paid_base_url: str,
     paid_app: RunningApp,
 ) -> None:
-    """Screenshot S5: /dashboard/billing page showing the switch buttons."""
-    email = unique_email("pay-e2e-s5")
-    signup(page, paid_base_url, email)
-    close_any_open_guide(page)
+    """Screenshot S5: /dashboard/billing for a card holder - a Pay button and its
+    sentence on the other plan, and no switch buttons (there are none since 2026-09-10).
+    """
 
-    # Seed with stripe provider so the billing page shows switch buttons
-    # but doesn't try to call external APIs
-    seed_paid_monitor_access(paid_app.database_url, email, provider="stripe")
+    _open_billing_as_holder(
+        page, paid_base_url, paid_app, tag="pay-e2e-s5", provider="stripe"
+    )
+    _assert_the_move_is_a_payment(page, "pro")
+    # A monthly card plan that still renews, named as one.
+    expect(_renewal_tile(page)).to_have_text("Automatic renewal, every month")
 
-    page.goto(f"{paid_base_url}/dashboard/billing", wait_until="domcontentloaded")
-    close_any_open_guide(page)
-    _settle_cookie_choice(page)
-
-    # Wait for the switch buttons to be visible
-    switch_trigger = page.locator('[data-plan-switch-trigger]').first
-    expect(switch_trigger).to_be_visible(timeout=15_000)
-    expect(switch_trigger).to_be_enabled()
-
-    paths = _take_screenshots(page, "s5-billing-switch", VIEWPORTS)
+    paths = _take_screenshots(page, "s5-billing-pay-for-card-holder", VIEWPORTS)
     assert all(path.exists() for path in paths), f"Screenshots should exist: {paths}"
 
     # At phone viewport, check no horizontal overflow
@@ -896,109 +868,165 @@ def test_screenshot_s5_billing_switch_buttons(
     assert_no_horizontal_overflow(page)
 
 
-def test_screenshot_s6_downgrade_confirmation(
+def test_screenshot_s6_downgrade_pay_note(
     page: Page,
     paid_base_url: str,
     paid_app: RunningApp,
 ) -> None:
-    """Screenshot S6: The page after a downgrade is scheduled."""
-    email = unique_email("pay-e2e-s6")
+    """Screenshot S6: a Pro holder's billing page - the Plus card offers a full-price
+    payment and says Plus starts once that payment is confirmed. It used to picture a
+    downgrade booked through the switch form, which nobody can book now.
+    """
+
+    _open_billing_as_holder(
+        page,
+        paid_base_url,
+        paid_app,
+        tag="pay-e2e-s6",
+        provider="stripe",
+        plan_code="pro",
+    )
+    _assert_the_move_is_a_payment(page, "trader")
+    expect(_renewal_tile(page)).to_have_text("Automatic renewal, every month")
+
+    paths = _take_screenshots(page, "s6-downgrade-pay-note", VIEWPORTS)
+    assert all(path.exists() for path in paths), f"Screenshots should exist: {paths}"
+
+
+# ── Visual-defect reproducers (run 20260912T152825Z-d6d10e2a) ────────────────
+
+
+_METHOD_NOTES = [
+    ("card", "Handled by a test payment page."),
+    ("crypto", "Paying by crypto is switched off just now."),
+]
+
+
+_MEASURE_METHOD_NOTE = """args => {
+  const el = document.querySelector(args.selector);
+  if (!el) return {missing: true};
+  const text = el.textContent.trim();
+  const words = text.split(/\\s+/).filter(Boolean);
+  const style = getComputedStyle(el);
+  const testSpan = document.createElement('span');
+  testSpan.style.cssText = (
+    'position:absolute;visibility:hidden;white-space:nowrap;' +
+    'font:' + style.font + ';' +
+    'letter-spacing:' + style.letterSpacing + ';'
+  );
+  document.body.appendChild(testSpan);
+  let maxWordWidth = 0;
+  for (const word of words) {
+    testSpan.textContent = word;
+    maxWordWidth = Math.max(maxWordWidth, testSpan.getBoundingClientRect().width);
+  }
+  testSpan.remove();
+  const rects = el.getClientRects();
+  return {
+    text,
+    expected: args.expected,
+    words,
+    clientWidth: el.clientWidth,
+    maxWordWidth: Math.ceil(maxWordWidth),
+    lineCount: rects.length,
+    wordCount: words.length,
+  };
+}"""
+
+
+@pytest.mark.parametrize("method, expected_note", _METHOD_NOTES)
+def test_review_page_method_notes_wrap_at_word_boundaries(
+    page: Page,
+    paid_base_url: str,
+    paid_app: RunningApp,
+    method: str,
+    expected_note: str,
+) -> None:
+    """The sentence under Card/Crypto must not break mid-word.
+
+    `overflow-wrap: anywhere` let the grid column collapse to one-character width,
+    so the note rendered as "Han dled by a test pay men t pag e". `break-word`
+    keeps the column wide enough for the longest word and only breaks a word when it
+    genuinely does not fit.
+    """
+
+    email = unique_email(f"pay-e2e-method-note-{method}")
     signup(page, paid_base_url, email)
     close_any_open_guide(page)
+    seed_paid_monitor_access(paid_app.database_url, email, provider="creem")
 
-    # Seed with stripe provider so the billing page shows switch buttons
-    # but doesn't try to call external APIs
-    seed_paid_monitor_access(paid_app.database_url, email, provider="stripe")
-
-    # Go to billing and upgrade to pro first
-    page.goto(f"{paid_base_url}/dashboard/billing", wait_until="domcontentloaded")
+    page.goto(
+        f"{paid_base_url}/dashboard/billing/checkout?plan_code=pro",
+        wait_until="domcontentloaded",
+    )
     close_any_open_guide(page)
     _settle_cookie_choice(page)
 
-    upgrade_button = page.locator(
-        '[data-plan-switch-trigger][data-plan-switch="upgrade"][data-plan-code="pro"]'
+    for vp in VIEWPORTS:
+        page.set_viewport_size(vp)
+        page.wait_for_timeout(400)
+        selector = f'input[name="payment_method"][value="{method}"] + .billing-method-card small'
+        measured = page.evaluate(
+            _MEASURE_METHOD_NOTE, {"selector": selector, "expected": expected_note}
+        )
+        assert not measured.get("missing"), f"{method} note not found at {vp['width']}px"
+        assert measured["text"] == expected_note, (
+            f"{method} note text mismatch at {vp['width']}px: {measured}"
+        )
+        # The element must be at least as wide as its longest word, otherwise a word
+        # cannot fit unbroken.
+        assert measured["clientWidth"] >= measured["maxWordWidth"], (
+            f"{method} note column too narrow at {vp['width']}px: {measured}"
+        )
+        # A broken word would create one rect per character; normal wrapping has no more
+        # lines than words.
+        assert measured["lineCount"] <= measured["wordCount"], (
+            f"{method} note appears broken mid-word at {vp['width']}px: "
+            f"lineCount={measured['lineCount']} wordCount={measured['wordCount']}"
+        )
+
+
+def test_review_page_launch_price_does_not_overlap_countdown(
+    page: Page,
+    paid_base_url: str,
+    paid_app: RunningApp,
+) -> None:
+    """The launch-price paragraph must sit above the countdown box, not under it.
+
+    The countdown had a negative top margin that pulled it up over the paragraph on
+    the review page at 1440x900.
+    """
+
+    email = unique_email("pay-e2e-launch-overlap")
+    signup(page, paid_base_url, email)
+    close_any_open_guide(page)
+    seed_paid_monitor_access(paid_app.database_url, email, provider="creem")
+
+    page.goto(
+        f"{paid_base_url}/dashboard/billing/checkout?plan_code=pro",
+        wait_until="domcontentloaded",
     )
-    expect(upgrade_button).to_be_visible(timeout=15_000)
-    upgrade_button.click()
-
-    dialog = page.locator("[data-plan-switch-dialog]")
-    expect(dialog).to_be_visible()
-
-    # Choose immediate timing so the upgrade happens now
-    page.locator('[data-plan-timing="immediate"]').check()
-    page.locator('input[name="switch_consent"]').check()
-    page.locator("[data-plan-switch-submit]").click()
-
-    # Wait for navigation - the server redirects to /dashboard/billing?message=plan_upgraded
-    page.wait_for_timeout(2000)
-    
-    # Check that we're on the billing page with the upgrade message
-    current_url = page.url
-    assert "dashboard/billing" in current_url, (
-        f"Should be on billing page, got: {current_url}"
-    )
-    assert "message=plan_upgraded" in current_url, (
-        f"Should have upgrade message, got: {current_url}"
-    )
-
-    # Now downgrade
-    page.reload(wait_until="domcontentloaded")
+    close_any_open_guide(page)
     _settle_cookie_choice(page)
 
-    downgrade_button = page.locator(
-        '[data-plan-switch-trigger][data-plan-switch="downgrade"][data-plan-code="trader"]'
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.wait_for_timeout(400)
+
+    boxes = page.evaluate("""
+        () => {
+          const price = document.querySelector('.checkout-action-card .checkout-small');
+          const countdown = document.querySelector('.checkout-action-card .offer-countdown');
+          const rect = el => {
+            if (!el) return null;
+            const r = el.getBoundingClientRect();
+            return {top: r.top, bottom: r.bottom, left: r.left, right: r.right};
+          };
+          return {price: rect(price), countdown: rect(countdown)};
+        }
+    """)
+
+    assert boxes["price"] is not None, "launch-price paragraph not found"
+    assert boxes["countdown"] is not None, "countdown box not found"
+    assert boxes["price"]["bottom"] <= boxes["countdown"]["top"] + 1, (
+        f"launch price paragraph overlaps countdown: {boxes}"
     )
-    expect(downgrade_button).to_be_visible(timeout=15_000)
-    downgrade_button.click()
-
-    dialog = page.locator("[data-plan-switch-dialog]")
-    expect(dialog).to_be_visible()
-
-    # Wait for the JavaScript to run
-    page.wait_for_timeout(1000)
-    
-    # The JavaScript should unhide the reason options for downgrade
-    # If it doesn't, we force-unhide them and check the first radio
-    page.evaluate(
-        """() => {
-            const dialog = document.querySelector('[data-plan-switch-dialog]');
-            const reasonBox = dialog.querySelector('[data-plan-switch-reasons]');
-            if (reasonBox) {
-                reasonBox.hidden = false;
-                reasonBox.style.display = 'block';
-            }
-            // Check the first reason radio within the dialog
-            const firstRadio = dialog.querySelector('[data-plan-reason]');
-            if (firstRadio) {
-                firstRadio.checked = true;
-                firstRadio.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        }"""
-    )
-
-    page.locator('input[name="switch_consent"]').check()
-    page.locator("[data-plan-switch-submit]").click()
-
-    # Wait for navigation - the server redirects to /dashboard/billing?message=plan_downgraded
-    page.wait_for_timeout(2000)
-    
-    # Check that we're on the billing page with the downgrade message
-    current_url = page.url
-    assert "dashboard/billing" in current_url, (
-        f"Should be on billing page, got: {current_url}"
-    )
-    assert "message=plan_downgraded" in current_url, (
-        f"Should have downgrade message, got: {current_url}"
-    )
-
-    # Verify the confirmation is visible
-    message_banner = page.locator("[data-page-status]")
-    expect(message_banner).to_be_visible()
-    message_text = message_banner.inner_text()
-    lower = message_text.lower()
-    assert (
-        "smaller plan" in lower or "downgrade" in lower or "booked" in lower
-    ), f"Confirmation should mention downgrade: {message_text}"
-
-    paths = _take_screenshots(page, "s6-downgrade-scheduled", VIEWPORTS)
-    assert all(path.exists() for path in paths), f"Screenshots should exist: {paths}"

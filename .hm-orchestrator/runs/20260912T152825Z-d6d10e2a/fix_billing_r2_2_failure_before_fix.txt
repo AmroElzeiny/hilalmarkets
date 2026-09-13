@@ -1,0 +1,9 @@
+R2-2 SERIOUS: lapsed recurring card plan is invisible to replacement search.
+
+Test: tests/integration/test_paid_plan_replacement.py::test_lapsed_recurring_card_plan_is_frozen_and_cancelled_on_move
+Failure before fix (prepare_checkout uses active_paid_plan_codes, which excludes lapsed periods):
+
+AssertionError: assert None == UUID('37cc69d4-3536-456d-af28-a2d316764f9f')
+  +  where None = attempt.replaces_subscription_id
+
+The checkout was not frozen onto the old plan, so the old card would keep charging.

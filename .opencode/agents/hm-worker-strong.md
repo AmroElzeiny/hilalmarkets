@@ -1,77 +1,37 @@
 ---
 description: Strong coding worker for multi-file implementation, debugging, state/serialization flows, and non-trivial refactors.
 mode: subagent
-model: opencode-go/kimi-k2.7-code
-permissions:
-  - action: read
-    resource: "*"
-    effect: allow
-  - action: glob
-    resource: "*"
-    effect: allow
-  - action: grep
-    resource: "*"
-    effect: allow
-  - action: edit
-    resource: "*"
-    effect: allow
-  - action: read
-    resource: "*.env"
-    effect: deny
-  - action: read
-    resource: "*.env.*"
-    effect: deny
-  - action: edit
-    resource: "*.env"
-    effect: deny
-  - action: edit
-    resource: "*.env.*"
-    effect: deny
-  - action: edit
-    resource: "CLAUDE.md"
-    effect: deny
-  - action: edit
-    resource: "AGENTS.md"
-    effect: deny
-  - action: edit
-    resource: ".claude/*"
-    effect: deny
-  - action: edit
-    resource: ".opencode/*"
-    effect: deny
-  - action: edit
-    resource: ".hm-orchestrator/policy/*"
-    effect: deny
-  - action: edit
-    resource: ".hm-orchestrator/models/*"
-    effect: deny
-  - action: edit
-    resource: "tools/hm-orchestrator/*"
-    effect: deny
-  - action: shell
-    resource: "*"
-    effect: allow
-  - action: shell
-    resource: "git push *"
-    effect: deny
-  - action: shell
-    resource: "git commit *"
-    effect: deny
-  - action: shell
-    resource: "git reset *"
-    effect: deny
-  - action: shell
-    resource: "git clean *"
-    effect: deny
-  - action: shell
-    resource: "git rebase *"
-    effect: deny
-  - action: shell
-    resource: "git merge *"
-    effect: deny
-  - action: subagent
-    resource: "*"
-    effect: deny
+model: opencode-go/qwen3.8-flash
+permission:
+  read:
+    "*": allow
+    "*.env": deny
+    "*.env.*": deny
+  glob:
+    "*": allow
+  grep:
+    "*": allow
+  bash:
+    "*": allow
+    "git push *": deny
+    "git commit *": deny
+    "git reset *": deny
+    "git clean *": deny
+    "git rebase *": deny
+    "git merge *": deny
+  edit:
+    "*": allow
+    "*.env": deny
+    "*.env.*": deny
+    "CLAUDE.md": deny
+    "AGENTS.md": deny
+    ".claude/*": deny
+    ".opencode/*": deny
+    ".hm-orchestrator/policy/*": deny
+    ".hm-orchestrator/models/*": deny
+    "tools/hm-orchestrator/*": deny
+  task:
+    "*": deny
 ---
 
 

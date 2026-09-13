@@ -1,50 +1,34 @@
 ---
 description: Vision reviewer for screenshots against Claude's exact visual contract.
-mode: subagent
+# `all`, not `subagent`: a screenshot reaches a model only as a CLI `--file`
+# attachment, and the task tool that spawns a subagent carries text alone. As a
+# subagent this reviewer could never actually see an image, which is the one
+# thing it exists to do. `all` keeps it callable both ways.
+mode: all
 model: opencode-go/deepseek-v4-flash-vision-exp
-permissions:
-  - action: read
-    resource: "*"
-    effect: allow
-  - action: glob
-    resource: "*"
-    effect: allow
-  - action: grep
-    resource: "*"
-    effect: allow
-  - action: edit
-    resource: "*"
-    effect: deny
-  - action: read
-    resource: "*.env"
-    effect: deny
-  - action: read
-    resource: "*.env.*"
-    effect: deny
-  - action: shell
-    resource: "*"
-    effect: allow
-  - action: shell
-    resource: "git push *"
-    effect: deny
-  - action: shell
-    resource: "git commit *"
-    effect: deny
-  - action: shell
-    resource: "git reset *"
-    effect: deny
-  - action: shell
-    resource: "git clean *"
-    effect: deny
-  - action: shell
-    resource: "git rebase *"
-    effect: deny
-  - action: shell
-    resource: "git merge *"
-    effect: deny
-  - action: subagent
-    resource: "*"
-    effect: deny
+permission:
+  read:
+    "*": allow
+    "*.env": deny
+    "*.env.*": deny
+  glob:
+    "*": allow
+  grep:
+    "*": allow
+  bash:
+    "*": allow
+    "git push *": deny
+    "git commit *": deny
+    "git reset *": deny
+    "git clean *": deny
+    "git rebase *": deny
+    "git merge *": deny
+  edit:
+    "*": deny
+    ".hm-orchestrator/runs/*": allow
+  task:
+    "*": deny
+  webfetch: allow
 ---
 
 

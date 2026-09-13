@@ -1,0 +1,178 @@
+﻿E501 Line too long (103 > 100)
+   --> .hm-orchestrator\runs\20260913T002503Z-fdd3949e\d1_make_pre_tree.py:123:101
+    |
+122 |     # 3. The one-time crypto guard back to `completed` alone, comment with it.
+123 |     condition = "            and attempt.status in {SETTLED_ATTEMPT_STATUS, REFUNDED_ATTEMPT_STATUS}\n"
+    |                                                                                                     ^^^
+124 |     assert text.count(condition) == 1
+125 |     text = text.replace(condition, '            and attempt.status == "completed"\n', 1)
+    |
+
+E501 Line too long (103 > 100)
+   --> .hm-orchestrator\runs\20260913T002503Z-fdd3949e\d1_make_pre_tree.py:126:101
+    |
+124 |     assert text.count(condition) == 1
+125 |     text = text.replace(condition, '            and attempt.status == "completed"\n', 1)
+126 |     comment = """            # ``refunded`` is in this check because the money behind a one-time crypto
+    |                                                                                                     ^^^
+127 |             # invoice came back after it was paid. Without it, a re-delivered
+128 |             # ``payment.finished`` — NOWPayments sends the invoice status again — would
+    |
+
+E501 Line too long (111 > 100)
+   --> .hm-orchestrator\runs\20260913T002503Z-fdd3949e\d1_make_pre_tree.py:154:101
+    |
+152 |     #    old failure set that carried `payment.refunded`.
+153 |     start, stop = region(text, RECORD_START, RECORD_STOP, "_record_checkout_event")
+154 |     text = text[:start] + "        if event_type in {\n" + text[stop + len("        elif event_type in {\n") :]
+    |                                                                                                     ^^^^^^^^^^^
+155 |     text = text.replace(
+156 |         '            attempt.status = SETTLED_ATTEMPT_STATUS\n',
+    |
+
+E501 Line too long (106 > 100)
+   --> .hm-orchestrator\runs\20260913T002503Z-fdd3949e\d1_make_pre_tree.py:203:101
+    |
+201 |     print("reverted tree:")
+202 |     print("  refund event routed in _apply_event:", ORIGINAL_APPLY_START in billing_after)
+203 |     print("  hydrate refund early return:", "Money coming back is read by its own rules" in billing_after)
+    |                                                                                                     ^^^^^^
+204 |     print("  payment.refunded in failure set:", '"payment.partially_paid",\n            "payment.refunded",' in billing_after)
+205 |     plan_after = plan_path.read_text(encoding="utf-8")
+    |
+
+E501 Line too long (126 > 100)
+   --> .hm-orchestrator\runs\20260913T002503Z-fdd3949e\d1_make_pre_tree.py:204:101
+    |
+202 |     print("  refund event routed in _apply_event:", ORIGINAL_APPLY_START in billing_after)
+203 |     print("  hydrate refund early return:", "Money coming back is read by its own rules" in billing_after)
+204 |     print("  payment.refunded in failure set:", '"payment.partially_paid",\n            "payment.refunded",' in billing_after)
+    |                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+205 |     plan_after = plan_path.read_text(encoding="utf-8")
+206 |     print("  money owed reads the frozen row unconditionally:", "        amount = money_owed_for_unused_time(" in plan_after)
+    |
+
+E501 Line too long (125 > 100)
+   --> .hm-orchestrator\runs\20260913T002503Z-fdd3949e\d1_make_pre_tree.py:206:101
+    |
+204 |     print("  payment.refunded in failure set:", '"payment.partially_paid",\n            "payment.refunded",' in billing_after)
+205 |     plan_after = plan_path.read_text(encoding="utf-8")
+206 |     print("  money owed reads the frozen row unconditionally:", "        amount = money_owed_for_unused_time(" in plan_after)
+    |                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+207 |     return 0
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> .hm-orchestrator\runs\20260913T162406Z-39060cc7\_adv_repro_cancel_erases_refund.py:22:1
+   |
+20 |   sys.path.insert(0, os.path.abspath("."))
+21 |
+22 | / from sqlalchemy import select
+23 | |
+24 | | from tests.conftest import _build_context
+25 | | from tests.support.billing_config import live_billing_overrides
+26 | |
+27 | | from ai_market_monitor.core.plans import effective_monthly_price  # noqa: E402
+28 | | from ai_market_monitor.db.models import (  # noqa: E402
+29 | |     BillingCheckoutAttempt,
+30 | |     Plan,
+31 | |     Subscription,
+32 | | )
+33 | | from ai_market_monitor.services.billing import BillingService  # noqa: E402
+   | |_____________________________________________________________^
+   |
+help: Organize imports
+
+F401 [*] `sqlalchemy.select` imported but unused
+  --> .hm-orchestrator\runs\20260913T162406Z-39060cc7\_adv_repro_cancel_erases_refund.py:22:24
+   |
+20 | sys.path.insert(0, os.path.abspath("."))
+21 |
+22 | from sqlalchemy import select
+   |                        ^^^^^^
+23 |
+24 | from tests.conftest import _build_context
+   |
+help: Remove unused import: `sqlalchemy.select`
+
+F401 [*] `ai_market_monitor.db.models.Plan` imported but unused
+  --> .hm-orchestrator\runs\20260913T162406Z-39060cc7\_adv_repro_cancel_erases_refund.py:30:5
+   |
+28 | from ai_market_monitor.db.models import (  # noqa: E402
+29 |     BillingCheckoutAttempt,
+30 |     Plan,
+   |     ^^^^
+31 |     Subscription,
+32 | )
+   |
+help: Remove unused import: `ai_market_monitor.db.models.Plan`
+
+F401 [*] `decimal.Decimal` imported but unused
+  --> .hm-orchestrator\runs\20260913T162406Z-39060cc7\_adv_repro_move_then_refund.py:15:21
+   |
+13 | import sys
+14 | from datetime import UTC, datetime, timedelta
+15 | from decimal import Decimal
+   |                     ^^^^^^^
+16 |
+17 | sys.path.insert(0, os.path.abspath("."))
+   |
+help: Remove unused import: `decimal.Decimal`
+
+F841 Local variable `old_id` is assigned to but never used
+  --> .hm-orchestrator\runs\20260913T162406Z-39060cc7\_adv_repro_move_then_refund.py:82:13
+   |
+80 |             await session.commit()
+81 |             user_id = user.id
+82 |             old_id = old.id
+   |             ^^^^^^
+83 |             source_id = source.id
+84 |             new_attempt_id = new_attempt.id
+   |
+help: Remove assignment to unused variable `old_id`
+
+E401 [*] Multiple imports on one line
+ --> tools\hm-orchestrator\validate-report.py:1:1
+  |
+1 | import json, sys
+  | ^^^^^^^^^^^^^^^^
+2 | from pathlib import Path
+  |
+help: Split imports
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> tools\hm-orchestrator\validate-report.py:1:1
+  |
+1 | / import json, sys
+2 | | from pathlib import Path
+  | |________________________^
+3 |
+4 |   if len(sys.argv) != 3:
+  |
+help: Organize imports
+
+B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+  --> tools\hm-orchestrator\validate-report.py:14:5
+   |
+12 | except Exception as e:
+13 |     print(f"invalid json: {e}", file=sys.stderr)
+14 |     raise SystemExit(3)
+   |     ^^^^^^^^^^^^^^^^^^^
+15 |
+16 | errors = []
+   |
+
+E701 Multiple statements on one line (colon)
+  --> tools\hm-orchestrator\validate-report.py:38:19
+   |
+36 |         rid = r.get("id")
+37 |         st = r.get("status")
+38 |         if not rid: errors.append(f"requirements[{i}] missing id")
+   |                   ^
+39 |         if st not in {"PASS","BLOCKED","ESCALATED"}:
+40 |             errors.append(f"requirements[{i}] invalid status")
+   |
+
+Found 15 errors.
+[*] 6 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+

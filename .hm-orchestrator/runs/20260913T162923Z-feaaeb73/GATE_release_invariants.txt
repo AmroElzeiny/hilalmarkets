@@ -1,0 +1,2 @@
+﻿PASS: release exposure, route security, provider, and artifact invariants hold.
+

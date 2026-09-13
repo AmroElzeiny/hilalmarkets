@@ -1,0 +1,108 @@
+﻿.........F.                                                              [100%]
+================================== FAILURES ===================================
+______ test_screenshots_of_the_ask_ai_surfaces_and_the_subscription_page ______
+
+page = <Page url='http://127.0.0.1:37231/dashboard/opportunities'>
+base_url = 'http://127.0.0.1:37231'
+
+    def test_screenshots_of_the_ask_ai_surfaces_and_the_subscription_page(
+        page: Page, base_url: str
+    ) -> None:
+        """Four Ask AI surfaces and the subscription page, at V1, V2 and V3.
+    
+        Also records, for each viewport, whether the Ask AI button in the Halal Assets bar
+        lands on a row of its own, measured from the drawn boxes.
+        """
+    
+        signup(page, base_url)
+        close_any_open_guide(page)
+        rows: dict[str, Any] = {}
+        for viewport in (V1, V2, V3):
+            size = f"{viewport['width']}x{viewport['height']}"
+            page.set_viewport_size(viewport)
+            for surface, path in ASK_AI_SURFACES.items():
+                _open_dashboard(page, base_url, path)
+                buttons = page.locator("[data-hilal-ask]")
+>               expect(buttons.first).to_be_visible(timeout=15_000)
+E               AssertionError: Locator expected to be visible
+E               Actual value: - complementary:
+E                 - link "Hilal Markets — go to Home":
+E                   - /url: http://127.0.0.1:37231/home
+E                 - button "Minimize the menu" [expanded]: Minimize menu
+E                 - navigation "Dashboard navigation":
+E                   - paragraph: Overview
+E                   - list "Overview":
+E                     - listitem:
+E                       - link "Home":
+E                         - /url: http://127.0.0.1:37231/home
+E                     - listitem:
+E                       - link "Halal Assets":
+E                         - /url: http://127.0.0.1:37231/dashboard/market
+E                     - listitem:
+E                       - link "Coins we researched":
+E                         - /url: http://127.0.0.1:37231/dashboard/research
+E                   - paragraph: Your monitors
+E                   - list "Your monitors":
+E                     - listitem:
+E                       - link "Monitors":
+E                         - /url: http://127.0.0.1:37231/dashboard/monitors
+E                     - listitem:
+E                       - link "Create a monitor":
+E                         - /url: http://127.0.0.1:37231/dashboard/create-monitor
+E                     - listitem:
+E                       - link "Opportunities":
+E                         - /url: http://127.0.0.1:37231/dashboard/opportunities
+E                   - paragraph: Account
+E                   - list "Account":
+E                     - listitem:
+E                       - link "Notifications":
+E                         - /url: http://127.0.0.1:37231/dashboard/connections
+E                     - listitem:
+E                       - link "Plan and billing":
+E                         - /url: http://127.0.0.1:37231/dashboard/subscription
+E                     - listitem:
+E                       - link "Affiliate":
+E                         - /url: http://127.0.0.1:37231/dashboard/affiliate
+E                     - listitem:
+E                       - link "Settings":
+E                         - /url: http://127.0.0.1:37231/dashboard/settings
+E                     - listitem:
+E                       - link "Support":
+E                         - /url: http://127.0.0.1:37231/dashboard/support
+E                 - button "Browser Trader Explore Open the account menu":
+E                   - strong: Browser Trader
+E                   - text: Explore Open the account menu
+E               - main:
+E                 - text: Your monitors Opportunities
+E                 - search:
+E                   - textbox "Search screened coins":
+E                     - /placeholder: Search coins
+E                 - link "Monitors":
+E                   - /url: /dashboard/monitors
+E                 - button "Open notifications"
+E                 - paragraph: What your monitors found
+E                 - heading "Opportunities" [level=1]
+E                 - paragraph: How close each coin is to everything you asked for. Hilal Markets never buys, sells, or tells you what to buy.
+E                 - heading "Nothing has been found yet" [level=2]
+E                 - paragraph: This page fills up on its own. A monitor has to be watching first, and it has to look at the market at least once. Then every coin it finds appears here with what we saw.
+E                 - link "Look at your monitors See which of them are watching, and start any that are paused.":
+E                   - /url: /dashboard/monitors
+E                   - strong: Look at your monitors
+E                   - text: See which of them are watching, and start any that are paused.
+E                 - link "Make your first monitor Answer a few questions and Hilal Markets starts watching for you.":
+E                   - /url: /dashboard/create-monitor
+E                   - strong: Make your first monitor
+E                   - text: Answer a few questions and Hilal Markets starts watching for you.
+E                 - link "Or look at which coins passed screening first":
+E                   - /url: /dashboard/market
+E               - button "Ask AI. Open Hilal, your AI assistant. It sees the page you are on and helps as you go."
+E               - status
+E               Error: element(s) not found 
+E               Call log:
+E                 - Expect "to_be_visible" with timeout 15000ms
+E                 - waiting for locator("[data-hilal-ask]").first
+
+tests\browser\test_ask_ai_corner_tag_e2e.py:261: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/browser/test_ask_ai_corner_tag_e2e.py::test_screenshots_of_the_ask_ai_surfaces_and_the_subscription_page
+1 failed, 10 passed in 79.31s (0:01:19)

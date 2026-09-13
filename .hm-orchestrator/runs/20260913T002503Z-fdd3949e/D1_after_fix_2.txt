@@ -1,0 +1,156 @@
+﻿........................................................................ [ 56%]
+........................FF.............................                  [100%]
+================================== FAILURES ===================================
+_ test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused[unknown-id] _
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000027E861BC380>, 'client': <httpx.AsyncClient object at 0x0000027E...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+reference = '00000000-0000-0000-0000-000000000000', label = 'no such checkout'
+
+    @pytest.mark.parametrize(
+        ("reference", "label"),
+        [
+            pytest.param("00000000-0000-0000-0000-000000000000", "no such checkout", id="unknown-id"),
+            pytest.param("not-a-uuid", "malformed reference", id="invalid-id"),
+        ],
+    )
+    async def test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused(
+        test_context, reference: str, label: str
+    ) -> None:
+        """A bad reference on a refund is a reason to ask a person, not to fail the webhook.
+    
+        Money-in events keep refusing an unreadable checkout тАФ that is a real risk of giving
+        away a plan. A refund cannot give anything away, so it is recorded and alerted.
+        """
+    
+        async with test_context["session_factory"]() as session:
+>           result = await BillingService(session, test_context["settings"]).process_event(
+                provider="creem",
+                payload={
+                    "id": f"evt-bad-ref-{label}",
+                    "type": "refund.created",
+                    "data": {"checkout_attempt_id": reference, "status": "refunded"},
+                },
+            )
+
+tests\unit\test_invariant_refund_is_recorded.py:414: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\ai_market_monitor\services\billing.py:2482: in process_event
+    await self._hydrate_checkout_data(
+src\ai_market_monitor\services\billing.py:3237: in _hydrate_checkout_data
+    await self._attach_refund_to_attempt(
+src\ai_market_monitor\services\billing.py:3125: in _attach_refund_to_attempt
+    await self._save_refund_alert(
+src\ai_market_monitor\services\billing.py:3068: in _save_refund_alert
+    dedupe_key=sanitize_dedupe_key(f"billing:refund-unattached:{event_id}:{reason}"),
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+key = 'billing:refund-unattached:evt-bad-ref-no such checkout:payment'
+
+    def sanitize_dedupe_key(key: str) -> str:
+        """Make one caller's raw string into a dedupe key the queue can always store.
+    
+        Providers write event ids in their own shapes: Stripe uses uppercase
+        (``evt_01JABCdefGHI``), NOWPayments uses ``:``, and some ids run past the 160
+        characters the column holds. Those are facts about providers, not reasons to lose
+        a critical billing alert, so what a key may look like is decided here тАФ once тАФ
+        instead of by each caller's string. A key is casefolded, characters the pattern
+        forbids become ``-``, the first character is made a lowercase letter or digit, and
+        the result is cut to the length the pattern allows. A key that already fits is
+        returned unchanged, so a write and the later read for the same problem agree, and
+        cleaning twice is the same as cleaning once.
+    
+        A key that cannot be made safe keeps raising: an empty string, anything with
+        whitespace (a key with spaces is prose or a timestamp, not a stable identifier тАФ
+        exactly the volatile keys the queue has always refused), or a key with no
+        lowercase letter or digit anywhere left in it.
+        """
+    
+        error = IssueQueueError(
+            f"Issue dedupe key {key!r} is not a stable low-cardinality key."
+        )
+        if not isinstance(key, str) or not key:
+            raise error
+        if any(character.isspace() for character in key):
+>           raise error
+E           ai_market_monitor.observability.issues.IssueQueueError: Issue dedupe key 'billing:refund-unattached:evt-bad-ref-no such checkout:payment' is not a stable low-cardinality key.
+
+src\ai_market_monitor\observability\issues.py:110: IssueQueueError
+_ test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused[invalid-id] _
+
+test_context = {'app': <fastapi.applications.FastAPI object at 0x0000027E85DA9520>, 'client': <httpx.AsyncClient object at 0x0000027E...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+reference = 'not-a-uuid', label = 'malformed reference'
+
+    @pytest.mark.parametrize(
+        ("reference", "label"),
+        [
+            pytest.param("00000000-0000-0000-0000-000000000000", "no such checkout", id="unknown-id"),
+            pytest.param("not-a-uuid", "malformed reference", id="invalid-id"),
+        ],
+    )
+    async def test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused(
+        test_context, reference: str, label: str
+    ) -> None:
+        """A bad reference on a refund is a reason to ask a person, not to fail the webhook.
+    
+        Money-in events keep refusing an unreadable checkout тАФ that is a real risk of giving
+        away a plan. A refund cannot give anything away, so it is recorded and alerted.
+        """
+    
+        async with test_context["session_factory"]() as session:
+>           result = await BillingService(session, test_context["settings"]).process_event(
+                provider="creem",
+                payload={
+                    "id": f"evt-bad-ref-{label}",
+                    "type": "refund.created",
+                    "data": {"checkout_attempt_id": reference, "status": "refunded"},
+                },
+            )
+
+tests\unit\test_invariant_refund_is_recorded.py:414: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\ai_market_monitor\services\billing.py:2482: in process_event
+    await self._hydrate_checkout_data(
+src\ai_market_monitor\services\billing.py:3237: in _hydrate_checkout_data
+    await self._attach_refund_to_attempt(
+src\ai_market_monitor\services\billing.py:3125: in _attach_refund_to_attempt
+    await self._save_refund_alert(
+src\ai_market_monitor\services\billing.py:3068: in _save_refund_alert
+    dedupe_key=sanitize_dedupe_key(f"billing:refund-unattached:{event_id}:{reason}"),
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+key = 'billing:refund-unattached:evt-bad-ref-malformed reference:payment'
+
+    def sanitize_dedupe_key(key: str) -> str:
+        """Make one caller's raw string into a dedupe key the queue can always store.
+    
+        Providers write event ids in their own shapes: Stripe uses uppercase
+        (``evt_01JABCdefGHI``), NOWPayments uses ``:``, and some ids run past the 160
+        characters the column holds. Those are facts about providers, not reasons to lose
+        a critical billing alert, so what a key may look like is decided here тАФ once тАФ
+        instead of by each caller's string. A key is casefolded, characters the pattern
+        forbids become ``-``, the first character is made a lowercase letter or digit, and
+        the result is cut to the length the pattern allows. A key that already fits is
+        returned unchanged, so a write and the later read for the same problem agree, and
+        cleaning twice is the same as cleaning once.
+    
+        A key that cannot be made safe keeps raising: an empty string, anything with
+        whitespace (a key with spaces is prose or a timestamp, not a stable identifier тАФ
+        exactly the volatile keys the queue has always refused), or a key with no
+        lowercase letter or digit anywhere left in it.
+        """
+    
+        error = IssueQueueError(
+            f"Issue dedupe key {key!r} is not a stable low-cardinality key."
+        )
+        if not isinstance(key, str) or not key:
+            raise error
+        if any(character.isspace() for character in key):
+>           raise error
+E           ai_market_monitor.observability.issues.IssueQueueError: Issue dedupe key 'billing:refund-unattached:evt-bad-ref-malformed reference:payment' is not a stable low-cardinality key.
+
+src\ai_market_monitor\observability\issues.py:110: IssueQueueError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused[unknown-id]
+FAILED tests/unit/test_invariant_refund_is_recorded.py::test_a_refund_naming_a_checkout_we_do_not_have_is_alerted_not_refused[invalid-id]

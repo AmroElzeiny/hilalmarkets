@@ -1,0 +1,22 @@
+New visual-defect tests BEFORE the fix
+======================================
+
+1. test_review_page_method_notes_wrap_at_word_boundaries[card-Handled by a test payment page.]
+   AssertionError: card note column too narrow at 1440px: clientWidth=28 maxWordWidth=55
+   AssertionError: card note column too narrow at 1440px: clientWidth=28 maxWordWidth=58 (crypto)
+   Root: .billing-method-card small was auto-placed in the 28px icon column, so the note
+   rendered one character wide.
+
+2. test_review_page_launch_price_does_not_overlap_countdown
+   AssertionError: launch price paragraph overlaps countdown:
+   price={'top': 445.2, 'bottom': 463.8, ...}
+   countdown={'top': 455.8, 'bottom': 558.3, ...}
+   Root: .offer-countdown had margin-top:-8px, pulling it up over .checkout-small.
+
+3. test_landing_footer_legal_text_clears_the_ai_launcher[v2_small_laptop]
+   AssertionError: footer legal text overlaps the corner: ...
+   Measured: legal line right edge at ~1000px, launcher left edge at 946px (overlap).
+
+4. test_landing_footer_legal_text_clears_the_ai_launcher[v3_phone]
+   AssertionError: footer legal text overlaps the corner: ...
+   Measured: legal line right edge at ~374px, launcher left edge at 320px (overlap).

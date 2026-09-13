@@ -1,0 +1,8 @@
+R2-3 SERIOUS: a late renewal for a canceled subscription resurrects it.
+
+Test: tests/integration/test_paid_plan_replacement.py::test_paid_event_for_replaced_subscription_is_refused_and_alerted
+Failure before fix (resurrection guard removed):
+
+Failed: DID NOT RAISE <class 'ai_market_monitor.services.billing.BillingError'>
+
+The subscription.paid for the old provider id succeeded, so the old row would come back ACTIVE next to the replacement.

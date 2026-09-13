@@ -1,0 +1,94 @@
+﻿opencode.exe : [0m
+At C:\Users\amroe\AppData\Roaming\npm\opencode.ps1:14 char:3
++   & "$basedir/node_modules/opencode-ai/bin/opencode.exe"   $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([0m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+> hm-direct-read ┬╖ deepseek-v4-flash-vision-exp
+[0m
+# Vision Review тАФ 6 screenshots
+
+**Important first:** none of the six images is a **SETTINGS** page or a **SUBSCRIPTION** page. They are two **Create a monitor** screens and three **Opportunities** screens (one image is a second Create-a-monitor). So review questions **3 and 4 cannot be answered** from this set. I mark them N/A and flag it below.
+
+---
+
+**IMAGE 1** (create-monitor, 1440├Ч900)
+1. Yes. A blue pill "Ask AI" with white text and a sparkle icon sits **third in the canvas toolbar**, after "+ Add condition" and "Add group", before the undo/redo arrows. A second, smaller blue "Ask AI" sits in the top-right of the floating "Add your first condition" panel.
+2. The toolbar button itself does **not** crowd its neighbours. But the floating panel and its caption line "your AI assistant - sees the page you are on - here tтАж" are **clipped at the right screen edge**.
+3. N/A тАФ not a settings page.
+4. N/A тАФ not a subscription page.
+5. Yes. The round green sparkle assistant button at bottom-right sits **on top of the floating panel**, covering part of its lower-right area near the "Price dips under the last low, then comes back" chip.
+6. The assistant caption is cut off at the right edge. Two "Ask AI" buttons are visible at once (toolbar + panel), which is visually confusing.
+**VERDICT: FAIL** тАФ assistant caption/panel clipped at right edge; round assistant button covers panel content.
+
+**IMAGE 2** (create-monitor, 1024├Ч768)
+1. Yes. Same toolbar position (third, after Add condition/Add group). The floating panel also shows the small blue "Ask AI".
+2. The floating panel is pushed past the right edge and **clipped**; the caption "your AI assistant - sees the page you are on - here tтАж" is cut. The toolbar button is fine.
+3. N/A.
+4. N/A.
+5. Yes. The round green assistant button **overlaps the floating panel's lower-right corner**.
+6. The panel overlaps the "All of these" group card, and its content is cut off at this narrower width.
+**VERDICT: FAIL** тАФ panel clipped and overlapping content.
+
+**IMAGE 3** (create-monitor, 390├Ч844 тАФ mobile)
+1. Yes. The blue "Ask AI" is third in the toolbar after Add condition/Add group, but it sits **hard against the right edge and appears clipped**. The panel's small blue "Ask AI" is also present.
+2. Yes, clearly. The "Add your fiтАж" panel is **cut off at the right edge**, the assistant caption is cut, and the canvas cards are clipped on both left and right.
+3. N/A.
+4. N/A.
+5. Yes. The round green assistant button overlaps the floating panel.
+6. Severe mobile clipping: the panel extends off-screen; canvas content is cut on both sides.
+**VERDICT: FAIL** тАФ mobile layout clips the panel, the caption and the toolbar button.
+
+**IMAGE 4** (opportunities, 1440├Ч900)
+1. Yes. A blue "Ask AI" pill sits **far right in the "Search by coin" row**. A second small blue "Ask AI" appears near the round assistant button over the cards.
+2. The top button is fine. The assistant caption "your AI assistant - sees the page you are on - here tтАж" is **cut at the right edge**, and the small Ask AI + round button overlay the LINK/USDT card.
+3. N/A.
+4. N/A.
+5. Yes. The round assistant button **covers part of the LINK/USDT "What did we see?" green button**.
+6. The assistant overlay sits on top of card content.
+**VERDICT: FAIL** тАФ overlay covers card content and the caption is clipped.
+
+**IMAGE 5** (opportunities, 1024├Ч768)
+1. Yes. Blue "Ask AI" to the **right of the "Search by coin" field**. A small blue "Ask AI" also appears over the SOL/USDT card.
+2. Top button fine. The caption is cut at the right edge and the overlay sits over the SOL/USDT card.
+3. N/A.
+4. N/A.
+5. Yes. The round assistant button overlaps the SOL/USDT card near the progress bar / "Still waiting on: RVOL above 1.50x" area.
+6. Overlay covers card content; caption clipped.
+**VERDICT: FAIL** тАФ overlay covers card content and the caption is clipped.
+
+**IMAGE 6** (opportunities, 390├Ч844 тАФ mobile)
+1. Yes. Blue "Ask AI" sits **below the "Search by coin" field, left-aligned** on mobile. A small blue "Ask AI" also appears over the SOL/USDT card.
+2. The caption and overlay are **cut at the right edge** and overlap the SOL/USDT card.
+3. N/A.
+4. N/A.
+5. Yes. The round assistant button overlaps the SOL/USDT card.
+6. Overlay covers card content; clipping at the right edge.
+**VERDICT: FAIL** тАФ overlay covers card content and the caption is clipped.
+
+---
+
+## Summary
+
+| Image | Page (what I see) | Verdict |
+|---|---|---|
+| 1 | Create a monitor, 1440├Ч900 | FAIL |
+| 2 | Create a monitor, 1024├Ч768 | FAIL |
+| 3 | Create a monitor, 390├Ч844 | FAIL |
+| 4 | Opportunities, 1440├Ч900 | FAIL |
+| 5 | Opportunities, 1024├Ч768 | FAIL |
+| 6 | Opportunities, 390├Ч844 | FAIL |
+
+**What I verified (seen in the images):**
+- The blue "Ask AI" pill exists and is correctly placed in the canvas toolbar (third, after Add condition/Add group) and in the Opportunities search row.
+- A second small blue "Ask AI" and a round green assistant button appear on the cards/panels.
+- The round assistant button **overlaps content in all six images**.
+- The assistant caption "your AI assistant - sees the page you are on - here tтАж" is **clipped at the right edge in all six images**.
+- On the 390px mobile shots the floating panel and toolbar button are visibly cut off.
+
+**Uncertainty / flag for the supervisor:**
+- The review prompt asks about a **SETTINGS** page (question 3) and a **SUBSCRIPTION** page (question 4), but **no such screenshots were provided**. I cannot answer 3 or 4, and I will not guess. Either the wrong screenshots were attached, or those pages were never captured.
+- I cannot tell whether the toolbar "Ask AI" in IMAGE 3 is fully on-screen or slightly clipped тАФ it is flush with the edge. Treat that as "at risk of clipping", not confirmed.
+
+**Not done:** no files were read beyond the six images and the prompt; no commands run; nothing edited.

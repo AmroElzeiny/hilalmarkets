@@ -84,8 +84,8 @@ class _StubSession:
         # Once the cycle is allowed, the route asks whether this person is already on a
         # different paid plan, so an old period can be linked to the new payment. These
         # tests are about the cycle check, and every one of them describes an account
-        # holding no paid plan (``active_paid_plan_codes`` is empty above). An empty
-        # answer here is that same account, not a convenience.
+        # holding no paid plan (``paid_plan_codes_for_replacement_decisions`` returns
+        # nothing). An empty answer here is that same account, not a convenience.
         return _StubScalars()
 
     async def commit(self) -> None:
@@ -192,7 +192,11 @@ def test_resume_checks_attempt_own_cycle_not_aggregate_purchasable(
         del user_id
         return False
 
-    monkeypatch.setattr(dashboard_module, "active_paid_plan_codes", empty_active_paid)
+    monkeypatch.setattr(
+        dashboard_module,
+        "paid_plan_codes_for_replacement_decisions",
+        empty_active_paid,
+    )
     monkeypatch.setattr(dashboard_module, "paid_access_can_be_repriced", false_repriced)
 
     attempt = _attempt(plan_id=plan_id, billing_cycle="annual_auto_renewal", user_id=uuid4())
@@ -250,7 +254,11 @@ def test_resume_allows_attempt_when_its_cycle_is_still_available(
         del user_id
         return False
 
-    monkeypatch.setattr(dashboard_module, "active_paid_plan_codes", empty_active_paid)
+    monkeypatch.setattr(
+        dashboard_module,
+        "paid_plan_codes_for_replacement_decisions",
+        empty_active_paid,
+    )
     monkeypatch.setattr(dashboard_module, "paid_access_can_be_repriced", false_repriced)
 
     attempt = _attempt(plan_id=plan_id, billing_cycle="annual_auto_renewal", user_id=uuid4())
@@ -322,7 +330,11 @@ def test_aggregate_purchasable_does_not_rescue_a_withdrawn_cycle(
             del user_id
             return False
 
-        monkeypatch.setattr(dashboard_module, "active_paid_plan_codes", empty_active_paid)
+        monkeypatch.setattr(
+            dashboard_module,
+            "paid_plan_codes_for_replacement_decisions",
+            empty_active_paid,
+        )
         monkeypatch.setattr(dashboard_module, "paid_access_can_be_repriced", false_repriced)
 
         attempt = _attempt(plan_id=plan_id, billing_cycle=attempt_cycle, user_id=uuid4())

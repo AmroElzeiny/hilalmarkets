@@ -323,17 +323,27 @@ Only request a variant when the live OpenCode model metadata for opencode-go con
 
 Default preference:
 
-cheap read/search/test triage first;
+- use the cheapest model that has the required capability;
+- use `qwen3.8-flash` as the default implementation and test/debug model;
+- use `deepseek-v4.1-flash` for read-heavy exploration, deep supervision, or adversarial review when needed;
+- use `minimax-m3` for standard supervision and independent logic review;
+- use a vision-capable model only when actual screenshot/image verification is required;
+- multi-file work does not by itself justify a more expensive model;
+- expensive models are escalation-only, never normal defaults.
 
-cost-efficient coding model for normal implementation;
+A higher-cost model may be selected only when:
+1. the normal cheap route has failed two meaningful attempts;
+2. the required capability is unavailable in the normal models;
+3. independent review shows a material quality failure;
+4. Claude can state a concrete reason why the expensive model is likely to solve that failure.
 
-stronger coding model for cross-file implementation;
+Before any expensive-model escalation, record:
+- the model that failed;
+- the evidence of failure;
+- the replacement model;
+- why another cheap-model attempt is unlikely to help.
 
-independent model family for review;
-
-vision-capable model for screenshot/visual review;
-
-expensive Go models only when their expected reduction in retries is worth the allowance.
+Do not escalate model cost merely because a task is large, important, cross-file, or high-risk.
 
 Claude may direct the supervisor to use any currently available OpenCode Go model through:
 powershell -ExecutionPolicy Bypass -File .\tools\hm-orchestrator\run-model.ps1 ...

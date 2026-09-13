@@ -17,7 +17,10 @@
        seconds and a timezone that is not the reader's were three numbers a beginner had
        to read past to reach the one that matters. #}
     {% if trial and entitlement.source == 'trial' %}<span><small>Trial access until</small><strong>{{ trial.ends_at|day_dt(user.timezone) }}</strong></span>{% endif %}
-    <span><small>Renewal</small><strong>{{ 'Free forever' if entitlement.plan.code == 'demo' else ('No automatic renewal' if entitlement.source == 'trial' else ('Automatic renewal' if billing_capabilities.supports_recurring_billing else 'Manual 30-day renewal')) }}</strong></span>
+    {# Decided from the plan held (`held_renewal` in `services/billing.py`). It asked the
+       payment company this server would use for a new sale, so a customer who paid by
+       crypto read "Automatic renewal" on a server that sells by card. #}
+    <span><small>Renewal</small><strong>{{ {'free': 'Free forever', 'trial': 'No automatic renewal', 'grant': 'No automatic renewal', 'renews': ('Automatic renewal, every ' ~ held_renewal.every) if held_renewal.every else 'Automatic renewal', 'stopped': 'Ends after the current period', 'fixed_period': 'Manual 30-day renewal'}[held_renewal.kind] }}</strong></span>
   </div>
 </section>
 
@@ -181,11 +184,17 @@
             data-monthly-label="{{ switch_buy_labels.monthly }}"
             data-annual-label="{{ switch_buy_labels.annual }}"
           >{{ switch_buy_labels.monthly }}</button>
-          <p class="dashboard-trial-note">You pay the full {{ plan.name }} price today. It starts only after that payment is confirmed. Your old plan stays active if you leave or the payment fails. After a confirmed payment, the old plan ends and a person sends the value of its unused time {{ consent_upgrade_now.split('time ', 1)[1] }}</p>
-        {% elif switch.action == 'upgrade' %}
-          <button class="btn btn-primary" type="button" data-plan-switch-trigger data-plan-switch="upgrade" data-plan-code="{{ code }}" data-plan-name="{{ plan.name }}">{{ switch.label }}</button>
-        {% elif switch.action == 'downgrade' %}
-          <button class="btn btn-secondary" type="button" data-plan-switch-trigger data-plan-switch="downgrade" data-plan-code="{{ code }}" data-plan-name="{{ plan.name }}">{{ switch.label }}</button>
+          {# The window comes from `manual_return_window_words()`, the one owner of the 48
+             hours. This sentence used to cut it out of a consent string with `.split`,
+             which broke silently the day that string was reworded. #}
+          <p class="dashboard-trial-note">You pay the {{ plan.name }} price today. It starts only after that payment is confirmed. Your old plan stays active if you leave or the payment fails. After a confirmed payment, the old plan ends and a person sends the value of its unused time {{ manual_return_window }}.</p>
+        {#- There is no "switch" button any more, and no form behind one. Moving between paid
+            plans used to re-price the card already held; the owner ruled that out on
+            2026-09-10, so the server refuses every switch (`plan_change_needs_payment`).
+            A button that opens a form the server always refuses is a page offering what
+            the server will not do — and its script told people "there is no new payment
+            page", which stopped being true that day. A plan the service does not mark as
+            needing a checkout falls through to the disabled button below: fail closed. -#}
         {% else %}
           <button class="btn {{ 'btn-gold' if switch.action == 'current' else 'btn-secondary' }} is-disabled" type="button" disabled aria-disabled="true">{{ switch.label }}</button>
         {% endif %}
@@ -319,7 +328,7 @@
 
       <label class="checkout-consent">
         <input type="checkbox" name="terms_accepted" value="true" required>
-        <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, and <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>, including the price and renewal terms shown above for the payment method you chose.</span>
+        <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a>, <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, and <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>, including the price and renewal terms shown above for the payment method you chose.{% if current_paid_plan_code %} {{ consent_plan_replacement }}{% endif %}</span>
       </label>
       <p class="billing-dialog-status" role="status" aria-live="polite" tabindex="-1" data-billing-dialog-status></p>
       <div class="billing-dialog-actions">
@@ -380,83 +389,12 @@
   </div>
 </dialog>
 
-{# ── Moving up or down a plan ────────────────────────────────────────────────────
-   One form for both directions. Which one it is, is decided on the server from the plan
-   the person is already on — never from a field in this form, which anybody can edit. #}
-<dialog id="plan-switch-dialog" class="billing-dialog" aria-labelledby="plan-switch-title" data-plan-switch-dialog>
-  <div class="billing-dialog-shell">
-    <header class="billing-dialog-header">
-      <div>
-        <span class="kicker" data-plan-switch-kicker>Change plan</span>
-        <h2 id="plan-switch-title" data-plan-switch-title>Change your plan</h2>
-        <p data-plan-switch-lead>A different paid plan uses the normal payment page and charges its full price today.</p>
-      </div>
-      <button class="icon-btn billing-dialog-close" type="button" data-plan-switch-close aria-label="Close change-plan form">
-        <span data-icon="close" data-icon-class="icon"></span>
-      </button>
-    </header>
-    <form class="billing-dialog-form" method="post" action="/dashboard/billing/switch">
-      <input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}">
-      <input type="hidden" name="plan_code" value="" data-plan-switch-code>
-
-      {# Only an upgrade offers a choice of when. A smaller plan always starts at the end
-         of the period already paid for, so nothing somebody paid for is taken away
-         early — and the server refuses an immediate downgrade for the same reason. #}
-      {# Both labels name the plan being moved to. The script writes the name in from the
-         button that opened this form, the same way it writes the title and the submit
-         button — these two said "Pro" outright, which is right only for as long as the
-         one upgrade anybody can make happens to be the one to Pro. #}
-      <fieldset class="plan-timing-options" data-plan-switch-timing hidden>
-        <legend>When do you want it?</legend>
-        <label class="plan-timing-option">
-          <input type="radio" name="timing" value="{{ timing_immediate }}" data-plan-timing="{{ timing_immediate }}">
-          <span>
-            <strong data-plan-switch-timing-now>Pay for the new plan today</strong>
-            <small>{{ consent_upgrade_now }}</small>
-          </span>
-        </label>
-        <label class="plan-timing-option">
-          <input type="radio" name="timing" value="{{ timing_period_end }}" checked data-plan-timing="{{ timing_period_end }}">
-          <span>
-            <strong data-plan-switch-timing-later>Pay for the new plan today</strong>
-            <small>{{ consent_upgrade_period_end }}</small>
-          </span>
-        </label>
-      </fieldset>
-      <input type="hidden" name="timing" value="{{ timing_period_end }}" data-plan-switch-fixed-timing disabled>
-
-      {# A downgrade asks why. An upgrade does not: nobody has to explain buying more. #}
-      <fieldset class="plan-reason-options" data-plan-switch-reasons hidden>
-        <legend>Why are you moving to a smaller plan?</legend>
-        {% for value, words in downgrade_reasons %}
-          <label class="plan-reason-option">
-            <input type="radio" name="reason_code" value="{{ value }}" data-plan-reason data-plan-reason-other="{{ 'true' if value == other_reason_code else 'false' }}">
-            <span>{{ words }}</span>
-          </label>
-        {% endfor %}
-      </fieldset>
-      <label class="plan-reason-text" data-plan-reason-text hidden>
-        <span>Please tell us in your own words</span>
-        <textarea name="reason_text" maxlength="500" rows="3" data-plan-reason-textarea></textarea>
-      </label>
-
-      <label class="checkout-consent">
-        <input type="checkbox" name="switch_consent" value="true" required>
-        <span data-plan-switch-consent>{{ consent_upgrade_period_end }}</span>
-      </label>
-      <div class="billing-dialog-actions">
-        <button class="btn btn-secondary" type="button" data-plan-switch-close>Not now</button>
-        <button class="btn btn-primary" type="submit" data-plan-switch-submit>Confirm</button>
-      </div>
-    </form>
-  </div>
-</dialog>
-
-<script id="plan-switch-consents" type="application/json">{{ {
-  'upgradeNow': consent_upgrade_now,
-  'upgradePeriodEnd': consent_upgrade_period_end,
-  'downgrade': consent_downgrade,
-}|tojson }}</script>
+{#- The "Moving up or down a plan" form used to be here, with a JSON block of its three
+    consent sentences. It re-priced the card already held, which the owner ruled out on
+    2026-09-10, and no button could open it after that. It is gone rather than left
+    unreachable: a form that posts to a route which always refuses is a page offering
+    what the server will not do. A different paid plan is bought with the Pay button on
+    its card, and the tick box of that checkout carries the plan-replacement sentence. -#}
 
 <section class="panel dashboard-plan-comparison" aria-labelledby="dashboard-plan-comparison-title">
   <div class="panel-head">
@@ -508,7 +446,7 @@
 </section>
 {% endblock %}
 {% block page_scripts %}
-<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260910-pay-now"></script>
-<script src="{{ url_for('static', path='/hm-plan-change.js') }}?v=20260910-pay-now"></script>
-<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260910-pay-now"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260913-corner-clear"></script>
+<script src="{{ url_for('static', path='/hm-plan-change.js') }}?v=20260913-corner-clear"></script>
+<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260913-corner-clear"></script>
 {% endblock %}

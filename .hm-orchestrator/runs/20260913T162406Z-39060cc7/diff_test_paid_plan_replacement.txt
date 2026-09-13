@@ -1,0 +1,1092 @@
+﻿diff --git a/tests/integration/test_paid_plan_replacement.py b/tests/integration/test_paid_plan_replacement.py
+index 549b45e5..3745830f 100644
+--- a/tests/integration/test_paid_plan_replacement.py
++++ b/tests/integration/test_paid_plan_replacement.py
+@@ -7,7 +7,11 @@ import pytest
+ from sqlalchemy import func, select
+ 
+ from ai_market_monitor.core.config import get_settings
+-from ai_market_monitor.core.plans import PURCHASABLE_PLAN_CODES, effective_monthly_price
++from ai_market_monitor.core.plans import (
++    PUBLIC_PLAN_PRESENTATIONS,
++    PURCHASABLE_PLAN_CODES,
++    effective_monthly_price,
++)
+ from ai_market_monitor.db.models import (
+     BillingCheckoutAttempt,
+     BillingEvent,
+@@ -33,6 +37,31 @@ PLAN_PAIRS = tuple(
+     if held != target
+ )
+ 
++#: The shapes of the OLD (held) plan the owner's two safety properties must cover:
++#: a recurring card plan тАФ which must come out of the move with exactly one charge left тАФ
++#: and a one-time crypto plan тАФ which has no card to stop. The card plan is crossed with
++#: its monthly and its annual paid period, so the unused-time money is valued from a
++#: 30-day and from a 365-day period.
++#:
++#: The NEW plan is always bought as a monthly card checkout, because that is the only
++#: checkout the catalog sells today: `plan_offer(code).annual_available` is False for
++#: both purchasable plans, and `_normalize_billing_cycle` refuses an annual request with
++#: "Annual billing is not available yet." An annual *new* checkout therefore cannot be
++#: driven end-to-end without editing the product's offer, which a test must not do. The
++#: closest reachable annual case тАФ an annual period being *replaced* тАФ is here as
++#: card-annual, and it is the case the money rule actually reads (period dates and the
++#: amount really paid, never a cycle label).
++#:
++#: An annual CRYPTO held plan is not a shape the product can reach either: NOWPayments
++#: takes one 30-day invoice per purchase (`one_time_30_day`; the cycle aliases refuse
++#: "annual" for a provider without recurring capability), so no annual crypto period
++#: exists to hold. It is left out rather than faked.
++HELD_PLAN_SHAPES = [
++    pytest.param("creem", "monthly_auto_renewal", id="card-monthly"),
++    pytest.param("creem", "annual_auto_renewal", id="card-annual"),
++    pytest.param("nowpayments", "one_time_30_day", id="crypto-one-time"),
++]
++
+ 
+ async def _find_user(test_context, email: str) -> User:
+     async with test_context["session_factory"]() as session:
+@@ -46,25 +75,48 @@ async def _find_user(test_context, email: str) -> User:
+ 
+ 
+ async def _seed_old_payment(
+-    test_context, *, email: str, plan_code: str, provider: str = "creem"
++    test_context,
++    *,
++    email: str,
++    plan_code: str,
++    provider: str = "creem",
++    billing_cycle: str = "monthly_auto_renewal",
+ ) -> tuple[User, Subscription, BillingCheckoutAttempt]:
++    """Give the account a paid plan and the completed payment that bought it.
++
++    ``billing_cycle`` also decides the shape of the paid period: a monthly period half
++    spent (15 days used, 15 to go), an annual period of 365 days about half spent, and
++    the one-time crypto invoice over a 30-day period. The money the move must return is
++    valued from the period dates and this payment's amount тАФ the annual price for an
++    annual period, the price a checkout really charges (launch price included) otherwise.
++    """
++
+     user = await _find_user(test_context, email)
++    annual = billing_cycle == "annual_auto_renewal"
+     async with test_context["session_factory"]() as session:
+         plan = await PlanCatalogService(session).get_or_sync(plan_code)
+         now = datetime.now(UTC)
++        paid_days = 365 if annual else 30
++        used_days = 182 if annual else 15
++        period_start = now - timedelta(days=used_days)
++        amount = (
++            PUBLIC_PLAN_PRESENTATIONS[plan_code].annual_price
++            if annual
++            else effective_monthly_price(plan_code)
++        )
+         source = BillingCheckoutAttempt(
+             user_id=user.id,
+             plan_id=plan.id,
+-            billing_cycle="monthly_auto_renewal",
++            billing_cycle=billing_cycle,
+             provider=provider,
+             status="completed",
+             idempotency_key=f"source-{user.id}-{plan_code}",
+             terms_version="test",
+-            amount=effective_monthly_price(plan_code),
++            amount=amount,
+             currency="USD",
+-            terms_accepted_at=now - timedelta(days=15),
++            terms_accepted_at=period_start,
+             expires_at=now,
+-            completed_at=now - timedelta(days=15),
++            completed_at=period_start,
+             billing_profile={"first_name": "Amina"},
+         )
+         old = Subscription(
+@@ -73,8 +125,8 @@ async def _seed_old_payment(
+             status=SubscriptionStatus.ACTIVE,
+             provider=provider,
+             provider_subscription_id=f"old-{provider}-{user.id}",
+-            current_period_start=now - timedelta(days=15),
+-            current_period_end=now + timedelta(days=15),
++            current_period_start=period_start,
++            current_period_end=period_start + timedelta(days=paid_days),
+         )
+         session.add_all([source, old])
+         await session.commit()
+@@ -82,14 +134,14 @@ async def _seed_old_payment(
+ 
+ 
+ async def _prepare_new_checkout(
+-    test_context, *, user: User, target_code: str, settings
++    test_context, *, user: User, target_code: str, settings, request_key: str = ""
+ ) -> BillingCheckoutAttempt:
+     async with test_context["session_factory"]() as session:
+         prepared = await BillingService(session, settings, provider_name="creem").prepare_checkout(
+             user_id=user.id,
+             plan_code=target_code,
+             billing_cycle="monthly",
+-            request_key=f"move-{user.id}-{target_code}",
++            request_key=request_key or f"move-{user.id}-{target_code}",
+             terms_accepted=True,
+             billing_profile={"first_name": "Amina"},
+         )
+@@ -98,16 +150,20 @@ async def _prepare_new_checkout(
+ 
+ 
+ def _paid_event(
+-    *, attempt: BillingCheckoutAttempt, target_code: str, event_id: str
++    *,
++    attempt: BillingCheckoutAttempt,
++    target_code: str,
++    event_id: str,
++    starts_in_days: int = 0,
+ ) -> dict[str, object]:
+-    now = datetime.now(UTC)
++    now = datetime.now(UTC) + timedelta(days=starts_in_days)
+     return {
+         "id": event_id,
+         "type": "subscription.paid",
+         "data": {
+             "checkout_attempt_id": str(attempt.id),
+             "plan_code": target_code,
+-            "provider_subscription_id": f"new-creem-{attempt.user_id}",
++            "provider_subscription_id": f"new-creem-{attempt.id}",
+             "amount": str(attempt.amount),
+             "currency": attempt.currency,
+             "status": "active",
+@@ -117,14 +173,32 @@ def _paid_event(
+     }
+ 
+ 
++@pytest.mark.parametrize(("held_provider", "held_cycle"), HELD_PLAN_SHAPES)
+ @pytest.mark.parametrize(("held_code", "target_code"), PLAN_PAIRS)
+-async def test_confirmed_card_move_leaves_one_charge_and_one_money_record(
+-    test_context, monkeypatch, held_code: str, target_code: str
++async def test_confirmed_move_leaves_one_charge_and_one_money_record(
++    test_context,
++    monkeypatch,
++    held_provider: str,
++    held_cycle: str,
++    held_code: str,
++    target_code: str,
+ ) -> None:
+-    email = f"paid-move-{held_code}-{target_code}@example.com"
++    """The owner's first safety property, for every move and every shape of old plan.
++
++    After a confirmed payment for a different plan, exactly one live subscription and
++    one recurring card charge remain тАФ trader to pro and pro to trader, from a monthly
++    card period and an annual one, and from a one-time crypto plan (which has no card
++    to stop at all).
++    """
++
++    email = f"paid-move-{held_provider}-{held_cycle}-{held_code}-{target_code}@example.com"
+     await _signup(test_context, email)
+     user, old, source = await _seed_old_payment(
+-        test_context, email=email, plan_code=held_code
++        test_context,
++        email=email,
++        plan_code=held_code,
++        provider=held_provider,
++        billing_cycle=held_cycle,
+     )
+     enabled = test_context["settings"].model_copy(update=live_billing_overrides())
+     test_context["app"].dependency_overrides[get_settings] = lambda: enabled
+@@ -145,7 +219,7 @@ async def test_confirmed_card_move_leaves_one_charge_and_one_money_record(
+     payload = _paid_event(
+         attempt=attempt,
+         target_code=target_code,
+-        event_id=f"move-paid-{held_code}-{target_code}",
++        event_id=f"move-paid-{held_provider}-{held_cycle}-{held_code}-{target_code}",
+     )
+     async with test_context["session_factory"]() as session:
+         service = BillingService(session, enabled, provider_name="creem")
+@@ -190,9 +264,16 @@ async def test_confirmed_card_move_leaves_one_charge_and_one_money_record(
+         assert len(live) == 1
+         assert len(recurring) == 1
+         assert live[0].plan_id != old.plan_id
+-        assert len(cancel_calls) == 1
+-        assert cancel_calls[0]["retry"] is True
+-        assert cancel_calls[0]["mutation_committed"] is False
++        if held_provider == "creem":
++            # The old card is stopped at the payment company exactly once, with the
++            # queue's own retry policy and no committed-mutation shortcut.
++            assert len(cancel_calls) == 1
++            assert cancel_calls[0]["retry"] is True
++            assert cancel_calls[0]["mutation_committed"] is False
++        else:
++            # A crypto plan has no recurring charge to stop: asking the payment company
++            # to cancel something it never sold would be its own bug.
++            assert cancel_calls == []
+         assert len(owed) == 1
+         assert owed[0].paid_amount == source.amount
+         assert 0 < owed[0].amount_owed <= source.amount
+@@ -201,18 +282,327 @@ async def test_confirmed_card_move_leaves_one_charge_and_one_money_record(
+         )
+         assert len(emails) == 1
+         assert emails[0].amount == owed[0].amount_owed
++        # The customer's email promises that a person sends this money, so a person on
++        # our side is told as well: the amount, and the moment it is due.
++        notices = list((await session.scalars(select(OperationalIssue))).all())
++        assert [row.dedupe_key for row in notices] == [f"billing:money-owed:{owed[0].id}"]
++        assert notices[0].state == "open"
++        assert notices[0].severity == "ticket"
++        assert f"{owed[0].amount_owed} {owed[0].currency}" in notices[0].summary
++        assert f"{owed[0].due_at:%Y-%m-%d %H:%M} UTC" in notices[0].summary
+ 
+ 
+ @pytest.mark.parametrize(("held_code", "target_code"), PLAN_PAIRS)
+-async def test_abandoned_checkout_leaves_the_old_plan_untouched(
+-    test_context, held_code: str, target_code: str
++async def test_renewing_the_new_plan_never_ends_or_repays_the_old_one_again(
++    test_context, monkeypatch, held_code: str, target_code: str
++) -> None:
++    """Creem sends `subscription.paid` again at every renewal, naming the same checkout.
++
++    The move happens once: one cancel request, one money record, one email. A payment
++    company that refuses to cancel what it has already cancelled must never roll the
++    renewal back тАФ that customer has paid for the new plan and must keep it.
++    """
++
++    email = f"renewed-move-{held_code}-{target_code}@example.com"
++    await _signup(test_context, email)
++    user, old, _source = await _seed_old_payment(
++        test_context, email=email, plan_code=held_code
++    )
++    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
++    attempt = await _prepare_new_checkout(
++        test_context, user=user, target_code=target_code, settings=enabled
++    )
++    cancel_calls: list[dict[str, object]] = []
++
++    async def cancel_only_once(*args, **kwargs):
++        cancel_calls.append(kwargs)
++        status = 200 if len(cancel_calls) == 1 else 400
++        return httpx.Response(status, request=httpx.Request("POST", str(args[2])))
++
++    monkeypatch.setattr(replacement_module, "provider_request", cancel_only_once)
++    first = _paid_event(
++        attempt=attempt, target_code=target_code, event_id=f"first-{held_code}-{target_code}"
++    )
++    renewal = _paid_event(
++        attempt=attempt,
++        target_code=target_code,
++        event_id=f"renewal-{held_code}-{target_code}",
++        starts_in_days=30,
++    )
++    async with test_context["session_factory"]() as session:
++        service = BillingService(session, enabled, provider_name="creem")
++        await service.process_event(provider="creem", payload=first)
++        await session.commit()
++        renewed = await service.process_event(provider="creem", payload=renewal)
++        await session.commit()
++    assert renewed.replayed is False
++    assert renewed.processing_status == "processed"
++
++    async with test_context["session_factory"]() as session:
++        live = list(
++            (
++                await session.scalars(
++                    select(Subscription).where(
++                        Subscription.user_id == user.id,
++                        Subscription.status == SubscriptionStatus.ACTIVE,
++                    )
++                )
++            ).all()
++        )
++        ended = await session.get(Subscription, old.id)
++        owed = await session.scalar(
++            select(func.count(PlanMoveMoneyOwed.id)).where(PlanMoveMoneyOwed.user_id == user.id)
++        )
++        move_emails = await session.scalar(
++            select(func.count(PaymentEmailDelivery.id)).where(
++                PaymentEmailDelivery.user_id == user.id,
++                PaymentEmailDelivery.purpose == "plan_move_money_owed",
++            )
++        )
++        owed_row = await session.scalar(
++            select(PlanMoveMoneyOwed).where(PlanMoveMoneyOwed.user_id == user.id)
++        )
++        issues = [
++            (row.dedupe_key, row.occurrence_count)
++            for row in (await session.scalars(select(OperationalIssue))).all()
++        ]
++    assert len(cancel_calls) == 1
++    assert len(live) == 1
++    assert live[0].plan_id != old.plan_id
++    renewed_until = live[0].current_period_end
++    assert renewed_until is not None
++    if renewed_until.tzinfo is None:
++        renewed_until = renewed_until.replace(tzinfo=UTC)
++    assert renewed_until > datetime.now(UTC) + timedelta(days=59)
++    assert ended is not None and ended.status == SubscriptionStatus.CANCELED
++    assert owed == 1
++    assert move_emails == 1
++    # One staff notice, for the one money record, seen once. No failure notice, and the
++    # renewal adds nothing: a second row or a second occurrence would fail here.
++    assert owed_row is not None
++    assert issues == [(f"billing:money-owed:{owed_row.id}", 1)]
++
++
++@pytest.mark.parametrize(("held_code", "target_code"), PLAN_PAIRS)
++async def test_two_payment_pages_paid_for_one_move_leave_one_live_plan(
++    test_context, monkeypatch, held_code: str, target_code: str
+ ) -> None:
+-    email = f"abandoned-move-{held_code}-{target_code}@example.com"
++    """Two payment pages for the same move, both paid.
++
++    Creem's page outlives our checkout's own time limit. Open Pay, wait past the limit,
++    press Pay again тАФ a second checkout, frozen onto the same old plan тАФ then pay both
++    pages. The first payment ends the old plan. The second must end what the first one
++    bought and record its unused value, never leave two paid plans charging every month.
++    """
++
++    email = f"two-pages-{held_code}-{target_code}@example.com"
+     await _signup(test_context, email)
+     user, old, _source = await _seed_old_payment(
+         test_context, email=email, plan_code=held_code
+     )
+     enabled = test_context["settings"].model_copy(update=live_billing_overrides())
++    first_attempt = await _prepare_new_checkout(
++        test_context, user=user, target_code=target_code, settings=enabled
++    )
++    async with test_context["session_factory"]() as session:
++        stale = await session.get(BillingCheckoutAttempt, first_attempt.id)
++        assert stale is not None
++        stale.expires_at = datetime.now(UTC) - timedelta(minutes=1)
++        await session.commit()
++    second_attempt = await _prepare_new_checkout(
++        test_context,
++        user=user,
++        target_code=target_code,
++        settings=enabled,
++        request_key=f"second-page-{user.id}",
++    )
++    assert second_attempt.id != first_attempt.id
++    assert second_attempt.replaces_subscription_id == old.id
++
++    cancelled: list[str] = []
++
++    async def successful_cancel(*args, **kwargs):
++        cancelled.append(str(args[2]))
++        return httpx.Response(200, request=httpx.Request("POST", str(args[2])))
++
++    monkeypatch.setattr(replacement_module, "provider_request", successful_cancel)
++    async with test_context["session_factory"]() as session:
++        service = BillingService(session, enabled, provider_name="creem")
++        for attempt in (first_attempt, second_attempt):
++            result = await service.process_event(
++                provider="creem",
++                payload=_paid_event(
++                    attempt=attempt, target_code=target_code, event_id=f"paid-{attempt.id}"
++                ),
++            )
++            await session.commit()
++            assert result.processing_status == "processed"
++
++    async with test_context["session_factory"]() as session:
++        live = list(
++            (
++                await session.scalars(
++                    select(Subscription).where(
++                        Subscription.user_id == user.id,
++                        Subscription.status == SubscriptionStatus.ACTIVE,
++                    )
++                )
++            ).all()
++        )
++        owed = list(
++            (
++                await session.scalars(
++                    select(PlanMoveMoneyOwed)
++                    .where(PlanMoveMoneyOwed.user_id == user.id)
++                    .order_by(PlanMoveMoneyOwed.created_at)
++                )
++            ).all()
++        )
++        first_bought = await session.scalar(
++            select(Subscription).where(
++                Subscription.provider_subscription_id == f"new-creem-{first_attempt.id}"
++            )
++        )
++        notices = sorted(
++            row.dedupe_key for row in (await session.scalars(select(OperationalIssue))).all()
++        )
++    assert [row.provider_subscription_id for row in live] == [
++        f"new-creem-{second_attempt.id}"
++    ]
++    assert first_bought is not None
++    assert first_bought.status == SubscriptionStatus.CANCELED
++    assert len(cancelled) == 2
++    assert cancelled[0].endswith(f"/v1/subscriptions/{old.provider_subscription_id}/cancel")
++    assert cancelled[1].endswith(f"/v1/subscriptions/new-creem-{first_attempt.id}/cancel")
++    assert [row.ended_subscription_id for row in owed] == [old.id, first_bought.id]
++    assert owed[1].paid_amount == first_attempt.amount
++    assert 0 < owed[1].amount_owed <= owed[1].paid_amount
++    # One staff notice per money record: two amounts owed, two sums a person must send.
++    assert notices == sorted(f"billing:money-owed:{row.id}" for row in owed)
++
++
++@pytest.mark.parametrize(
++    "refusal", ["multiple_paid_plans_need_help", "paid_amount_missing"]
++)
++async def test_a_move_that_cannot_be_finished_safely_changes_nothing_and_alerts(
++    test_context, monkeypatch, refusal: str
++) -> None:
++    """Every way a paid move can fail is seen by a person, not only a failed cancel.
++
++    The plan frozen onto the checkout has already ended, and what is live besides the new
++    plan cannot be ended safely: two paid plans at once, or a paid plan with no payment
++    on record, so its unused value would be a guess. The payment is rolled back whole тАФ
++    the customer keeps what they had тАФ and a critical issue is saved.
++    """
++
++    email = f"unsafe-move-{refusal.replace('_', '-')}@example.com"
++    await _signup(test_context, email)
++    user, old, _source = await _seed_old_payment(test_context, email=email, plan_code="trader")
++    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
++    attempt = await _prepare_new_checkout(
++        test_context, user=user, target_code="pro", settings=enabled
++    )
++    extra_providers = ("creem", "creem") if refusal == "multiple_paid_plans_need_help" else (
++        "stripe",
++    )
++    now = datetime.now(UTC)
++    async with test_context["session_factory"]() as session:
++        ended = await session.get(Subscription, old.id)
++        assert ended is not None
++        ended.status = SubscriptionStatus.CANCELED
++        ended.canceled_at = now
++        trader = await PlanCatalogService(session).get_or_sync("trader")
++        extras = [
++            Subscription(
++                user_id=user.id,
++                plan_id=trader.id,
++                status=SubscriptionStatus.ACTIVE,
++                provider=provider,
++                provider_subscription_id=f"extra-{index}-{user.id}",
++                current_period_start=now - timedelta(days=3),
++                current_period_end=now + timedelta(days=27),
++            )
++            for index, provider in enumerate(extra_providers)
++        ]
++        session.add_all(extras)
++        await session.commit()
++        extra_ids = [row.id for row in extras]
++
++    reached: list[object] = []
++
++    async def record_cancel(*args, **kwargs):
++        reached.append(args[2])
++        return httpx.Response(200, request=httpx.Request("POST", str(args[2])))
++
++    monkeypatch.setattr(replacement_module, "provider_request", record_cancel)
++    event_id = f"unsafe-{refusal}"
++    async with test_context["session_factory"]() as session:
++        with pytest.raises(BillingError) as error:
++            await BillingService(session, enabled, provider_name="creem").process_event(
++                provider="creem",
++                payload=_paid_event(attempt=attempt, target_code="pro", event_id=event_id),
++            )
++        assert error.value.code == refusal
++
++    async with test_context["session_factory"]() as session:
++        event = await session.scalar(
++            select(BillingEvent).where(BillingEvent.provider_event_id == event_id)
++        )
++        assert event is not None
++        assert event.processing_status == "failed"
++        assert event.error_code == refusal
++        notices = list((await session.scalars(select(OperationalIssue))).all())
++        # One alert, for a person to act on now, that names the failed event and says the
++        # customer paid and did not get the plan.
++        assert [row.dedupe_key for row in notices] == [f"billing:plan-move-failed:{event_id}"]
++        assert notices[0].severity == "critical"
++        assert notices[0].state == "open"
++        assert "Money was taken" in notices[0].summary
++        assert f"billing_error:{refusal}" in notices[0].evidence_refs
++        assert await session.scalar(select(func.count(PlanMoveMoneyOwed.id))) == 0
++        for extra_id in extra_ids:
++            kept = await session.get(Subscription, extra_id)
++            assert kept is not None and kept.status == SubscriptionStatus.ACTIVE
++        assert (
++            await session.scalar(
++                select(Subscription).where(
++                    Subscription.provider_subscription_id == f"new-creem-{attempt.id}"
++                )
++            )
++            is None
++        )
++    assert reached == []
++
++
++@pytest.mark.parametrize(("held_provider", "held_cycle"), HELD_PLAN_SHAPES)
++@pytest.mark.parametrize(("held_code", "target_code"), PLAN_PAIRS)
++async def test_abandoned_checkout_leaves_the_old_plan_untouched(
++    test_context,
++    held_provider: str,
++    held_cycle: str,
++    held_code: str,
++    target_code: str,
++) -> None:
++    """The owner's second safety property, first half: abandoning costs nothing.
++
++    Whatever shape the old paid plan has тАФ monthly card, annual card or a one-time
++    crypto invoice тАФ opening a payment page for another plan and never paying it leaves
++    that plan exactly as it was, live, with no money record and no cancellation.
++    """
++
++    email = (
++        f"abandoned-move-{held_provider}-{held_cycle}-"
++        f"{held_code}-{target_code}@example.com"
++    )
++    await _signup(test_context, email)
++    user, old, _source = await _seed_old_payment(
++        test_context,
++        email=email,
++        plan_code=held_code,
++        provider=held_provider,
++        billing_cycle=held_cycle,
++    )
++    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
+     await _prepare_new_checkout(
+         test_context, user=user, target_code=target_code, settings=enabled
+     )
+@@ -265,7 +655,15 @@ async def test_failed_card_cancellation_is_visible_and_reprocessed(
+         assert event is not None
+         assert event.processing_status == "failed"
+         assert event.error_code == "old_subscription_cancel_failed"
+-        assert await session.scalar(select(func.count(OperationalIssue.id))) == 1
++        notices = list((await session.scalars(select(OperationalIssue))).all())
++        assert [row.dedupe_key for row in notices] == [
++            "billing:plan-move-failed:move-cancel-failed"
++        ]
++        assert notices[0].severity == "critical"
++        assert notices[0].state == "open"
++        assert "could not be stopped after retries" in notices[0].summary
++        assert "Money was taken" in notices[0].summary
++        assert "billing_error:old_subscription_cancel_failed" in notices[0].evidence_refs
+         assert await session.scalar(select(func.count(PlanMoveMoneyOwed.id))) == 0
+ 
+     async def successful_cancel(*args, **kwargs):
+@@ -287,16 +685,64 @@ async def test_failed_card_cancellation_is_visible_and_reprocessed(
+             )
+         )
+         assert live_count == 1
++        owed = await session.scalar(select(PlanMoveMoneyOwed))
++        assert owed is not None
++        states = {
++            row.dedupe_key: row.state
++            for row in (await session.scalars(select(OperationalIssue))).all()
++        }
++        # The try that finished the move closes the failure alert. The money still owed
++        # keeps its own notice open, because that sum has not been sent yet.
++        assert states == {
++            "billing:plan-move-failed:move-cancel-failed": "resolved",
++            f"billing:money-owed:{owed.id}": "open",
++        }
++
++
++async def _prepare_crypto_checkout(
++    test_context, *, user: User, target_code: str, settings, request_key: str = ""
++) -> BillingCheckoutAttempt:
++    async with test_context["session_factory"]() as session:
++        prepared = await BillingService(
++            session, settings, provider_name="nowpayments"
++        ).prepare_checkout(
++            user_id=user.id,
++            plan_code=target_code,
++            billing_cycle="monthly",
++            request_key=request_key or f"crypto-move-{user.id}-{target_code}",
++            terms_accepted=True,
++            billing_profile={"first_name": "Amina"},
++        )
++        await session.commit()
++        return prepared.attempt
+ 
+ 
++@pytest.mark.parametrize(("held_provider", "held_cycle"), HELD_PLAN_SHAPES)
+ @pytest.mark.parametrize(("held_code", "target_code"), PLAN_PAIRS)
+ async def test_failed_payment_leaves_the_old_plan_untouched(
+-    test_context, held_code: str, target_code: str
++    test_context,
++    held_provider: str,
++    held_cycle: str,
++    held_code: str,
++    target_code: str,
+ ) -> None:
+-    email = f"failed-move-{held_code}-{target_code}@example.com"
++    """The owner's second safety property, second half: a declined payment costs nothing.
++
++    A failed payment for the new plan leaves the old paid plan тАФ monthly card, annual
++    card or one-time crypto тАФ untouched and still live. The customer is never left with
++    nothing after having paid for something.
++    """
++
++    email = (
++        f"failed-move-{held_provider}-{held_cycle}-{held_code}-{target_code}@example.com"
++    )
+     await _signup(test_context, email)
+     user, old, _source = await _seed_old_payment(
+-        test_context, email=email, plan_code=held_code
++        test_context,
++        email=email,
++        plan_code=held_code,
++        provider=held_provider,
++        billing_cycle=held_cycle,
+     )
+     enabled = test_context["settings"].model_copy(update=live_billing_overrides())
+     attempt = await _prepare_new_checkout(
+@@ -304,7 +750,7 @@ async def test_failed_payment_leaves_the_old_plan_untouched(
+     )
+     now = datetime.now(UTC)
+     payload = {
+-        "id": f"move-failed-{held_code}-{target_code}",
++        "id": f"move-failed-{held_provider}-{held_cycle}-{held_code}-{target_code}",
+         "type": "invoice.payment_failed",
+         "data": {
+             "checkout_attempt_id": str(attempt.id),
+@@ -329,3 +775,445 @@ async def test_failed_payment_leaves_the_old_plan_untouched(
+         assert failed_attempt is not None
+         assert failed_attempt.status == "payment_failed"
+         assert await session.scalar(select(func.count(PlanMoveMoneyOwed.id))) == 0
++
++
++async def test_canceled_event_does_not_downgrade_completed_attempt(
++    test_context,
++) -> None:
++    """A cancellation webhook for an old subscription still names the checkout that bought it.
++
++    That event is not a payment, so it must not move the settled attempt back to
++    "processing". Doing so hides the attempt from the money-owed path and breaks the
++    renewal words shown to the customer.
++    """
++
++    email = "completed-attempt-cancel-event@example.com"
++    await _signup(test_context, email)
++    user, old, source = await _seed_old_payment(
++        test_context, email=email, plan_code="trader"
++    )
++    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
++    assert source.status == "completed"
++    payload = {
++        "id": "cancel-old-sub",
++        "type": "subscription.canceled",
++        "data": {
++            "checkout_attempt_id": str(source.id),
++            "plan_code": "trader",
++            "provider_subscription_id": old.provider_subscription_id,
++            "status": "canceled",
++            "current_period_start": (
++                old.current_period_start.isoformat()
++                if old.current_period_start
++                else datetime.now(UTC).isoformat()
++            ),
++            "current_period_end": (
++                old.current_period_end.isoformat()
++                if old.current_period_end
++                else datetime.now(UTC).isoformat()
++            ),
++        },
++    }
++    async with test_context["session_factory"]() as session:
++        await BillingService(
++            session, enabled, provider_name="creem"
++        ).process_event(provider="creem", payload=payload)
++        await session.commit()
++    async with test_context["session_factory"]() as session:
++        attempt_after = await session.get(BillingCheckoutAttempt, source.id)
++        assert attempt_after is not None
++        assert attempt_after.status == "completed"
++
++
++async def test_paid_event_for_replaced_subscription_is_refused_and_alerted(
++    test_context, monkeypatch
++) -> None:
++    """A late renewal charge for the old subscription must not resurrect it.
++
++    After a move, the old subscription is ``CANCELED`` in our database. If the payment
++    company then sends a ``subscription.paid`` for that old provider subscription id, the
++    row must stay ended and a critical alert must tell a person that money was taken.
++    """
++
++    email = "resurrect-old-after-move@example.com"
++    await _signup(test_context, email)
++    user, old, source = await _seed_old_payment(
++        test_context, email=email, plan_code="trader"
++    )
++    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
++    attempt = await _prepare_new_checkout(
++        test_context, user=user, target_code="pro", settings=enabled
++    )
++
++    async def successful_cancel(*args, **kwargs):
++        return httpx.Response(200, request=httpx.Request("POST", str(args[2])))
++
++    monkeypatch.setattr(replacement_module, "provider_request", successful_cancel)
++    async with test_context["session_factory"]() as session:
++        result = await BillingService(
++            session, enabled, provider_name="creem"
++        ).process_event(
++            provider="creem",
++            payload=_paid_event(
++                attempt=attempt, target_code="pro", event_id="move-pro-paid"
++            ),
++        )
++        await session.commit()
++    assert result.processing_status == "processed"
++
++    async with test_context["session_factory"]() as session:
++        old_after_move = await session.get(Subscription, old.id)
++        assert old_after_move is not None
++        assert old_after_move.status == SubscriptionStatus.CANCELED
++
++    now = datetime.now(UTC)
++    resurrection_payload = {
++        "id": "old-sub-resurrected",
++        "type": "subscription.paid",
++        "data": {
++            "checkout_attempt_id": str(source.id),
++            "plan_code": "trader",
++            "provider_subscription_id": old.provider_subscription_id,
++            "amount": str(source.amount),
++            "currency": source.currency,
++            "status": "active",
++            "current_period_start": now.isoformat(),
++            "current_period_end": (now + timedelta(days=30)).isoformat(),
++        },
++    }
++    async with test_context["session_factory"]() as session:
++        with pytest.raises(BillingError) as error:
++            await BillingService(
++                session, enabled, provider_name="creem"
++            ).process_event(provider="creem", payload=resurrection_payload)
++        assert error.value.code == "subscription_resurrected_after_cancel"
++
++    async with test_context["session_factory"]() as session:
++        old_after = await session.get(Subscription, old.id)
++        event = await session.scalar(
++            select(BillingEvent).where(
++                BillingEvent.provider_event_id == "old-sub-resurrected"
++            )
++        )
++        assert old_after is not None
++        assert old_after.status == SubscriptionStatus.CANCELED
++        assert event is not None
++        assert event.processing_status == "failed"
++        assert event.error_code == "subscription_resurrected_after_cancel"
++        notices = list((await session.scalars(select(OperationalIssue))).all())
++        assert any(
++            row.dedupe_key == "billing:subscription-resurrected:old-sub-resurrected"
++            and row.severity == "critical"
++            and row.state == "open"
++            for row in notices
++        )
++
++
++#: Every provider event type that reaches `_upsert_subscription` for a subscription
++#: that already exists, with the status word that provider sends with it. Each one
++#: maps to ACTIVE or TRIALING тАФ each one is therefore a way to make an ended row live
++#: again. `subscription.paid` is included so the family is asserted whole, not just
++#: the payment half of it that the original guard covered.
++RESURRECTION_EVENTS: list[tuple[str, str]] = [
++    ("subscription.paid", "active"),
++    ("subscription.updated", "active"),
++    ("subscription.update", "active"),
++    ("customer.subscription.updated", "active"),
++    ("subscription.scheduled_cancel", "scheduled_cancel"),
++    ("subscription.trialing", "trialing"),
++]
++
++
++@pytest.mark.parametrize(("event_type", "provider_status"), RESURRECTION_EVENTS)
++async def test_a_late_event_of_any_type_cannot_resurrect_an_ended_subscription(
++    test_context, monkeypatch, event_type: str, provider_status: str
++) -> None:
++    """No event shape may set a CANCELED/EXPIRED row back to ACTIVE/TRIALING.
++
++    The guard used to fire only for paid event types. But Creem also sends
++    ``subscription.updated``, ``subscription.update``, ``customer.subscription.updated``
++    and ``subscription.scheduled_cancel`` тАФ all of which map to ACTIVE тАФ and
++    ``subscription.trialing``, which maps to TRIALING. Any of them arriving after our
++    cancel made the ended row live again: two paid plans charging, the exact outcome
++    the paid-event guard exists to prevent. A real re-subscribe gets a new provider
++    subscription id, so refusing these loses nothing legitimate.
++    """
++
++    slug = event_type.replace(".", "-")
++    email = f"resurrect-{slug}@example.com"
++    await _signup(test_context, email)
++    user, old, source = await _seed_old_payment(
++        test_context, email=email, plan_code="trader"
++    )
++    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
++    attempt = await _prepare_new_checkout(
++        test_context, user=user, target_code="pro", settings=enabled
++    )
++
++    async def successful_cancel(*args, **kwargs):
++        return httpx.Response(200, request=httpx.Request("POST", str(args[2])))
++
++    monkeypatch.setattr(replacement_module, "provider_request", successful_cancel)
++    async with test_context["session_factory"]() as session:
++        moved = await BillingService(
++            session, enabled, provider_name="creem"
++        ).process_event(
++            provider="creem",
++            payload=_paid_event(
++                attempt=attempt, target_code="pro", event_id=f"move-paid-{slug}"
++            ),
++        )
++        await session.commit()
++    assert moved.processing_status == "processed"
++
++    now = datetime.now(UTC)
++    late_event_id = f"late-{slug}"
++    late_payload = {
++        "id": late_event_id,
++        "type": event_type,
++        "data": {
++            "checkout_attempt_id": str(source.id),
++            "plan_code": "trader",
++            "provider_subscription_id": old.provider_subscription_id,
++            "amount": str(source.amount),
++            "currency": source.currency,
++            "status": provider_status,
++            "current_period_start": now.isoformat(),
++            "current_period_end": (now + timedelta(days=30)).isoformat(),
++        },
++    }
++    async with test_context["session_factory"]() as session:
++        with pytest.raises(BillingError) as error:
++            await BillingService(
++                session, enabled, provider_name="creem"
++            ).process_event(provider="creem", payload=late_payload)
++        assert error.value.code == "subscription_resurrected_after_cancel"
++
++    async with test_context["session_factory"]() as session:
++        old_after = await session.get(Subscription, old.id)
++        assert old_after is not None
++        assert old_after.status == SubscriptionStatus.CANCELED
++        live = list(
++            (
++                await session.scalars(
++                    select(Subscription).where(
++                        Subscription.user_id == user.id,
++                        Subscription.status.in_(
++                            [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]
++                        ),
++                    )
++                )
++            ).all()
++        )
++        assert [row.provider_subscription_id for row in live] == [
++            f"new-creem-{attempt.id}"
++        ]
++        event = await session.scalar(
++            select(BillingEvent).where(BillingEvent.provider_event_id == late_event_id)
++        )
++        assert event is not None
++        assert event.processing_status == "failed"
++        assert event.error_code == "subscription_resurrected_after_cancel"
++        resurrection_notices = [
++            row
++            for row in (await session.scalars(select(OperationalIssue))).all()
++            if row.dedupe_key.startswith("billing:subscription-resurrected:")
++        ]
++        assert [row.dedupe_key for row in resurrection_notices] == [
++            f"billing:subscription-resurrected:{late_event_id}"
++        ]
++        assert resurrection_notices[0].severity == "critical"
++        assert resurrection_notices[0].state == "open"
++
++
++async def test_a_mixed_case_event_id_failed_move_still_leaves_alert_and_failed_event(
++    test_context, monkeypatch
++) -> None:
++    """A Stripe-shaped event id (`evt_01JABCdefGHI`) must not lose the critical alert.
++
++    The dedupe key used to be validated lowercase-only, so a paid move that failed on
++    an event whose id carries uppercase raised inside `_save_replacement_failure`
++    *before* its commit: the failed ``BillingEvent`` row and the alert were both lost.
++    The key is now built through the queue's own sanitizer, and
++    ``_close_replacement_failure`` reads it back through the same function.
++    """
++
++    email = "mixed-case-move-cancel-fails@example.com"
++    await _signup(test_context, email)
++    user, old, _source = await _seed_old_payment(
++        test_context, email=email, plan_code="trader"
++    )
++    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
++    attempt = await _prepare_new_checkout(
++        test_context, user=user, target_code="pro", settings=enabled
++    )
++    payload = _paid_event(
++        attempt=attempt, target_code="pro", event_id="evt_01JABCdefGHI"
++    )
++
++    async def failed_cancel(*args, **kwargs):
++        raise httpx.ConnectError("offline", request=httpx.Request("POST", str(args[2])))
++
++    monkeypatch.setattr(replacement_module, "provider_request", failed_cancel)
++    async with test_context["session_factory"]() as session:
++        with pytest.raises(BillingError) as error:
++            await BillingService(session, enabled, provider_name="creem").process_event(
++                provider="creem", payload=payload
++            )
++        assert error.value.code == "old_subscription_cancel_failed"
++
++    async with test_context["session_factory"]() as session:
++        event = await session.scalar(
++            select(BillingEvent).where(BillingEvent.provider_event_id == "evt_01JABCdefGHI")
++        )
++        assert event is not None
++        assert event.processing_status == "failed"
++        assert event.error_code == "old_subscription_cancel_failed"
++        notices = list((await session.scalars(select(OperationalIssue))).all())
++        assert [row.dedupe_key for row in notices] == [
++            "billing:plan-move-failed:evt_01jabcdefghi"
++        ]
++        assert notices[0].severity == "critical"
++        assert notices[0].state == "open"
++        unchanged = await session.get(Subscription, old.id)
++        assert unchanged is not None
++        assert unchanged.status == SubscriptionStatus.ACTIVE
++
++
++async def test_lapsed_recurring_card_plan_is_frozen_and_cancelled_on_move(
++    test_context, monkeypatch
++) -> None:
++    """A card plan whose period has just ended is still the plan that gets replaced.
++
++    The payment company keeps the subscription ``ACTIVE`` until the renewal decision
++    arrives. In that window the replacement search must still find it, freeze it on the
++    checkout, and cancel it after the new payment; otherwise the old card keeps charging
++    next to the new plan.
++    """
++
++    email = "lapsed-card-move@example.com"
++    await _signup(test_context, email)
++    user, old, source = await _seed_old_payment(
++        test_context, email=email, plan_code="trader"
++    )
++    async with test_context["session_factory"]() as session:
++        old = await session.get(Subscription, old.id)
++        assert old is not None
++        old.current_period_end = datetime.now(UTC) - timedelta(days=1)
++        old.cancel_at_period_end = False
++        await session.commit()
++
++    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
++    attempt = await _prepare_new_checkout(
++        test_context, user=user, target_code="pro", settings=enabled
++    )
++    assert attempt.replaces_subscription_id == old.id
++    assert attempt.replaces_checkout_attempt_id == source.id
++
++    async def successful_cancel(*args, **kwargs):
++        return httpx.Response(200, request=httpx.Request("POST", str(args[2])))
++
++    monkeypatch.setattr(replacement_module, "provider_request", successful_cancel)
++    payload = _paid_event(
++        attempt=attempt, target_code="pro", event_id="lapsed-card-move-paid"
++    )
++    async with test_context["session_factory"]() as session:
++        result = await BillingService(
++            session, enabled, provider_name="creem"
++        ).process_event(provider="creem", payload=payload)
++        await session.commit()
++    assert result.processing_status == "processed"
++
++    async with test_context["session_factory"]() as session:
++        subscriptions = list(
++            (
++                await session.scalars(
++                    select(Subscription).where(Subscription.user_id == user.id)
++                )
++            ).all()
++        )
++        live = [row for row in subscriptions if row.status == SubscriptionStatus.ACTIVE]
++        recurring = [
++            row for row in live if (row.provider or "") in {"creem", "stripe"}
++        ]
++        old_after = await session.get(Subscription, old.id)
++        assert len(live) == 1
++        assert len(recurring) == 1
++        assert old_after is not None
++        assert old_after.status == SubscriptionStatus.CANCELED
++        assert old_after.cancel_at_period_end is False
++        assert await session.scalar(select(func.count(PlanMoveMoneyOwed.id))) == 0
++
++
++async def test_crypto_paid_move_with_failed_cancel_leaves_alert_and_failed_event(
++    test_context, monkeypatch
++) -> None:
++    """A crypto payment that cannot cancel the old card plan must still be visible.
++
++    NOWPayments event ids contain ``:``. Before the queue sanitized evidence refs, the
++    critical alert raised inside ``_save_replacement_failure`` before the commit, so
++    neither the alert nor the failed ``BillingEvent`` row survived.
++    """
++
++    email = "crypto-move-cancel-fails@example.com"
++    await _signup(test_context, email)
++    user, old, _source = await _seed_old_payment(
++        test_context, email=email, plan_code="trader"
++    )
++    enabled = test_context["settings"].model_copy(update=live_billing_overrides())
++    attempt = await _prepare_crypto_checkout(
++        test_context, user=user, target_code="pro", settings=enabled
++    )
++    assert attempt.replaces_subscription_id == old.id
++
++    async def failed_cancel(*args, **kwargs):
++        raise httpx.ConnectError("offline", request=httpx.Request("POST", str(args[2])))
++
++    monkeypatch.setattr(replacement_module, "provider_request", failed_cancel)
++
++    event_id = "nowpayments:np-finish-111:finished"
++    now = datetime.now(UTC)
++    payload = {
++        "id": event_id,
++        "type": "payment.finished",
++        "data": {
++            "checkout_attempt_id": str(attempt.id),
++            "plan_code": "pro",
++            "provider_subscription_id": "nowpayments_np-finish-111",
++            "provider_payment_reference": "np-finish-111",
++            "amount": str(attempt.amount),
++            "currency": attempt.currency,
++            "status": "active",
++            "current_period_start": now.isoformat(),
++            "current_period_end": (now + timedelta(days=30)).isoformat(),
++            "cancel_at_period_end": True,
++            "settlement_expected_amount": str(attempt.amount),
++            "settlement_actual_amount": str(attempt.amount),
++            "settlement_currency": attempt.currency,
++        },
++    }
++    async with test_context["session_factory"]() as session:
++        with pytest.raises(BillingError) as error:
++            await BillingService(
++                session, enabled, provider_name="nowpayments"
++            ).process_event(provider="nowpayments", payload=payload)
++        assert error.value.code == "old_subscription_cancel_failed"
++
++    async with test_context["session_factory"]() as session:
++        event = await session.scalar(
++            select(BillingEvent).where(BillingEvent.provider_event_id == event_id)
++        )
++        assert event is not None
++        assert event.processing_status == "failed"
++        assert event.error_code == "old_subscription_cancel_failed"
++        notices = list((await session.scalars(select(OperationalIssue))).all())
++        assert [row.dedupe_key for row in notices] == [
++            f"billing:plan-move-failed:{event_id}"
++        ]
++        assert notices[0].severity == "critical"
++        assert notices[0].state == "open"
++        assert "billing_event:nowpayments-np-finish-111-finished" in notices[0].evidence_refs
++        assert "billing_error:old_subscription_cancel_failed" in notices[0].evidence_refs
++        old_after = await session.get(Subscription, old.id)
++        assert old_after is not None
++        assert old_after.status == SubscriptionStatus.ACTIVE

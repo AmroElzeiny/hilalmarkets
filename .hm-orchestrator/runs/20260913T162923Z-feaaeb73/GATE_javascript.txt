@@ -1,0 +1,2 @@
+﻿PASS: checked 53 JavaScript files with Node.js.
+

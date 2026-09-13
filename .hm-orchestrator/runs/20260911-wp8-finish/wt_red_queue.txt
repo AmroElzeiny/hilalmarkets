@@ -1,0 +1,81 @@
+﻿.................F                                                       [100%]
+================================== FAILURES ===================================
+_________ test_the_queue_and_the_content_check_hold_one_length_limit __________
+
+session = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x000001BD174B7DA0>
+
+    async def test_the_queue_and_the_content_check_hold_one_length_limit(
+        session: AsyncSession,
+    ) -> None:
+        """One limit for a summary and a reason, and it is the content check's own.
+    
+        The queue allowed 240 characters, then ran a content check that refuses anything
+        over 200. A summary of 201 to 240 characters passed the first rule and failed the
+        second, and ``record_fired_alert``, which cut an alert's text to 240, would have
+        failed at the moment the alert fired — the alert becoming the failure.
+        """
+    
+        service = OperationalIssueService(session)
+        at_the_limit = ("Scan 7 is late. " * 13)[:MAX_RECORD_VALUE_LENGTH]
+        assert len(at_the_limit) == MAX_RECORD_VALUE_LENGTH
+    
+        issue = await _record(service, summary=at_the_limit)
+        assert issue.summary == at_the_limit
+        with pytest.raises(IssueQueueError, match=f"at most {MAX_RECORD_VALUE_LENGTH} characters"):
+>           await _record(service, dedupe_key="alert:too_long:api", summary=at_the_limit + "x")
+
+tests\unit\test_operational_issue_queue.py:251: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_operational_issue_queue.py:52: in _record
+    return await service.record_occurrence(**payload)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\ai_market_monitor\observability\issues.py:105: in record_occurrence
+    self._validate_payload(
+src\ai_market_monitor\observability\issues.py:356: in _validate_payload
+    assert_no_sensitive_content(summary, field="issue.summary")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = 'Scan 7 is late. Scan 7 is late. Scan 7 is late. Scan 7 is late. Scan 7 is late. Scan 7 is late. Scan 7 is late. Scan 7 is late. Scan 7 is late. Scan 7 is late. Scan 7 is late. Scan 7 is late. Scan 7 ix'
+
+    def assert_no_sensitive_content(
+        value: object,
+        *,
+        field: str,
+        max_length: int = MAX_RECORD_VALUE_LENGTH,
+    ) -> None:
+        """Raise when a value carries a secret, a prompt, model output or customer text.
+    
+        Applied to everything an operational record holds — label values, numeric units,
+        issue summaries, alert bodies. A record is allowed to say *that* a provider call
+        failed with an unauthorized status. It is not allowed to say what was sent.
+    
+        ``max_length`` exists for the one record that is deliberately several sentences
+        long: the body of a page, which this product writes itself from fixed text. The
+        length rule is a test for prose that arrived from somewhere else, so a caller that
+        knows its own text has a declared, bounded length raises the limit rather than
+        skipping the check — the credential and seed-phrase tests still run on every
+        character. There is no second copy of those tests anywhere.
+        """
+    
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                assert_no_sensitive_content(str(key), field=f"{field}.key")
+                assert_no_sensitive_content(item, field=f"{field}.{key}", max_length=max_length)
+            return
+        if isinstance(value, (list, tuple, set, frozenset)):
+            for item in value:
+                assert_no_sensitive_content(item, field=field, max_length=max_length)
+            return
+        if not isinstance(value, str):
+            return
+        if len(value) > max_length:
+>           raise SensitiveValueError(
+                f"{field} is {len(value)} characters. An operational record carries codes and "
+                "counts, never prose, a prompt or a model reply."
+            )
+E           ai_market_monitor.observability.labels.SensitiveValueError: issue.summary is 201 characters. An operational record carries codes and counts, never prose, a prompt or a model reply.
+
+src\ai_market_monitor\observability\labels.py:289: SensitiveValueError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_operational_issue_queue.py::test_the_queue_and_the_content_check_hold_one_length_limit
+1 failed, 17 passed in 12.87s

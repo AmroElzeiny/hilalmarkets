@@ -1,0 +1,3 @@
+﻿src\ai_market_monitor\services\billing.py:2597: error: Missing named argument "event_id" for "_hydrate_checkout_data" of "BillingService"  [call-arg]
+src\ai_market_monitor\services\billing.py:2986: error: Incompatible types in assignment (expression has type "Subscription | None", variable has type "Subscription")  [assignment]
+Found 2 errors in 1 file (checked 369 source files)

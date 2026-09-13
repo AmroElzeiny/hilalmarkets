@@ -81,7 +81,11 @@ addopts = "-q --strict-markers --import-mode=importlib"
 line-length = 100
 target-version = "py312"
 exclude = ["alembic/versions"]
-extend-exclude = ["HilalMarkets_Chatbot_AI_Evaluator"]
+# `.hm-orchestrator` holds the evidence each OpenCode run leaves behind, including the
+# throwaway probe scripts its workers write. It is a record of work, not product code, and
+# linting it made `ruff check .` — the release gate's own command — fail on files nobody
+# ships.
+extend-exclude = ["HilalMarkets_Chatbot_AI_Evaluator", ".hm-orchestrator"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

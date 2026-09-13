@@ -145,6 +145,13 @@ body.hilal-dashboard .hm-hilal .hilal-orb {
   cursor: pointer;
 }
 
+/* Room for the "Ask AI" label (`hm-ask-tag.css`), which hangs 10px above the circle and
+   is 26px tall. Without this it would sit on top of the travelling tag above. Only while
+   the window is shut: the label is hidden once it opens. */
+body.hilal-dashboard .hm-hilal .hilal-orb:not([aria-expanded="true"]) {
+  margin-block-start: 36px;
+}
+
 /* The face. Apple green: this is the one invitation on the screen. */
 body.hilal-dashboard .hm-hilal .hilal-orb-face {
   position: relative;

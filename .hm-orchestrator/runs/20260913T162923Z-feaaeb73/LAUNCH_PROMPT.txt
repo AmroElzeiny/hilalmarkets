@@ -1,0 +1,23 @@
+﻿RUN_ID: 20260913T162923Z-feaaeb73
+RUN_DIR: .hm-orchestrator/runs/20260913T162923Z-feaaeb73
+MISSION_FILE: .hm-orchestrator/runs/20260913T162923Z-feaaeb73/MISSION.md
+
+Execute this mission under the Hilal orchestration policies.
+You own execution. Claude Code must not be asked for routine progress.
+Write final evidence to:
+- .hm-orchestrator/runs/20260913T162923Z-feaaeb73/SUPERVISOR_REPORT.json
+- .hm-orchestrator/runs/20260913T162923Z-feaaeb73/SUPERVISOR_REPORT.md
+
+If escalation is required, also write:
+- .hm-orchestrator/runs/20260913T162923Z-feaaeb73/ESCALATION.json
+
+Read:
+- CLAUDE.md
+- AGENTS.md
+- .hm-orchestrator/policy/ROUTING_POLICY.md
+- .hm-orchestrator/policy/SUPERVISOR_REPORT_CONTRACT.md
+- .hm-orchestrator/models/LIVE_MODELS.md
+- .hm-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+- .hm-orchestrator/models/MODEL_METADATA_RULES.md
+- .hm-orchestrator/models/ROLE_MODEL_MAP.md
+Do not claim completion without evidence.

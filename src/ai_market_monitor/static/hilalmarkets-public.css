@@ -301,6 +301,16 @@ body.public-page .site-footer.hm-jinja-footer {
   }
 }
 
+/* The fixed AI launcher sits in the bottom-right corner (56px wide, 22px from the edges
+   on larger screens and 14px from the edges on phones). At 1024px and below the footer
+   legal text can wrap low enough to run underneath it, so the bottom band keeps a clear
+   90px column on the right where the launcher and its label breathe. */
+@media (max-width: 1024px) {
+  .hm-jinja-footer .hm-footer-bottom {
+    padding-right: 90px;
+  }
+}
+
 /* ==========================================================================
    Back to the top
    ==========================================================================
@@ -311,10 +321,13 @@ body.public-page .site-footer.hm-jinja-footer {
    **It sits above the assistant's button, not beside it.** Both are fixed to the
    bottom-right corner and neither knew about the other, so on every long page the two
    overlapped. The numbers here are the assistant's own, from
-   `hilalmarkets-public-chat.css`: it is 56px wide at right:22px bottom:22px, so
-   22 + 56 + 12 of air puts this clear above it, and right:26px centres this smaller
-   48px circle over the larger one — the pair reads as one column rather than two
-   near-misses.
+   `hilalmarkets-public-chat.css`: it is 56px wide at right:22px bottom:22px. Above it
+   sits its "Ask AI" label (`hm-ask-tag.css`): 10px of air, then 26px of label, which
+   grows upward to 29px at the top of its breath. So 22 + 56 + 10 + 29 is 117, and 11
+   more of air is 128,
+   and right:26px centres this smaller 48px circle over the larger one — the circle, its
+   label and this button read as one column rather than three near-misses.
+   `test_invariant_public_footer_and_chrome.py` reads these numbers out of the sheets.
 
    `z-index` stays below the assistant's panel and backdrop (445-450), so an open chat
    covers this rather than leaving a stray button floating over it.
@@ -322,7 +335,7 @@ body.public-page .site-footer.hm-jinja-footer {
 .hm-to-top {
   position: fixed;
   right: 26px;
-  bottom: 90px;
+  bottom: 128px;
   z-index: 60;
   display: inline-flex;
   align-items: center;
@@ -362,12 +375,13 @@ body.public-page .site-footer.hm-jinja-footer {
   background: #f3f6f9;
 }
 
-/* The assistant's button moves in at 640px, and this moves with it so the pair keeps
-   the same column and the same gap on a phone. */
+/* The assistant's button moves in at 640px, and this moves with it so the three keep
+   the same column and the same gap on a phone: 14 + 56 + 10 + 29 of label is 109, and
+   11 more of air is 120. */
 @media (max-width: 640px) {
   .hm-to-top {
     right: 18px;
-    bottom: 82px;
+    bottom: 120px;
   }
 }
 

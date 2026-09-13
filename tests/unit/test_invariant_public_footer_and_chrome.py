@@ -19,6 +19,7 @@ removed addresses, all three social channels, both renderers, both sheets.
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 
@@ -43,6 +44,7 @@ JINJA_FOOTER = (TEMPLATES / "hilal" / "partials" / "public_footer.html").read_te
 )
 PUBLIC_CSS = (STATIC / "hilalmarkets-public.css").read_text(encoding="utf-8")
 CHAT_CSS = (STATIC / "hilalmarkets-public-chat.css").read_text(encoding="utf-8")
+TAG_CSS = (STATIC / "hm-ask-tag.css").read_text(encoding="utf-8")
 REACT_CSS = (REACT / "index.css").read_text(encoding="utf-8")
 CONSENT_JS = (STATIC / "hilalmarkets-consent.js").read_text(encoding="utf-8")
 
@@ -313,6 +315,47 @@ def test_back_to_top_sits_clear_above_the_assistant_button() -> None:
     assert to_top_bottom >= launcher_bottom + launcher_height, (
         "back-to-top overlaps the assistant's button"
     )
+    # The circle now wears an "Ask AI" label above it, so clearing the circle alone is
+    # no longer enough: the label has to be cleared too, at the top of its breath.
+    assert to_top_bottom >= launcher_bottom + launcher_height + _tag_reach(), (
+        "back-to-top overlaps the assistant's Ask AI label"
+    )
+
+
+def test_back_to_top_sits_clear_above_the_assistant_label_on_a_phone() -> None:
+    """The same arithmetic with the phone numbers, which both sheets change at 640px."""
+
+    launcher_bottom = _pixels(_phone_rules(CHAT_CSS), ".public-chat-launcher", "bottom")
+    launcher_height = _pixels(CHAT_CSS, ".public-chat-launcher", "height")
+    to_top_bottom = _pixels(_phone_rules(PUBLIC_CSS), ".hm-to-top", "bottom")
+
+    assert to_top_bottom >= launcher_bottom + launcher_height + _tag_reach(), (
+        "on a phone, back-to-top overlaps the assistant's Ask AI label"
+    )
+
+
+def _phone_rules(css: str) -> str:
+    """The body of a sheet's `max-width: 640px` block."""
+
+    block = re.search(r"@media\s*\(max-width:\s*640px\)\s*\{(.*?)\n\}", css, re.DOTALL)
+    assert block, "the sheet has no phone block at 640px"
+    return block.group(1)
+
+
+def _tag_reach() -> int:
+    """How far the "Ask AI" label reaches above the top of the assistant's circle.
+
+    The air under it, plus its height at the peak of its breathing. It grows from its
+    bottom edge, so all of the growth is upward.
+    """
+
+    rule = re.search(r"\.hm-ask-tag\s*\{(.*?)\}", TAG_CSS, re.DOTALL)
+    assert rule, "hm-ask-tag.css has no rule for the label"
+    gap = re.search(r"bottom:\s*calc\(100%\s*\+\s*(\d+)px\)", rule.group(1))
+    height = re.search(r"\bheight:\s*(\d+)px", rule.group(1))
+    peak = re.search(r"\bscale:\s*(\d+(?:\.\d+)?)\s*;\s*\}\s*\}", TAG_CSS)
+    assert gap and height and peak, "the label's gap, height or peak scale is unreadable"
+    return int(gap.group(1)) + math.ceil(int(height.group(1)) * float(peak.group(1)))
 
 
 def test_back_to_top_has_exactly_one_owner() -> None:

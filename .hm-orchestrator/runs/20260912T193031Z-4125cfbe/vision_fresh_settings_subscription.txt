@@ -1,0 +1,50 @@
+﻿opencode.exe : [0m
+At C:\Users\amroe\AppData\Roaming\npm\opencode.ps1:14 char:3
++   & "$basedir/node_modules/opencode-ai/bin/opencode.exe"   $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([0m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+> hm-reviewer-visual ┬╖ deepseek-v4-flash-vision-exp
+[0m
+I inspected all 6 images. Results per image:
+
+**Image 1 тАФ Settings 1440x900**
+1. Group headings with blue "Ask AI": **8 of 8**. Where we tell you, Timing, How much we send, What we tell you about, On this screen, When a coin's Shariah status changes, Which exchanges we watch, Your data тАФ every one has the pill. None missing.
+4. **FAIL** тАФ overlap/clip: the assistant hint line "your AI assistant тАФ sees the page you are on тАФ here to" sits on top of the Timing card / time-zone row and is cut off at the right edge. The floating green Ask AI button also overlaps the card corner.
+
+**Image 2 тАФ Settings 1024x768**
+1. **8 of 8**, same set, all pills present.
+4. **FAIL** тАФ same assistant hint text overlaps the Timing card and is clipped at the right edge; floating green button overlaps the card.
+
+**Image 3 тАФ Settings 390x844**
+1. **8 of 8** headings present, each with an Ask AI pill (narrow but visible).
+4. **FAIL** тАФ the section tab strip is clipped at the right edge ("About wтАж", "On this screen" partly off) тАФ looks like a horizontal scroll, so I can't tell if it's a defect or intended scroll. The assistant hint text again overlaps the Timing card; floating Ask AI button overlaps content.
+
+**Image 4 тАФ Subscription 1440x900**
+2. No group-heading "Ask AI" buttons (unlike Settings). The old jump bar (What you have / Other plans / Your payments) is **absent**. Note: there **is** a floating "Ask AI" pill + green circular button on the page тАФ that is not a group/toolbar button.
+3. **No live green Pay button.** Explore = "This is your plan"; Plus and Pro = "Cannot be chosen yet" (lock icon). PASS.
+4. **FAIL** тАФ the assistant hint text "тАжrial тАФ your AI assistant тАФ sees the page you are on тАФ here" overlaps the Pro card and its "$17" price, and is clipped on the left.
+
+**Image 5 тАФ Subscription 1024x768**
+2. No group "Ask AI" buttons; old jump bar absent. Floating Ask AI pill + green button present.
+3. No live green Pay button (Explore "This is your plan"; Plus/Pro "Cannot be chosen yet"). PASS.
+4. **FAIL** тАФ hint text "тАжial тАФ your AI assistant тАФ sees the page you are on тАФ here" overlaps the Plus card area and is clipped at the left; Ask AI pill/button overlap card content.
+
+**Image 6 тАФ Subscription 390x844**
+2. No group "Ask AI" buttons; old jump bar absent. Floating Ask AI pill + green button present.
+3. No live green Pay button (same as above). PASS.
+4. **FAIL** тАФ hint text "тАжial тАФ your AI assistant тАФ sees the page you are" overlaps the "Market checks a week" card; Ask AI pill/button overlap content.
+
+**Summary**
+
+| Image | Q1 / Q2 | Q3 Pay button | Q4 overlap/clip |
+|---|---|---|---|
+| 1 Settings 1440 | 8/8 PASS | тАФ | FAIL (hint overlaps Timing card, clipped right) |
+| 2 Settings 1024 | 8/8 PASS | тАФ | FAIL (same) |
+| 3 Settings 390 | 8/8 PASS | тАФ | FAIL (hint overlap; tab strip clipped тАФ scroll, cannot confirm defect) |
+| 4 Sub 1440 | No group button; jump bar absent PASS | No green Pay тАФ PASS | FAIL (hint overlaps Pro card/price) |
+| 5 Sub 1024 | Same PASS | No green Pay тАФ PASS | FAIL (hint overlaps Plus card) |
+| 6 Sub 390 | Same PASS | No green Pay тАФ PASS | FAIL (hint overlaps Market-checks card) |
+
+The repeating defect is the assistant hint/tooltip text overlapping card content and clipping at the screen edge тАФ it appears in all 6 images. I can only judge what is visible; I did not inspect the DOM, so I cannot tell whether the clipped hint is intended truncation or a bug.

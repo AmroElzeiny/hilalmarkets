@@ -1,0 +1,30 @@
+============================= test session starts =============================
+collected 61 items
+
+tests\unit\test_operational_issue_queue.py ............................. [ 47%]
+......................FFFFFFFFFF                                         [100%]
+
+================================== FAILURES ===================================
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\observability\issues.py:456: ai_market_monitor.observability.issues.IssueQueueError: Evidence reference 'slo:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' must be a pointer such as 'slo:api_availability', never a payload.
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_operational_issue_queue.py:546: AssertionError: assert ['billing_eve...d-a-500-body'] == ['billing_eve...05347a194394']
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_operational_issue_queue.py:546: AssertionError: assert ['billing_eve...cel_failed--'] == ['billing_eve...da2ebb96dcea']
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_operational_issue_queue.py:546: AssertionError: assert ['billing_eve...rocess_event'] == ['billing_eve...28a684037087']
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_operational_issue_queue.py:546: AssertionError: assert ['billing_eve...-example.com'] == ['billing_eve...e7bc6b036505']
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_operational_issue_queue.py:546: AssertionError: assert ['billing_eve...abc123def456'] == ['billing_eve...31397e8fb8b5']
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_operational_issue_queue.py:581: AssertionError: assert 'billing_even...ed-a-500-body' == 'billing_even...605347a194394'
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_operational_issue_queue.py:602: AssertionError: slo:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_operational_issue_queue.py:626: Failed: DID NOT RAISE <class 'ai_market_monitor.observability.labels.SensitiveValueError'>
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_operational_issue_queue.py:626: Failed: DID NOT RAISE <class 'ai_market_monitor.observability.labels.SensitiveValueError'>
+- generated xml file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T103127Z-e7a9da76\D4_repro_before.xml -
+=========================== short test summary info ===========================
+FAILED tests/unit/test_operational_issue_queue.py::test_a_pointer_shaped_ref_is_stored_as_the_pointer_it_names[slo:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-slo:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]
+FAILED tests/unit/test_operational_issue_queue.py::test_a_payload_shaped_ref_is_reduced_to_a_pointer_not_stored[billing_event:the provider returned a 500 body-forbidden0]
+FAILED tests/unit/test_operational_issue_queue.py::test_a_payload_shaped_ref_is_reduced_to_a_pointer_not_stored[billing_event:{"code":500,"msg":"old_subscription_cancel_failed"}-forbidden1]
+FAILED tests/unit/test_operational_issue_queue.py::test_a_payload_shaped_ref_is_reduced_to_a_pointer_not_stored[billing_event:File "x.py", line 5, in process_event-forbidden2]
+FAILED tests/unit/test_operational_issue_queue.py::test_a_payload_shaped_ref_is_reduced_to_a_pointer_not_stored[billing_event:support@example.com-forbidden3]
+FAILED tests/unit/test_operational_issue_queue.py::test_a_payload_shaped_ref_is_reduced_to_a_pointer_not_stored[billing_event:https://api.provider.test/cb?token=abc123def456-forbidden4]
+FAILED tests/unit/test_operational_issue_queue.py::test_payload_reduction_is_deterministic_and_tells_payloads_apart
+FAILED tests/unit/test_operational_issue_queue.py::test_the_pointer_route_is_not_applied_to_identifiers
+FAILED tests/unit/test_operational_issue_queue.py::test_a_credential_inside_an_identifier_shaped_ref_is_refused[billing_event:sk-abcdefghijklmnopqrstuvwxyz012345]
+FAILED tests/unit/test_operational_issue_queue.py::test_a_credential_inside_an_identifier_shaped_ref_is_refused[billing_event:eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcDEF123]
+======================= 10 failed, 51 passed in 28.01s ========================

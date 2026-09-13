@@ -146,6 +146,13 @@ async def process_telegram_update(
             receipt.status = "ready"
             await session.commit()
         except Exception as exc:
+            # A failed flush leaves the session unusable until it is rolled back, and an
+            # unsaved receipt goes with it. This branch used to write to the receipt and
+            # commit straight away, which raised PendingRollbackError from inside the
+            # recovery itself: HTTP 500, Telegram delivered the same update again, and it
+            # failed the same way again. The person got no answer at all.
+            await session.rollback()
+            receipt = await _receipt_after_rollback(session, update_id=update_id, body=body)
             receipt.error_code = type(exc).__name__
             receipt.error_detail = "Telegram update processing required user recovery."
             fallback = _fallback_outbound(update)
@@ -179,6 +186,35 @@ async def process_telegram_update(
     receipt.processed_at = datetime.now(UTC)
     await session.commit()
     return {"ok": True, "replayed": False, "message_ids": delivery.message_ids}
+
+
+async def _receipt_after_rollback(
+    session: AsyncSession,
+    *,
+    update_id: str,
+    body: bytes,
+) -> TelegramUpdateReceipt:
+    """The receipt for this update, read again once the session has been rolled back.
+
+    A handler that committed part of its work has already saved the receipt; one that
+    failed before its first commit took the receipt down with it. Either way the object
+    held before the rollback is stale, so it is read or written afresh.
+    """
+
+    receipt = await session.scalar(
+        select(TelegramUpdateReceipt).where(TelegramUpdateReceipt.update_id == update_id)
+    )
+    if receipt is None:
+        receipt = TelegramUpdateReceipt(
+            update_id=update_id,
+            payload_hash=hashlib.sha256(body).hexdigest(),
+            status="processing",
+            response_payload={},
+            provider_message_ids=[],
+            created_at=datetime.now(UTC),
+        )
+        session.add(receipt)
+    return receipt
 
 
 def _parse_message(update: dict[str, Any]) -> TelegramInboundMessage | None:
@@ -245,8 +281,6 @@ def _processing_outbound(update: dict[str, Any]) -> TelegramOutboundMessage | No
             "explain_rule",
         }:
             text = "Processing..."
-        elif callback.data.startswith("billing:checkout:"):
-            text = "Creating secure payment link..."
         if text is None:
             return None
         return TelegramOutboundMessage(chat_id=callback.chat_id, text=text, menu=[])
@@ -323,34 +357,10 @@ def _fallback_outbound(update: dict[str, Any]) -> TelegramOutboundMessage | None
 
 
 def _outbound_to_dict(message: TelegramOutboundMessage) -> dict[str, Any]:
-    return {
-        "chat_id": message.chat_id,
-        "text": message.text,
-        "buttons": [
-            {"text": button.text, "callback_data": button.callback_data, "url": button.url}
-            for button in message.buttons
-        ],
-        "menu": message.menu,
-        "parse_mode": message.parse_mode,
-        "correlation_id": message.correlation_id,
-        "edit_message_id": message.edit_message_id,
-    }
+    """Store an answer for replay. One owner: see ``TelegramOutboundMessage.to_payload``."""
+
+    return message.to_payload()
 
 
 def _outbound_from_dict(payload: dict[str, Any]) -> TelegramOutboundMessage:
-    return TelegramOutboundMessage(
-        chat_id=str(payload["chat_id"]),
-        text=str(payload["text"]),
-        buttons=[
-            TelegramButton(
-                text=str(button["text"]),
-                callback_data=str(button["callback_data"]),
-                url=button.get("url"),
-            )
-            for button in payload.get("buttons", [])
-        ],
-        menu=[str(item) for item in payload.get("menu", [])],
-        parse_mode=payload.get("parse_mode"),
-        correlation_id=payload.get("correlation_id"),
-        edit_message_id=payload.get("edit_message_id"),
-    )
+    return TelegramOutboundMessage.from_payload(payload)

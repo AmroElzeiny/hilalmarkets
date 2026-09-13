@@ -1,13 +1,13 @@
 ﻿# Live OpenCode Go model snapshot
 
-Generated UTC: 2026-09-10T16:39:19.6329818Z
+Generated UTC: 2026-09-12T19:26:33.6017197Z
 
 Authority: local opencode models opencode-go --refresh --verbose.
 Do not invent variants. Inspect LIVE_MODELS_VERBOSE.txt for current metadata.
 
 ## Locally selectable
 
-- `opencode-go/deepseek-flash`
+- `opencode-go/deepseek-v4.1-flash`
 - `opencode-go/deepseek-v4-flash`
 - `opencode-go/deepseek-v4-flash-vision-exp`
 - `opencode-go/deepseek-v4-pro`
@@ -38,6 +38,7 @@ Do not invent variants. Inspect LIVE_MODELS_VERBOSE.txt for current metadata.
 ## Go endpoint inventory
 
 - `opencode-go/deepseek-flash`
+- `opencode-go/deepseek-v4.1-flash`
 - `opencode-go/deepseek-v4-flash`
 - `opencode-go/deepseek-v4-flash-vision-exp`
 - `opencode-go/deepseek-v4-pro`
@@ -76,5 +77,5 @@ Do not invent variants. Inspect LIVE_MODELS_VERBOSE.txt for current metadata.
 
 ## Drift
 
-Endpoint but not locally selectable: opencode-go/glm-5, opencode-go/grok-4.5, opencode-go/hy3-preview, opencode-go/kimi-k2.5, opencode-go/mimo-v2-omni, opencode-go/mimo-v2-pro, opencode-go/minimax-m2.5, opencode-go/omen-alpha, opencode-go/qwen3.5-plus
+Endpoint but not locally selectable: opencode-go/deepseek-flash, opencode-go/glm-5, opencode-go/grok-4.5, opencode-go/hy3-preview, opencode-go/kimi-k2.5, opencode-go/mimo-v2-omni, opencode-go/mimo-v2-pro, opencode-go/minimax-m2.5, opencode-go/omen-alpha, opencode-go/qwen3.5-plus
 Local but not endpoint: none
