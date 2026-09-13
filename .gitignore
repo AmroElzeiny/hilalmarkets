@@ -4,6 +4,10 @@
 !.env.example
 !.env.production.example
 
+# A Claude takeover pass: temporary, file-scoped permission to edit product code. It is
+# made and removed by tools/hm-orchestrator and must never be committed.
+.hm-orchestrator/current/CLAUDE_TAKEOVER.ok
+
 # Python environments and caches
 .venv/
 # Open Interpreter's own environment. Deliberately separate from .venv: it needs Python

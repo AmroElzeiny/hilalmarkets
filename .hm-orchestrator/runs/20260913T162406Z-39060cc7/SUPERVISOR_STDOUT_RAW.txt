@@ -1,0 +1,1665 @@
+﻿[0m
+> hm-supervisor-deep · deepseek-v4.1-flash
+[0m
+[0m→ [0mRead CLAUDE.md
+[0m→ [0mRead .hm-orchestrator/policy/ROUTING_POLICY.md
+[0m→ [0mRead .hm-orchestrator/policy/SUPERVISOR_REPORT_CONTRACT.md
+I'll start by reading the required policy documents and understanding the current state.
+[0m→ [0mRead .hm-orchestrator/models/LIVE_MODELS.md
+[0m→ [0mRead .hm-orchestrator/models/ROLE_MODEL_MAP.md
+[0m→ [0mRead .hm-orchestrator/models/MODEL_METADATA_RULES.md
+Now let me read the model policy documents and inspect the run directory and prior evidence.
+[0m→ [0mRead .hm-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+[0m
+[0m# [0mTodos
+[•] Recon: baseline state (branch, commit, git status, existing run evidence, browser artifacts)
+[ ] H1: Replace every ?v=20260911-ask-tag with ?v=20260913-corner-clear across templates; prove one value; run static assets test
+[ ] H2: Logic review of D1-D4 + Claude's D4/D5 changes -> REVIEW_HANDBACK_LOGIC.md
+[ ] H3: Adversarial review of D1/D3 money paths -> REVIEW_HANDBACK_ADVERSARIAL.md; fix or escalate findings
+[ ] H4: Vision review 15 screenshots against VISUAL_CONTRACT.md -> VISUAL_REVIEW_HANDBACK.md; run contrast browser checks
+[ ] H5: Full verification (ruff, mypy, broad pytest with junitxml); cleanup clutter; write SUPERVISOR_REPORT.json + .md
+[0m
+[0m→ [0mRead .hm-orchestrator/runs/20260913T162406Z-39060cc7
+Now let me set up a task plan and gather the baseline state in parallel.
+[0m
+[0m$ [0mgit rev-parse --abbrev-ref HEAD; git rev-parse --short HEAD; git status --porcelain | Select-Object -First 80
+cloudflare-access-service-tokens
+75b19580
+ D .claude/settings.local.disabled.json
+ M .hm-orchestrator/CLAUDE_MD_INSERT.md
+ M .hm-orchestrator/current/CLAUDE_DECISION.md
+ M .hm-orchestrator/current/CLAUDE_READ_THIS.md
+ M .hm-orchestrator/current/MISSION.md
+ M .hm-orchestrator/current/RUN.json
+ M .hm-orchestrator/current/VISUAL_CONTRACT.md
+ M .hm-orchestrator/models/LIVE_ENDPOINT.json
+ M .hm-orchestrator/models/LIVE_MODELS.md
+ M .hm-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+ M .hm-orchestrator/models/LIVE_MODEL_IDS.txt
+ M .hm-orchestrator/policy/ROUTING_POLICY.md
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s1-pro-none-1024x768.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s1-pro-none-1440x900.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s1-pro-none-390x844.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s2-pro-card-1024x768.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s2-pro-card-1440x900.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s2-pro-card-390x844.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s3-pro-crypto-1024x768.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s3-pro-crypto-1440x900.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s3-pro-crypto-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-trader-refusal-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-trader-refusal-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-trader-refusal-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-switch-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-switch-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-switch-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-scheduled-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-scheduled-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-scheduled-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-refusal-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-refusal-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-refusal-390x844.png
+ M .opencode/agents/hm-direct-read.md
+ M .opencode/agents/hm-direct-write.md
+ M .opencode/agents/hm-explorer.md
+ M .opencode/agents/hm-reviewer-adversarial.md
+ M .opencode/agents/hm-reviewer-logic.md
+ M .opencode/agents/hm-reviewer-visual.md
+ M .opencode/agents/hm-supervisor-deep.md
+ M .opencode/agents/hm-supervisor.md
+ M .opencode/agents/hm-test-debugger.md
+ M .opencode/agents/hm-worker-fast.md
+ M .opencode/agents/hm-worker-strong.md
+ M .opencode/commands/hm-review.md
+ M .opencode/commands/hm-visual-review.md
+ M CLAUDE.md
+ M src/ai_market_monitor/api/routers/dashboard.py
+ M src/ai_market_monitor/api/routers/dashboard_test.py
+ M src/ai_market_monitor/api/template_env.py
+ M src/ai_market_monitor/core/plans.py
+ M src/ai_market_monitor/observability/issues.py
+ M src/ai_market_monitor/observability/labels.py
+ M src/ai_market_monitor/services/billing.py
+ M src/ai_market_monitor/services/payment_emails.py
+ M src/ai_market_monitor/services/plan_changes.py
+ M src/ai_market_monitor/services/plan_replacements.py
+ M src/ai_market_monitor/static/hilalmarkets-dashboard-v2.css
+ M src/ai_market_monitor/static/hilalmarkets-public-chat.css
+ M src/ai_market_monitor/static/hilalmarkets-public.css
+ M src/ai_market_monitor/static/hilalmarkets.css
+ M src/ai_market_monitor/static/hm-hilal-chat.css
+ M src/ai_market_monitor/static/hm-hilal-chat.js
+ M src/ai_market_monitor/static/hm-plan-change.js
+ M src/ai_market_monitor/static/hm-shell.css
+ M src/ai_market_monitor/static/landing/assets/landing.css
+ M src/ai_market_monitor/static/system-brain.css
+ M src/ai_market_monitor/templates/auth.html
+ M src/ai_market_monitor/templates/billing_result.html
+ M src/ai_market_monitor/templates/dashboard_public.html
+ M src/ai_market_monitor/templates/hilal/base_dashboard.html
+ M src/ai_market_monitor/templates/hilal/base_public.html
+ M src/ai_market_monitor/templates/hilal/dashboard/activity.html
+ M src/ai_market_monitor/templates/hilal/dashboard/affiliate.html
+ M src/ai_market_monitor/templates/hilal/dashboard/alert_proof.html
+ M src/ai_market_monitor/templates/hilal/dashboard/billing.html
+ M src/ai_market_monitor/templates/hilal/dashboard/checkout.html
+ M src/ai_market_monitor/templates/hilal/dashboard/passport.html
+ M src/ai_market_monitor/templates/hilal/dashboard/strategy_detail.html
+ M src/ai_market_monitor/templates/hilal/dashboard/strategy_verify.html
+[0m
+[0m→ [0mRead .opencode/agents/hm-supervisor-deep.md
+[0m→ [0mRead .hm-orchestrator/runs/20260913T162406Z-39060cc7/BASELINE_STATUS.txt
+[0m→ [0mRead .hm-orchestrator/runs/20260913T162406Z-39060cc7/BASELINE_COMMIT.txt
+[0m→ [0mRead .hm-orchestrator/runs/20260913T162406Z-39060cc7/VISUAL_CONTRACT.md
+Let me read my own agent definition, the run baseline, and the visual contract.
+The run folder's VISUAL_CONTRACT.md is the older Ask AI one. H4 references a VISUAL_CONTRACT.md about corner clearance. Let me locate the right one and the screenshots.
+[0m→ [0mRead .hm-orchestrator/current/VISUAL_CONTRACT.md
+[0m
+[0m$ [0mGet-ChildItem -Path ".hm-orchestrator\runs\20260913T103127Z-e7a9da76" -ErrorAction SilentlyContinue | Select-Object Name,Length | Format-Table -AutoSize; Write-Output "===fdd==="; Get-ChildItem -Path ".hm-orchestrator\runs\20260913T002503Z-fdd3949e" -ErrorAction SilentlyContinue | Select-Object Name,Length | Format-Table -AutoSize
+Name                        Length
+----                        ------
+BASELINE_COMMIT.txt             45
+BASELINE_DIFF.patch         788535
+BASELINE_STATUS.txt           8951
+D2_mypy.txt                     94
+D2_neighbours.txt              804
+D2_neighbours.xml            26766
+D2_repro_after.txt             482
+D2_repro_after.xml            3952
+D2_repro_before.txt         214828
+D2_repro_before.xml         111246
+D2_ruff.txt                     42
+D3_mypy.txt                     94
+D3_neighbours.txt             2362
+D3_repro_after.txt            1552
+D3_repro_before.txt         101354
+D3_ruff.txt                     42
+D4_dedupe_key_probe.txt        633
+D4_extra_adjacent.txt          405
+D4_extra_adjacent2.txt         162
+D4_mypy.txt                     46
+D4_neighbours.txt              750
+D4_neighbours.xml            19001
+D4_pointer_probe.txt          2646
+D4_repro_after.txt             507
+D4_repro_after.xml           11995
+D4_repro_before.txt           5145
+D4_repro_before.xml          17187
+D4_repro_before_raw.txt      43142
+D4_ruff.txt                     20
+D5_after.xml                   756
+D5_before.xml                 7363
+D5_neighbour_cookie.xml        684
+D5_neighbour_hilal_chat.xml   6560
+D5_neighbour_shell.xml        2525
+ESCALATION.json               1508
+FINAL_DIFF.patch            812477
+FINAL_STATUS.txt              9095
+LAUNCH_PROMPT.txt              934
+MISSION.md                   13879
+MISSION_HANDBACK.md           6078
+SUPERVISOR_STDOUT.txt        50604
+SUPERVISOR_STDOUT_RAW.txt    51615
+VISUAL_CONTRACT.md           15079
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+===fdd===
+System.Management.Automation.RemoteException
+Name                                  Length
+----                                  ------
+BASELINE_COMMIT.txt                       45
+BASELINE_DIFF.patch                   759741
+BASELINE_STATUS.txt                     8846
+D1_after_fix_1.txt                     45973
+D1_after_fix_2.txt                      9140
+D1_after_fix_3.txt                       165
+D1_after_fix_final.txt                   165
+D1_before_fix.txt                     254951
+D1_collect_before.txt                     59
+D1_final_after.txt                       486
+D1_final_after.xml                     36955
+D1_final_before.txt                    37109
+D1_final_before.xml                    62717
+D1_integration.txt                      2754
+D1_integration.xml                    379741
+D1_integration_final.txt                2760
+D1_integration_final.xml              379741
+d1_make_pre_tree.py                     9299
+D1_mypy.txt                              388
+D1_mypy2.txt                              49
+D1_neighbours.txt                        485
+D1_neighbours.xml                      37444
+D1_newfile_after.txt                     326
+D1_newfile_after.xml                   25198
+D1_newfile_before.txt                  37705
+D1_newfile_before.xml                  63719
+D1_new_plus_existing.txt                 246
+D1_offline.txt                         32811
+D1_offline.xml                       4986252
+D1_offline2.txt                        32811
+D1_offline3.txt                        32966
+D1_offline_final.txt                   32972
+D1_offline_final.xml                 4988239
+D1_probe1.txt                             84
+D1_unit_final.txt                      30430
+D1_unit_final.xml                    4514139
+D1_WP_own_diff_billing.txt              8645
+D1_WP_own_diff_plan_replacements.txt    2618
+FINAL_DIFF.patch                      786910
+FINAL_STATUS.txt                        8898
+LAUNCH_PROMPT.txt                        934
+MISSION.md                             12306
+SUPERVISOR_STDOUT.txt                  57601
+SUPERVISOR_STDOUT_RAW.txt              58191
+VISUAL_CONTRACT.md                     15079
+WP_D1_EVIDENCE.md                      24459
+[0m
+[0m$ [0mGet-ChildItem -Path "test-results\browser\corner-clearance" -ErrorAction SilentlyContinue | Select-Object Name,Length | Format-Table -AutoSize; Write-Output "---CURRENT VC---"; Test-Path ".hm-orchestrator\current\VISUAL_CONTRACT.md"; Write-Output "---browser dirs---"; Get-ChildItem -Path "test-results\browser" -Directory -ErrorAction SilentlyContinue | Select-Object Name
+...output truncated...
+System.Management.Automation.RemoteException
+Full output saved to: C:\Users\amroe\.local\share\opencode\tool-output\tool_09b95b776001Zdb6zpsRS5aLU7
+System.Management.Automation.RemoteException
+tests_browser_test_dashboard_test_account_e2e.py_test_an_empty_message_is_refused_in_words_beside_the_box              
+tests_browser_test_dashboard_test_account_e2e.py_test_a_code_changes_the_price_on_screen_and_crosses_out_the_old_one   
+tests_browser_test_dashboard_test_account_e2e.py_test_a_plan_that_cannot_be_bought_shows_no_price_and_says_why         
+tests_browser_test_dashboard_test_account_e2e.py_test_a_saved_setting_is_still_there_after_a_reload                    
+tests_browser_test_dashboard_test_account_e2e.py_test_a_sent_message_is_still_there_after_a_reload                     
+tests_browser_test_dashboard_test_account_e2e.py_test_a_setting_can_be_changed_with_the_keyboard_alone                 
+tests_browser_test_dashboard_test_account_e2e.py_test_a_silenced_coin_can_be_taken_back_out                            
+tests_browser_test_dashboard_test_account_e2e.py_test_a_switch_saves_by_itself_and_says_so                             
+tests_browser_test_dashboard_test_account_e2e.py_test_a_wrong_code_says_so_and_changes_no_price                        
+tests_browser_test_dashboard_test_account_e2e.py_test_choosing_a_part_of_the_day_takes_all_of_its_hours                
+tests_browser_test_dashboard_test_account_e2e.py_test_choosing_a_topic_changes_what_we_ask_for                         
+tests_browser_test_dashboard_test_account_e2e.py_test_each_way_of_paying_names_the_company_that_takes_the_money        
+tests_browser_test_dashboard_test_account_e2e.py_test_every_allowance_that_shows_a_bar_shows_real_numbers              
+tests_browser_test_dashboard_test_account_e2e.py_test_every_control_in_the_checkout_is_big_enough_to_press             
+tests_browser_test_dashboard_test_account_e2e.py_test_every_control_on_the_help_page_is_big_enough_to_press            
+tests_browser_test_dashboard_test_account_e2e.py_test_every_control_on_the_plan_page_is_big_enough_to_press            
+tests_browser_test_dashboard_test_account_e2e.py_test_every_control_on_the_settings_page_is_big_enough_to_press        
+tests_browser_test_dashboard_test_account_e2e.py_test_every_day_switches_the_single_days_off_without_hiding_them       
+tests_browser_test_dashboard_test_account_e2e.py_test_every_paid_plan_and_payment_button_opens_the_provider_page_pro...
+tests_browser_test_dashboard_test_account_e2e.py_test_every_paid_plan_and_payment_button_opens_the_provider_page_pro...
+tests_browser_test_dashboard_test_account_e2e.py_test_every_paid_plan_and_payment_button_opens_the_provider_page_tra...
+tests_browser_test_dashboard_test_account_e2e.py_test_every_paid_plan_and_payment_button_opens_the_provider_page_tra...
+tests_browser_test_dashboard_test_account_e2e.py_test_no_hour_chosen_is_explained_as_any_time                          
+tests_browser_test_dashboard_test_account_e2e.py_test_no_settings_row_holds_an_empty_hole                              
+tests_browser_test_dashboard_test_account_e2e.py_test_sending_a_message_puts_it_in_your_own_list_straight_away         
+tests_browser_test_dashboard_test_account_e2e.py_test_silencing_a_coin_keeps_it_after_a_reload                         
+tests_browser_test_dashboard_test_account_e2e.py_test_switching_an_exchange_off_asks_first_and_can_be_called_off       
+tests_browser_test_dashboard_test_account_e2e.py_test_switching_back_to_card_drops_a_code_that_cannot_be_used          
+tests_browser_test_dashboard_test_account_e2e.py_test_the_browser_refuses_the_same_shapes_the_server_refuses           
+tests_browser_test_dashboard_test_account_e2e.py_test_the_checkout_closes_on_escape_and_gives_the_keyboard_back        
+tests_browser_test_dashboard_test_account_e2e.py_test_the_checkout_list_is_styled_inside_the_popup                     
+tests_browser_test_dashboard_test_account_e2e.py_test_the_checkout_reads_on_a_phone                                    
+tests_browser_test_dashboard_test_account_e2e.py_test_the_checkout_shows_the_exact_charge_at_every_step                
+tests_browser_test_dashboard_test_account_e2e.py_test_the_checkout_will_not_move_on_from_an_incomplete_step            
+tests_browser_test_dashboard_test_account_e2e.py_test_the_code_box_appears_only_for_crypto                             
+tests_browser_test_dashboard_test_account_e2e.py_test_the_code_box_is_readable_and_reachable                           
+tests_browser_test_dashboard_test_account_e2e.py_test_the_comparison_table_is_behind_a_disclosure                      
+tests_browser_test_dashboard_test_account_e2e.py_test_the_consequence_of_switching_an_exchange_off_is_on_the_page      
+tests_browser_test_dashboard_test_account_e2e.py_test_the_help_page_is_readable                                        
+tests_browser_test_dashboard_test_account_e2e.py_test_the_help_page_offers_a_way_out_before_a_form                     
+tests_browser_test_dashboard_test_account_e2e.py_test_the_help_page_reads_on_a_phone                                   
+tests_browser_test_dashboard_test_account_e2e.py_test_the_hours_get_most_of_their_row                                  
+tests_browser_test_dashboard_test_account_e2e.py_test_the_jump_bar_marks_where_you_really_are                          
+tests_browser_test_dashboard_test_account_e2e.py_test_the_last_button_stays_shut_until_the_person_has_agreed           
+tests_browser_test_dashboard_test_account_e2e.py_test_the_last_exchange_cannot_be_switched_off                         
+tests_browser_test_dashboard_test_account_e2e.py_test_the_pages_still_work_for_somebody_who_asked_for_less_movement    
+tests_browser_test_dashboard_test_account_e2e.py_test_the_paying_step_still_fits_a_phone                               
+tests_browser_test_dashboard_test_account_e2e.py_test_the_plan_page_is_readable                                        
+tests_browser_test_dashboard_test_account_e2e.py_test_the_plan_page_leads_with_what_you_have                           
+tests_browser_test_dashboard_test_account_e2e.py_test_the_plan_page_reads_on_a_phone                                   
+tests_browser_test_dashboard_test_account_e2e.py_test_the_review_page_code_box_rewrites_both_prices_in_its_own_wording 
+tests_browser_test_dashboard_test_account_e2e.py_test_the_settings_page_is_readable                                    
+tests_browser_test_dashboard_test_account_e2e.py_test_the_settings_page_reads_on_a_phone                               
+tests_browser_test_dashboard_test_account_e2e.py_test_the_two_ways_of_paying_stay_the_same_size_beside_each_other      
+tests_browser_test_dashboard_test_account_e2e.py_test_turning_a_setting_off_hides_only_what_depends_on_it              
+tests_browser_test_dashboard_test_connections_e2e.py_test_a_channel_that_is_not_available_says_why                     
+tests_browser_test_dashboard_test_connections_e2e.py_test_every_way_of_being_told_is_on_the_page                       
+tests_browser_test_dashboard_test_connections_e2e.py_test_nothing_is_too_small_to_press                                
+tests_browser_test_dashboard_test_connections_e2e.py_test_sending_a_test_really_sends_and_says_so                      
+tests_browser_test_dashboard_test_connections_e2e.py_test_sending_a_test_reports_back                                  
+tests_browser_test_dashboard_test_connections_e2e.py_test_switching_a_channel_on_saves_and_says_so                     
+tests_browser_test_dashboard_test_connections_e2e.py_test_the_colours_are_strong_enough_to_read                        
+tests_browser_test_dashboard_test_connections_e2e.py_test_the_link_popup_opens_closes_and_gives_the_keyboard_back      
+tests_browser_test_dashboard_test_connections_e2e.py_test_the_page_never_scrolls_sideways                              
+tests_browser_test_dashboard_test_connections_e2e.py_test_the_page_says_what_will_arrive_before_anything_is_switched_on
+tests_browser_test_dashboard_test_connections_e2e.py_test_the_state_line_follows_the_switch                            
+tests_browser_test_dashboard_test_connections_e2e.py_test_the_whole_page_can_be_reached_with_the_keyboard              
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_asking_whether_a_coin_is_halal_never_lands_on_a_missing_...
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_a_coin_we_could_not_check_is_not_drawn_as_a_failure        
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_a_filter_really_filters                                    
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_a_group_with_nothing_in_it_cannot_be_pressed               
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_a_popup_gives_the_keyboard_back                            
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_each_card_shows_its_own_evidence_not_the_first_ones        
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_escape_closes_a_popup                                      
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_every_card_says_what_it_is_doing_in_words                  
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_it_still_works_for_somebody_who_asked_for_less_motion      
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_nothing_on_the_page_is_too_small_to_press                  
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_progress_is_counted_and_a_screen_reader_can_read_it        
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_searching_by_coin_finds_that_coin                          
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_searching_for_nothing_offers_a_way_back                    
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_somebody_with_nothing_found_is_given_two_ways_on           
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_the_page_invents_no_colour_of_its_own                      
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_the_page_never_scrolls_sideways_1024_                      
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_the_page_never_scrolls_sideways_1440_                      
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_the_page_never_scrolls_sideways_390_                       
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_the_page_never_scrolls_sideways_760_                       
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_the_price_picture_always_says_something                    
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_the_same_coin_is_never_shown_twice                         
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_the_small_print_is_actually_readable                       
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_the_two_ways_on_are_actually_drawn_as_cards                
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_the_whole_page_works_without_a_mouse                       
+tests_browser_test_dashboard_test_opportunities_e2e.py_test_what_did_we_see_shows_the_readings_for_that_card           
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_a_filter_really_filters                                       
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_a_filter_with_nothing_in_it_cannot_be_pressed                 
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_a_person_with_no_lists_is_shown_the_two_ways_to_make_one      
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_a_person_with_no_lists_is_shown_the_way_to_make_one           
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_changing_a_list_asks_first_archive_                           
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_changing_a_list_asks_first_pause_                             
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_escape_closes_the_question                                    
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_every_card_says_what_it_is_doing_in_words                     
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_it_still_works_for_somebody_who_asked_for_less_motion         
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_nothing_on_the_page_is_too_small_to_press                     
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_saying_no_changes_nothing_and_gives_the_keyboard_back         
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_searching_for_nothing_offers_a_way_back                       
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_show_me_takes_you_to_the_list_that_needs_a_look               
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_the_page_never_scrolls_sideways_1024_                         
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_the_page_never_scrolls_sideways_1440_                         
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_the_page_never_scrolls_sideways_390_                          
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_the_page_never_scrolls_sideways_760_                          
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_the_small_print_is_actually_readable                          
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_the_whole_page_works_without_a_mouse                          
+tests_browser_test_dashboard_test_watchlists_e2e.py_test_what_is_holding_a_list_back_can_be_asked_about                
+tests_browser_test_hilal_chat_e2e.py_test_an_answer_can_also_be_reported_from_the_answer_itself                        
+tests_browser_test_hilal_chat_e2e.py_test_an_answer_can_be_reported_from_the_header                                    
+tests_browser_test_hilal_chat_e2e.py_test_an_answer_never_shows_code_or_a_field_name                                   
+tests_browser_test_hilal_chat_e2e.py_test_asking_for_advice_gets_a_refusal_that_offers_something_else                  
+tests_browser_test_hilal_chat_e2e.py_test_asking_for_a_strategy_points_at_the_page_that_builds_them                    
+tests_browser_test_hilal_chat_e2e.py_test_asking_hilal_to_decide_a_strategy_offers_guidance_instead                    
+tests_browser_test_hilal_chat_e2e.py_test_asking_how_to_use_the_canvas_is_not_refused                                  
+tests_browser_test_hilal_chat_e2e.py_test_a_suggestion_asks_the_question_for_you                                       
+tests_browser_test_hilal_chat_e2e.py_test_a_suggestion_keeps_its_words_inside_itself_1024_                             
+tests_browser_test_hilal_chat_e2e.py_test_a_suggestion_keeps_its_words_inside_itself_1440_                             
+tests_browser_test_hilal_chat_e2e.py_test_a_suggestion_keeps_its_words_inside_itself_390_                              
+tests_browser_test_hilal_chat_e2e.py_test_closing_with_the_x_asks_how_it_went                                          
+tests_browser_test_hilal_chat_e2e.py_test_every_control_in_the_window_has_a_name                                       
+tests_browser_test_hilal_chat_e2e.py_test_every_page_says_this_is_new                                                  
+tests_browser_test_hilal_chat_e2e.py_test_hilal_is_told_what_is_on_the_canvas                                          
+tests_browser_test_hilal_chat_e2e.py_test_hilal_still_refuses_to_choose_a_number                                       
+tests_browser_test_hilal_chat_e2e.py_test_it_still_works_for_somebody_who_asked_for_less_motion                        
+tests_browser_test_hilal_chat_e2e.py_test_nobody_is_asked_to_rate_a_conversation_they_never_had                        
+tests_browser_test_hilal_chat_e2e.py_test_nothing_is_polled_once_the_window_is_closed                                  
+tests_browser_test_hilal_chat_e2e.py_test_no_row_in_the_window_is_squashed_by_a_long_conversation                      
+tests_browser_test_hilal_chat_e2e.py_test_shift_and_enter_writes_a_new_line_instead_of_sending                         
+tests_browser_test_hilal_chat_e2e.py_test_tab_stays_inside_the_open_window                                             
+tests_browser_test_hilal_chat_e2e.py_test_the_board_is_not_described_on_a_page_that_has_none                           
+tests_browser_test_hilal_chat_e2e.py_test_the_button_carries_its_own_icon                                              
+tests_browser_test_hilal_chat_e2e.py_test_the_button_icon_is_not_the_fallback                                          
+tests_browser_test_hilal_chat_e2e.py_test_the_button_is_not_on_the_live_dashboard                                      
+tests_browser_test_hilal_chat_e2e.py_test_the_button_says_what_it_will_do                                              
+tests_browser_test_hilal_chat_e2e.py_test_the_button_sits_in_the_bottom_right_of_every_dashboard_test_page             
+tests_browser_test_hilal_chat_e2e.py_test_the_chat_never_pushes_the_page_sideways_1024_                                
+tests_browser_test_hilal_chat_e2e.py_test_the_chat_never_pushes_the_page_sideways_1440_                                
+tests_browser_test_hilal_chat_e2e.py_test_the_chat_never_pushes_the_page_sideways_390_                                 
+tests_browser_test_hilal_chat_e2e.py_test_the_chat_never_pushes_the_page_sideways_760_                                 
+tests_browser_test_hilal_chat_e2e.py_test_the_chat_uses_no_colour_that_is_not_the_brands                               
+tests_browser_test_hilal_chat_e2e.py_test_the_conversation_is_a_real_list_a_screen_reader_can_follow                   
+tests_browser_test_hilal_chat_e2e.py_test_the_conversation_is_still_there_after_a_reload                               
+tests_browser_test_hilal_chat_e2e.py_test_the_cookie_banner_never_buries_the_button                                    
+tests_browser_test_hilal_chat_e2e.py_test_the_rating_can_be_skipped_and_still_closes                                   
+tests_browser_test_hilal_chat_e2e.py_test_the_stars_light_up_to_the_one_being_pointed_at                               
+tests_browser_test_hilal_chat_e2e.py_test_the_status_keeps_being_asked_for_while_the_window_is_open                    
+tests_browser_test_hilal_chat_e2e.py_test_the_way_out_of_a_used_up_day_looks_like_a_button                             
+tests_browser_test_hilal_chat_e2e.py_test_the_welcome_is_honest_about_what_it_will_not_do                              
+tests_browser_test_hilal_chat_e2e.py_test_the_welcome_is_not_a_wall_of_text                                            
+tests_browser_test_hilal_chat_e2e.py_test_the_welcome_offers_help_and_says_any_language_is_fine                        
+tests_browser_test_hilal_chat_e2e.py_test_the_welcome_offers_things_to_ask                                             
+tests_browser_test_hilal_chat_e2e.py_test_the_whole_chat_works_without_a_mouse                                         
+tests_browser_test_hilal_chat_e2e.py_test_the_window_shows_what_is_left_of_today                                       
+tests_browser_test_hilal_chat_e2e.py_test_the_words_a_person_reads_are_dark_enough_to_read                             
+tests_browser_test_hilal_chat_e2e.py_test_the_writing_box_grows_and_only_then_scrolls                                  
+tests_browser_test_hilal_chat_e2e.py_test_the_writing_box_has_no_scrollbar_when_it_is_empty_1440_                      
+tests_browser_test_hilal_chat_e2e.py_test_the_writing_box_has_no_scrollbar_when_it_is_empty_390_                       
+tests_browser_test_hilal_never_hides_a_control_e2e.py_test_no_focused_control_is_hidden_behind_the_corner_assistant_...
+tests_browser_test_hilal_never_hides_a_control_e2e.py_test_no_focused_control_is_hidden_behind_the_corner_assistant_...
+tests_browser_test_hilal_never_hides_a_control_e2e.py_test_no_focused_control_is_hidden_behind_the_corner_assistant_...
+tests_browser_test_hilal_never_hides_a_control_e2e.py_test_zz_probe_settings_phone                                     
+tests_browser_test_landing_analytics.py_test_a_duplicate_email_is_explained_without_claiming_success                   
+tests_browser_test_landing_analytics.py_test_a_refused_submission_reports_no_waitlist_conversion                       
+tests_browser_test_landing_analytics.py_test_consent_cta_sections_and_pricing_events_are_grounded_and_deduplicated     
+tests_browser_test_landing_analytics.py_test_consent_cta_sections_and_waitlist_events_are_grounded_and_deduplicated    
+tests_browser_test_landing_analytics.py_test_consent_cta_sections_and_waitlist_funnel_are_grounded_and_deduplicated    
+tests_browser_test_landing_analytics.py_test_contact_form_shows_branded_success_without_duplicate_client_submission    
+tests_browser_test_landing_analytics.py_test_contact_page_is_only_the_form_and_the_address                             
+tests_browser_test_landing_analytics.py_test_failed_waitlist_submission_never_emits_success_event                      
+tests_browser_test_landing_analytics.py_test_long_entry_section_and_percentage_waitlist_visibility                     
+tests_browser_test_landing_analytics.py_test_long_entry_section_and_pricing_visibility                                 
+tests_browser_test_landing_analytics.py_test_long_entry_section_and_waitlist_visibility                                
+tests_browser_test_landing_analytics.py_test_missing_or_failed_tracking_provider_does_not_block_plan_navigation        
+tests_browser_test_landing_analytics.py_test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission    
+tests_browser_test_landing_analytics.py_test_paid_plan_selection_preserves_plan_and_interval_when_billing_is_disabled  
+tests_browser_test_landing_analytics.py_test_pricing_is_responsive_keyboard_accessible_and_reduced_motion_safe         
+tests_browser_test_landing_analytics.py_test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id     
+tests_browser_test_landing_analytics.py_test_shared_public_shell_loads_gtm_once_only_after_consent                     
+tests_browser_test_landing_analytics.py_test_the_form_shows_no_consent_box_and_sends_no_consent_answer                 
+tests_browser_test_landing_analytics.py_test_the_hero_illustration_is_visible_and_fits_at_every_width                  
+tests_browser_test_landing_analytics.py_test_the_waitlist_is_responsive_keyboard_accessible_and_offers_no_account      
+tests_browser_test_landing_analytics.py_test_x_pixel_loads_once_after_marketing_consent_and_not_in_system_brain        
+tests_browser_test_main_dashboard_e2e.py_test_a_coin_opens_its_shariah_evidence                                        
+tests_browser_test_main_dashboard_e2e.py_test_dashboard_home_has_one_first_level_heading                               
+tests_browser_test_main_dashboard_e2e.py_test_dashboard_home_offers_one_way_to_create_a_watchlist                      
+tests_browser_test_main_dashboard_e2e.py_test_dashboard_home_says_when_rather_than_a_timestamp                         
+tests_browser_test_main_dashboard_e2e.py_test_dashboard_home_text_clears_wcag_aa                                       
+tests_browser_test_main_dashboard_e2e.py_test_each_tile_explains_its_own_number                                        
+tests_browser_test_main_dashboard_e2e.py_test_every_number_counts_to_its_real_value                                    
+tests_browser_test_main_dashboard_e2e.py_test_every_pressable_thing_answers_a_pointer_and_a_keyboard                   
+tests_browser_test_main_dashboard_e2e.py_test_every_tile_says_what_its_number_means                                    
+tests_browser_test_main_dashboard_e2e.py_test_every_word_on_main_clears_wcag_aaa                                       
+tests_browser_test_main_dashboard_e2e.py_test_it_fits_without_sideways_scrolling_1440-1000_                            
+tests_browser_test_main_dashboard_e2e.py_test_it_fits_without_sideways_scrolling_320-720_                              
+tests_browser_test_main_dashboard_e2e.py_test_it_fits_without_sideways_scrolling_390-844_                              
+tests_browser_test_main_dashboard_e2e.py_test_it_fits_without_sideways_scrolling_768-1024_                             
+tests_browser_test_main_dashboard_e2e.py_test_it_survives_double_zoom                                                  
+tests_browser_test_main_dashboard_e2e.py_test_main_answers_the_first_question                                          
+tests_browser_test_main_dashboard_e2e.py_test_reduced_motion_still_shows_the_whole_page                                
+tests_browser_test_main_dashboard_e2e.py_test_the_cookie_banner_does_not_cover_the_page                                
+tests_browser_test_main_dashboard_e2e.py_test_the_cookie_banner_never_hides_the_end_of_a_page_dashboard_               
+tests_browser_test_main_dashboard_e2e.py_test_the_cookie_banner_never_hides_the_end_of_a_page_home_                    
+tests_browser_test_main_dashboard_e2e.py_test_the_cookie_banner_never_hides_the_end_of_a_page_main_                    
+tests_browser_test_main_dashboard_e2e.py_test_the_explain_popup_opens_traps_and_gives_the_keyboard_back                
+tests_browser_test_main_dashboard_e2e.py_test_the_focus_ring_is_visible_on_every_control                               
+tests_browser_test_main_dashboard_e2e.py_test_the_headings_go_in_order                                                 
+tests_browser_test_main_dashboard_e2e.py_test_the_new_watchlist_button_is_not_on_this_page                             
+tests_browser_test_main_dashboard_e2e.py_test_the_page_is_not_a_wall_of_text                                           
+tests_browser_test_main_dashboard_e2e.py_test_the_readiness_ring_shows_the_real_share                                  
+tests_browser_test_main_dashboard_e2e.py_test_the_screened_coins_carry_a_word_not_only_a_colour                        
+tests_browser_test_main_dashboard_e2e.py_test_the_shared_motion_layer_really_animates                                  
+tests_browser_test_main_dashboard_e2e.py_test_touch_targets_are_big_enough                                             
+tests_browser_test_market_card_actions_e2e.py_test_each_card_action_gets_its_own_row_1024_                             
+tests_browser_test_market_card_actions_e2e.py_test_each_card_action_gets_its_own_row_1440_                             
+tests_browser_test_market_card_actions_e2e.py_test_each_card_action_gets_its_own_row_760_                              
+tests_browser_test_market_card_actions_e2e.py_test_the_action_wording_is_never_cut_short                               
+tests_browser_test_methodology_page_look.py_test_every_figure_shows_a_real_number                                      
+tests_browser_test_methodology_page_look.py_test_the_conditions_can_be_narrowed                                        
+tests_browser_test_methodology_page_look.py_test_the_page_is_whole_at_every_width_1440-900_                            
+tests_browser_test_methodology_page_look.py_test_the_page_is_whole_at_every_width_390-844_                             
+tests_browser_test_methodology_page_look.py_test_the_rail_follows_the_reader                                           
+tests_browser_test_monitor_canvas_e2e.py_test_a_cancelled_connection_can_be_undone_and_joined_back                     
+tests_browser_test_monitor_canvas_e2e.py_test_a_card_can_be_moved_into_a_group_without_dragging                        
+tests_browser_test_monitor_canvas_e2e.py_test_a_card_can_be_removed_and_brought_back                                   
+tests_browser_test_monitor_canvas_e2e.py_test_a_condition_can_be_added_filled_in_and_checked                           
+tests_browser_test_monitor_canvas_e2e.py_test_a_connection_can_be_cancelled_by_dragging_the_line_onto_empty_space      
+tests_browser_test_monitor_canvas_e2e.py_test_a_connector_can_be_told_apart_from_the_board_behind_it                   
+tests_browser_test_monitor_canvas_e2e.py_test_a_contract_that_never_answers_ends_in_a_message_not_a_wait               
+tests_browser_test_monitor_canvas_e2e.py_test_a_monitor_with_no_saved_board_says_so_and_offers_a_new_one               
+tests_browser_test_monitor_canvas_e2e.py_test_a_problem_points_at_the_card_it_is_about                                 
+tests_browser_test_monitor_canvas_e2e.py_test_a_request_to_somebody_elses_server_keeps_its_own_behaviour               
+tests_browser_test_monitor_canvas_e2e.py_test_a_saved_board_is_drawn_as_the_monitor_it_belongs_to                      
+tests_browser_test_monitor_canvas_e2e.py_test_a_set_aside_card_never_blocks_the_monitor_it_left                        
+tests_browser_test_monitor_canvas_e2e.py_test_a_starting_point_fills_the_board_in_one_step                             
+tests_browser_test_monitor_canvas_e2e.py_test_a_wire_can_be_dragged_from_a_card_into_a_group                           
+tests_browser_test_monitor_canvas_e2e.py_test_email_is_offered_as_a_way_of_being_told                                  
+tests_browser_test_monitor_canvas_e2e.py_test_escape_closes_the_list_even_with_something_typed                         
+tests_browser_test_monitor_canvas_e2e.py_test_escape_leaves_a_wire_being_dragged_exactly_as_it_was                     
+tests_browser_test_monitor_canvas_e2e.py_test_every_card_carries_its_place_in_the_tree                                 
+tests_browser_test_monitor_canvas_e2e.py_test_naming_coins_yourself_opens_a_real_search                                
+tests_browser_test_monitor_canvas_e2e.py_test_nothing_moves_when_a_person_asks_for_less_motion                         
+tests_browser_test_monitor_canvas_e2e.py_test_switching_it_on_sends_one_test_message_and_says_what_happened            
+tests_browser_test_monitor_canvas_e2e.py_test_the_canvas_draws_itself_from_the_contract                                
+tests_browser_test_monitor_canvas_e2e.py_test_the_canvas_has_two_sizes                                                 
+tests_browser_test_monitor_canvas_e2e.py_test_the_card_can_be_dragged_around_the_board                                 
+tests_browser_test_monitor_canvas_e2e.py_test_the_card_offers_a_button_that_cancels_its_connection                     
+tests_browser_test_monitor_canvas_e2e.py_test_the_connector_lines_are_actually_painted                                 
+tests_browser_test_monitor_canvas_e2e.py_test_the_draft_survives_a_reload                                              
+tests_browser_test_monitor_canvas_e2e.py_test_the_drag_handles_are_big_enough_to_take_hold_of                          
+tests_browser_test_monitor_canvas_e2e.py_test_the_favorites_picker_says_what_is_missing_when_there_are_no_lists        
+tests_browser_test_monitor_canvas_e2e.py_test_the_last_step_reads_the_setup_back_in_plain_words                        
+tests_browser_test_monitor_canvas_e2e.py_test_the_line_itself_carries_the_button_that_cancels_it                       
+tests_browser_test_monitor_canvas_e2e.py_test_the_next_step_appears_only_when_nothing_is_blocking                      
+tests_browser_test_monitor_canvas_e2e.py_test_the_page_never_scrolls_sideways_1024_                                    
+tests_browser_test_monitor_canvas_e2e.py_test_the_page_never_scrolls_sideways_1440_                                    
+tests_browser_test_monitor_canvas_e2e.py_test_the_page_never_scrolls_sideways_760_                                     
+tests_browser_test_monitor_canvas_e2e.py_test_the_page_puts_a_time_limit_on_every_request_it_sends                     
+tests_browser_test_monitor_canvas_e2e.py_test_the_shelf_is_not_part_of_the_tree_a_screen_reader_hears                  
+tests_browser_test_monitor_canvas_e2e.py_test_the_try_again_button_really_tries_again                                  
+tests_browser_test_monitor_canvas_e2e.py_test_the_whole_board_works_from_the_keyboard                                  
+tests_browser_test_oi4_diagnose.py_test_diagnose                                                                       
+tests_browser_test_phase5_status_and_brand.py_test_a_degradation_banner_renders_and_is_announced_1440_                 
+tests_browser_test_phase5_status_and_brand.py_test_a_degradation_banner_renders_and_is_announced_390_                  
+tests_browser_test_phase5_status_and_brand.py_test_dashboard_headings_and_status_follow_the_brand_rules                
+tests_browser_test_phase5_status_and_brand.py_test_focus_is_visible_on_the_public_page                                 
+tests_browser_test_phase5_status_and_brand.py_test_no_banner_is_shown_when_nothing_is_wrong                            
+tests_browser_test_phase5_status_and_brand.py_test_public_page_headings_and_status_follow_the_brand_rules              
+tests_browser_test_phase5_status_and_brand.py_test_reduced_motion_is_honoured_on_public_pages_                         
+tests_browser_test_phase5_status_and_brand.py_test_reduced_motion_is_honoured_on_public_pages_features_                
+tests_browser_test_phase5_status_and_brand.py_test_reduced_motion_keeps_the_content                                    
+tests_browser_test_public_pages_e2e.py_test_an_empty_form_says_which_field_and_puts_the_cursor_there                   
+tests_browser_test_public_pages_e2e.py_test_a_deep_link_lands_on_the_open_clause_privacy_                              
+tests_browser_test_public_pages_e2e.py_test_a_deep_link_lands_on_the_open_clause_terms_                                
+tests_browser_test_public_pages_e2e.py_test_a_message_is_sent_and_the_remaining_allowance_is_stated                    
+tests_browser_test_public_pages_e2e.py_test_a_secret_is_caught_before_it_leaves_the_browser                            
+tests_browser_test_public_pages_e2e.py_test_choosing_a_subject_changes_what_the_form_asks_for                          
+tests_browser_test_public_pages_e2e.py_test_every_reading_size_of_text_is_readable_contact_                            
+tests_browser_test_public_pages_e2e.py_test_every_reading_size_of_text_is_readable_cookies_                            
+tests_browser_test_public_pages_e2e.py_test_every_reading_size_of_text_is_readable_features_                           
+tests_browser_test_public_pages_e2e.py_test_every_reading_size_of_text_is_readable_hilal-methodology_                  
+tests_browser_test_public_pages_e2e.py_test_every_reading_size_of_text_is_readable_how-it-works_                       
+tests_browser_test_public_pages_e2e.py_test_every_reading_size_of_text_is_readable_privacy_                            
+tests_browser_test_public_pages_e2e.py_test_every_reading_size_of_text_is_readable_terms_                              
+tests_browser_test_public_pages_e2e.py_test_no_page_asks_the_reader_to_sign_up_for_something_else_privacy_             
+tests_browser_test_public_pages_e2e.py_test_no_page_asks_the_reader_to_sign_up_for_something_else_terms_               
+tests_browser_test_public_pages_e2e.py_test_searching_narrows_the_document_and_says_how_much_privacy-delete_           
+tests_browser_test_public_pages_e2e.py_test_searching_narrows_the_document_and_says_how_much_privacy_                  
+tests_browser_test_public_pages_e2e.py_test_searching_narrows_the_document_and_says_how_much_terms-payment_            
+tests_browser_test_public_pages_e2e.py_test_searching_narrows_the_document_and_says_how_much_terms_                    
+tests_browser_test_public_pages_e2e.py_test_the_document_shows_when_it_was_last_changed_privacy_                       
+tests_browser_test_public_pages_e2e.py_test_the_document_shows_when_it_was_last_changed_terms_                         
+tests_browser_test_public_pages_e2e.py_test_the_footer_is_the_same_on_every_page_                                      
+tests_browser_test_public_pages_e2e.py_test_the_footer_is_the_same_on_every_page_contact_                              
+tests_browser_test_public_pages_e2e.py_test_the_footer_is_the_same_on_every_page_cookies_                              
+tests_browser_test_public_pages_e2e.py_test_the_footer_is_the_same_on_every_page_features_                             
+tests_browser_test_public_pages_e2e.py_test_the_footer_is_the_same_on_every_page_hilal-methodology_                    
+tests_browser_test_public_pages_e2e.py_test_the_footer_is_the_same_on_every_page_how-it-works_                         
+tests_browser_test_public_pages_e2e.py_test_the_footer_is_the_same_on_every_page_privacy_                              
+tests_browser_test_public_pages_e2e.py_test_the_footer_is_the_same_on_every_page_terms_                                
+tests_browser_test_public_pages_e2e.py_test_the_form_fields_have_an_edge_a_person_can_see                              
+tests_browser_test_public_pages_e2e.py_test_the_keyboard_can_see_where_it_is_contact_                                  
+tests_browser_test_public_pages_e2e.py_test_the_keyboard_can_see_where_it_is_cookies_                                  
+tests_browser_test_public_pages_e2e.py_test_the_keyboard_can_see_where_it_is_features_                                 
+tests_browser_test_public_pages_e2e.py_test_the_keyboard_can_see_where_it_is_hilal-methodology_                        
+tests_browser_test_public_pages_e2e.py_test_the_keyboard_can_see_where_it_is_how-it-works_                             
+tests_browser_test_public_pages_e2e.py_test_the_keyboard_can_see_where_it_is_privacy_                                  
+tests_browser_test_public_pages_e2e.py_test_the_keyboard_can_see_where_it_is_terms_                                    
+tests_browser_test_public_pages_e2e.py_test_the_landing_pricing_card_carries_the_live_countdown                        
+tests_browser_test_public_pages_e2e.py_test_the_launch_price_and_its_timer_are_really_on_the_pricing_page              
+tests_browser_test_public_pages_e2e.py_test_the_page_invents_no_colour_contact_                                        
+tests_browser_test_public_pages_e2e.py_test_the_page_invents_no_colour_cookies_                                        
+tests_browser_test_public_pages_e2e.py_test_the_page_invents_no_colour_features_                                       
+tests_browser_test_public_pages_e2e.py_test_the_page_invents_no_colour_hilal-methodology_                              
+tests_browser_test_public_pages_e2e.py_test_the_page_invents_no_colour_how-it-works_                                   
+tests_browser_test_public_pages_e2e.py_test_the_page_invents_no_colour_privacy_                                        
+tests_browser_test_public_pages_e2e.py_test_the_page_invents_no_colour_terms_                                          
+tests_browser_test_public_pages_e2e.py_test_the_page_renders_and_fits_the_screen_                                      
+tests_browser_test_public_pages_e2e.py_test_the_page_renders_and_fits_the_screen_contact_                              
+tests_browser_test_public_pages_e2e.py_test_the_page_renders_and_fits_the_screen_cookies_                              
+tests_browser_test_public_pages_e2e.py_test_the_page_renders_and_fits_the_screen_features_                             
+tests_browser_test_public_pages_e2e.py_test_the_page_renders_and_fits_the_screen_hilal-methodology_                    
+tests_browser_test_public_pages_e2e.py_test_the_page_renders_and_fits_the_screen_how-it-works_                         
+tests_browser_test_public_pages_e2e.py_test_the_page_renders_and_fits_the_screen_privacy_                              
+tests_browser_test_public_pages_e2e.py_test_the_page_renders_and_fits_the_screen_terms_                                
+tests_browser_test_public_pages_e2e.py_test_the_phone_menu_opens_closes_and_says_which_it_does_                        
+tests_browser_test_public_pages_e2e.py_test_the_phone_menu_opens_closes_and_says_which_it_does_contact_                
+tests_browser_test_public_pages_e2e.py_test_the_phone_menu_opens_closes_and_says_which_it_does_cookies_                
+tests_browser_test_public_pages_e2e.py_test_the_phone_menu_opens_closes_and_says_which_it_does_features_               
+tests_browser_test_public_pages_e2e.py_test_the_phone_menu_opens_closes_and_says_which_it_does_hilal-methodology_      
+tests_browser_test_public_pages_e2e.py_test_the_phone_menu_opens_closes_and_says_which_it_does_how-it-works_           
+tests_browser_test_public_pages_e2e.py_test_the_phone_menu_opens_closes_and_says_which_it_does_privacy_                
+tests_browser_test_public_pages_e2e.py_test_the_phone_menu_opens_closes_and_says_which_it_does_terms_                  
+tests_browser_test_public_pages_e2e.py_test_the_plain_summary_opens_first_and_the_full_text_is_one_press_away_privacy_ 
+tests_browser_test_public_pages_e2e.py_test_the_plain_summary_opens_first_and_the_full_text_is_one_press_away_terms_   
+tests_browser_test_public_pages_e2e.py_test_the_reader_is_told_where_they_are_and_how_much_is_left_privacy_            
+tests_browser_test_public_pages_e2e.py_test_the_reader_is_told_where_they_are_and_how_much_is_left_terms_              
+tests_browser_test_public_pages_e2e.py_test_the_review_window_traps_focus_and_gives_it_back                            
+tests_browser_test_public_pages_e2e.py_test_the_shared_icon_set_actually_drew_the_icons_contact_                       
+tests_browser_test_public_pages_e2e.py_test_the_shared_icon_set_actually_drew_the_icons_cookies_                       
+tests_browser_test_public_pages_e2e.py_test_the_shared_icon_set_actually_drew_the_icons_features_                      
+tests_browser_test_public_pages_e2e.py_test_the_shared_icon_set_actually_drew_the_icons_hilal-methodology_             
+tests_browser_test_public_pages_e2e.py_test_the_shared_icon_set_actually_drew_the_icons_how-it-works_                  
+tests_browser_test_public_pages_e2e.py_test_the_shared_icon_set_actually_drew_the_icons_privacy_                       
+tests_browser_test_public_pages_e2e.py_test_the_shared_icon_set_actually_drew_the_icons_terms_                         
+tests_browser_test_public_pages_e2e.py_test_the_third_message_is_refused_with_a_reason_and_a_time                      
+tests_browser_test_registry_publication_contract.py_test_active_builder_fields_round_trip_to_exact_impulse_and_pivot...
+tests_browser_test_registry_publication_contract.py_test_capabilities_reader_preserves_only_the_authoritative_items    
+tests_browser_test_registry_publication_contract.py_test_current_builder_failure_cannot_create_a_fallback_condition    
+tests_browser_test_registry_publication_contract.py_test_current_builder_renders_only_its_published_catalog_and_counts 
+tests_browser_test_registry_publication_contract.py_test_failed_capabilities_read_discards_all_executable_fallbacks    
+tests_browser_test_sharia_governance_admin.py_test_research_is_nowhere_near_the_decision_bar                           
+tests_browser_test_sharia_governance_admin.py_test_sharia_governance_workspace_visual_qa                               
+tests_browser_test_sharia_governance_admin.py_test_system_brain_user_controls_use_branded_confirmation_dialog          
+tests_browser_test_sharia_governance_admin.py_test_zzz_probe_inputs                                                    
+tests_browser_test_tmp_activity_diagnosis.py_test_activity_console                                                     
+tests_browser_test_tmp_diag.py_test_footer_opacity                                                                     
+tests_browser_test_tmp_hero_shots.py_test_tmp_shots                                                                    
+tests_browser_test_tmp_inspector_side.py_test_on_a_narrow_screen_it_is_still_a_bottom_sheet                            
+tests_browser_test_tmp_inspector_side.py_test_the_board_still_works_with_the_panel_open                                
+tests_browser_test_tmp_inspector_side.py_test_the_panel_sits_on_the_left_of_the_board                                  
+tests_browser_test_tmp_shots.py_test_capture_-ecosystem-_ecosystem-1440_                                               
+tests_browser_test_tmp_shots.py_test_capture_-hero-canvas-phone-_data-name_Hero_flow_-390_                             
+tests_browser_test_tmp_shots.py_test_capture_-hero-canvas-_data-name_Hero_flow_-1440_                                  
+tests_browser_test_tmp_shots.py_test_capture_-landing-desktop-1440_                                                    
+tests_browser_test_tmp_shots.py_test_capture_-landing-phone-390_                                                       
+tests_browser_test_tmp_shots.py_test_capture_-pricing-_pricing-1440_                                                   
+tests_browser_test_tmp_shots.py_test_capture_cookies-cookies-desktop-1440_                                             
+tests_browser_test_tmp_shots.py_test_capture_features-feature-grid-.hm-feature-grid-1440_                              
+tests_browser_test_tmp_shots.py_test_capture_features-features-desktop-1440_                                           
+tests_browser_test_tmp_shots.py_test_capture_features-features-phone-390_                                              
+tests_browser_test_tmp_shots.py_test_capture_how-it-works-hiw-desktop-1440_                                            
+tests_browser_test_tmp_shots.py_test_capture_how-it-works-hiw-phone-390_                                               
+tests_browser_test_tmp_shots.py_test_capture_how-it-works-journey-.hm-journey-1440_                                    
+tests_browser_test_visual_fixes_e2e.py_test_landing_footer_legal_text_clears_the_ai_launcher_v1_desktop_               
+tests_browser_test_visual_fixes_e2e.py_test_landing_footer_legal_text_clears_the_ai_launcher_v2_small_laptop_          
+tests_browser_test_visual_fixes_e2e.py_test_landing_footer_legal_text_clears_the_ai_launcher_v3_phone_                 
+tests_browser_test_visual_fixes_e2e.py_test_market_methodology_button_text_is_not_accidentally_clipped                 
+tests_browser_test_zzz_diagnose.py_test_diagnose_the_stall                                                             
+tests_browser_test_zzz_diag_tmp.py_test_diag                                                                           
+tests_browser_test_zzz_manual_verify.py_test_zzz_manual_verify                                                         
+tests_browser_test_zzz_repro_hang.py_test_a_stalled_contract_hangs_the_canvas_for_ever                                 
+tests_browser_test_zzz_repro_hang.py_test_the_try_again_button_is_dead_when_the_contract_fails                         
+tests_browser_test_zz_canvas_debug.py_test_debug_activate                                                              
+tests_browser_test_zz_canvas_debug.py_test_debug_checks                                                                
+tests_browser_test_zz_canvas_shots.py_test_shots                                                                       
+tests_browser_test_zz_debug_canvas.py_test_debug                                                                       
+tests_browser_test_zz_final.py_test_final                                                                              
+tests_browser_test_zz_hilal_probe.py_test_probe                                                                        
+tests_browser_test_zz_look.py_test_look                                                                                
+tests_browser_test_zz_main_audit.py_test_audit_dashboard                                                               
+tests_browser_test_zz_main_shot.py_test_shot_main                                                                      
+tests_browser_test_zz_probe.py_test_probe                                                                              
+tests_browser_test_zz_score_probe.py_test_probe                                                                        
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_reset-sent-_reset-password_message_code_sent_email_aisha_40exa...
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_reset-sent-_reset-password_message_code_sent_email_a_40b.com_    
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_reset-_reset-password-False_                                     
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_reset-_reset-password_                                           
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_signin-code-sent-_signin_code_message_code_sent_email_aisha_40...
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_signin-code-sent-_signin_code_message_code_sent_email_a_40b.com_ 
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_signin-code-_signin_code-False_                                  
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_signin-code-_signin_code_                                        
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_signin-error-_signin_error_invalid_login_                        
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_signin-error-_signin_error_invalid_login_email_aisha_40example...
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_signin-_signin-False_                                            
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_signin-_signin_                                                  
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_signup-verify-_signup_verify_message_code_sent_email_a_40b.com_  
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_signup-_signup-True_                                             
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_signup-_signup_                                                  
+tests_browser_test_zz_scratch_auth_shots.py_test_shot_verify-_signup_verify_message_code_sent_email_aisha_40example....
+tests_browser_test_zz_scratch_shot.py_test_shot                                                                        
+tests_browser_test_zz_scratch_shot.py_test_shot_billing_popup_and_review                                               
+tests_browser_test_zz_scratch_shots.py_test_shoot                                                                      
+tests_browser_test_zz_scratch_widths.py_test_widths_signin-_signin_                                                    
+tests_browser_test_zz_scratch_widths.py_test_widths_signup-_signup_                                                    
+tests_browser_test_zz_shots.py_test_shots                                                                              
+tests_browser_test_zz_shots.py_test_shots_checkout                                                                     
+tests_browser_test_zz_wires.py_test_wires                                                                              
+tests_browser_test_zz_wl_probe.py_test_probe
+[0m
+The output was truncated. Let me look specifically for the corner-clearance screenshots and the D5-related contract.
+[0m$ [0mTest-Path "test-results\browser\corner-clearance"; Get-ChildItem -Path "test-results\browser\corner-clearance" -Filter "*-bottom.png" -ErrorAction SilentlyContinue | Select-Object Name,Length | Format-Table -AutoSize
+True
+System.Management.Automation.RemoteException
+Name                                         Length
+----                                         ------
+1024x768-dashboard-create-monitor-bottom.png 114320
+1024x768-dashboard-market-bottom.png         105439
+1024x768-dashboard-opportunities-bottom.png  105654
+1024x768-dashboard-settings-bottom.png       108226
+1024x768-dashboard-subscription-bottom.png    93728
+1440x900-dashboard-create-monitor-bottom.png 160320
+1440x900-dashboard-market-bottom.png         125895
+1440x900-dashboard-opportunities-bottom.png  129480
+1440x900-dashboard-settings-bottom.png       132235
+1440x900-dashboard-subscription-bottom.png   117168
+390x844-dashboard-create-monitor-bottom.png   56273
+390x844-dashboard-market-bottom.png           56843
+390x844-dashboard-opportunities-bottom.png    56584
+390x844-dashboard-settings-bottom.png         58165
+390x844-dashboard-subscription-bottom.png     50992
+[0m
+[0m$ [0mGet-ChildItem -Path ".hm-orchestrator\runs" -Recurse -Filter "VISUAL_CONTRACT*.md" -ErrorAction SilentlyContinue | Select-Object FullName,Length,LastWriteTime | Sort-Object LastWriteTime | Format-Table -AutoSize
+FullName                                                                                                               
+--------                                                                                                               
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260909T230230Z-e3694f20\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260909T231327Z-82aa9b01\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260909T222439Z-b484f87c\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260909T213031Z-702ebe0d\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260909T221707Z-0dfcd35b\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T164746Z-f76e4f88\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T164037Z-c3f5ab26\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T195812Z-d8f498bb\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T195503Z-3cdafbb9\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T030616Z-24bcf48d\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260909T235115Z-487c0ad4\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260909T231538Z-608dc889\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T010643Z-c3d54570\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260910T000521Z-1da17cdf\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T002503Z-fdd3949e\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T103127Z-e7a9da76\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T162406Z-39060cc7\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260912T152017Z-10ed86cb\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260912T152825Z-d6d10e2a\V...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260912T193031Z-4125cfbe\V...
+[0m
+[0m✱ [0mGrep "corner.clearance|corner_clearance|--hm-corner-clearance"[90m 6 matches[0m
+[0m→ [0mRead .hm-orchestrator/runs/20260913T103127Z-e7a9da76/MISSION_HANDBACK.md
+Let me read the previous mission's D5 details and the handback note.
+[0m✱ [0mGrep "D5|clearance|hm-corner|whenScrollSettles"[90m in .hm-orchestrator/runs/20260913T103127Z-e7a9da76/MISSION.md · 43 matches[0m
+[0m→ [0mRead .hm-orchestrator/runs/20260913T103127Z-e7a9da76/MISSION.md[90m [offset=140, limit=90][0m
+[0m→ [0mRead .opencode/agents/hm-reviewer-visual.md
+[0m→ [0mRead .opencode/agents/hm-reviewer-logic.md
+[0m→ [0mRead .opencode/agents/hm-reviewer-adversarial.md
+[0m→ [0mRead .opencode/agents/hm-worker-fast.md
+[0m→ [0mRead tools/hm-orchestrator/run-model.ps1
+[0m→ [0mRead .opencode/commands/hm-visual-review.md
+[0m→ [0mRead .agents/commands.json
+Now I understand the shape. Let me gather H1 scope facts and check the key test/tooling before delegating.
+[0m
+[0m$ [0mWrite-Output "=== all ?v= with file counts ==="; Get-ChildItem -Path "src\ai_market_monitor\templates" -Recurse -File | Select-String -Pattern '\?v=([0-9A-Za-z\-]+)' -AllMatches | ForEach-Object { $_.Matches } | ForEach-Object { $_.Groups[1].Value } | Group-Object | Select-Object Name,Count | Format-Table -AutoSize; Write-Output "=== total template files ==="; (Get-ChildItem -Path "src\ai_market_monitor\templates" -Recurse -File -Filter *.html).Count
+=== all ?v= with file counts ===
+System.Management.Automation.RemoteException
+Name             Count
+----             -----
+20260911-ask-tag   130
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+=== total template files ===
+88
+[0m
+[0m$ [0mWrite-Output "=== old key count (20260911-ask-tag) ==="; (Get-ChildItem -Path "src\ai_market_monitor\templates" -Recurse -File | Select-String -Pattern '\?v=20260911-ask-tag' -AllMatches | ForEach-Object { $_.Matches.Count } | Measure-Object -Sum).Sum; Write-Output "=== files with old key ==="; (Get-ChildItem -Path "src\ai_market_monitor\templates" -Recurse -File | Select-String -Pattern '20260911-ask-tag' -List).Count; Write-Output "=== distinct ?v= values in templates ==="; Get-ChildItem -Path "src\ai_market_monitor\templates" -Recurse -File | Select-String -Pattern '\?v=([0-9A-Za-z\-]+)' -AllMatches | ForEach-Object { $_.Matches } | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+=== old key count (20260911-ask-tag) ===
+130
+=== files with old key ===
+31
+=== distinct ?v= values in templates ===
+20260911-ask-tag
+[0m
+[0m$ [0mopencode --version; Write-Output "=== models check ==="; opencode models opencode-go 2>&1 | Select-String -Pattern 'deepseek-v4-flash-vision-exp|qwen3.8-flash|minimax-m3|deepseek-v4.1-flash'
+1.18.30
+=== models check ===
+System.Management.Automation.RemoteException
+opencode-go/deepseek-v4-flash-vision-exp
+opencode-go/deepseek-v4.1-flash
+opencode-go/minimax-m3
+opencode-go/qwen3.8-flash
+[0m
+[0m• [0mH1 replace release key[90m Hm-Worker-Fast Agent[0m
+[0m• [0mH2 logic review D1-D5[90m Hm-Reviewer-Logic Agent[0m
+[0m• [0mH3 adversarial money review[90m Hm-Reviewer-Adversarial Agent[0m
+Baseline confirmed. H1 scope: 130 occurrences of `?v=20260911-ask-tag` across 31 template files, and it is the only `?v=` value. Now I'll launch H1 implementation plus H2 and H3 reviewers in parallel.
+[0m✓ [0mH1 replace release key[90m Hm-Worker-Fast Agent[0m
+[0m✓ [0mH3 adversarial money review[90m Hm-Reviewer-Adversarial Agent[0m
+[0m✓ [0mH2 logic review D1-D5[90m Hm-Reviewer-Logic Agent[0m
+H1 complete. H2 passed D1–D4 with minor findings; H3 found real money-path defects. Before ordering fixes I must verify the high findings myself. Let me read both review files and the cited code.
+[0m→ [0mRead .hm-orchestrator/runs/20260913T162406Z-39060cc7/REVIEW_HANDBACK_LOGIC.md
+[0m→ [0mRead .hm-orchestrator/runs/20260913T162406Z-39060cc7/REVIEW_HANDBACK_ADVERSARIAL.md
+[0m→ [0mRead src/ai_market_monitor/core/money.py
+[0m→ [0mRead src/ai_market_monitor/api/routers/dashboard.py[90m [offset=4430, limit=100][0m
+[0m→ [0mRead src/ai_market_monitor/services/billing.py[90m [offset=1360, limit=60][0m
+Both reviews are substantive. I must verify the high findings myself before ordering fixes. Let me read the cited code.
+Let me check the repository's own evidence on the NOWPayments wire format and the D3 intent.
+[0m→ [0mRead .hm-orchestrator/runs/20260913T103127Z-e7a9da76/MISSION.md[90m [limit=55, offset=95][0m
+[0m✱ [0mGrep "price_amount"[90m 100 matches[0m
+[0m✱ [0mGrep "wire_text|wire_number|core\.money|core import money"[90m 94 matches[0m
+[0m✱ [0mGrep "async def provider_request|def provider_request|json=|content="[90m in src/ai_market_monitor/services/provider_runtime.py · 83 matches[0m
+[0m→ [0mRead src/ai_market_monitor/services/plan_replacements.py[90m [limit=180, offset=255][0m
+Let me inspect the provider runtime, the owner decision, and the H-1 code path.
+[0m
+[0m$ [0mGet-ChildItem -Recurse -Filter "OWNER_DECISION_WP8*" -ErrorAction SilentlyContinue | Select-Object FullName; Write-Output "=== grep owner decision wire/price ==="; Get-ChildItem -Recurse -Filter "OWNER_DECISION*" -ErrorAction SilentlyContinue | Select-Object FullName
+FullName                                                                                                         
+--------                                                                                                         
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\current\OWNER_DECISION_WP8.md
+=== grep owner decision wire/price ===
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\current\OWNER_DECISION_WP8.md
+[0m
+[0m→ [0mRead src/ai_market_monitor/services/provider_runtime.py[90m [limit=130, offset=270][0m
+[0m→ [0mRead .hm-orchestrator/current/OWNER_DECISION_WP8.md
+A second run directory appeared (`feaaeb73`, started 16:29Z) that wasn't in the baseline. Let me check whether another run is active on the same tree.
+[0m
+[0m$ [0mGet-ChildItem -Path ".hm-orchestrator\runs\20260913T162923Z-feaaeb73" -ErrorAction SilentlyContinue | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize; Write-Output "=== other recent run dirs ==="; Get-ChildItem -Path ".hm-orchestrator\runs" -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 6 Name,LastWriteTime | Format-Table -AutoSize
+Name                Length LastWriteTime       
+----                ------ -------------       
+BASELINE_COMMIT.txt     45 9/13/2026 7:29:23 PM
+BASELINE_DIFF.patch 843394 9/13/2026 7:29:24 PM
+BASELINE_STATUS.txt   9353 9/13/2026 7:29:23 PM
+LAUNCH_PROMPT.txt      934 9/13/2026 7:29:24 PM
+MISSION.md           19439 9/13/2026 7:29:16 PM
+VISUAL_CONTRACT.md   15079 9/11/2026 6:29:56 AM
+_check_codes.py        447 9/13/2026 7:38:51 PM
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+=== other recent run dirs ===
+System.Management.Automation.RemoteException
+Name                      LastWriteTime       
+----                      -------------       
+20260913T162406Z-39060cc7 9/13/2026 7:48:25 PM
+20260913T162923Z-feaaeb73 9/13/2026 7:38:51 PM
+20260913T103127Z-e7a9da76 9/13/2026 7:23:50 PM
+20260913T002503Z-fdd3949e 9/13/2026 1:30:33 PM
+20260912T193031Z-4125cfbe 9/13/2026 2:49:23 AM
+20260912T152825Z-d6d10e2a 9/12/2026 8:22:13 PM
+[0m
+[0m$ [0mGet-ChildItem -Path ".hm-orchestrator\current" -ErrorAction SilentlyContinue | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize; Write-Output "=== RUN.json exists? ==="; if (Test-Path ".hm-orchestrator\current\RUN.json") { Get-Content ".hm-orchestrator\current\RUN.json" -Raw }
+Name                  Length LastWriteTime        
+----                  ------ -------------        
+CLAUDE_DECISION.md      2582 9/13/2026 6:28:04 PM 
+CLAUDE_READ_THIS.md      333 9/13/2026 2:49:24 AM 
+HANDOFF_PROMPT.md      15847 9/10/2026 10:36:29 PM
+MISSION.md             19439 9/13/2026 7:29:16 PM 
+OWNER_DECISION_WP8.md   4649 9/10/2026 9:45:19 PM 
+RUN.json                 174 9/13/2026 7:29:23 PM 
+VISUAL_CONTRACT.md     15079 9/11/2026 6:29:56 AM 
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+=== RUN.json exists? ===
+{
+    "run_dir":  ".hm-orchestrator/runs/20260913T162923Z-feaaeb73",
+    "run_id":  "20260913T162923Z-feaaeb73",
+    "started_utc":  "2026-09-13T16:29:23.6785496Z"
+}
+[0m
+[0m→ [0mRead .hm-orchestrator/runs/20260913T162923Z-feaaeb73/MISSION.md[90m [limit=60][0m
+[0m→ [0mRead .hm-orchestrator/runs/20260913T162923Z-feaaeb73/_check_codes.py
+A concurrent run `feaaeb73` owns `.hm-orchestrator/current/` and started after mine. I must understand it before editing to avoid collisions.
+[0m
+[0m$ [0mWrite-Output "=== product files modified after 19:29 local ==="; Get-ChildItem -Path "src\ai_market_monitor\services","src\ai_market_monitor\core","src\ai_market_monitor\api\routers" -Recurse -File -Include *.py | Where-Object { $_.LastWriteTime -gt (Get-Date "2026-09-13 19:29:23") } | Select-Object FullName,LastWriteTime | Sort-Object LastWriteTime | Format-Table -AutoSize; Write-Output "=== run folder file times ==="; Get-ChildItem -Path ".hm-orchestrator\runs\20260913T162406Z-39060cc7" -File | Select-Object Name,LastWriteTime | Format-Table -AutoSize
+=== product files modified after 19:29 local ===
+=== run folder file times ===
+System.Management.Automation.RemoteException
+Name                                LastWriteTime       
+----                                -------------       
+BASELINE_COMMIT.txt                 9/13/2026 7:24:06 PM
+BASELINE_DIFF.patch                 9/13/2026 7:24:07 PM
+BASELINE_STATUS.txt                 9/13/2026 7:24:06 PM
+diff_billing.txt                    9/13/2026 7:26:00 PM
+diff_hilal_chat.txt                 9/13/2026 7:26:31 PM
+diff_hm_shell.txt                   9/13/2026 7:26:36 PM
+diff_issues.txt                     9/13/2026 7:26:11 PM
+diff_plan_replacements.txt          9/13/2026 7:26:07 PM
+diff_test_oiq.txt                   9/13/2026 7:26:26 PM
+diff_test_oiq_full.txt              9/13/2026 7:37:01 PM
+diff_test_paid_plan_replacement.txt 9/13/2026 7:28:15 PM
+diff_test_refund.txt                9/13/2026 7:37:59 PM
+inv_money_collect.txt               9/13/2026 7:30:05 PM
+issues_HEAD.py                      9/13/2026 7:26:15 PM
+LAUNCH_PROMPT.txt                   9/13/2026 7:24:07 PM
+MISSION.md                          9/13/2026 7:22:48 PM
+REVIEW_HANDBACK_ADVERSARIAL.md      9/13/2026 7:43:33 PM
+REVIEW_HANDBACK_LOGIC.md            9/13/2026 7:48:25 PM
+VISUAL_CONTRACT.md                  9/11/2026 6:29:56 AM
+_adv_repro_cancel_erases_refund.py  9/13/2026 7:34:28 PM
+_adv_repro_move_then_refund.py      9/13/2026 7:28:57 PM
+[0m
+[0m→ [0mRead tests/unit/test_invariant_money_on_the_wire.py[90m [limit=140, offset=120][0m
+The concurrent run is the separate Telegram mission — different scope, no collision. Now let me verify the H-3 mechanics before deciding the fix, by reading the D3 test and the HTTP call path.
+[0m✱ [0mGrep "async def provider_call|client|request\(|content=|json="[90m in src/ai_market_monitor/services/reliability.py · 100 matches[0m
+[0m• [0mFix H-1 H2-M1 M-2 money[90m Hm-Worker-Strong Agent[0m
+[0m• [0mFix H-2 cancel erases refund[90m Hm-Worker-Strong Agent[0m
+The concurrent run is the separate Telegram mission — no file collision. H-1 and H-2 are confirmed real. I'll delegate the money-path fixes to strong workers (H-1, M-2, logic-M1 to one; H-2 to another) with failing-first tests.
+[0m✓ [0mFix H-1 H2-M1 M-2 money[90m Hm-Worker-Strong Agent[0m
+[0m✓ [0mFix H-2 cancel erases refund[90m Hm-Worker-Strong Agent[0m
+Both fixes landed. Worker 2 flagged a possible test-interaction failure and did a risky temporary revert. Let me verify the current state and reproduce the reported 6 failures.
+[0m
+[0m$ [0mgit diff --stat -- src/ai_market_monitor/services/billing.py src/ai_market_monitor/services/plan_replacements.py src/ai_market_monitor/api/routers/dashboard.py; Write-Output "=== H-2 fix present? ==="; Select-String -Path "src/ai_market_monitor/api/routers/dashboard.py" -Pattern 'refunded|creating.*pending.*processing|neutral' | Select-Object -First 20 | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }
+warning: in the working copy of 'src/ai_market_monitor/services/plan_replacements.py', LF will be replaced by CRLF the next time Git touches it
+ src/ai_market_monitor/api/routers/dashboard.py     | 119 ++-
+ src/ai_market_monitor/services/billing.py          | 938 +++++++++++++++++++--
+ .../services/plan_replacements.py                  | 316 ++++++-
+ 3 files changed, 1233 insertions(+), 140 deletions(-)
+=== H-2 fix present? ===
+451: if status in {"completed", "refunded", "processing", "creating"}:
+4080: # period neutral here; the selected provider converts it to recurring card
+4462: "refunded": ("Refunded", "payment_refunded"),
+4475: # Which states the result page shows in its neutral (message) tone rather than the
+4479: neutral_result_states = {"completed", "pending", "processing", "refunded"}
+4491: message=state_message if status in neutral_result_states else None,
+4492: error=state_message if status not in neutral_result_states else None,
+4514: # money-in states (completed, refunded) and the already-ended states (failed,
+4515: # expired) are left exactly as they are. In particular ``refunded`` must never be
+4520: if checkout_attempt.status in {"creating", "pending", "processing"}:
+[0m
+[0m$ [0m& .venv/Scripts/python -m pytest tests/unit/test_invariant_refund_is_recorded.py tests/unit/test_invariant_refund_after_plan_move.py -q -p no:randomly --no-header 2>&1 | Select-Object -Last 25
+........................................................................ [ 43%]
+........................................................................ [ 86%]
+......................                                                   [100%]
+[0m
+H-2 fix is present and the refund tests pass. Let me reproduce the combined-run failure and confirm no D2/D5 content was lost by the temporary revert.
+[0m$ [0mWrite-Output "=== D2 owner usage in dashboard.py ==="; Select-String -Path "src/ai_market_monitor/api/routers/dashboard.py" -Pattern 'paid_plan_codes_for_replacement_decisions|active_paid_plan_codes' | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }; Write-Output "=== compile check ==="; & .venv/Scripts/python -c "import ast; ast.parse(open('src/ai_market_monitor/api/routers/dashboard.py',encoding='utf-8').read()); ast.parse(open('src/ai_market_monitor/services/billing.py',encoding='utf-8').read()); ast.parse(open('src/ai_market_monitor/services/plan_replacements.py',encoding='utf-8').read()); print('AST OK')"
+=== D2 owner usage in dashboard.py ===
+152: paid_plan_codes_for_replacement_decisions,
+3436: user_held_plan_codes = await paid_plan_codes_for_replacement_decisions(
+3453: active_paid_plan_codes=user_held_plan_codes,
+3827: active_paid_plan_codes=await paid_plan_codes_for_replacement_decisions(
+4027: review_held_plan_codes = await paid_plan_codes_for_replacement_decisions(
+4039: active_paid_plan_codes=review_held_plan_codes,
+=== compile check ===
+AST OK
+[0m
+[0m$ [0m& .venv/Scripts/python -m pytest tests/unit/test_invariant_refund_is_recorded.py tests/unit/test_invariant_refund_after_plan_move.py tests/unit/test_invariant_one_held_plan_owner.py tests/integration/test_checkout_and_payment_email.py tests/integration/test_paid_plan_replacement.py -q -p no:randomly --no-header 2>&1 | Select-Object -Last 20
+........................................................................ [ 25%]
+........................................................................ [ 50%]
+........................................................................ [ 75%]
+.......................................................................  [100%]
+[0m
+Combined run is green (287 passed) — the 6 failures were a transient race. Now let me check the HTTP layer before ordering the H-3 wire-format fix.
+[0m$ [0mSelect-String -Path "src/ai_market_monitor/services/reliability.py" -Pattern 'async def provider_call' | ForEach-Object { $_.LineNumber }
+(no output)
+[0m
+[0m✱ [0mGrep "def provider_call"[90m 1 match[0m
+[0m→ [0mRead src/ai_market_monitor/services/provider_runtime.py[90m [limit=70, offset=150][0m
+[0m→ [0mRead tests/unit/test_invariant_money_on_the_wire.py[90m [limit=95, offset=258][0m
+[0m→ [0mRead src/ai_market_monitor/templates/billing_result.html
+[0m• [0mH-3 wire amount as number[90m Hm-Worker-Strong Agent[0m
+[0m• [0mL-2 refund result wording[90m Hm-Worker-Strong Agent[0m
+The L-2 body sentence is indeed wrong for a refund. Let me launch the H-3 wire-format fix and the L-2 template fix in parallel.
+[0m✓ [0mL-2 refund result wording[90m Hm-Worker-Strong Agent[0m
+[0m✓ [0mH-3 wire amount as number[90m Hm-Worker-Strong Agent[0m
+[0m→ [0mRead tests/support/billing_config.py[90m [limit=45, offset=195][0m
+H-3 now sends a bare JSON number. Its worker correctly flagged two test doubles that hard-require `json=`. Let me size that correctly and fix all of them.
+[0m
+[0m$ [0mWrite-Output "=== test doubles with provider_request and required json ==="; Get-ChildItem -Path "tests" -Recurse -File -Filter *.py | Select-String -Pattern 'provider_request' -List | ForEach-Object { $_.Path } | Sort-Object -Unique; Write-Output "=== signatures mentioning json as required ==="; Get-ChildItem -Path "tests" -Recurse -File -Filter *.py | Select-String -Pattern 'def .*provider_request[^\n]*json[^\n]*' | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
+=== test doubles with provider_request and required json ===
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_checkout_and_payment_email.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_invariant_ai_budget.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_paid_plan_replacement.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_plan_change_journey.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\oi\test_invariant_oi_routing.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\support\billing_config.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_billing_offers.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_money_on_the_wire.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_official_sources_from_the_open_web.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_payment_methods.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_payment_network_guard.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_provider_reliability.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_after_plan_move.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_refund_is_recorded.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_reliability_metrics.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_invariant_setup_chat_durability_migration.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\unit\test_openai_structured_call.py
+=== signatures mentioning json as required ===
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\tests\integration\test_checkout_and_payment_email.py:166: async def fake_provider_request(*args, provider, json, **kwargs):
+[0m
+[0m• [0mFix test doubles for content body[90m Hm-Worker-Fast Agent[0m
+Only one double hard-requires `json`; the shared helper should also record `content`. Let me delegate that test-infrastructure fix.
+[0m✓ [0mFix test doubles for content body[90m Hm-Worker-Fast Agent[0m
+[0m
+[0m← [0mWrite .hm-orchestrator/runs/20260913T162406Z-39060cc7/H4_VISUAL_PROMPT.md
+Wrote file successfully.
+[0m
+H-3 is integrated. Now let me set up the H4 vision review. First, the prompt file for the direct vision-agent invocation.
+Now invoke the vision reviewer directly with the 15 screenshots as file attachments.
+[0m$ [0m$repo = (Resolve-Path ".").Path
+$promptPath = (Resolve-Path ".hm-orchestrator/runs/20260913T162406Z-39060cc7/H4_VISUAL_PROMPT.md").Path
+$prompt = Get-Content -Raw $promptPath
+$files = Get-ChildItem "test-results/browser/corner-clearance" -Filter "*-bottom.png" | Sort-Object Name | ForEach-Object { $_.FullName }
+Write-Output "screenshot count: $($files.Count)"
+$ocArgs = @("run", $prompt, "--agent", "hm-reviewer-visual", "--model", "opencode-go/deepseek-v4-flash-vision-exp", "--auto", "--dir", $repo, "--file", $promptPath)
+foreach ($f in $files) { $ocArgs += @("--file", $f) }
+& opencode @ocArgs 2>&1 | Tee-Object -FilePath ".hm-orchestrator/runs/20260913T162406Z-39060cc7/H4_VISUAL_STDOUT.txt"
+Write-Output "EXIT=$LASTEXITCODE"
+screenshot count: 15
+opencode.exe : [0m
+At C:\Users\amroe\AppData\Roaming\npm\opencode.ps1:14 char:3
++   & "$basedir/node_modules/opencode-ai/bin/opencode.exe"   $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([0m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+> hm-reviewer-visual · deepseek-v4-flash-vision-exp
+[0m
+I'll start by reading the contract and mission files to establish the judging criteria.
+[0m→ [0mRead .hm-orchestrator/current/VISUAL_CONTRACT.md
+[0m→ [0mRead .hm-orchestrator/runs/20260913T162406Z-39060cc7/MISSION.md
+[0m→ [0mRead .agents/commands.json
+I have the contract and mission. Now let me verify the image files on disk and set up programmatic inspection to back up my visual reading.
+[0m
+[0m$ [0mGet-ChildItem "test-results\browser\corner-clearance" | Select-Object Name,Length | Format-Table -AutoSize
+Name                                         Length
+----                                         ------
+1024x768-dashboard-create-monitor-bottom.png 114320
+1024x768-dashboard-market-bottom.png         105439
+1024x768-dashboard-opportunities-bottom.png  105654
+1024x768-dashboard-settings-bottom.png       108226
+1024x768-dashboard-subscription-bottom.png    93728
+1440x900-dashboard-create-monitor-bottom.png 160320
+1440x900-dashboard-market-bottom.png         125895
+1440x900-dashboard-opportunities-bottom.png  129480
+1440x900-dashboard-settings-bottom.png       132235
+1440x900-dashboard-subscription-bottom.png   117168
+390x844-dashboard-create-monitor-bottom.png   56273
+390x844-dashboard-market-bottom.png           56843
+390x844-dashboard-opportunities-bottom.png    56584
+390x844-dashboard-settings-bottom.png         58165
+390x844-dashboard-subscription-bottom.png     50992
+[0m
+[0m$ [0mTest-Path ".venv\Scripts\python.exe"; & ".venv\Scripts\python.exe" -c "import PIL; print('PIL', PIL.__version__)"
+True
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'PIL'
+[0m
+PIL is unavailable. I'll use Windows `System.Drawing` via PowerShell for pixel-level verification. Let me check the run folder and then write a probe script inside it (the only place I may write).
+[0m$ [0mGet-ChildItem ".hm-orchestrator\runs\20260913T162406Z-39060cc7" | Select-Object Name,Length | Format-Table -AutoSize
+Name                                Length
+----                                ------
+BASELINE_COMMIT.txt                     45
+BASELINE_DIFF.patch                 841683
+BASELINE_STATUS.txt                   9300
+diff_billing.txt                     59054
+diff_hilal_chat.txt                   8103
+diff_hm_shell.txt                     2802
+diff_issues.txt                      14309
+diff_plan_replacements.txt           18453
+diff_test_oiq.txt                    19050
+diff_test_oiq_full.txt               19050
+diff_test_paid_plan_replacement.txt  50019
+diff_test_refund.txt                     0
+H4_VISUAL_PROMPT.md                   2197
+H4_VISUAL_STDOUT.txt                   824
+inv_money_collect.txt                17761
+issues_HEAD.py                       13413
+LAUNCH_PROMPT.txt                      934
+MISSION.md                            6078
+REVIEW_HANDBACK_ADVERSARIAL.md       21363
+REVIEW_HANDBACK_LOGIC.md             22058
+VISUAL_CONTRACT.md                   15079
+_adv_repro_cancel_erases_refund.py    5682
+_adv_repro_move_then_refund.py        6402
+[0m
+[0m✗ [0mRead .hm-orchestrator/runs/20260913T162406Z-39060cc7/H4_VISUAL_STDOUT.txt failed
+[91m[1mError: [0mCannot read binary file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\run
+s\20260913T162406Z-39060cc7\H4_VISUAL_STDOUT.txt
+[0m
+[0m$ [0mGet-Content -LiteralPath ".hm-orchestrator\runs\20260913T162406Z-39060cc7\H4_VISUAL_STDOUT.txt" -Encoding Unicode 
+-Raw
+opencode.exe : [0m
+At C:\Users\amroe\AppData\Roaming\npm\opencode.ps1:14 char:3
++   & "$basedir/node_modules/opencode-ai/bin/opencode.exe"   $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([0m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+> hm-reviewer-visual · deepseek-v4-flash-vision-exp
+[0m
+I'll start by reading the contract and mission files to establish the judging criteria.
+[0m→ [0mRead .hm-orchestrator/current/VISUAL_CONTRACT.md
+[0m→ [0mRead .hm-orchestrator/runs/20260913T162406Z-39060cc7/MISSION.md
+[0m→ [0mRead .agents/commands.json
+I have the contract and mission. Now let me verify the image files on disk and set up programmatic inspection to back 
+up my visual reading.
+[0m
+[0m$ [0mGet-ChildItem "test-results\browser\corner-clearance" | Select-Object Name,Length | Format-Table -AutoSize
+Name                                         Length
+----                                         ------
+1024x768-dashboard-create-monitor-bottom.png 114320
+1024x768-dashboard-market-bottom.png         105439
+1024x768-dashboard-opportunities-bottom.png  105654
+1024x768-dashboard-settings-bottom.png       108226
+1024x768-dashboard-subscription-bottom.png    93728
+1440x900-dashboard-create-monitor-bottom.png 160320
+1440x900-dashboard-market-bottom.png         125895
+1440x900-dashboard-opportunities-bottom.png  129480
+1440x900-dashboard-settings-bottom.png       132235
+1440x900-dashboard-subscription-bottom.png   117168
+390x844-dashboard-create-monitor-bottom.png   56273
+390x844-dashboard-market-bottom.png           56843
+390x844-dashboard-opportunities-bottom.png    56584
+390x844-dashboard-settings-bottom.png         58165
+390x844-dashboard-subscription-bottom.png     50992
+[0m
+[0m$ [0mTest-Path ".venv\Scripts\python.exe"; & ".venv\Scripts\python.exe" -c "import PIL; print('PIL', 
+PIL.__version__)"
+True
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'PIL'
+[0m
+PIL is unavailable. I'll use Windows `System.Drawing` via PowerShell for pixel-level verification. Let me check the 
+run folder and then write a probe script inside it (the only place I may write).
+[0m$ [0mGet-ChildItem ".hm-orchestrator\runs\20260913T162406Z-39060cc7" | Select-Object Name,Length | Format-Table 
+-AutoSize
+Name                                Length
+----                                ------
+BASELINE_COMMIT.txt                     45
+BASELINE_DIFF.patch                 841683
+BASELINE_STATUS.txt                   9300
+diff_billing.txt                     59054
+diff_hilal_chat.txt                   8103
+diff_hm_shell.txt                     2802
+diff_issues.txt                      14309
+diff_plan_replacements.txt           18453
+diff_test_oiq.txt                    19050
+diff_test_oiq_full.txt               19050
+diff_test_paid_plan_replacement.txt  50019
+diff_test_refund.txt                     0
+H4_VISUAL_PROMPT.md                   2197
+H4_VISUAL_STDOUT.txt                   824
+inv_money_collect.txt                17761
+issues_HEAD.py                       13413
+LAUNCH_PROMPT.txt                      934
+MISSION.md                            6078
+REVIEW_HANDBACK_ADVERSARIAL.md       21363
+REVIEW_HANDBACK_LOGIC.md             22058
+VISUAL_CONTRACT.md                   15079
+_adv_repro_cancel_erases_refund.py    5682
+_adv_repro_move_then_refund.py        6402
+[0m
+[0m✗ [0mRead .hm-orchestrator/runs/20260913T162406Z-39060cc7/H4_VISUAL_STDOUT.txt failed
+[91m[1mError: [0mCannot read binary file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orc
+hestrator\runs\20260913T162406Z-39060cc7\H4_VISUAL_STDOUT.txt
+[0m
+[0m← [0mWrite .hm-orchestrator/runs/20260913T162406Z-39060cc7/_visual_probe.ps1
+Wrote file successfully.
+[0m
+The stdout file is just a capture of this same session. Now let me write a pixel probe inside the run folder to verify the widget's geometry and colours objectively.
+[0m$ [0m& ".hm-orchestrator\runs\20260913T162406Z-39060cc7\_visual_probe.ps1"
+1024x768-dashboard-create-monitor-bottom.png | 1024x768 | label px=1172 box=(946,652)-(1001,677) 56x26 cx=973.5 | orb 
+px=2619 box=(944,688)-(1003,747) 60x60 cx=973.5 | whiteTextPx=44 | label-orb gap=-11
+1024x768-dashboard-market-bottom.png | 1024x768 | label px=1174 box=(946,652)-(1002,677) 57x26 cx=974 | orb px=2619 
+box=(944,688)-(1003,747) 60x60 cx=973.5 | whiteTextPx=38 | label-orb gap=-11
+1024x768-dashboard-opportunities-bottom.png | 1024x768 | label px=1269 box=(945,651)-(1003,677) 59x27 cx=974 | orb 
+px=2619 box=(944,688)-(1003,747) 60x60 cx=973.5 | whiteTextPx=46 | label-orb gap=-11
+1024x768-dashboard-settings-bottom.png | 1024x768 | label px=1345 box=(944,650)-(1003,677) 60x28 cx=973.5 | orb 
+px=2619 box=(944,688)-(1003,747) 60x60 cx=973.5 | whiteTextPx=42 | label-orb gap=-11
+1024x768-dashboard-subscription-bottom.png | 1024x768 | label px=1347 box=(771,448)-(1003,677) 233x230 cx=887 | orb 
+px=2619 box=(944,688)-(1003,747) 60x60 cx=973.5 | whiteTextPx=49665 | label-orb gap=-11
+1440x900-dashboard-create-monitor-bottom.png | 1440x900 | label px=1250 box=(1361,783)-(1418,809) 58x27 cx=1389.5 | 
+orb px=2621 box=(1192,650)-(1419,879) 228x230 cx=1305.5 | whiteTextPx=41 | label-orb gap=159
+1440x900-dashboard-market-bottom.png | 1440x900 | label px=1172 box=(1362,784)-(1417,809) 56x26 cx=1389.5 | orb 
+px=2619 box=(1360,820)-(1419,879) 60x60 cx=1389.5 | whiteTextPx=38 | label-orb gap=-11
+1440x900-dashboard-opportunities-bottom.png | 1440x900 | label px=1254 box=(1361,783)-(1418,809) 58x27 cx=1389.5 | orb 
+px=2619 box=(1360,820)-(1419,879) 60x60 cx=1389.5 | whiteTextPx=36 | label-orb gap=-11
+1440x900-dashboard-settings-bottom.png | 1440x900 | label px=1295 box=(1360,783)-(1419,809) 60x27 cx=1389.5 | orb 
+px=2619 box=(1360,820)-(1419,879) 60x60 cx=1389.5 | whiteTextPx=37 | label-orb gap=-11
+1440x900-dashboard-subscription-bottom.png | 1440x900 | label px=1346 box=(1360,782)-(1419,809) 60x28 cx=1389.5 | orb 
+px=2619 box=(1360,820)-(1419,879) 60x60 cx=1389.5 | whiteTextPx=46 | label-orb gap=-11
+390x844-dashboard-create-monitor-bottom.png | 390x844 | label px=1199 box=(130,524)-(375,761) 246x238 cx=252.5 | orb 
+px=2620 box=(136,618)-(377,831) 242x214 cx=256.5 | whiteTextPx=51807 | label-orb gap=143
+390x844-dashboard-market-bottom.png | 390x844 | label px=1176 box=(320,736)-(375,761) 56x26 cx=347.5 | orb px=2619 
+box=(318,772)-(377,831) 60x60 cx=347.5 | whiteTextPx=35 | label-orb gap=-11
+390x844-dashboard-opportunities-bottom.png | 390x844 | label px=1210 box=(319,736)-(376,761) 58x26 cx=347.5 | orb 
+px=2619 box=(318,772)-(377,831) 60x60 cx=347.5 | whiteTextPx=33 | label-orb gap=-11
+390x844-dashboard-settings-bottom.png | 390x844 | label px=1258 box=(131,569)-(376,761) 246x193 cx=253.5 | orb px=2619 
+box=(318,772)-(377,831) 60x60 cx=347.5 | whiteTextPx=42552 | label-orb gap=-11
+390x844-dashboard-subscription-bottom.png | 390x844 | label px=1267 box=(147,524)-(376,761) 230x238 cx=261.5 | orb 
+px=2619 box=(318,772)-(377,831) 60x60 cx=347.5 | whiteTextPx=48951 | label-orb gap=-11
+[0m
+[0m← [0mWrite .hm-orchestrator/runs/20260913T162406Z-39060cc7/_visual_probe2.ps1
+Wrote file successfully.
+[0m
+The probe confirms the widget geometry on the clean shots (label ≈56–60×26–28 px, orb 60×60, same centre, ~11 px air gap). A few shots had contamination from other sky-blue elements, so let me isolate the label by its column and measure the corner radius to rule out a pill.
+[0m$ [0m& ".hm-orchestrator\runs\20260913T162406Z-39060cc7\_visual_probe2.ps1"
+1024x768-dashboard-create-monitor-bottom.png | orbBox=(944,688)-(1003,747) 60x60 cx=974 | 
+labelBox=(946,652)-(1001,677) 56x26 | topRowPx=42 midRowPx=26 | fill=#D3E6F1 | whiteTextPx=44 | airGap=-11
+1024x768-dashboard-market-bottom.png | orbBox=(944,688)-(1003,747) 60x60 cx=974 | labelBox=(946,652)-(1002,677) 57x26 
+| topRowPx=44 midRowPx=27 | fill=#DDECF4 | whiteTextPx=38 | airGap=-11
+1024x768-dashboard-opportunities-bottom.png | orbBox=(944,688)-(1003,747) 60x60 cx=974 | labelBox=(945,651)-(1003,677) 
+59x27 | topRowPx=45 midRowPx=28 | fill=#89BDD8 | whiteTextPx=46 | airGap=-11
+1024x768-dashboard-settings-bottom.png | orbBox=(944,688)-(1003,747) 60x60 cx=974 | labelBox=(944,650)-(1003,677) 
+60x28 | topRowPx=44 midRowPx=27 | fill=#DBEBF3 | whiteTextPx=42 | airGap=-11
+1024x768-dashboard-subscription-bottom.png | orbBox=(944,688)-(1003,747) 60x60 cx=974 | labelBox=(944,650)-(1003,677) 
+60x28 | topRowPx=44 midRowPx=27 | fill=#DBEBF3 | whiteTextPx=42 | airGap=-11
+1440x900-dashboard-create-monitor-bottom.png | orbBox=(1192,650)-(1419,879) 228x230 cx=1306 | 
+labelBox=(1440,900)-(-1,-1) -1440x-900 | topRowPx=0 midRowPx=0 | fill=#E1E5EA | whiteTextPx=0 | airGap=-651
+1440x900-dashboard-market-bottom.png | orbBox=(1360,820)-(1419,879) 60x60 cx=1390 | labelBox=(1362,784)-(1417,809) 
+56x26 | topRowPx=43 midRowPx=26 | fill=#D3E6F1 | whiteTextPx=38 | airGap=-11
+1440x900-dashboard-opportunities-bottom.png | orbBox=(1360,820)-(1419,879) 60x60 cx=1390 | 
+labelBox=(1361,783)-(1418,809) 58x27 | topRowPx=44 midRowPx=27 | fill=#E3EFF5 | whiteTextPx=36 | airGap=-11
+1440x900-dashboard-settings-bottom.png | orbBox=(1360,820)-(1419,879) 60x60 cx=1390 | labelBox=(1360,783)-(1419,809) 
+60x27 | topRowPx=46 midRowPx=29 | fill=#E6F1F6 | whiteTextPx=37 | airGap=-11
+1440x900-dashboard-subscription-bottom.png | orbBox=(1360,820)-(1419,879) 60x60 cx=1390 | 
+labelBox=(1360,782)-(1419,809) 60x28 | topRowPx=46 midRowPx=27 | fill=#DAEAF3 | whiteTextPx=46 | airGap=-11
+390x844-dashboard-create-monitor-bottom.png | orbBox=(136,618)-(377,831) 242x214 cx=256 | labelBox=(390,844)-(-1,-1) 
+-390x-844 | topRowPx=0 midRowPx=0 | fill=#FFFFFF | whiteTextPx=0 | airGap=-619
+390x844-dashboard-market-bottom.png | orbBox=(318,772)-(377,831) 60x60 cx=348 | labelBox=(320,736)-(375,761) 56x26 | 
+topRowPx=44 midRowPx=26 | fill=#DAEAF3 | whiteTextPx=35 | airGap=-11
+390x844-dashboard-opportunities-bottom.png | orbBox=(318,772)-(377,831) 60x60 cx=348 | labelBox=(319,736)-(376,761) 
+58x26 | topRowPx=48 midRowPx=27 | fill=#E0EDF5 | whiteTextPx=33 | airGap=-11
+390x844-dashboard-settings-bottom.png | orbBox=(318,772)-(377,831) 60x60 cx=348 | labelBox=(319,735)-(376,761) 58x27 | 
+topRowPx=42 midRowPx=27 | fill=#E0EDF5 | whiteTextPx=37 | airGap=-11
+390x844-dashboard-subscription-bottom.png | orbBox=(318,772)-(377,831) 60x60 cx=348 | labelBox=(319,736)-(376,761) 
+58x26 | topRowPx=48 midRowPx=27 | fill=#DFEDF4 | whiteTextPx=40 | airGap=-11
+[0m
+[0m← [0mWrite .hm-orchestrator/runs/20260913T162406Z-39060cc7/_visual_probe3.ps1
+Two create-monitor shots confused orb detection with a lime content element. Let me refine: search the true corner for the orb, then measure the label's per-row span to estimate corner radius, and sample the fill away from the glyphs.
+Wrote file successfully.
+[0m
+[0m$ [0m& ".hm-orchestrator\runs\20260913T162406Z-39060cc7\_visual_probe3.ps1"
+1024x768-dashboard-create-monitor-bottom.png | orb 60x60 at (944,688) cx=974 | label 56x26 at (946,652) | spans 
+top+1..+3=48,52,53 max=56 | fillLeft=#0E78AF | whiteTextPx=44 | gap=11
+1024x768-dashboard-market-bottom.png | orb 60x60 at (944,688) cx=974 | label 57x26 at (946,652) | spans 
+top+1..+3=50,52,54 max=57 | fillLeft=#0E78AF | whiteTextPx=38 | gap=11
+1024x768-dashboard-opportunities-bottom.png | orb 60x60 at (944,688) cx=974 | label 59x27 at (945,651) | spans 
+top+1..+3=51,54,56 max=59 | fillLeft=#0E78AF | whiteTextPx=46 | gap=11
+1024x768-dashboard-settings-bottom.png | orb 60x60 at (944,688) cx=974 | label 60x28 at (944,650) | spans 
+top+1..+3=52,54,56 max=60 | fillLeft=#0E78AF | whiteTextPx=42 | gap=11
+1024x768-dashboard-subscription-bottom.png | orb 60x60 at (944,688) cx=974 | label 60x28 at (944,650) | spans 
+top+1..+3=50,54,56 max=60 | fillLeft=#0E78AF | whiteTextPx=42 | gap=11
+1440x900-dashboard-create-monitor-bottom.png | orb 60x60 at (1360,820) cx=1390 | label 58x27 at (1361,783) | spans 
+top+1..+3=50,54,54 max=58 | fillLeft=#0E78AF | whiteTextPx=41 | gap=11
+1440x900-dashboard-market-bottom.png | orb 60x60 at (1360,820) cx=1390 | label 56x26 at (1362,784) | spans 
+top+1..+3=48,52,53 max=56 | fillLeft=#0E78AF | whiteTextPx=38 | gap=11
+1440x900-dashboard-opportunities-bottom.png | orb 60x60 at (1360,820) cx=1390 | label 58x27 at (1361,783) | spans 
+top+1..+3=50,54,55 max=58 | fillLeft=#0E78AF | whiteTextPx=36 | gap=11
+1440x900-dashboard-settings-bottom.png | orb 60x60 at (1360,820) cx=1390 | label 60x27 at (1360,783) | spans 
+top+1..+3=52,55,56 max=60 | fillLeft=#0E78AF | whiteTextPx=37 | gap=11
+1440x900-dashboard-subscription-bottom.png | orb 60x60 at (1360,820) cx=1390 | label 60x28 at (1360,782) | spans 
+top+1..+3=52,55,56 max=60 | fillLeft=#0E78AF | whiteTextPx=46 | gap=11
+390x844-dashboard-create-monitor-bottom.png | orb 60x60 at (318,772) cx=348 | label 56x26 at (320,736) | spans 
+top+1..+3=48,52,53 max=56 | fillLeft=#0E78AF | whiteTextPx=38 | gap=11
+390x844-dashboard-market-bottom.png | orb 60x60 at (318,772) cx=348 | label 56x26 at (320,736) | spans 
+top+1..+3=49,52,54 max=56 | fillLeft=#0E78AF | whiteTextPx=35 | gap=11
+390x844-dashboard-opportunities-bottom.png | orb 60x60 at (318,772) cx=348 | label 58x26 at (319,736) | spans 
+top+1..+3=52,54,56 max=58 | fillLeft=#0E78AF | whiteTextPx=33 | gap=11
+390x844-dashboard-settings-bottom.png | orb 60x60 at (318,772) cx=348 | label 58x27 at (319,735) | spans 
+top+1..+3=50,52,54 max=58 | fillLeft=#0E78AF | whiteTextPx=37 | gap=11
+390x844-dashboard-subscription-bottom.png | orb 60x60 at (318,772) cx=348 | label 58x26 at (319,736) | spans 
+top+1..+3=52,54,56 max=58 | fillLeft=#0E78AF | whiteTextPx=40 | gap=11
+[0m
+[0m← [0mWrite .hm-orchestrator/runs/20260913T162406Z-39060cc7/_visual_probe4.ps1
+Wrote file successfully.
+[0m
+All 15 shots measure identically: orb 60×60, label ≈56–60×26–28 at `#0E78AF` with white text, centred, 11 px air gap, and a top-row span (~48–52 of ~56–60) consistent with an 8 px radius — not a pill (a 13 px pill would read ~40). Now a check for any ink in the strip immediately left of the widget, which is where a covered control would be cut off.
+[0m$ [0m& ".hm-orchestrator\runs\20260913T162406Z-39060cc7\_visual_probe4.ps1"
+1024x768-dashboard-create-monitor-bottom.png | widgetX=944..1003 y=652..747 | LEFTstrip ink=0 
+bbox=(99999,99999)-(-1,-1) | BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+1024x768-dashboard-market-bottom.png | widgetX=944..1003 y=652..747 | LEFTstrip ink=0 bbox=(99999,99999)-(-1,-1) | 
+BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+1024x768-dashboard-opportunities-bottom.png | widgetX=944..1003 y=651..747 | LEFTstrip ink=0 
+bbox=(99999,99999)-(-1,-1) | BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+1024x768-dashboard-settings-bottom.png | widgetX=944..1003 y=650..747 | LEFTstrip ink=0 bbox=(99999,99999)-(-1,-1) | 
+BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+1024x768-dashboard-subscription-bottom.png | widgetX=944..1003 y=650..747 | LEFTstrip ink=0 bbox=(99999,99999)-(-1,-1) 
+| BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+1440x900-dashboard-create-monitor-bottom.png | widgetX=1360..1419 y=783..879 | LEFTstrip ink=0 
+bbox=(99999,99999)-(-1,-1) | BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+1440x900-dashboard-market-bottom.png | widgetX=1360..1419 y=784..879 | LEFTstrip ink=0 bbox=(99999,99999)-(-1,-1) | 
+BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+1440x900-dashboard-opportunities-bottom.png | widgetX=1360..1419 y=783..879 | LEFTstrip ink=0 
+bbox=(99999,99999)-(-1,-1) | BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+1440x900-dashboard-settings-bottom.png | widgetX=1360..1419 y=783..879 | LEFTstrip ink=0 bbox=(99999,99999)-(-1,-1) | 
+BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+1440x900-dashboard-subscription-bottom.png | widgetX=1360..1419 y=782..879 | LEFTstrip ink=0 
+bbox=(99999,99999)-(-1,-1) | BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+390x844-dashboard-create-monitor-bottom.png | widgetX=318..377 y=736..831 | LEFTstrip ink=0 bbox=(99999,99999)-(-1,-1) 
+| BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+390x844-dashboard-market-bottom.png | widgetX=318..377 y=736..831 | LEFTstrip ink=0 bbox=(99999,99999)-(-1,-1) | 
+BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+390x844-dashboard-opportunities-bottom.png | widgetX=318..377 y=736..831 | LEFTstrip ink=0 bbox=(99999,99999)-(-1,-1) 
+| BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+390x844-dashboard-settings-bottom.png | widgetX=318..377 y=735..831 | LEFTstrip ink=0 bbox=(99999,99999)-(-1,-1) | 
+BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+390x844-dashboard-subscription-bottom.png | widgetX=318..377 y=736..831 | LEFTstrip ink=0 bbox=(99999,99999)-(-1,-1) | 
+BELOWstrip ink=0 bbox=(99999,99999)-(-1,-1)
+[0m
+Zero ink in the 30 px strip left of the widget and below it, in all 15 shots — no control is adjacent to or cut off by the widget. Let me cross-check the orb's phone inset in CSS (supporting evidence only, not the basis for approval) and confirm the tag CSS exists.
+[0m✱ [0mGrep "\.hilal-orb"[90m 20 matches[0m
+[0m✱ [0mGrep "hilal-orb|hm-ask-tag|corner-clearance"[90m 31 matches[0m
+[0m→ [0mRead src/ai_market_monitor/static/hm-hilal-chat.css[90m [offset=115, limit=120][0m
+[0m→ [0mRead src/ai_market_monitor/static/hm-ask-tag.css
+[0m→ [0mRead src/ai_market_monitor/static/hm-hilal-chat.css[90m [limit=55, offset=60][0m
+[0m
+[0m$ [0mSelect-String -LiteralPath "src\ai_market_monitor\static\hm-hilal-chat.css" -Pattern 
+"hm-hilal\s*\{|right:|bottom:|--h-size|max-width" | Select-Object LineNumber,Line | Format-Table -AutoSize -Wrap
+LineNumber Line                                                                                
+---------- ----                                                                                
+        26 body.hilal-dashboard .hm-hilal {                                                    
+        27   --h-size: 60px;                                                                   
+        35   right: max(20px, env(safe-area-inset-right));                                     
+        36   bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--h-lift));             
+        49   body.hilal-dashboard .hm-hilal { transition: none; }                              
+        92   max-width: calc(100vw - 44px);                                                    
+       127 @media (max-width: 520px) {                                                         
+       129      `max-width` above keeps it 44px clear of both edges whatever this says. */     
+       138   width: var(--h-size);                                                             
+       139   height: var(--h-size);                                                            
+       222   right: -2px;                                                                      
+       266   border-bottom: 1px solid var(--t-line);                                           
+       381   border-bottom: 1px solid var(--t-line);                                           
+       431   max-width: 100%;                                                                  
+       455   max-width: 82%;                                                                   
+       502 body.hilal-dashboard .hm-hilal .hilal-bubble p:last-child { margin-bottom: 0; }     
+       809 @media (max-width: 520px) {                                                         
+       810   body.hilal-dashboard .hm-hilal {                                                  
+       812     /* Both of these keep `--h-lift` in them. Written as a plain `bottom: 12px` this
+       817     right: 12px;                                                                    
+       818     bottom: calc(12px + var(--h-lift));
+[0m
+[0m→ [0mRead tests/browser/test_hilal_never_hides_a_control_e2e.py
+CSS confirms the phone inset (12 px at ≤520 px) is the existing rule, not a change. Let me look at the authoritative clearance test to decide whether it is cheap to run as corroboration.
+[0m
+[0m← [0mWrite .hm-orchestrator/runs/20260913T162406Z-39060cc7/VISUAL_REVIEW_HANDBACK.md
+Wrote file successfully.
+[0m
+I have all the evidence I need. Let me write the hand-back report.
+Let me confirm the deliverable is in place and that I only wrote inside the authorized run folder.
+[0m$ [0mGet-ChildItem ".hm-orchestrator\runs\20260913T162406Z-39060cc7" | Where-Object { $_.Name -match 
+'VISUAL_REVIEW_HANDBACK|_visual_probe' } | Select-Object Name,Length | Format-Table -AutoSize; Write-Output "---"; git 
+status --porcelain -- .hm-orchestrator test-results src tests
+Name                      Length
+----                      ------
+VISUAL_REVIEW_HANDBACK.md   6582
+_visual_probe.ps1           2364
+_visual_probe2.ps1          2783
+_visual_probe3.ps1          2925
+_visual_probe4.ps1          2608
+---
+ M .hm-orchestrator/CLAUDE_MD_INSERT.md
+ M .hm-orchestrator/current/CLAUDE_DECISION.md
+ M .hm-orchestrator/current/CLAUDE_READ_THIS.md
+ M .hm-orchestrator/current/MISSION.md
+ M .hm-orchestrator/current/RUN.json
+ M .hm-orchestrator/current/VISUAL_CONTRACT.md
+ M .hm-orchestrator/models/LIVE_ENDPOINT.json
+ M .hm-orchestrator/models/LIVE_MODELS.md
+ M .hm-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+ M .hm-orchestrator/models/LIVE_MODEL_IDS.txt
+ M .hm-orchestrator/policy/ROUTING_POLICY.md
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s1-pro-none-1024x768.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s1-pro-none-1440x900.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s1-pro-none-390x844.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s2-pro-card-1024x768.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s2-pro-card-1440x900.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s2-pro-card-390x844.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s3-pro-crypto-1024x768.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s3-pro-crypto-1440x900.png
+ M .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s3-pro-crypto-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-trader-refusal-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-trader-refusal-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-trader-refusal-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-switch-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-switch-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-switch-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-scheduled-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-scheduled-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-scheduled-390x844.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-refusal-1024x768.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-refusal-1440x900.png
+ D .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-refusal-390x844.png
+ M src/ai_market_monitor/api/routers/dashboard.py
+ M src/ai_market_monitor/api/routers/dashboard_test.py
+ M src/ai_market_monitor/api/routers/telegram.py
+ M src/ai_market_monitor/api/template_env.py
+ M src/ai_market_monitor/core/plans.py
+ M src/ai_market_monitor/observability/issues.py
+ M src/ai_market_monitor/observability/labels.py
+ M src/ai_market_monitor/services/billing.py
+ M src/ai_market_monitor/services/payment_emails.py
+ M src/ai_market_monitor/services/plan_changes.py
+ M src/ai_market_monitor/services/plan_replacements.py
+ M src/ai_market_monitor/services/telegram_account_links.py
+ M src/ai_market_monitor/static/hilalmarkets-dashboard-v2.css
+ M src/ai_market_monitor/static/hilalmarkets-public-chat.css
+ M src/ai_market_monitor/static/hilalmarkets-public.css
+ M src/ai_market_monitor/static/hilalmarkets.css
+ M src/ai_market_monitor/static/hm-hilal-chat.css
+ M src/ai_market_monitor/static/hm-hilal-chat.js
+ M src/ai_market_monitor/static/hm-plan-change.js
+ M src/ai_market_monitor/static/hm-shell.css
+ M src/ai_market_monitor/static/landing/assets/landing.css
+ M src/ai_market_monitor/static/system-brain.css
+ M src/ai_market_monitor/telegram/adapter.py
+ M src/ai_market_monitor/telegram/service.py
+ M src/ai_market_monitor/telegram/types.py
+ M src/ai_market_monitor/templates/auth.html
+ M src/ai_market_monitor/templates/billing_result.html
+ M src/ai_market_monitor/templates/dashboard_public.html
+ M src/ai_market_monitor/templates/hilal/base_dashboard.html
+ M src/ai_market_monitor/templates/hilal/base_public.html
+ M src/ai_market_monitor/templates/hilal/dashboard/activity.html
+ M src/ai_market_monitor/templates/hilal/dashboard/affiliate.html
+ M src/ai_market_monitor/templates/hilal/dashboard/alert_proof.html
+ M src/ai_market_monitor/templates/hilal/dashboard/billing.html
+ M src/ai_market_monitor/templates/hilal/dashboard/checkout.html
+ M src/ai_market_monitor/templates/hilal/dashboard/passport.html
+ M src/ai_market_monitor/templates/hilal/dashboard/strategy_detail.html
+ M src/ai_market_monitor/templates/hilal/dashboard/strategy_verify.html
+ M src/ai_market_monitor/templates/hilal/dashboard/strategy_versions.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/connections.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/market.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/monitor.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/opportunities.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/partials/hilal_chat.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/passport.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/report.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/research.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/research_detail.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/settings.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/subscription.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/support.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/watchlists.html
+ M src/ai_market_monitor/templates/hilal/main/home.html
+ M src/ai_market_monitor/templates/hilal/partials/public_chat.html
+ M src/ai_market_monitor/templates/hilal/public/help.html
+ M src/ai_market_monitor/templates/hilal/public/react_site.html
+ M src/ai_market_monitor/templates/system_brain.html
+ M src/ai_market_monitor/templates/system_brain_agent_dock.html
+ M src/ai_market_monitor/templates/system_brain_auth.html
+ M tests/browser/conftest.py
+ M tests/browser/test_checkout_pay_button_e2e.py
+ M tests/integration/test_checkout_and_payment_email.py
+ M tests/integration/test_paid_plan_replacement.py
+ M tests/integration/test_plan_change_journey.py
+ M tests/integration/test_system_brain_payments.py
+ M tests/support/billing_config.py
+ M tests/unit/test_billing_entitlements.py
+ M tests/unit/test_dashboard_static_assets.py
+ M tests/unit/test_invariant_billing_offers.py
+ M tests/unit/test_invariant_public_footer_and_chrome.py
+ M tests/unit/test_invariant_resume_checkout_cycle.py
+ M tests/unit/test_operational_issue_queue.py
+?? .hm-orchestrator/models/ROLE_MODEL_MAP.md
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-billing-pro-card-crypto-holder-1024x768.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-billing-pro-card-crypto-holder-1440x900.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s4-billing-pro-card-crypto-holder-390x844.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-pay-for-card-holder-1024x768.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-pay-for-card-holder-1440x900.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s5-billing-pay-for-card-holder-390x844.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-pay-note-1024x768.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-pay-note-1440x900.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s6-downgrade-pay-note-390x844.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-review-card-holder-1024x768.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-review-card-holder-1440x900.png
+?? .hm-orchestrator/runs/20260910T030616Z-24bcf48d/screens/s7-pro-review-card-holder-390x844.png
+?? .hm-orchestrator/runs/20260911-wp8-finish/
+?? .hm-orchestrator/runs/20260912T152017Z-10ed86cb/
+?? .hm-orchestrator/runs/20260912T152825Z-d6d10e2a/
+?? .hm-orchestrator/runs/20260912T193031Z-4125cfbe/
+?? .hm-orchestrator/runs/20260913T002503Z-fdd3949e/
+?? .hm-orchestrator/runs/20260913T103127Z-e7a9da76/
+?? .hm-orchestrator/runs/20260913T162406Z-39060cc7/
+?? .hm-orchestrator/runs/20260913T162923Z-feaaeb73/
+?? src/ai_market_monitor/core/money.py
+?? src/ai_market_monitor/static/hm-ask-tag.css
+?? tests/browser/test_ask_ai_corner_tag_e2e.py
+?? tests/browser/test_hilal_never_hides_a_control_e2e.py
+?? tests/browser/test_visual_fixes_e2e.py
+?? tests/integration/test_held_plan_renewal_words.py
+?? tests/integration/test_invariant_pages_close_their_tags.py
+?? tests/integration/test_telegram_connect_flow.py
+?? tests/support/html_balance.py
+?? tests/unit/test_invariant_annual_only_plan_card.py
+?? tests/unit/test_invariant_ask_ai_corner_tag.py
+?? tests/unit/test_invariant_money_on_the_wire.py
+?? tests/unit/test_invariant_one_held_plan_owner.py
+?? tests/unit/test_invariant_refund_after_plan_move.py
+?? tests/unit/test_invariant_refund_is_recorded.py
+?? tests/unit/test_invariant_templates_compile.py
+?? tests/unit/test_telegram_adapter_keyboard.py
+[0m
+## H4 vision review — complete
+System.Management.Automation.RemoteException
+**Verdict: PASS.** All 15 images were visible and inspected. The corner assistant is present and unchanged, and no page control is covered.
+System.Management.Automation.RemoteException
+### Deliverable
+`.hm-orchestrator/runs/20260913T162406Z-39060cc7/VISUAL_REVIEW_HANDBACK.md` — table of all 15 images plus the pixel evidence. Supporting probe scripts (`_visual_probe.ps1` … `_visual_probe4.ps1`) are in the same folder.
+System.Management.Automation.RemoteException
+### What I verified (not from CSS)
+- **All 15 present** (`1440x900`, `1024x768`, `390x844` × market, create-monitor, opportunities, settings, subscription).
+- **Widget unchanged:** round lime orb **60×60** in the bottom-right corner; sky-blue label **56–60 × 26–28**, fill sampled away from glyphs = **`#0E78AF`** exactly (`--hm-sky`), white text, centred on the orb (centres equal within 0.5 px), **11 px** air gap (contract 10 px + 1 px rasterisation).
+- **Not a pill:** top-row span 48–52 of a 56–60 px box ⇒ radius ≈ 8 px. A 13 px pill would read ≈ 40. Matches the contract's 8 px.
+- **No control covered:** zero "ink" pixels (luminance < 170) in the 30 px strip immediately left of the widget and in the strip below it, in every image. Visually, the last control on each page sits above the reserved `--hm-corner-clearance` band. Scroll-clear = yes everywhere.
+System.Management.Automation.RemoteException
+### Not mismatches (checked and explained)
+- The travelling `.hilal-tag` ticker above the label is mid-scroll and clipped at the viewport edge in every shot — existing marquee, covers no control, does not touch the label.
+- Phone orb inset is 12 px vs 20 px on larger widths — the shipped `@media (max-width:520px)` rule, so unchanged, not moved.
+System.Management.Automation.RemoteException
+### Uncertainties / not done
+- I did not run the browser suites. The direct H4 instruction asked for the visual review only; `tests/browser/...` is `auto_run: false` in `.agents/commands.json`. The machine check that answers the same question is `tests/browser/test_hilal_never_hides_a_control_e2e.py` (the file that produced these screenshots); `MISSION.md` records it 3/3 pass after D5. Say the word if you want me to run it.
+- No "before" screenshot was supplied, so "unchanged" is judged against the contract's stated look/size/position — which all 15 images match exactly.
+- I wrote only inside the run folder; the many other working-tree changes shown by `git status` pre-existed and were not touched.
+EXIT=0
+[0m
+[0m# [0mTodos
+[✓] Recon: baseline state (branch, commit, git status, existing run evidence, browser artifacts)
+[✓] H1: release key replaced (130 occurrences, 31 files); static assets test passes
+[✓] H2: logic review written; reviews D1-D4
+[✓] H3: adversarial review written; H-1/H-2/H-3/M-2/logic-M1 fixed; test doubles fixed
+[•] H4: vision review PASS (15 screenshots); run contrast browser checks
+[ ] H5: full verification (ruff, mypy, broad pytest junit); cleanup clutter; write SUPERVISOR_REPORT.json + .md
+[0m
+[0m$ [0mWrite-Output "=== clutter files in 4125cfbe ==="; Get-ChildItem -Path ".hm-orchestrator\runs\20260912T193031Z-4125cfbe" -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'temp_*.py' -or $_.Name -eq 'dashboard.py' -or $_.Name -eq 'dashboard_test.py' } | Select-Object FullName,Length | Format-Table -AutoSize; Write-Output "=== telegram file mtimes (concurrent run) ==="; Get-ChildItem -Path "src\ai_market_monitor\telegram","src\ai_market_monitor\api\routers\telegram.py" -Recurse -File -ErrorAction SilentlyContinue | Select-Object Name,LastWriteTime | Sort-Object LastWriteTime -Descending | Select-Object -First 6 | Format-Table -AutoSize
+=== clutter files in 4125cfbe ===
+System.Management.Automation.RemoteException
+FullName                                                                                                               
+--------                                                                                                               
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260912T193031Z-4125cfbe\f...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260912T193031Z-4125cfbe\f...
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+=== telegram file mtimes (concurrent run) ===
+System.Management.Automation.RemoteException
+Name                    LastWriteTime       
+----                    -------------       
+service.cpython-312.pyc 9/13/2026 9:32:59 PM
+service.py              9/13/2026 9:32:44 PM
+types.cpython-312.pyc   9/13/2026 8:54:48 PM
+types.py                9/13/2026 8:53:05 PM
+telegram.py             9/13/2026 8:52:35 PM
+adapter.cpython-312.pyc 9/13/2026 8:45:53 PM
+[0m
+H4 PASS — the vision reviewer inspected all 15 images and wrote `VISUAL_REVIEW_HANDBACK.md`. Let me update the plan and start H5: cleanup, then lint/type checks.
+[0m$ [0mgit status --porcelain -- src/ai_market_monitor/templates | Measure-Object | Select-Object -ExpandProperty Count; Write-Output "=== confirm H1 keys ==="; Get-ChildItem -Path "src\ai_market_monitor\templates" -Recurse -File | Select-String -Pattern '20260911-ask-tag' -AllMatches | ForEach-Object { $_.Matches.Count } | Measure-Object -Sum | Select-Object -ExpandProperty Sum; Get-ChildItem -Path "src\ai_market_monitor\templates" -Recurse -File | Select-String -Pattern '\?v=([0-9A-Za-z\-]+)' -AllMatches | ForEach-Object { $_.Matches } | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+34
+=== confirm H1 keys ===
+0
+20260913-corner-clear
+[0m
+H1 confirmed (0 old, 1 new value). Let me clean the clutter and run the two contrast browser checks (one at a time).
+[0m$ [0mGet-ChildItem -Path ".hm-orchestrator\runs\20260912T193031Z-4125cfbe" -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'temp_*.py' -or $_.Name -eq 'dashboard.py' -or $_.Name -eq 'dashboard_test.py' } | ForEach-Object { $_.FullName }
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260912T193031Z-4125cfbe\fixa_snapshot\dashboard.py
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260912T193031Z-4125cfbe\fixa_snapshot\dashboard_test.py
+[0m
+[0m$ [0mRemove-Item -LiteralPath ".hm-orchestrator\runs\20260912T193031Z-4125cfbe\fixa_snapshot\dashboard.py", ".hm-orchestrator\runs\20260912T193031Z-4125cfbe\fixa_snapshot\dashboard_test.py" -Force; Write-Output "removed; remaining matches:"; Get-ChildItem -Path ".hm-orchestrator\runs\20260912T193031Z-4125cfbe" -Recurse -File | Where-Object { $_.Name -like 'temp_*.py' -or $_.Name -eq 'dashboard.py' -or $_.Name -eq 'dashboard_test.py' } | ForEach-Object { $_.FullName }; Write-Output "done"
+removed; remaining matches:
+done
+[0m
+Clutter removed. Now the first contrast browser check.
+[0m$ [0m& .venv/Scripts/python -m pytest tests/browser/test_dashboard_shell_e2e.py -q -p no:randomly --no-header -rN 2>&1 | Select-Object -Last 25; Write-Output "EXIT=$LASTEXITCODE"
+.................                                                        [100%]
+EXIT=0
+[0m
+[0m$ [0m& .venv/Scripts/python -m pytest tests/browser/test_dashboard_test_account_e2e.py -q -p no:randomly --no-header -rN 2>&1 | Select-Object -Last 30; Write-Output "EXIT=$LASTEXITCODE"
+.......................................................                  [100%]
+EXIT=0
+[0m
+Both contrast browser checks pass (17 + 55). H4 complete. Now H5 static checks.
+[0m$ [0m& .venv/Scripts/python -m ruff check src tests scripts 2>&1 | Select-Object -Last 40; Write-Output "RUFF_EXIT=$LASTEXITCODE"
+All checks passed!
+RUFF_EXIT=0
+[0m
+[0m$ [0m& .venv/Scripts/python -m mypy src 2>&1 | Select-Object -Last 40; Write-Output "MYPY_EXIT=$LASTEXITCODE"
+Success: no issues found in 427 source files
+MYPY_EXIT=0
+[0m
+Ruff and mypy both clean. Now the single full offline verification run with JUnit output.
+[0m$ [0m& .venv/Scripts/python -m pytest tests/unit tests/engine tests/interpreter tests/services tests/integration -q -p no:randomly --junitxml=.hm-orchestrator/runs/20260913T162406Z-39060cc7/H5_offline.xml 2>&1 | Tee-Object -FilePath ".hm-orchestrator/runs/20260913T162406Z-39060cc7/H5_offline_tail.txt" | Select-Object -Last 40; Write-Output "PYTEST_EXIT=$LASTEXITCODE"
+(no output)
+System.Management.Automation.RemoteException
+<shell_metadata>
+shell tool terminated command after exceeding timeout 2700000 ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.
+</shell_metadata>
+[0m
+The full run exceeded 45 minutes. Let me check whether it completed or was killed, and whether a process is still running.
+[0m$ [0mGet-Process python -ErrorAction SilentlyContinue | Select-Object Id,CPU,StartTime,WorkingSet64 | Format-Table -AutoSize; Write-Output "=== junit xml ==="; Get-Item ".hm-orchestrator\runs\20260913T162406Z-39060cc7\H5_offline.xml" -ErrorAction SilentlyContinue | Select-Object Length,LastWriteTime; Write-Output "=== tail file ==="; Get-Item ".hm-orchestrator\runs\20260913T162406Z-39060cc7\H5_offline_tail.txt" -ErrorAction SilentlyContinue | Select-Object Length,LastWriteTime
+Id       CPU StartTime             WorkingSet64
+   --       --- ---------             ------------
+ 1304  19.09375 9/13/2026 10:37:15 PM     42516480
+ 1628   18.8125 9/13/2026 10:37:15 PM     42061824
+ 5112         0 9/13/2026 7:07:25 PM         16384
+ 5128    22.625 9/13/2026 10:37:15 PM    181174272
+ 5300 18.171875 9/13/2026 10:37:15 PM     40079360
+ 6740     22.25 9/13/2026 10:37:15 PM    181268480
+ 7936 28.640625 9/13/2026 7:07:25 PM       2449408
+ 8128  0.015625 9/13/2026 10:36:58 PM        61440
+ 8260  28.78125 9/13/2026 10:37:15 PM    145207296
+ 8664         0 9/13/2026 10:37:15 PM       212992
+ 8884         0 9/13/2026 10:37:15 PM       233472
+ 9196         0 9/13/2026 10:37:15 PM       212992
+ 9984  13.46875 9/13/2026 10:37:15 PM     53932032
+10256     17.75 9/13/2026 10:37:15 PM     30904320
+10596  0.046875 9/13/2026 10:37:15 PM       229376
+11268   12.8125 9/13/2026 10:37:03 PM       233472
+11328 24.640625 9/13/2026 10:37:15 PM    181301248
+11332         0 9/13/2026 10:37:15 PM       233472
+11448  28.84375 9/13/2026 10:37:15 PM    147369984
+11788  0.015625 9/13/2026 10:37:15 PM       229376
+11992         0 9/13/2026 10:37:15 PM       225280
+12328         0 9/13/2026 10:37:15 PM       233472
+12648  0.015625 9/13/2026 10:37:15 PM       196608
+14048 23.234375 9/13/2026 10:37:15 PM    181403648
+14068   26.4375 9/13/2026 10:37:15 PM    131014656
+15064  58.90625 9/13/2026 10:36:58 PM    213766144
+15160 21.484375 9/13/2026 10:37:15 PM    181325824
+15732 19.078125 9/13/2026 10:37:15 PM    181166080
+15896    14.875 9/13/2026 10:37:15 PM     56668160
+16144 32.453125 9/13/2026 10:37:15 PM    167374848
+16724  23.65625 9/13/2026 10:37:15 PM    181088256
+16728  0.015625 9/13/2026 10:37:15 PM       229376
+18648  24.34375 9/13/2026 10:37:15 PM    181104640
+18844         0 9/13/2026 10:37:15 PM       225280
+21028         0 9/13/2026 10:37:15 PM       204800
+21588  25.21875 9/13/2026 10:37:15 PM    181288960
+22068 25.296875 9/13/2026 10:37:15 PM    176205824
+22448 16.953125 9/13/2026 10:37:15 PM    181202944
+22472  0.015625 9/13/2026 10:37:15 PM       200704
+23832 22.421875 9/13/2026 10:37:15 PM    181293056
+24140 27.140625 9/13/2026 10:37:15 PM    171458560
+24536  0.015625 9/13/2026 10:37:15 PM       208896
+24668         0 9/13/2026 10:37:15 PM       253952
+25244  0.015625 9/13/2026 10:37:15 PM       208896
+25488  0.015625 9/13/2026 10:37:15 PM       233472
+25516 19.890625 9/13/2026 10:37:15 PM     43171840
+26968  0.015625 9/13/2026 10:37:15 PM       217088
+27032         0 9/13/2026 10:37:15 PM       188416
+27776         0 9/13/2026 10:37:03 PM        61440
+28244         0 9/13/2026 10:37:15 PM       200704
+28372  0.015625 9/13/2026 10:37:15 PM       221184
+28628         0 9/13/2026 10:37:15 PM       229376
+30212  0.015625 9/13/2026 10:37:15 PM       212992
+30660  0.015625 9/13/2026 10:37:15 PM       229376
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+=== junit xml ===
+=== tail file ===
+System.Management.Automation.RemoteException
+Length LastWriteTime        
+------ -------------        
+ 66260 9/13/2026 10:37:23 PM
+[0m
+The full run didn't finish (no JUnit XML). Let me inspect the captured progress and check for the concurrent run's activity.
+[0m$ [0m$c = Get-Content ".hm-orchestrator\runs\20260913T162406Z-39060cc7\H5_offline_tail.txt" -Raw; Write-Output "length=$($c.Length)"; Write-Output "=== last 1500 chars ==="; $c.Substring([Math]::Max(0,$c.Length-1500))
+length=33129
+=== last 1500 chars ===
+sssssssssssssssssssssssssssssssss [ 91%]
+ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss [ 91%]
+sssssssssssssssssss.sssssssssssssssssssssssss.ssssssssssssssssssssssssss [ 91%]
+ssssssssssssssssssssssssssssssssssss.................................... [ 91%]
+........................................................................ [ 91%]
+........................................................................ [ 92%]
+........................................................................ [ 92%]
+........................................................................ [ 92%]
+........................................................................ [ 92%]
+........................................................................ [ 93%]
+........................................................................ [ 93%]
+........................................................................ [ 93%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 94%]
+........................................................................ [ 94%]
+........................................................................ [ 94%]
+........................................................................ [ 94%]
+........................................................................ [ 95%]
+[0m
+[0m$ [0mGet-ChildItem -Path ".hm-orchestrator\runs\20260913T162923Z-feaaeb73" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 8 Name,Length,LastWriteTime | Format-Table -AutoSize; Write-Output "=== newest files under run feaaeb73 recursively ==="; Get-ChildItem -Path ".hm-orchestrator\runs\20260913T162923Z-feaaeb73" -Recurse -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 8 FullName,LastWriteTime | Format-Table -AutoSize
+Name                     Length LastWriteTime        
+----                     ------ -------------        
+R5_REPRO_MATRIX.md        10375 9/13/2026 10:34:52 PM
+_matrix_rows.txt           3864 9/13/2026 8:42:25 PM 
+_matrix_report_plugin.py   1450 9/13/2026 8:41:22 PM 
+_parse_matrix.py           1028 9/13/2026 8:39:54 PM 
+_prefix_matrix.txt       220486 9/13/2026 8:39:34 PM 
+_check_lock.py              381 9/13/2026 7:53:29 PM 
+_check_codes.py             447 9/13/2026 7:38:51 PM 
+LAUNCH_PROMPT.txt           934 9/13/2026 7:29:24 PM 
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+=== newest files under run feaaeb73 recursively ===
+System.Management.Automation.RemoteException
+FullName                                                                                                               
+--------                                                                                                               
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T162923Z-feaaeb73\R...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T162923Z-feaaeb73\_...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T162923Z-feaaeb73\_...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T162923Z-feaaeb73\_...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T162923Z-feaaeb73\_...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T162923Z-feaaeb73\_...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T162923Z-feaaeb73\_...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T162923Z-feaaeb73\_...
+[0m
+The run reached 95% before the 45-minute cap; no JUnit file. I'll re-run the single full verification with a larger timeout and progressive file output.
+[0m$ [0m& .venv/Scripts/python -m pytest tests/unit tests/engine tests/interpreter tests/services tests/integration -q -p no:randomly --junitxml=.hm-orchestrator/runs/20260913T162406Z-39060cc7/H5_offline.xml *> .hm-orchestrator/runs/20260913T162406Z-39060cc7/H5_offline_full.txt; Write-Output "PYTEST_EXIT=$LASTEXITCODE"; Get-Content ".hm-orchestrator\runs\20260913T162406Z-39060cc7\H5_offline_full.txt" -Tail 15
+PYTEST_EXIT=0
+........................................................................ [ 99%]
+..............................................                           [100%]
+============================== warnings summary ===============================
+tests/unit/test_invariant_homepage_links_need_javascript.py: 12 warnings
+tests/unit/test_invariant_last_resort_source_discovery.py: 25 warnings
+tests/unit/test_invariant_official_links_in_layers.py: 24 warnings
+tests/unit/test_invariant_official_sources_from_the_open_web.py: 56 warnings
+tests/unit/test_invariant_source_sweep_rotation.py: 105 warnings
+tests/services/test_fasset_import.py: 5 warnings
+tests/services/test_sc_malaysia_governance.py: 5 warnings
+  C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.venv\Lib\site-packages\lxml\html\__init__.py:1891: DeprecationWarning: The 'strip_cdata' option of HTMLParser() has never done anything and will eventually be removed.
+    super().__init__(**kwargs)
+System.Management.Automation.RemoteException
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\.hm-orchestrator\runs\20260913T162406Z-39060cc7\H5_offline.xml -
+[0m

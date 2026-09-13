@@ -380,6 +380,9 @@ class TelegramBotService:
                     conversation,
                 )
             return self._telegram_link_reminder_message(message, conversation)
+        if conversation.user_id is None:
+            # A chat that opened a connect question and did not connect is on no account.
+            return self._plain(message, "Send /start to open the main menu.")
         if conversation.flow == "create_monitor" and conversation.step == "collect_setup_text":
             try:
                 return await self._receive_setup_text(message, conversation)
@@ -709,6 +712,18 @@ class TelegramBotService:
                 TelegramOutboundMessage(
                     chat_id=callback.chat_id,
                     text="This action expired. Send /start to resume.",
+                    menu=PRIMARY_MENU,
+                ),
+            )
+        if conversation.user_id is None and not callback.data.startswith("telegram_link:"):
+            # The connect question's own two buttons work on no account; nothing else does.
+            return await self._store_callback(
+                callback,
+                payload_hash,
+                None,
+                TelegramOutboundMessage(
+                    chat_id=callback.chat_id,
+                    text="Send /start to open the main menu.",
                     menu=PRIMARY_MENU,
                 ),
             )
@@ -3277,11 +3292,11 @@ class TelegramBotService:
         message: TelegramInboundMessage,
         raw_token: str,
     ) -> TelegramOutboundMessage:
+        links = TelegramAccountLinkService(self.session, self.settings)
         try:
-            offer = await TelegramAccountLinkService(
-                self.session,
-                self.settings,
-            ).pending_dashboard_start_link(raw_token, telegram_user_id=message.telegram_user_id)
+            offer = await links.pending_dashboard_start_link(
+                raw_token, telegram_user_id=message.telegram_user_id
+            )
         except TelegramAccountLinkError as exc:
             await self.session.rollback()
             return self._plain(
@@ -3291,9 +3306,15 @@ class TelegramBotService:
                 f"{self._dashboard_url(CONNECTIONS_PATH)}",
                 buttons=[self._dashboard_button("Connections page", CONNECTIONS_PATH)],
             )
+        # The chat stays on the account this Telegram is really on — or on none — until
+        # Confirm succeeds. It used to be pointed at the offered account here, before
+        # anybody had answered, so a Cancel, or any older menu button tapped while the
+        # question was open, showed that account's monitors, trial and plan to a chat
+        # that was never connected to it. The link token is shown only on its owner's
+        # Connections page, but it is a bearer token all the same.
         conversation = await self._upsert_conversation(
             message,
-            user_id=offer.user.id,
+            user_id=await links.account_holding(message.telegram_user_id),
             onboarding_session_id=None,
             flow="telegram_link",
             step="confirm",
@@ -3600,8 +3621,16 @@ class TelegramBotService:
             conversation.flow = "main_menu"
             conversation.step = "idle"
             conversation.state_data = state
-            if owner_id is not None:
-                conversation.user_id = owner_id
+            # Every ending names the account the chat acts as: the one just connected, or
+            # the one the Telegram identity is on right now — never the offered account
+            # of a question that was cancelled or refused.
+            conversation.user_id = (
+                owner_id
+                if owner_id is not None
+                else await TelegramAccountLinkService(
+                    self.session, self.settings
+                ).account_holding(conversation.telegram_user_id)
+            )
             await self.session.commit()
         return self._telegram_link_answer(
             chat_id=callback.chat_id,
@@ -3614,7 +3643,7 @@ class TelegramBotService:
         self,
         message: TelegramInboundMessage,
         *,
-        user_id: UUID,
+        user_id: UUID | None,
         onboarding_session_id: UUID | None,
         flow: str,
         step: str,

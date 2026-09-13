@@ -19,10 +19,11 @@
                           "tests\\integration\\test_dashboard_test_connections.py",
                           "tests\\unit\\test_telegram*",
                           "tests\\unit\\test_invariant_telegram*",
-                          "pyproject.toml"
+                          "pyproject.toml",
+                          ".gitignore"
                       ],
     "run_id":  "20260913T162923Z-feaaeb73",
     "source_escalation":  "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.hm-orchestrator\\runs\\20260913T162923Z-feaaeb73\\ESCALATION.json",
-    "expires_utc":  "2026-09-14T07:15:04.0452594Z",
-    "granted_utc":  "2026-09-13T21:15:04.0388785Z"
+    "expires_utc":  "2026-09-14T08:36:23.7713326Z",
+    "granted_utc":  "2026-09-13T22:36:23.7638409Z"
 }

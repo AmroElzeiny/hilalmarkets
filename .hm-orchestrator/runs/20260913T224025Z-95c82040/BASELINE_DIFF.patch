@@ -1,0 +1,429 @@
+﻿diff --git a/.gitignore b/.gitignore
+index aae64cca..403c2748 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -4,6 +4,10 @@
+ !.env.example
+ !.env.production.example
+ 
++# A Claude takeover pass: temporary, file-scoped permission to edit product code. It is
++# made and removed by tools/hm-orchestrator and must never be committed.
++.hm-orchestrator/current/CLAUDE_TAKEOVER.ok
++
+ # Python environments and caches
+ .venv/
+ # Open Interpreter's own environment. Deliberately separate from .venv: it needs Python
+diff --git a/.hm-orchestrator/current/CLAUDE_DECISION.md b/.hm-orchestrator/current/CLAUDE_DECISION.md
+index 1114d9a6..42da081d 100644
+--- a/.hm-orchestrator/current/CLAUDE_DECISION.md
++++ b/.hm-orchestrator/current/CLAUDE_DECISION.md
+@@ -1,51 +1,132 @@
+-# CLAUDE_DECISION — owner-ordered takeover of run 20260913T103127Z-e7a9da76
+-
+-Date: 2026-09-13. Written by Claude Code (architect).
+-
+-## Facts (measured by Claude)
+-
+-- Run `20260913T103127Z-e7a9da76` wrote its last evidence file (`D4_extra_adjacent2.txt`)
+-  at 15:28 local. At 18:23 local — about 3 hours later — it had written nothing new and no
+-  source file had changed since 15:18. The mission's stall rule is 30 minutes.
+-- D2, D3 and D4 have before/after evidence in that run folder. D5 (corner widget covers
+-  controls) and D6 (reviews, final verification, report) were never started.
+-- The owner (repository owner) wrote in chat: "its stuck for over 3 hours, take over now".
+-  Claude stopped the supervisor process (PID 21688).
+-
+-## Your one task (do nothing else)
+-
+-Write exactly one file: `.hm-orchestrator/runs/20260913T103127Z-e7a9da76/ESCALATION.json`,
+-with exactly this content (valid JSON, per `.hm-orchestrator/policy/ESCALATION_CONTRACT.md`):
+-
+-```json
+-{
+-  "status": "ESCALATE_TO_CLAUDE",
+-  "run_id": "20260913T103127Z-e7a9da76",
+-  "needs_claude_implementation": true,
+-  "category": "repeated-failure",
+-  "summary": "Supervisor stalled for about 3 hours after D4 with D5 and D6 not started; the owner ordered Claude to take over.",
+-  "decision_needed": "Finish D4's never-raise gap, implement D5 (corner assistant must not cover a focused control), then hand reviews and verification back to OpenCode.",
+-  "evidence": [
+-    ".hm-orchestrator/runs/20260913T103127Z-e7a9da76/D4_extra_adjacent2.txt last written 15:28, nothing after until 18:23",
+-    "no src/ or tests/ file modified after 15:18",
+-    "owner instruction in chat 2026-09-13: take over now"
+-  ],
+-  "attempts": [
+-    {"model": "hm-supervisor-deep (deepseek-v4.1-flash)", "action": "run e7a9da76 D2-D4", "result": "D2-D4 done, then stalled ~3h before D5"},
+-    {"model": "hm-supervisor-deep (deepseek-v4.1-flash)", "action": "run fdd3949e D1", "result": "D1 done in 10h, stopped by owner for slowness"}
+-  ],
+-  "allowed_files": [
+-    "src/ai_market_monitor/observability/issues.py",
+-    "tests/unit/test_operational_issue_queue.py",
+-    "src/ai_market_monitor/static/hm-hilal-chat.js",
+-    "src/ai_market_monitor/static/hm-hilal-chat.css",
+-    "src/ai_market_monitor/static/hm-shell.css",
+-    "src/ai_market_monitor/templates/*",
+-    "tests/browser/test_hilal_never_hides_a_control_e2e.py",
+-    ".hm-orchestrator/runs/20260913T103127Z-e7a9da76/*"
+-  ],
+-  "recommended_next_action": "claude-implement"
+-}
+-```
+-
+-Do not edit any other file. Do not run tests. When the file is written, reply `ESCALATION_WRITTEN`.
++# MISSION — money follow-up after hand-back run 20260913T162406Z-39060cc7
++
++Date: 2026-09-14. Written by Claude Code (architect). This file is the mission for this run.
++`current/MISSION.md` belongs to a different (Telegram) mission. Do not read it as yours and
++never edit it.
++
++## Baseline (measured by Claude)
++
++- HEAD `98f56c3f`. D1–D5 of the earlier mission are committed.
++- Hand-back run `39060cc7` fixed H-1 (money-owed row is `voided` after a late refund), H-2
++  (cancel link never overwrites `refunded`), H-3 (NOWPayments amount is a JSON number),
++  M-2 (source payment row lock), logic-M1 (phantom subscription) and L-2 (refund page words).
++  Offline + integration suite green (30,934 passed). `ruff` and `mypy src` clean.
++- The same reviews left these findings **open**. Claude re-checked each one in the code on
++  2026-09-14. Read `.hm-orchestrator/runs/20260913T162406Z-39060cc7/REVIEW_HANDBACK_ADVERSARIAL.md`
++  and `REVIEW_HANDBACK_LOGIC.md` for the full text.
++
++## Concurrency rules (a second session is working in this repository right now)
++
++- Another Claude session holds a takeover for the Telegram mission. Do **not** edit any of:
++  `src/ai_market_monitor/telegram/*`, `services/telegram_account_links.py`,
++  `api/routers/telegram.py`, `api/routers/dashboard.py`, `api/routers/dashboard_test.py`,
++  `worker.py`, `core/auth_pages.py`, `core/dashboard_paths.py`, `services/onboarding.py`,
++  `services/notifications.py`, `services/compliance_watch.py`, `services/admin_notifications.py`,
++  `observability/alert_delivery.py`, `pyproject.toml`, `.gitignore`, any `tests/**/test_telegram*`.
++  If a fix truly needs one of them, write ESCALATION.json instead.
++- This machine has little memory. Before starting pytest or a browser, check that no other
++  `python -m pytest` or browser process is running; if one is, wait for it to finish. Never run
++  two at once.
++- Never read `.env` / `.env.production`. Never git commit, push, reset, checkout, clean, stash.
++
++## Test cadence (owner rule, 2026-09-13)
++
++Run focused tests (the new test file + direct neighbours) after each work package. Run the
++full verification **once**, at the end (WP5). Do not re-run the full suite after each step.
++
++## Requirements
++
++| ID | Requirement |
++|---|---|
++| R1 | A partial refund is not treated as a full refund (adversarial M-1). |
++| R2 | One owner decides "the money kept from a payment"; every money reader uses it. |
++| R3 | No `float` on a money value anywhere in `src/`, including `core/plans.py` (L-3). |
++| R4 | One rounding rule for money (`ROUND_HALF_UP`, owner `core/money.py`) (L-4). |
++| R5 | A refunded payment is not counted as an "unfinished attempt" for staff (L-1). |
++| R6 | A second cancel of an already-cancelled subscription keeps the first `canceled_at` (logic L1). |
++| R7 | Reviews, one full verification, SUPERVISOR_REPORT.json + .md. |
++
++## Work packages
++
++### WP1 — Partial refunds (R1, R2). Risk: HIGH (billing, money).
++
++- **Objective:** a refund event's amount is read. Money and access follow the amount really
++  returned, not the event name.
++- **Authority:** `services/billing.py` (`REFUND_EVENT_TYPES`, `REFUND_ENDS_PLAN_EVENT_TYPES`,
++  `_hydrate_checkout_data`, `_record_checkout_event`, `_end_refunded_plan`, `_minor_unit_amount`,
++  `_stripe_amount`), `services/plan_replacements.py` (`payment_that_bought`,
++  `apply_after_payment`, money-owed void), `services/affiliate_attribution.py`
++  (`_amount_charged`), `services/system_brain_payments.py`, `db/models/commercial.py`,
++  `tests/unit/test_invariant_refund_is_recorded.py`, `tests/unit/test_invariant_refund_after_plan_move.py`.
++  Check the real payload field for the refunded amount of each provider (Stripe
++  `charge.refunded` → `amount_refunded` in minor units; Creem; NOWPayments) in the existing
++  normaliser and test fixtures. Do not invent a field name; if a provider's field is unknown,
++  its amount counts as unknown.
++- **Behaviour (Claude's decision):**
++  - One parser reads the refunded amount (reuse the existing minor-unit parser; do not write a
++    second one).
++  - Amount unknown, or amount ≥ the payment amount → **full refund**: today's behaviour stays
++    exactly as it is.
++  - Amount known and smaller than the payment → **partial refund**: the attempt stays
++    `completed`; the refunded total is stored (sum of distinct refund events, never counted
++    twice for a replayed event); the plan is **not** ended; one critical staff alert says a
++    partial refund arrived so a person can decide. A later refund that brings the total to the
++    full amount becomes a full refund.
++  - One owner function returns "money kept" = paid − refunded (never below zero). The plan-move
++    money-owed value and the affiliate commission base read it. A money-owed row already
++    written from a payment that is later partly refunded is re-valued or voided the same way
++    H-1 voids it — one rule, in the existing void owner.
++  - Storage: prefer an existing JSON/metadata column on the attempt. A new column needs an
++    Alembic migration with `op.f()` names; only do that if no existing field fits, and say why.
++- **Forbidden:** changing the full-refund path's results; guessing a refund amount; ending a
++  plan on a partial refund; editing the files in "Concurrency rules".
++- **Acceptance / evidence:** failing-first test `tests/unit/test_invariant_partial_refund.py`,
++  parametrised over every refund event name × every provider × {unknown, partial, exact full,
++  over-full} amounts × {one event, same event replayed, two partial events summing to full}.
++  Before (fails) and after (passes) JUnit files in the run folder. Neighbours:
++  both refund invariant files, `test_billing_entitlements.py`, `tests/integration/test_paid_plan_replacement.py`,
++  affiliate tests.
++- **Escalate if:** a provider sends no amount at all for any refund; a migration is needed.
++
++### WP2 — One money-kept reader for staff (R5). Risk: low.
++
++- `services/system_brain_payments.py:359-364` counts `refunded` (and `cancelled`) as
++  unfinished. An unfinished attempt is one still open (`creating`, `pending`, `processing`).
++  Use an allow-list of open states, from one shared constant with the billing module, not a
++  new word list. Failing-first test over every attempt status.
++
++### WP3 — Money serialisation and rounding owner (R3, R4). Risk: medium.
++
++- `core/plans.py:330-340` pushes prices through `float`. Route them through one function in
++  `core/money.py` that returns a JSON number exactly equal to the 2-decimal text (the browser
++  contract stays a number; the React bundle and templates must not need a change). Prove it
++  for every plan, both cycles, every offer and every discount percent.
++- Money `quantize` calls without `ROUND_HALF_UP`: `services/billing.py` (`_stripe_amount`,
++  `_minor_unit_amount`, around lines 2508 and 2517), `services/affiliate_attribution.py:528,535`,
++  `services/affiliate.py:366,772-777,813`. All must use the `core/money.py` owner.
++  Search the whole `src/` for any other money quantize or `float(` on money.
++- Extend the D3 source scan in `tests/unit/test_invariant_money_on_the_wire.py` to all of
++  `src/ai_market_monitor` (not four modules), and add a scan that bans a money `quantize`
++  outside the owner. Add a half-cent commission case (`1.00 × 12.5 %` → `0.13`).
++- In the report, say plainly that stored commission rows are not rewritten; only new ones use
++  the one rule.
++
++### WP4 — Keep the first cancellation time (R6). Risk: low.
++
++- `services/billing.py:2984` and `:3121` overwrite `canceled_at` unconditionally. Keep an
++  existing value (the rule already used at `:3815`). Failing-first test: a second refund / cancel
++  event on an already-cancelled subscription leaves `canceled_at` unchanged.
++
++### WP5 — Reviews and final verification (R7).
++
++- Logic review by `minimax-m3`; adversarial review of WP1 and WP3 by `deepseek-v4.1-flash`
++  (billing is high risk → two model families). Each finding is fixed with a failing-first test
++  or escalated.
++- One full verification at the end, after checking no other pytest is running:
++  `ruff check src tests scripts`, `mypy src`,
++  `pytest tests/unit tests/engine tests/interpreter tests/services tests/integration -q -p no:randomly --junitxml=<run>/FINAL_offline.xml`.
++  If a failure appears in a Telegram test while the other session is editing, record it and
++  re-run that file once; do not change Telegram files.
++- Write `SUPERVISOR_REPORT.json` and `SUPERVISOR_REPORT.md` (very simple English, tables).
++  Delete scratch `_*.py` / `_*.ps1` files you created in the run folder once the report cites
++  their results.
+diff --git a/.hm-orchestrator/current/CLAUDE_TAKEOVER.ok b/.hm-orchestrator/current/CLAUDE_TAKEOVER.ok
+index d0e40b02..01fdac1d 100644
+--- a/.hm-orchestrator/current/CLAUDE_TAKEOVER.ok
++++ b/.hm-orchestrator/current/CLAUDE_TAKEOVER.ok
+@@ -19,10 +19,11 @@
+                           "tests\\integration\\test_dashboard_test_connections.py",
+                           "tests\\unit\\test_telegram*",
+                           "tests\\unit\\test_invariant_telegram*",
+-                          "pyproject.toml"
++                          "pyproject.toml",
++                          ".gitignore"
+                       ],
+     "run_id":  "20260913T162923Z-feaaeb73",
+     "source_escalation":  "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\Trading_assistant\\.hm-orchestrator\\runs\\20260913T162923Z-feaaeb73\\ESCALATION.json",
+-    "expires_utc":  "2026-09-14T07:15:04.0452594Z",
+-    "granted_utc":  "2026-09-13T21:15:04.0388785Z"
++    "expires_utc":  "2026-09-14T08:36:23.7713326Z",
++    "granted_utc":  "2026-09-13T22:36:23.7638409Z"
+ }
+diff --git a/.hm-orchestrator/current/RUN.json b/.hm-orchestrator/current/RUN.json
+index f3eb685c..4aeb3755 100644
+--- a/.hm-orchestrator/current/RUN.json
++++ b/.hm-orchestrator/current/RUN.json
+@@ -1,5 +1,5 @@
+ ﻿{
+-    "run_dir":  ".hm-orchestrator/runs/20260913T162923Z-feaaeb73",
+-    "run_id":  "20260913T162923Z-feaaeb73",
+-    "started_utc":  "2026-09-13T16:29:23.6785496Z"
++    "run_dir":  ".hm-orchestrator/runs/20260913T224025Z-95c82040",
++    "run_id":  "20260913T224025Z-95c82040",
++    "started_utc":  "2026-09-13T22:40:25.2659779Z"
+ }
+diff --git a/.hm-orchestrator/runs/20260913T162923Z-feaaeb73/ESCALATION.json b/.hm-orchestrator/runs/20260913T162923Z-feaaeb73/ESCALATION.json
+index bd510418..7d9d6a71 100644
+--- a/.hm-orchestrator/runs/20260913T162923Z-feaaeb73/ESCALATION.json
++++ b/.hm-orchestrator/runs/20260913T162923Z-feaaeb73/ESCALATION.json
+@@ -36,7 +36,8 @@
+     "tests\\integration\\test_dashboard_test_connections.py",
+     "tests\\unit\\test_telegram*",
+     "tests\\unit\\test_invariant_telegram*",
+-    "pyproject.toml"
++    "pyproject.toml",
++    ".gitignore"
+   ],
+   "recommended_next_action": "claude-implement"
+ }
+\ No newline at end of file
+diff --git a/src/ai_market_monitor/telegram/service.py b/src/ai_market_monitor/telegram/service.py
+index a6c114e5..fa811789 100644
+--- a/src/ai_market_monitor/telegram/service.py
++++ b/src/ai_market_monitor/telegram/service.py
+@@ -380,6 +380,9 @@ class TelegramBotService:
+                     conversation,
+                 )
+             return self._telegram_link_reminder_message(message, conversation)
++        if conversation.user_id is None:
++            # A chat that opened a connect question and did not connect is on no account.
++            return self._plain(message, "Send /start to open the main menu.")
+         if conversation.flow == "create_monitor" and conversation.step == "collect_setup_text":
+             try:
+                 return await self._receive_setup_text(message, conversation)
+@@ -712,6 +715,18 @@ class TelegramBotService:
+                     menu=PRIMARY_MENU,
+                 ),
+             )
++        if conversation.user_id is None and not callback.data.startswith("telegram_link:"):
++            # The connect question's own two buttons work on no account; nothing else does.
++            return await self._store_callback(
++                callback,
++                payload_hash,
++                None,
++                TelegramOutboundMessage(
++                    chat_id=callback.chat_id,
++                    text="Send /start to open the main menu.",
++                    menu=PRIMARY_MENU,
++                ),
++            )
+         callback_user_id = conversation.user_id
+         try:
+             await self._push_navigation(conversation, callback.data)
+@@ -3277,11 +3292,11 @@ class TelegramBotService:
+         message: TelegramInboundMessage,
+         raw_token: str,
+     ) -> TelegramOutboundMessage:
++        links = TelegramAccountLinkService(self.session, self.settings)
+         try:
+-            offer = await TelegramAccountLinkService(
+-                self.session,
+-                self.settings,
+-            ).pending_dashboard_start_link(raw_token, telegram_user_id=message.telegram_user_id)
++            offer = await links.pending_dashboard_start_link(
++                raw_token, telegram_user_id=message.telegram_user_id
++            )
+         except TelegramAccountLinkError as exc:
+             await self.session.rollback()
+             return self._plain(
+@@ -3291,9 +3306,15 @@ class TelegramBotService:
+                 f"{self._dashboard_url(CONNECTIONS_PATH)}",
+                 buttons=[self._dashboard_button("Connections page", CONNECTIONS_PATH)],
+             )
++        # The chat stays on the account this Telegram is really on — or on none — until
++        # Confirm succeeds. It used to be pointed at the offered account here, before
++        # anybody had answered, so a Cancel, or any older menu button tapped while the
++        # question was open, showed that account's monitors, trial and plan to a chat
++        # that was never connected to it. The link token is shown only on its owner's
++        # Connections page, but it is a bearer token all the same.
+         conversation = await self._upsert_conversation(
+             message,
+-            user_id=offer.user.id,
++            user_id=await links.account_holding(message.telegram_user_id),
+             onboarding_session_id=None,
+             flow="telegram_link",
+             step="confirm",
+@@ -3600,8 +3621,16 @@ class TelegramBotService:
+             conversation.flow = "main_menu"
+             conversation.step = "idle"
+             conversation.state_data = state
+-            if owner_id is not None:
+-                conversation.user_id = owner_id
++            # Every ending names the account the chat acts as: the one just connected, or
++            # the one the Telegram identity is on right now — never the offered account
++            # of a question that was cancelled or refused.
++            conversation.user_id = (
++                owner_id
++                if owner_id is not None
++                else await TelegramAccountLinkService(
++                    self.session, self.settings
++                ).account_holding(conversation.telegram_user_id)
++            )
+             await self.session.commit()
+         return self._telegram_link_answer(
+             chat_id=callback.chat_id,
+@@ -3614,7 +3643,7 @@ class TelegramBotService:
+         self,
+         message: TelegramInboundMessage,
+         *,
+-        user_id: UUID,
++        user_id: UUID | None,
+         onboarding_session_id: UUID | None,
+         flow: str,
+         step: str,
+diff --git a/tests/integration/test_telegram_connect_flow.py b/tests/integration/test_telegram_connect_flow.py
+index ab849949..98f12a32 100644
+--- a/tests/integration/test_telegram_connect_flow.py
++++ b/tests/integration/test_telegram_connect_flow.py
+@@ -777,18 +777,18 @@ async def test_a_refused_chat_does_not_keep_acting_as_the_account_that_was_refus
+ ) -> None:
+     """R6(b): "no data changed" includes the conversation the question was asked in.
+ 
+-    Asking the question points the chat at the account named in the link. When the answer
+-    is no, leaving it there means this Telegram keeps being served that account's monitors
+-    and trial status without ever being connected to it.
++    A chat acting as the account named in the link, without being connected to it, is
++    served that account's monitors and trial status. Neither asking the question nor
++    refusing it may do that.
+     """
+ 
+     adapter = RecordingTelegramAdapter()
+     async with test_context["session_factory"]() as session:
+         opened = await _open_prompt(test_context, session, adapter, "other_real_account")
+         assert opened.other is not None
+-        # Asking the question is what moved the chat onto the offered account.
++        # Asking the question leaves the chat on the account this Telegram is really on.
+         asked = await _conversation(session, TELEGRAM_ID)
+-        assert asked is not None and asked.user_id == opened.dashboard
++        assert asked is not None and asked.user_id == opened.other
+         acted = await _act(test_context, session, adapter, opened, "tap_confirm")
+         _assert_answered(acted.outcome)
+ 
+@@ -800,6 +800,56 @@ async def test_a_refused_chat_does_not_keep_acting_as_the_account_that_was_refus
+         assert (refused.flow, refused.step) != ("telegram_link", "confirm")
+ 
+ 
++@pytest.mark.parametrize("scenario", SCENARIOS)
++@pytest.mark.parametrize("moment", ["while_the_question_is_open", "after_cancel"])
++async def test_the_chat_never_acts_as_the_offered_account_before_confirm(
++    test_context: dict, scenario: str, moment: str
++) -> None:
++    """Only a successful Confirm puts this chat on the account named in the link.
++
++    Opening the question used to point the chat at that account straight away, and Cancel
++    left it there. Anyone holding the link could tap Cancel, then My Monitors, and read the
++    monitors, trial and plan of an account this Telegram was never connected to — or tap
++    an older menu button while the question was still open and get the same.
++    """
++
++    adapter = RecordingTelegramAdapter()
++    async with test_context["session_factory"]() as session:
++        opened = await _open_prompt(test_context, session, adapter, scenario)
++        if moment == "after_cancel":
++            acted = await _act(test_context, session, adapter, opened, "tap_cancel")
++            _assert_answered(acted.outcome)
++
++        conversation = await _conversation(session, TELEGRAM_ID)
++        assert conversation is not None
++        assert conversation.user_id != opened.dashboard, (
++            f"{moment}: this chat acts as the offered account without being connected to it"
++        )
++        really_on = {
++            "fresh": None,
++            "replaces": None,
++            "pressed_start": opened.shell,
++            "other_real_account": opened.other,
++        }[scenario]
++        assert conversation.user_id == really_on
++
++        old_button = await _drive_tap(
++            test_context,
++            session,
++            adapter,
++            95,
++            "menu:my_monitors",
++            attached_message_id="msg-older-menu",
++            callback_query_id=f"cb-older-menu-{moment}",
++        )
++        _assert_answered(old_button)
++        typed = await _drive(test_context, session, adapter, message_update(96, "My Monitors"))
++        _assert_answered(typed)
++        assert await _connection(session, TELEGRAM_ID) is None or (
++            (await _connection(session, TELEGRAM_ID)).user_id != opened.dashboard
++        )
++
++
+ async def test_every_confirm_outcome_offers_the_connections_page(test_context: dict) -> None:
+     """R4: no dead end. Each outcome names the next step and links to the real page."""
+ 

@@ -36,7 +36,8 @@
     "tests\\integration\\test_dashboard_test_connections.py",
     "tests\\unit\\test_telegram*",
     "tests\\unit\\test_invariant_telegram*",
-    "pyproject.toml"
+    "pyproject.toml",
+    ".gitignore"
   ],
   "recommended_next_action": "claude-implement"
 }

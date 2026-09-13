@@ -1,0 +1,11 @@
+﻿ M .gitignore
+ M .hm-orchestrator/current/CLAUDE_DECISION.md
+ M .hm-orchestrator/current/CLAUDE_TAKEOVER.ok
+ M .hm-orchestrator/current/RUN.json
+ M .hm-orchestrator/runs/20260913T162923Z-feaaeb73/ESCALATION.json
+ M src/ai_market_monitor/telegram/service.py
+ M tests/integration/test_telegram_connect_flow.py
+?? .hm-orchestrator/runs/20260913T162406Z-39060cc7/FINAL_STATUS.txt
+?? .hm-orchestrator/runs/20260913T162406Z-39060cc7/SUPERVISOR_STDOUT.txt
+?? .hm-orchestrator/runs/20260913T162406Z-39060cc7/SUPERVISOR_STDOUT_RAW.txt
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/

@@ -777,18 +777,18 @@ async def test_a_refused_chat_does_not_keep_acting_as_the_account_that_was_refus
 ) -> None:
     """R6(b): "no data changed" includes the conversation the question was asked in.
 
-    Asking the question points the chat at the account named in the link. When the answer
-    is no, leaving it there means this Telegram keeps being served that account's monitors
-    and trial status without ever being connected to it.
+    A chat acting as the account named in the link, without being connected to it, is
+    served that account's monitors and trial status. Neither asking the question nor
+    refusing it may do that.
     """
 
     adapter = RecordingTelegramAdapter()
     async with test_context["session_factory"]() as session:
         opened = await _open_prompt(test_context, session, adapter, "other_real_account")
         assert opened.other is not None
-        # Asking the question is what moved the chat onto the offered account.
+        # Asking the question leaves the chat on the account this Telegram is really on.
         asked = await _conversation(session, TELEGRAM_ID)
-        assert asked is not None and asked.user_id == opened.dashboard
+        assert asked is not None and asked.user_id == opened.other
         acted = await _act(test_context, session, adapter, opened, "tap_confirm")
         _assert_answered(acted.outcome)
 
@@ -798,6 +798,56 @@ async def test_a_refused_chat_does_not_keep_acting_as_the_account_that_was_refus
             "the refusal left this Telegram acting as the account that refused it"
         )
         assert (refused.flow, refused.step) != ("telegram_link", "confirm")
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS)
+@pytest.mark.parametrize("moment", ["while_the_question_is_open", "after_cancel"])
+async def test_the_chat_never_acts_as_the_offered_account_before_confirm(
+    test_context: dict, scenario: str, moment: str
+) -> None:
+    """Only a successful Confirm puts this chat on the account named in the link.
+
+    Opening the question used to point the chat at that account straight away, and Cancel
+    left it there. Anyone holding the link could tap Cancel, then My Monitors, and read the
+    monitors, trial and plan of an account this Telegram was never connected to — or tap
+    an older menu button while the question was still open and get the same.
+    """
+
+    adapter = RecordingTelegramAdapter()
+    async with test_context["session_factory"]() as session:
+        opened = await _open_prompt(test_context, session, adapter, scenario)
+        if moment == "after_cancel":
+            acted = await _act(test_context, session, adapter, opened, "tap_cancel")
+            _assert_answered(acted.outcome)
+
+        conversation = await _conversation(session, TELEGRAM_ID)
+        assert conversation is not None
+        assert conversation.user_id != opened.dashboard, (
+            f"{moment}: this chat acts as the offered account without being connected to it"
+        )
+        really_on = {
+            "fresh": None,
+            "replaces": None,
+            "pressed_start": opened.shell,
+            "other_real_account": opened.other,
+        }[scenario]
+        assert conversation.user_id == really_on
+
+        old_button = await _drive_tap(
+            test_context,
+            session,
+            adapter,
+            95,
+            "menu:my_monitors",
+            attached_message_id="msg-older-menu",
+            callback_query_id=f"cb-older-menu-{moment}",
+        )
+        _assert_answered(old_button)
+        typed = await _drive(test_context, session, adapter, message_update(96, "My Monitors"))
+        _assert_answered(typed)
+        assert await _connection(session, TELEGRAM_ID) is None or (
+            (await _connection(session, TELEGRAM_ID)).user_id != opened.dashboard
+        )
 
 
 async def test_every_confirm_outcome_offers_the_connections_page(test_context: dict) -> None:
