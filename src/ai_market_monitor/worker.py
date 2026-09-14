@@ -721,11 +721,11 @@ async def _poll_telegram_updates() -> dict:
     if settings.telegram_adapter != "http" or settings.telegram_bot_token is None:
         return {"processed": 0, "disabled": True, "reason": "telegram_http_not_configured"}
 
-    from sqlalchemy import Integer, cast, func, select
-
-    from ai_market_monitor.api.routers.telegram import process_telegram_update
+    from ai_market_monitor.api.routers.telegram import (
+        process_telegram_update,
+        telegram_polling_offset,
+    )
     from ai_market_monitor.core.database import SessionFactory
-    from ai_market_monitor.db.models import TelegramUpdateReceipt
     from ai_market_monitor.services.market_preview import MarketPreviewService
     from ai_market_monitor.services.market_provider import market_data_provider
     from ai_market_monitor.telegram.adapter import TelegramDeliveryError, TelegramHttpAdapter
@@ -755,11 +755,8 @@ async def _poll_telegram_updates() -> dict:
     failed = 0
     try:
         async with SessionFactory() as session:
-            latest = await session.scalar(
-                select(func.max(cast(TelegramUpdateReceipt.update_id, Integer)))
-            )
             updates = await adapter.get_updates(
-                offset=(int(latest) + 1 if latest is not None else None),
+                offset=await telegram_polling_offset(session),
                 limit=settings.telegram_polling_limit,
                 timeout=0,
             )

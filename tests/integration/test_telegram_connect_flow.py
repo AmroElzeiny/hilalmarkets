@@ -30,7 +30,9 @@ The four shapes, and the defect each one used to prove:
                          connected: Confirm hit a uniqueness error instead of replacing it
                          (D-D), and nothing said so up front.
 ``other_real_account``   this Telegram belongs to a different account that has a sign-in
-                         of its own: refused in plain words, never re-pointed (D-F).
+                         of its own. It used to be refused, which left a person unable to
+                         move their own Telegram; the newest confirmed link now takes it
+                         over, and the other account keeps its own sign-in.
 """
 
 from __future__ import annotations
@@ -477,8 +479,8 @@ async def _open_prompt(test_context: dict, session, adapter, scenario: str) -> O
 def _expected(scenario: str, action: str) -> str:
     if action == "tap_cancel":
         return "cancelled"
-    if scenario == "other_real_account":
-        return "refused"
+    # Every scenario connects, including a Telegram held by another real account: the
+    # newest confirmed link takes it over.
     return "connected"
 
 
@@ -644,14 +646,6 @@ async def test_one_answer_ends_the_connect_prompt(
             assert "nothing was connected" in decided.reply.text.lower()
             return
 
-        if expected == "refused":
-            assert connection is not None and connection.user_id == opened.other
-            assert identity_owner == opened.other
-            assert linked_audits == 0, "a refusal wrote a connection audit event"
-            assert "another hilal markets account" in decided.reply.text.lower()
-            assert CONNECTIONS_PATH in decided.reply.text
-            return
-
         assert connection is not None, f"nothing was connected: {decided.reply.text!r}"
         assert connection.user_id == opened.dashboard
         assert connection.chat_id == CHAT_ID
@@ -688,6 +682,30 @@ async def test_one_answer_ends_the_connect_prompt(
             assert await _connection(session, OLD_TELEGRAM_ID) is None, (
                 "the replaced Telegram is still on the account it was replaced from"
             )
+        if scenario == "other_real_account":
+            # The newest confirmed link wins: the other account keeps its own sign-in and
+            # history, and holds no Telegram afterwards.
+            assert opened.other is not None and opened.other != opened.dashboard
+            assert await session.scalar(
+                select(func.count(TelegramConnection.id)).where(
+                    TelegramConnection.user_id == opened.other
+                )
+            ) == 0, "the account that lost this Telegram still holds its connection"
+            assert await session.scalar(
+                select(func.count(UserIdentity.id)).where(
+                    UserIdentity.provider == IdentityProvider.TELEGRAM,
+                    UserIdentity.user_id == opened.other,
+                )
+            ) == 0, "the account that lost this Telegram can still sign in with it"
+            assert await session.scalar(
+                select(func.count(UserIdentity.id)).where(
+                    UserIdentity.provider == IdentityProvider.EMAIL,
+                    UserIdentity.user_id == opened.other,
+                )
+            ) == 1, "taking the Telegram also took the other account's own sign-in"
+            assert await _audit_count(
+                session, "telegram.identity_moved", target_id=TELEGRAM_ID
+            ) == 1
 
 
 async def test_the_prompt_is_one_message_with_exactly_two_inline_buttons(
@@ -772,14 +790,14 @@ async def test_a_typed_answer_cannot_edit_and_clears_the_stale_keyboard(
         assert acted.outcome.reply.keyboard == "remove_reply_keyboard"
 
 
-async def test_a_refused_chat_does_not_keep_acting_as_the_account_that_was_refused(
+async def test_a_taken_over_chat_stops_acting_as_the_account_it_left(
     test_context: dict,
 ) -> None:
-    """R6(b): "no data changed" includes the conversation the question was asked in.
+    """R6(a): the conversation moves with the Telegram, only once Confirm is pressed.
 
-    A chat acting as the account named in the link, without being connected to it, is
-    served that account's monitors and trial status. Neither asking the question nor
-    refusing it may do that.
+    Asking the question must not move anything: the chat stays on the account it is
+    really on. After Confirm the chat acts as the newly linked account, and never again as
+    the account that gave the Telegram up.
     """
 
     adapter = RecordingTelegramAdapter()
@@ -792,12 +810,12 @@ async def test_a_refused_chat_does_not_keep_acting_as_the_account_that_was_refus
         acted = await _act(test_context, session, adapter, opened, "tap_confirm")
         _assert_answered(acted.outcome)
 
-        refused = await _conversation(session, TELEGRAM_ID)
-        assert refused is not None
-        assert refused.user_id == opened.other, (
-            "the refusal left this Telegram acting as the account that refused it"
+        moved = await _conversation(session, TELEGRAM_ID)
+        assert moved is not None
+        assert moved.user_id == opened.dashboard, (
+            "after the takeover this chat still acts as the account it left"
         )
-        assert (refused.flow, refused.step) != ("telegram_link", "confirm")
+        assert (moved.flow, moved.step) != ("telegram_link", "confirm")
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
@@ -1171,12 +1189,15 @@ async def _hold_telegram_on_signed_up_account(session) -> UUID:
     return holder.id
 
 
-async def test_both_doors_refuse_a_telegram_that_is_someone_elses(test_context: dict) -> None:
-    """R6(b), asked of the one rule from each door: same code, same plain sentence.
+@pytest.mark.parametrize("door", ["sign_in_form", "bot_confirm"])
+async def test_both_doors_take_a_telegram_over_from_another_real_account(
+    test_context: dict, door: str
+) -> None:
+    """R6(a), asked of the one rule from each door: the newest confirmed link wins.
 
-    One world, both doors. The rule refuses before it writes, so the session is still
-    usable for the second door, and the last assertions are the ones that matter: nothing
-    about the other person's account moved.
+    Each door proves the person controls this Telegram — the sign-in link is issued by
+    the bot to that chat, and the confirm is pressed inside it — so the Telegram moves.
+    The other account keeps its own sign-in and holds no Telegram afterwards.
     """
 
     settings = test_context["settings"]
@@ -1185,45 +1206,42 @@ async def test_both_doors_refuse_a_telegram_that_is_someone_elses(test_context: 
     async with test_context["session_factory"]() as session:
         holder_id = await _hold_telegram_on_signed_up_account(session)
         stranger = await _signed_up(session, "four@example.com", display_name="Four")
-        service = TelegramAccountLinkService(session, settings)
 
-        url = await service.create(
-            user_id=stranger.id,
-            telegram_user_id="tg-999",
-            target="signin",
-        )
-        await session.commit()
-        with pytest.raises(TelegramAccountLinkError) as door_two:
+        if door == "sign_in_form":
+            url = await TelegramAccountLinkService(session, settings).create(
+                user_id=stranger.id,
+                telegram_user_id="tg-999",
+                target="signin",
+            )
+            await session.commit()
             await TelegramAccountLinkService(session, settings).complete(
                 url.split("telegram_link=", 1)[1], user=stranger
             )
-        assert door_two.value.code == "telegram_already_linked"
-        assert "another hilal markets account" in str(door_two.value).lower()
-
-        token = await _start_link(session, settings, stranger.id)
-        with pytest.raises(TelegramAccountLinkError) as door_one:
+        else:
+            token = await _start_link(session, settings, stranger.id)
             await TelegramAccountLinkService(session, settings).complete_dashboard_start_link(
                 raw_token=token,
                 telegram_user_id="tg-999",
                 chat_id="chat-999",
                 username="locked",
             )
-        assert door_one.value.code == "telegram_already_linked"
-        assert "another hilal markets account" in str(door_one.value).lower()
+        await session.commit()
 
-        assert (await _connection(session, "tg-999")).user_id == holder_id
-        assert await _identity_owner(session, "tg-999") == holder_id
-        assert await _audit_count(session, "telegram.account_linked", target_id="tg-999") == 0
-        assert await _audit_count(session, "telegram.identity_moved", target_id="tg-999") == 0
-        link_rows = (
-            await session.scalars(
-                select(TelegramDashboardLink).where(TelegramDashboardLink.user_id == stranger.id)
+        assert (await _connection(session, "tg-999")).user_id == stranger.id
+        assert await _identity_owner(session, "tg-999") == stranger.id
+        assert await _audit_count(session, "telegram.account_linked", target_id="tg-999") == 1
+        assert await _audit_count(session, "telegram.identity_moved", target_id="tg-999") == 1
+        assert await session.scalar(
+            select(func.count(TelegramConnection.id)).where(
+                TelegramConnection.user_id == holder_id
             )
-        ).all()
-        assert link_rows, "the link rows a refusal must not spend were never created"
-        assert all(link.consumed_at is None for link in link_rows), (
-            "a refusal spent a link the person can still use"
-        )
+        ) == 0, "the account that gave the Telegram up still holds its connection"
+        assert await session.scalar(
+            select(func.count(UserIdentity.id)).where(
+                UserIdentity.user_id == holder_id,
+                UserIdentity.provider == IdentityProvider.EMAIL,
+            )
+        ) == 1, "taking the Telegram also took the other account's own sign-in"
 
 
 async def test_a_telegram_already_on_this_account_connects_without_duplicates(

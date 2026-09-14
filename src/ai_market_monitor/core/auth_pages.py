@@ -672,13 +672,6 @@ _ERRORS: Final[dict[str, tuple[str, str, str, str, str]]] = {
         "Contact support",
         "support",
     ),
-    "telegram_already_linked": (
-        "error",
-        "That Telegram account is already connected",
-        "It belongs to a different Hilal Markets account. Sign in with that one instead.",
-        "",
-        "",
-    ),
     "telegram_link_used": (
         "error",
         "That Telegram link was already used",

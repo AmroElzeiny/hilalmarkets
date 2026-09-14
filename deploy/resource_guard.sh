@@ -124,6 +124,8 @@ disk_prune_backups() {
   # The names are predeploy-YYYYmmdd-HHMMSS.sql.gz written in UTC, so sorting the text is
   # the same as sorting by time. No file timestamp is trusted: a copied or restored dump
   # carries the wrong one, and then the wrong dump is the one deleted.
+  # LC_ALL=C: a language setting such as en_US orders text by its own rules, not byte by
+  # byte, so the order must never depend on the server's language.
   while IFS= read -r old; do
     [[ -z "$old" ]] && continue
     if rm -f "$old"; then
@@ -132,7 +134,7 @@ disk_prune_backups() {
     fi
   done < <(
     find "$folder" -maxdepth 1 -type f -name 'predeploy-*.sql.gz' -print 2>/dev/null \
-      | sort -r \
+      | LC_ALL=C sort -r \
       | tail -n +$((keep + 1))
   )
 

@@ -9,19 +9,21 @@ the throwaway one the bot itself had made for that same person. Two owners of on
 how a person was told their own Telegram "already belongs to another account", and then
 kept being asked to confirm it.
 
-:meth:`TelegramAccountLinkService.attach` is the rule now, and both doors ask it. It says
-yes in three cases and no in one:
+:meth:`TelegramAccountLinkService.attach` is the rule now, and both doors ask it. The
+newest confirmed link always wins:
 
-* **(a) move** — the Telegram is held by an account with no sign-in of its own, which is
-  the shell the bot creates the moment somebody presses Start. The identity, the
-  connection and the conversation go to the account being signed into; everything else
-  that shell holds stays where it is, and an audit event names both accounts.
-* **(b) refuse** — the Telegram is held by a different account that *does* have a sign-in.
-  That is a different person's account, and nothing is changed.
-* **(c) replace** — the account being signed into already holds a different Telegram. The
+* **(a) move** — the Telegram is held by another account: the shell the bot creates the
+  moment somebody presses Start, or a different account with a sign-in of its own. Both
+  doors prove the person controls this Telegram — the confirm is pressed inside that
+  chat, and the sign-in link was issued by the bot to that chat — so the identity, the
+  connection and the conversation go to the account being linked. Everything else the
+  other account holds stays where it is, and an audit event names both accounts. Alerts
+  already queued for that chat by the other account are never sent: delivery checks
+  the chat still belongs to the alert's owner.
+* **(b) replace** — the account being signed into already holds a different Telegram. The
   person was told the prompt would do this, so the old one is taken off first and the new
   one attached, in one transaction and with no uniqueness error.
-* **(d) already there** — the same Telegram is already on this same account: success, and
+* **(c) already there** — the same Telegram is already on this same account: success, and
   no second row of anything.
 
 Every row this rule reads is read with ``with_for_update()``. SQLite ignores it and
@@ -37,7 +39,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
@@ -51,6 +53,7 @@ from ai_market_monitor.core.security import (
 )
 from ai_market_monitor.db.models import (
     AuditEvent,
+    DisclaimerAcceptance,
     TelegramConnection,
     TelegramConversationState,
     TelegramDashboardLink,
@@ -58,10 +61,6 @@ from ai_market_monitor.db.models import (
     UserIdentity,
 )
 from ai_market_monitor.db.models.enums import ConnectionStatus, IdentityProvider
-
-#: What makes an account a person's own rather than a placeholder the bot made: an email
-#: address. Google sign-in writes the same kind of row, so one name covers both doors.
-SIGN_IN_PROVIDERS: frozenset[IdentityProvider] = frozenset({IdentityProvider.EMAIL})
 
 
 class TelegramAccountLinkError(ValueError):
@@ -96,7 +95,7 @@ class TelegramOwnership:
 
     identity: UserIdentity
     connection: TelegramConnection | None
-    #: Telegram-only accounts that gave this Telegram up, if any.
+    #: Accounts that gave this Telegram up, if any.
     moved_from: tuple[UUID, ...] = field(default_factory=tuple)
     #: The Telegram that was taken off the account, if this confirm replaced one.
     replaced: str | None = None
@@ -296,36 +295,12 @@ class TelegramAccountLinkService:
             return None
 
         telegram_user_id = connection.telegram_user_id
-        identities = (
-            await self.session.scalars(
-                select(UserIdentity).where(
-                    UserIdentity.user_id == user_id,
-                    UserIdentity.provider == IdentityProvider.TELEGRAM,
-                )
-            )
-        ).all()
-        conversations = (
-            await self.session.scalars(
-                select(TelegramConversationState).where(
-                    TelegramConversationState.telegram_user_id == telegram_user_id
-                )
-            )
-        ).all()
-        for conversation in conversations:
-            await self.session.delete(conversation)
-        for identity in identities:
-            await self.session.delete(identity)
-        await self.session.delete(connection)
-        self.session.add(
-            AuditEvent(
-                actor_user_id=user_id,
-                actor_type="dashboard_user",
-                action="telegram.disconnected",
-                target_type="telegram_connection",
-                target_id=telegram_user_id,
-                metadata_redacted={"source": "dashboard"},
-                created_at=datetime.now(UTC),
-            )
+        await self._remove_telegram(
+            connection,
+            owner_id=user_id,
+            keep_subject=None,
+            action="telegram.disconnected",
+            metadata={"source": "dashboard"},
         )
         await self.session.flush()
         return telegram_user_id
@@ -344,9 +319,8 @@ class TelegramAccountLinkService:
     ) -> TelegramOwnership:
         """Put this Telegram account on ``target``. The only place that decision is made.
 
-        Raises :class:`TelegramAccountLinkError` with code ``telegram_already_linked``
-        when the Telegram is held by a different account that has a sign-in of its own,
-        and changes nothing in that case.
+        Never refuses because another account holds the Telegram: the newest confirmed
+        link takes it, and the Telegram this account held before is taken off.
         """
 
         identity = await self.session.scalar(
@@ -391,16 +365,11 @@ class TelegramAccountLinkService:
             )
             if stale_chat_owner is not None:
                 holders.add(stale_chat_owner.user_id)
-        for holder in holders:
-            if await self._is_signed_up(holder):
-                raise TelegramAccountLinkError(
-                    "telegram_already_linked",
-                    "This Telegram is already connected to another Hilal Markets account. "
-                    "Remove it there first on the Connections page.",
-                )
+        # (a) Whoever held this Telegram gives it up, whether or not that account has a
+        # sign-in of its own. The newest confirmed link wins; see the module docstring.
         moved_from = tuple(sorted(holders, key=str))
 
-        # (c) The account being signed into may hold a different Telegram. It was promised
+        # (b) The account being signed into may hold a different Telegram. It was promised
         # in the prompt; taking it off first is what makes the attach fit the constraints.
         previous = await self._replaced_connection(
             user_id=target.id, telegram_user_id=telegram_user_id
@@ -408,7 +377,11 @@ class TelegramAccountLinkService:
         replaced: str | None = None
         if previous is not None:
             replaced = previous.telegram_user_id
-            await self._take_off(previous, target=target)
+            await self._take_off(
+                previous,
+                target=target,
+                incoming_telegram_user_id=telegram_user_id,
+            )
             # The old Telegram's chat id may be the one about to be written (the same
             # person, a new Telegram account): the row is gone, so the value is free.
             await self.session.flush()
@@ -432,6 +405,18 @@ class TelegramAccountLinkService:
             )
             self.session.add(identity)
         else:
+            if identity.user_id != target.id:
+                # An acceptance the previous holder gave through this sign-in stays theirs.
+                # Its pointer is cleared rather than left naming a row that now belongs to
+                # another account; the record keeps its own copy of which sign-in gave it.
+                await self.session.execute(
+                    update(DisclaimerAcceptance)
+                    .where(
+                        DisclaimerAcceptance.identity_id == identity.id,
+                        DisclaimerAcceptance.user_id != target.id,
+                    )
+                    .values(identity_id=None)
+                )
             identity.user_id = target.id
             identity.display_identifier = username or identity.display_identifier
             identity.is_verified = True
@@ -515,17 +500,6 @@ class TelegramAccountLinkService:
             )
         )
 
-    async def _is_signed_up(self, user_id: UUID) -> bool:
-        identity_id = await self.session.scalar(
-            select(UserIdentity.id)
-            .where(
-                UserIdentity.user_id == user_id,
-                UserIdentity.provider.in_(SIGN_IN_PROVIDERS),
-            )
-            .limit(1)
-        )
-        return identity_id is not None
-
     async def _replaced_connection(
         self, *, user_id: UUID, telegram_user_id: str | None
     ) -> TelegramConnection | None:
@@ -538,7 +512,13 @@ class TelegramAccountLinkService:
             select(TelegramConnection).where(*clauses).with_for_update()
         )
 
-    async def _take_off(self, connection: TelegramConnection, *, target: User) -> None:
+    async def _take_off(
+        self,
+        connection: TelegramConnection,
+        *,
+        target: User,
+        incoming_telegram_user_id: str,
+    ) -> None:
         """Take a Telegram off an account, exactly as unlinking it from the page does.
 
         The connection, the sign-in row and the bot conversation all go: leaving any of
@@ -547,16 +527,44 @@ class TelegramAccountLinkService:
         next one from being written at all.
         """
 
+        await self._remove_telegram(
+            connection,
+            owner_id=target.id,
+            keep_subject=incoming_telegram_user_id,
+            action="telegram.connection_replaced",
+            metadata={"replaced_by": "telegram_start", "user_id": str(target.id)},
+        )
+
+    async def _remove_telegram(
+        self,
+        connection: TelegramConnection,
+        *,
+        owner_id: UUID,
+        keep_subject: str | None,
+        action: str,
+        metadata: dict[str, str],
+    ) -> None:
+        """Take every Telegram trace off one account. Unlink and replace both use this.
+
+        The connection, the bot conversation, and **every** Telegram sign-in the account
+        holds go — not only the one matching this connection — so an older Telegram left
+        behind by an earlier link cannot keep acting as the account. ``keep_subject`` is
+        the Telegram being linked right now, when there is one.
+
+        A risk-note acceptance given through a removed sign-in stays: the database clears
+        its pointer and the record keeps its own copy of which sign-in gave it. Alerts
+        already queued for the old chat are stopped when they are due to send, because
+        the chat no longer belongs to the account.
+        """
+
         telegram_user_id = connection.telegram_user_id
-        identities = (
-            await self.session.scalars(
-                select(UserIdentity).where(
-                    UserIdentity.user_id == target.id,
-                    UserIdentity.provider == IdentityProvider.TELEGRAM,
-                    UserIdentity.provider_subject == telegram_user_id,
-                )
-            )
-        ).all()
+        clauses = [
+            UserIdentity.user_id == owner_id,
+            UserIdentity.provider == IdentityProvider.TELEGRAM,
+        ]
+        if keep_subject is not None:
+            clauses.append(UserIdentity.provider_subject != keep_subject)
+        identities = (await self.session.scalars(select(UserIdentity).where(*clauses))).all()
         conversations = (
             await self.session.scalars(
                 select(TelegramConversationState).where(
@@ -571,12 +579,12 @@ class TelegramAccountLinkService:
         await self.session.delete(connection)
         self.session.add(
             AuditEvent(
-                actor_user_id=target.id,
+                actor_user_id=owner_id,
                 actor_type="dashboard_user",
-                action="telegram.connection_replaced",
+                action=action,
                 target_type="telegram_connection",
                 target_id=telegram_user_id,
-                metadata_redacted={"replaced_by": "telegram_start", "user_id": str(target.id)},
+                metadata_redacted=metadata,
                 created_at=datetime.now(UTC),
             )
         )

@@ -3461,11 +3461,6 @@ class TelegramBotService:
 
     def _telegram_link_refusal_text(self, code: str, *, email: str | None) -> str:
         connections = self._dashboard_url(CONNECTIONS_PATH)
-        if code == "telegram_already_linked":
-            return (
-                "⚠️ This Telegram is already connected to another Hilal Markets account. "
-                f"Remove it there first on the Connections page:\n{connections}"
-            )
         if code == "telegram_link_expired":
             return (
                 "⏳ This Telegram connection expired before it was confirmed.\n\n"
