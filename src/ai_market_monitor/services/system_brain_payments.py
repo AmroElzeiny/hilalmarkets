@@ -19,7 +19,10 @@ The three sources are already in the database and none of them is written here:
 **Nothing here recalculates money.** Every figure shown is the figure that was stored at
 the time. A page that recomputed a price from today's plan table would quietly restate
 history the day a price changes — which is exactly what happened on 8 September 2026 when
-Plus went from $15 to $9. The stored amount is the truth about what somebody paid.
+Plus went from $15 to $9. The stored amount is the truth about what somebody paid. The
+one reading applied to a stored figure is ``money_kept`` (paid minus what refund events
+stored back): both halves stay stored facts, and a money reader that ignored a stored
+partial refund would show staff money the customer no longer owes us.
 
 **Reading is capped and paged.** A single customer's history is small, but the list of
 everybody's is not, and one busy account must not make this page slow for the rest. The
@@ -39,6 +42,7 @@ from uuid import UUID
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.money import money_kept
 from ai_market_monitor.core.plans import plan_name
 from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
@@ -202,7 +206,18 @@ class SystemBrainPaymentsService:
             select(
                 BillingCheckoutAttempt.user_id.label("user_id"),
                 func.count(BillingCheckoutAttempt.id).label("payment_count"),
-                func.coalesce(func.sum(BillingCheckoutAttempt.amount), 0).label("total_paid"),
+                # What the payments still hold: a partial refund lowers what staff is
+                # shown as taken, and the subtraction is written once here as the SQL
+                # form of ``money_kept``. Only rows still in ``PAID_STATUSES`` count, so
+                # a fully refunded payment has already left this sum altogether, and a
+                # ``completed`` row never carries a refund total above its amount.
+                func.coalesce(
+                    func.sum(
+                        BillingCheckoutAttempt.amount
+                        - BillingCheckoutAttempt.refunded_amount
+                    ),
+                    0,
+                ).label("total_paid"),
                 func.min(BillingCheckoutAttempt.completed_at).label("first_paid_at"),
                 func.max(BillingCheckoutAttempt.completed_at).label("last_paid_at"),
             )
@@ -294,7 +309,16 @@ class SystemBrainPaymentsService:
             await self.session.execute(
                 select(
                     func.count(BillingCheckoutAttempt.id),
-                    func.coalesce(func.sum(BillingCheckoutAttempt.amount), 0),
+                    # The SQL form of ``money_kept`` (see ``list_customers``): a partial
+                    # refund lowers what staff is told was taken; fully refunded rows
+                    # left this set with their status, they are not subtracted here.
+                    func.coalesce(
+                        func.sum(
+                            BillingCheckoutAttempt.amount
+                            - BillingCheckoutAttempt.refunded_amount
+                        ),
+                        0,
+                    ),
                     func.count(func.distinct(BillingCheckoutAttempt.user_id)),
                 ).where(
                     BillingCheckoutAttempt.status.in_(PAID_STATUSES),
@@ -411,7 +435,10 @@ class SystemBrainPaymentsService:
                 paid_at=attempt.completed_at or attempt.created_at,
                 plan_code=code or "",
                 plan_words=_plan_words(code),
-                amount=attempt.amount,
+                # The money this payment still holds, not the figure first taken: the
+                # staff reading a customer's history after a partial refund must see the
+                # remainder, and ``money_kept`` is the owner of that reading.
+                amount=money_kept(attempt.amount, attempt.refunded_amount),
                 currency=attempt.currency,
                 provider=attempt.provider,
                 billing_cycle=attempt.billing_cycle,

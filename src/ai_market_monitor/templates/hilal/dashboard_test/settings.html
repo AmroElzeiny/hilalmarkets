@@ -1,8 +1,8 @@
 {% extends "hilal/base_dashboard.html" %}
 {% from "hilal/macros/ask_ai.html" import ask_ai with context %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260913-corner-clear">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260913-corner-clear">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260914-telegram-recovery">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260914-telegram-recovery">
 {% endblock %}
 {% block content %}
 
@@ -551,5 +551,5 @@
 </dialog>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-settings-test.js') }}?v=20260913-corner-clear"></script>
+<script type="module" src="{{ url_for('static', path='/hm-settings-test.js') }}?v=20260914-telegram-recovery"></script>
 {% endblock %}

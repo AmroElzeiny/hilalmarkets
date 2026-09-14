@@ -624,39 +624,7 @@ def test_both_assistants_draw_their_mark_at_the_same_share_of_their_button():
     assert not painted, painted
 
 
-def test_the_assistant_tag_is_one_line_in_a_box_that_is_narrower_than_it():
-    rules = _rules(HILAL_CSS)
-    tag = re.search(r"\.hilal-tag\s*\{([^}]*)\}", rules)
-    assert tag, "the tag has no rule"
-    assert "white-space: nowrap" in tag.group(1), "the line must never wrap"
-    assert "overflow: hidden" in tag.group(1)
-    assert re.search(r"width:\s*\d+px", tag.group(1)), "the box needs a width of its own"
-
-    run = re.search(r"\.hilal-tag-run\s*\{([^}]*)\}", rules)
-    assert run and "infinite" in run.group(1), "the line has to start over for ever"
-
-    # Two identical copies and a shift of exactly half the track: that is what makes the
-    # loop seamless rather than a visible jump back to the start.
-    partial = _text(HILAL_PARTIAL)
-    assert partial.count('<span class="hilal-tag-line">') == 2
-    assert "translateX(-50%)" in rules
-
-
-def test_the_moving_tag_can_be_stopped():
-    """WCAG 2.2.2. Moving text that starts by itself must be stoppable."""
-
-    rules = _rules(HILAL_CSS)
-    assert "animation-play-state: paused" in rules
-    hover = re.search(
-        r"\.hm-hilal:hover \.hilal-tag-run,\s*[^{]*:focus-within \.hilal-tag-run\s*\{",
-        rules,
-    )
-    assert hover, "the tag must stop for a pointer and for the keyboard"
-    reduced = rules.split("prefers-reduced-motion", 1)[1]
-    assert ".hilal-tag-run { animation: none; }" in reduced
-
-
-def test_the_tag_says_only_what_the_assistant_really_does():
+def test_the_assistant_button_says_only_what_the_assistant_really_does():
     """It claims to see the page. That claim has to be true where it is made.
 
     `hm-page-context.js` sends the page, the section on screen and the coin being looked
@@ -665,7 +633,7 @@ def test_the_tag_says_only_what_the_assistant_really_does():
     """
 
     partial = _text(HILAL_PARTIAL)
-    assert "sees the page you are on" in partial
+    assert "It sees the page you are on" in partial
     context = _text(ROOT / "static" / "hm-page-context.js")
     for field in ("page:", "section:", "subject:"):
         assert field in context

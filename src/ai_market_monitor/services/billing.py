@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.core.money import wire_json_body
+from ai_market_monitor.core.money import money_kept, wire_json_body
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PUBLIC_PLAN_PRESENTATIONS,
@@ -656,6 +656,19 @@ REFUND_RECONCILIATION_ALERTS: Final[dict[str, str]] = {
         "check the access against the refund."
     ),
 }
+
+#: One sentence per partial refund — a refund the event says is smaller than the payment
+#: it matched. The plan stays, the payment stays ``completed``, and the money kept is
+#: re-derived from :attr:`BillingCheckoutAttempt.refunded_amount`, so a person must look
+#: at it. The money figures are filled at the call site; the sentence shape is owned here
+#: like :data:`REFUND_RECONCILIATION_ALERTS` for the same reason: an over-long summary
+#: fails the queue's own cap, and an alert that cannot be written is a refund nobody hears
+#: about. It stays under 200 characters even for the widest figures the column can hold.
+PARTIAL_REFUND_ALERT_SUMMARY: Final[str] = (
+    "Part of a payment came back: {refunded} {currency} refunded of {paid} {currency} "
+    "taken; {kept} {currency} is still kept. The plan stays active and staff must "
+    "check the refund."
+)
 
 #: The attempt status a refund writes. Not ``failed``: money did move and came back, and
 #: "no money was taken" is the wrong sentence to leave beside it. This is the value the
@@ -2351,6 +2364,20 @@ class BillingService:
             "receipt_url": stripe_object.get("hosted_invoice_url")
             or stripe_object.get("invoice_pdf")
             or stripe_object.get("receipt_url"),
+            # What the company says has come back for this payment, already in **major
+            # units** once normalized (the minor-unit parser divides by 100); the
+            # recorder reads it with ``Decimal(str(...))`` and stores nothing it cannot
+            # read. Stripe's ``amount_refunded`` exists on a charge — a refund event's
+            # object — and is the **cumulative** total refunded on that charge, which is
+            # why the flag below is set with it: the recorder must not add a cumulative
+            # figure to a running total twice. A dispute carries no such field, and the
+            # Creem and NOWPayments normalisers invent none either: no field name is
+            # proven for them and no fixture proves one, so their refund amounts stay
+            # unknown — which downstream means a full refund, exactly today's behaviour.
+            "refunded_amount": BillingService._minor_unit_amount(
+                stripe_object.get("amount_refunded")
+            ),
+            "refunded_total_is_cumulative": True,
         }
         return {
             "id": payload.get("id"),
@@ -3013,6 +3040,26 @@ class BillingService:
             )
             return subscription
         if event_type in REFUND_EVENT_TYPES:
+            if data.get("refund_is_partial") is True:
+                # Part of the money came back and part is still held: this is not the
+                # event that ends a plan. The recorder in ``_attach_refund_to_attempt``
+                # decided full vs partial from the amount the provider reported and
+                # nobody else re-decides it here. The payment stays ``completed`` (the
+                # status rule in ``_record_checkout_event`` leaves it alone), the
+                # money readers value it through ``money_kept``, and a person is told —
+                # a smaller refund is a human judgement about the customer's account,
+                # not an automatic full return.
+                attempt_id = self._uuid_if_readable(data.get("checkout_attempt_id"))
+                attempt = (
+                    await self.session.get(BillingCheckoutAttempt, attempt_id)
+                    if attempt_id is not None
+                    else None
+                )
+                if attempt is not None:
+                    await self._save_partial_refund_alert(
+                        event_id=event_id, event_type=event_type, attempt=attempt
+                    )
+                return None
             # The money is going back, so the plan it bought is over — for the refund
             # names. A dispute is money frozen while the card network decides, and
             # ending a plan on a decision that can still be reversed is not this
@@ -3081,6 +3128,11 @@ class BillingService:
         """
 
         if event_type not in REFUND_ENDS_PLAN_EVENT_TYPES:
+            return None
+        if data.get("refund_is_full") is False:
+            # The recorder read this event's amount and found the payment still holds
+            # money: a partial refund ends nothing. The caller already guards; this is
+            # the belt so a new caller cannot end a plan on a partial by accident.
             return None
         user_id = self._uuid_if_readable(data.get("user_id"))
         reference = data.get("provider_subscription_id") or data.get("subscription_id")
@@ -3170,6 +3222,49 @@ class BillingService:
         )
         await self.session.flush()
 
+    async def _save_partial_refund_alert(
+        self, *, event_id: str, event_type: str, attempt: BillingCheckoutAttempt
+    ) -> None:
+        """Tell a person that part of a payment came back and this system left it standing.
+
+        A partial refund is not an error — the money truth is stored on the payment —
+        but it is a human judgement nobody should have to discover from a support
+        ticket: the plan stayed live while part of its price went back, and a standing
+        manual payout was re-valued rather than voided. So one critical row per
+        payment, its summary holding the three money figures in plain words.
+
+        The dedupe key is the payment, not the event: repeated partials on one payment
+        are one problem described more, so they raise the count on the one row. The
+        event id is kept as an evidence pointer, where the queue's own sanitizer cleans
+        or hashes it — the same rule :meth:`_refund_alert_key` exists for.
+        """
+
+        from ai_market_monitor.observability.issues import (
+            OperationalIssueService,
+            sanitize_dedupe_key,
+        )
+
+        kept = money_kept(attempt.amount, attempt.refunded_amount)
+        await OperationalIssueService(self.session).record_occurrence(
+            dedupe_key=sanitize_dedupe_key(f"billing:partial-refund:{attempt.id}"),
+            category="billing",
+            severity="critical",
+            summary=PARTIAL_REFUND_ALERT_SUMMARY.format(
+                refunded=f"{attempt.refunded_amount:.2f}",
+                paid=f"{attempt.amount:.2f}",
+                kept=f"{kept:.2f}",
+                currency=attempt.currency.upper(),
+            ),
+            affected_scope="billing.partial_refund",
+            evidence_refs=(
+                f"billing_checkout_attempt:{attempt.id}"[:134],
+                f"billing_event:{event_id}"[:134],
+                f"billing_event_type:{event_type}"[:134],
+            ),
+            source="billing_webhook",
+        )
+        await self.session.flush()
+
     async def _attach_refund_to_attempt(
         self,
         *,
@@ -3190,6 +3285,11 @@ class BillingService:
         where the payload supports two readings, no payment is picked and a person is
         asked instead. Marking the wrong payment refunded takes a real sale away from the
         money-owed path, which is the same mistake wearing the other sign.
+
+        This is also the one place a refund's amount is read and put on the record —
+        before the access and status writers run, so every later reader sees the same
+        total. A refund that matched no attempt is reported by the unattached alert
+        below and decides nothing here: with no payment there is no total to add to.
         """
 
         attempt: BillingCheckoutAttempt | None = None
@@ -3220,6 +3320,69 @@ class BillingService:
         plan = await self.session.get(Plan, attempt.plan_id)
         if plan is not None:
             data["plan_code"] = plan.code
+        await self._record_refund_amount(attempt=attempt, data=data)
+
+    async def _record_refund_amount(
+        self, *, attempt: BillingCheckoutAttempt, data: dict[str, Any]
+    ) -> None:
+        """Store the refunded total on the payment and decide full vs partial.
+
+        A running money total may not lose a concurrent update, so the matched row is
+        re-read under ``FOR UPDATE`` (SQLite no-ops the lock; PostgreSQL serialises the
+        two refunds). A replayed same event id never reaches here — ``process_event``
+        short-circuits it — so two deliveries that do reach here are two refunds, and
+        the totals say so:
+
+        * amount unknown → the stored total stays as it was and the refund is full.
+          Guessing a figure for a company that reports none would invent money evidence.
+        * amount known, provider reports a cumulative total (Stripe) → the new total is
+          the larger of stored and reported, never the sum.
+        * amount known otherwise → the new total adds it in.
+
+        Any total at or above the payment amount is a full refund — including more than
+        the payment, which says the whole payment came back with something beside it, not
+        that the payment still owes a credit. The flags below are the one decision
+        every later reader (plan, status, payout) reads; nobody re-decides it.
+        """
+
+        locked = await self.session.scalar(
+            select(BillingCheckoutAttempt)
+            .where(BillingCheckoutAttempt.id == attempt.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        payment = locked if locked is not None else attempt
+        refunded = self._refund_event_amount(data)
+        stored = payment.refunded_amount or Decimal("0")
+        if refunded is None:
+            new_total = stored
+        elif data.get("refunded_total_is_cumulative"):
+            new_total = max(stored, refunded)
+        else:
+            new_total = stored + refunded
+        refund_is_full = refunded is None or new_total >= payment.amount
+        data["refund_is_full"] = refund_is_full
+        data["refund_is_partial"] = not refund_is_full
+        payment.refunded_amount = new_total
+        await self.session.flush()
+
+    @staticmethod
+    def _refund_event_amount(data: Mapping[str, Any]) -> Decimal | None:
+        """The refunded amount one normalized event reports, in major units, or ``None``.
+
+        The normaliser already turned the provider's field into a major-units string (or
+        left it absent); unreadable text is the same unknown, not a reason to fail the
+        webhook — a refund that says nothing about its amount is a full refund by the
+        rule above, which is what this system believed until the amount could be read.
+        """
+
+        raw = data.get("refunded_amount")
+        if raw in (None, ""):
+            return None
+        try:
+            return Decimal(str(raw))
+        except (InvalidOperation, TypeError, ValueError):
+            return None
 
     @staticmethod
     def _refund_matches_attempt(
@@ -3603,7 +3766,16 @@ class BillingService:
             # leaving the row ``completed`` is how a refunded payment keeps counting as a
             # sale to the money-owed valuation, the affiliate commission and the
             # operations count. Idempotent — a second refund event changes nothing.
-            if current_status != REFUNDED_ATTEMPT_STATUS:
+            #
+            # Whether the payment is still money held is decided by the amount, once, in
+            # ``_record_refund_amount``: a full or unknown refund ends it (the unchanged
+            # status move), a partial leaves it ``completed`` — the money kept still
+            # counts, and the readers value it through ``money_kept``. Either way the
+            # payout settlement runs: full voids what this payment owed back, partial
+            # re-values it. Refund and settlement are one fact, never one-without-the-
+            # other, and both live inside this transaction.
+            refund_is_partial = data.get("refund_is_partial") is True
+            if not refund_is_partial and current_status != REFUNDED_ATTEMPT_STATUS:
                 attempt.status = REFUNDED_ATTEMPT_STATUS
                 # Writing this word can also retire a promise made beside it. A plan
                 # move paid for earlier may have left a manual-payout record valued
@@ -3611,7 +3783,9 @@ class BillingService:
                 # person must not also send it. Voiding lives in the one place that
                 # writes ``refunded``, and runs inside this transaction: the refund and
                 # the void of what it refunded are one fact, never one-without-the-other.
-                await self._void_manual_payout_for_refund(attempt)
+            await self._void_manual_payout_for_refund(
+                attempt, refund_is_partial=refund_is_partial
+            )
         elif event_type in {
             "checkout.session.completed",
             "invoice.payment_succeeded",
@@ -3638,22 +3812,30 @@ class BillingService:
         await self.session.flush()
 
     async def _void_manual_payout_for_refund(
-        self, attempt: BillingCheckoutAttempt
+        self, attempt: BillingCheckoutAttempt, *, refund_is_partial: bool
     ) -> None:
-        """Retire the promise to send money back once that money came back.
+        """Settle the promise to send money back against the money that came back.
 
         A paid plan move writes a :class:`PlanMoveMoneyOwed` row — "a person sends
         this sum by hand" — and opens the ``billing:money-owed:{id}`` ticket that is
         how staff hear about it. When the payment the row was valued from is
         refunded after the move, the company has already returned that money: a row
         still pending would have a person send it a second time, and the customer
-        would hold two refunds for one period. So this voids the row and resolves
-        its ticket, in the same transaction that records the refund.
+        would hold two refunds for one period. So a full refund voids the row and
+        resolves its ticket, in the same transaction that records the refund.
+
+        A **partial** refund is the same fact at a smaller figure, and the row is
+        re-valued in place instead: the payout is sized to the money still kept
+        (:func:`ai_market_monitor.core.money.money_kept` through the one unused-time
+        owner, :func:`money_owed_for_unused_time`), stays ``pending_manual``, and
+        keeps its open ticket — the customer is still owed the smaller sum and a
+        person still has to send it. If the smaller sum is nothing (the period was
+        fully used), voiding is the honest answer.
 
         It decides nothing else. Nothing here moves money: no payment is created or
-        reversed, the old plan stays ended (it really was replaced), and the row
-        keeps its figures — voiding is a word on the record, not a deletion of it.
-        A duplicate refund reaches this with nothing pending and changes nothing
+        reversed, the old plan stays ended (it really was replaced), and a row keeps
+        its history — voiding is a word on the record, not a deletion of it. A
+        duplicate refund reaches this with nothing pending and changes nothing
         further: the search takes only ``pending_manual`` rows, and
         :meth:`OperationalIssueService.transition` is never asked to resolve a
         ticket that already reads resolved. The two status words are the plan-move
@@ -3669,6 +3851,7 @@ class BillingService:
         from ai_market_monitor.services.plan_replacements import (
             MONEY_OWED_PENDING_STATUS,
             MONEY_OWED_VOID_STATUS,
+            money_owed_for_unused_time,
         )
 
         owed_rows = list(
@@ -3683,11 +3866,37 @@ class BillingService:
         )
         if not owed_rows:
             return
+        kept = money_kept(attempt.amount, attempt.refunded_amount)
+        voided_rows: list[PlanMoveMoneyOwed] = []
         for owed in owed_rows:
-            owed.status = MONEY_OWED_VOID_STATUS
+            if not refund_is_partial or kept <= 0:
+                owed.status = MONEY_OWED_VOID_STATUS
+                voided_rows.append(owed)
+                continue
+            new_amount = money_owed_for_unused_time(
+                paid_amount=kept,
+                period_start=owed.period_start,
+                period_end=owed.original_period_end,
+                ended_at=owed.ended_at,
+            )
+            if new_amount <= 0:
+                # Nothing of the shortened period is unused any more: there is no
+                # smaller promise to keep, only one to retire. (``amount_owed`` is
+                # constrained positive on the row — zero is not a value it may hold.)
+                owed.status = MONEY_OWED_VOID_STATUS
+                voided_rows.append(owed)
+                continue
+            # Re-value in place. ``paid_amount`` moves with it so the row's own
+            # check — the payout cannot exceed what the payment held — still holds.
+            owed.paid_amount = kept
+            owed.amount_owed = new_amount
         await self.session.flush()
+        if not voided_rows:
+            # A pure re-valuation: the payout is still to be sent, so its ticket
+            # stays open and is not re-reported.
+            return
         service = OperationalIssueService(self.session)
-        for owed in owed_rows:
+        for owed in voided_rows:
             issue = await self.session.scalar(
                 select(OperationalIssue).where(
                     OperationalIssue.dedupe_key

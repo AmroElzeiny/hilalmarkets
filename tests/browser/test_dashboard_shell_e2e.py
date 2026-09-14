@@ -237,45 +237,10 @@ def test_the_keyboard_shortcut_reaches_the_search_box(page: Page, base_url: str)
 # ── The assistant ────────────────────────────────────────────────────────────
 
 
-def test_the_assistant_tag_scrolls_its_line_and_can_be_stopped(
-    page: Page, base_url: str
-) -> None:
-    """One line, one box narrower than it, and movement that never ends.
-
-    Also the WCAG 2.2.2 half: moving text that starts by itself has to be stoppable.
-    """
-
-    _open(page, base_url, MONITORS_PATH)
-    tag = page.locator("[data-hilal-tag]")
-    expect(tag).to_be_visible()
-
-    run = page.locator("[data-hilal-tag-run]")
-    box = tag.bounding_box()["width"]
-    line = run.bounding_box()["width"]
-    assert line > box, f"the line ({line}) is not longer than its box ({box})"
-
-    first = run.evaluate("(el) => el.getBoundingClientRect().x")
-    page.wait_for_timeout(900)
-    second = run.evaluate("(el) => el.getBoundingClientRect().x")
-    assert second < first, "the line is not moving"
-
-    tag.hover()
-    page.wait_for_timeout(300)
-    paused = run.evaluate("(el) => el.getBoundingClientRect().x")
-    page.wait_for_timeout(600)
-    assert abs(run.evaluate("(el) => el.getBoundingClientRect().x") - paused) < 1, (
-        "the line does not stop when a pointer reaches it"
-    )
-
-
-def test_the_assistant_says_it_is_software_and_what_it_can_see(
+def test_the_assistant_button_says_it_is_software_and_what_it_can_see(
     page: Page, base_url: str
 ) -> None:
     _open(page, base_url, MONITORS_PATH)
-    words = page.locator("[data-hilal-tag]").inner_text()
-    assert "AI assistant" in words
-    assert "sees the page you are on" in words
-    # And the same sentence is the button's own name, for anybody who cannot see the tag.
     name = page.locator("[data-hilal-open]").get_attribute("aria-label")
     assert "AI assistant" in name
     assert "sees the page you are on" in name

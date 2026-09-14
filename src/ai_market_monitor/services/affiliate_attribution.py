@@ -45,6 +45,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.money import money_kept
 from ai_market_monitor.core.plans import is_discount_code_shaped
 from ai_market_monitor.db.models import (
     AffiliateApplication,
@@ -600,7 +601,7 @@ class ReferralAttributionService:
         if fallback is not None and fallback > 0:
             return _as_decimal(fallback), "event"
         query = (
-            select(BillingCheckoutAttempt.amount)
+            select(BillingCheckoutAttempt)
             .where(
                 BillingCheckoutAttempt.user_id == customer_user_id,
                 BillingCheckoutAttempt.status == "completed",
@@ -610,9 +611,12 @@ class ReferralAttributionService:
         )
         if plan_id is not None:
             query = query.where(BillingCheckoutAttempt.plan_id == plan_id)
-        charged = await self.session.scalar(query)
-        if charged is not None:
-            return _as_decimal(charged), "checkout"
+        row = await self.session.scalar(query)
+        if row is not None:
+            # The money kept, not the money taken: a partial refund (row still
+            # ``completed``) must not commission the affiliate on money the customer
+            # already got back. ``money_kept`` is the one owner of that reading.
+            return _as_decimal(money_kept(row.amount, row.refunded_amount)), "checkout"
         if plan_id is not None:
             plan = await self.session.get(Plan, plan_id)
             if plan is not None:

@@ -12,13 +12,18 @@ reading the code.
 
 from __future__ import annotations
 
+import re
+
+import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import (
+    RunningApp,
     assert_contrast,
     assert_no_horizontal_overflow,
     assert_no_raw_traceback,
     close_any_open_guide,
+    seed_telegram_connection,
     signup,
     unique_email,
 )
@@ -132,17 +137,114 @@ def test_the_link_popup_opens_closes_and_gives_the_keyboard_back(
     _open(page, base_url)
     opener = page.locator("[data-c-connect-telegram]")
     expect(opener).to_be_visible()
+    expect(opener).to_have_attribute("href", re.compile(r"^https://t\.me/.+\?start=link_"))
     opener.click()
 
     dialog = page.locator("[data-c-link-dialog]")
     expect(dialog).to_be_visible()
     assert dialog.locator(".c-step").count() == 3
+    expect(dialog.locator("[data-c-link-go]")).to_have_attribute(
+        "href", re.compile(r"^https://t\.me/.+\?start=link_")
+    )
 
     page.keyboard.press("Escape")
     expect(dialog).not_to_be_visible()
     assert page.evaluate(
         "() => document.activeElement?.hasAttribute('data-c-connect-telegram')"
     ), "closing the popup did not give the keyboard back to the button that opened it"
+
+
+def test_a_linked_telegram_can_be_unlinked_from_the_page(
+    page: Page, base_url: str, browser_app: RunningApp
+) -> None:
+    """Drive the action the existing route test never drove through the browser."""
+
+    email = _open(page, base_url)
+    assert browser_app.database_url
+    seed_telegram_connection(browser_app.database_url, email)
+    page.reload(wait_until="domcontentloaded")
+    close_any_open_guide(page)
+
+    opener = page.locator("[data-c-unlink-telegram]")
+    expect(opener).to_be_visible()
+    opener.click()
+    expect(page.locator("[data-c-ask-dialog]")).to_be_visible()
+
+    with page.expect_response(
+        lambda response: response.request.method == "DELETE"
+        and response.url.endswith("/api/v1/dashboard/integrations/telegram")
+    ) as response_info:
+        page.locator("[data-c-unlink-submit]").click()
+
+    assert response_info.value.status == 200, response_info.value.text()
+    expect(page.locator("[data-c-connect-telegram]")).to_be_visible(timeout=15_000)
+    expect(page.locator("[data-c-unlink-telegram]")).to_have_count(0)
+
+
+@pytest.mark.deliberate_console_errors("Failed to load resource", "503")
+def test_a_failed_unlink_stays_linked_and_shows_why(
+    page: Page, base_url: str, browser_app: RunningApp
+) -> None:
+    email = _open(page, base_url)
+    assert browser_app.database_url
+    seed_telegram_connection(browser_app.database_url, email)
+    page.reload(wait_until="domcontentloaded")
+    close_any_open_guide(page)
+
+    page.route(
+        "**/api/v1/dashboard/integrations/telegram",
+        lambda route: route.fulfill(
+            status=503,
+            content_type="application/json",
+            body='{"detail":"Telegram could not be unlinked just now."}',
+        )
+        if route.request.method == "DELETE"
+        else route.continue_(),
+    )
+    page.locator("[data-c-unlink-telegram]").click()
+    page.locator("[data-c-unlink-submit]").click()
+
+    expect(page.locator("[data-c-ask-dialog]")).to_be_hidden()
+    expect(page.locator("[data-c-trouble]")).to_contain_text(
+        "Telegram could not be unlinked just now."
+    )
+    expect(page.locator("[data-c-unlink-telegram]")).to_be_visible()
+    expect(page.locator("[data-c-unlink-submit]")).to_be_enabled()
+
+
+def test_link_and_unlink_keep_working_when_the_page_script_does_not_load(
+    page: Page, base_url: str, browser_app: RunningApp
+) -> None:
+    """Account recovery cannot depend on one JavaScript module loading successfully."""
+
+    email = _open(page, base_url)
+    assert browser_app.database_url
+    seed_telegram_connection(browser_app.database_url, email)
+
+    browser = page.context.browser
+    assert browser is not None
+    context = browser.new_context(
+        java_script_enabled=False,
+        storage_state=page.context.storage_state(),
+    )
+    fallback = context.new_page()
+    try:
+        fallback.goto(f"{base_url}{PAGE}", wait_until="domcontentloaded")
+        unlink = fallback.locator("[data-c-unlink-telegram]")
+        expect(unlink).to_have_attribute("href", f"{PAGE}?confirm_unlink=telegram")
+        fallback.goto(
+            f"{base_url}{unlink.get_attribute('href')}", wait_until="domcontentloaded"
+        )
+
+        expect(fallback.locator("[data-c-ask-dialog]")).to_be_visible()
+        fallback.locator("[data-c-unlink-submit]").click(force=True)
+        fallback.wait_for_url(f"**{PAGE}")
+
+        link = fallback.locator("[data-c-connect-telegram]")
+        expect(link).to_have_attribute("href", re.compile(r"^https://t\.me/.+\?start=link_"))
+        expect(fallback.locator("[data-c-unlink-telegram]")).to_have_count(0)
+    finally:
+        context.close()
 
 
 # ── How it looks and how it is used ──────────────────────────────────────────

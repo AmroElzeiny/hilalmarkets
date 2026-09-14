@@ -237,6 +237,16 @@ class BillingCheckoutAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     terms_version: Mapped[str] = mapped_column(String(80), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    #: What refund events have reported back against this payment, summed (or held at
+    #: the provider's own cumulative figure — see ``services/billing.py``). ``0`` with a
+    #: ``refunded`` status means the refund carried no amount, which is a full refund by
+    #: the unknown-amount rule; the money readers must use
+    #: :func:`ai_market_monitor.core.money.money_kept` and never subtract this by hand.
+    #: Not the ``billing_profile`` bag: that column is the customer's name and address,
+    #: rewritten by profile edits, and a money contract hidden in it can be clobbered.
+    refunded_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=0, nullable=False
+    )
     #: The discount code this checkout was opened with, and what it took off.
     #:
     #: ``amount`` above is already the discounted figure — it is the number the payment

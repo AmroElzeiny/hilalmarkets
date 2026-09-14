@@ -586,6 +586,9 @@ def _run_browser_app(
             "VITE_X_PIXEL_ENABLED": "true",
             "VITE_X_PIXEL_ID": "re20l",
             "TELEGRAM_ENABLED": "false",
+            # A real-shaped bot name makes the dashboard link test prove that its
+            # fallback opens Telegram. No request is sent to Telegram in this suite.
+            "TELEGRAM_BOT_USERNAME": "HilalMarketsBrowserTestBot",
             "BILLING_ENABLED": "false",
             "BILLING_PROVIDER": "static",
             "EMAIL_ADAPTER": "memory",

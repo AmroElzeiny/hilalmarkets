@@ -63,73 +63,6 @@ body.hilal-dashboard .hm-hilal .hilal-window :where(button, a, textarea, input, 
   outline-offset: -1px;
 }
 
-/* ── The tag above the button ──────────────────────────────────────────────── */
-
-/* A sentence that is longer than the box holding it, travelling from right to left
- * for as long as the button is there to be pressed.
- *
- * `brand guide.md` §15 rules out movement that loops **without meaning**. This one has
- * one: the box is deliberately narrower than the line, so travelling is the only thing
- * that makes the end of the sentence readable. Nothing else in the shell repeats.
- *
- * Three ways it stops, because moving text that cannot be stopped fails WCAG 2.2.2:
- *
- *   * a pointer anywhere in this corner pauses it;
- *   * the keyboard reaching the button pauses it;
- *   * `prefers-reduced-motion` stops it before it ever starts, and the box then simply
- *     shows the beginning of the line — the whole sentence is the button's own
- *     accessible name, which is where a screen reader reads it in every case.
- */
-body.hilal-dashboard .hm-hilal .hilal-tag {
-  /* Narrower than the line inside it, on purpose. That is what makes it a ticker
-     rather than a label, and it keeps the tag shorter than the window below it —
-     315px against the window's 408px.
-
-     Half as long again as it was (210px). The travelling line itself is unchanged, so
-     it still moves at the same speed and the loop is still seamless; the window on it
-     is simply wider, and half again as much of the sentence is readable at a glance. */
-  width: 315px;
-  max-width: calc(100vw - 44px);
-  overflow: hidden;
-  padding: 7px 0;
-  border: 1px solid var(--t-line);
-  border-radius: 999px;
-  background: var(--t-surface);
-  box-shadow: var(--hm-shadow-sm);
-  color: var(--t-ink-strong);
-  font-size: .735rem;
-  font-weight: 520;
-  line-height: 1.3;
-  white-space: nowrap;
-  /* The words fade at both ends instead of being cut off mid-letter. */
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 16px), transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 16px), transparent);
-}
-
-body.hilal-dashboard .hm-hilal .hilal-tag-run {
-  display: inline-flex;
-  gap: 30px;
-  padding-inline-start: 30px;
-  /* Two identical copies and a shift of exactly half the track: the moment the first
-     copy leaves, the second is standing precisely where it began, so the line has no
-     seam and never restarts visibly. */
-  animation: hilal-tag-run 19s linear infinite;
-}
-
-body.hilal-dashboard .hm-hilal:hover .hilal-tag-run,
-body.hilal-dashboard .hm-hilal:focus-within .hilal-tag-run { animation-play-state: paused; }
-
-/* Once the window is open, the tag has said everything it had to say. */
-body.hilal-dashboard .hm-hilal:has(.hilal-orb[aria-expanded="true"]) .hilal-tag { display: none; }
-
-@keyframes hilal-tag-run { to { transform: translateX(-50%); } }
-
-@media (max-width: 520px) {
-  /* Half as long again as it was here too (178px), and still inside the phone: the
-     `max-width` above keeps it 44px clear of both edges whatever this says. */
-  body.hilal-dashboard .hm-hilal .hilal-tag { width: 267px; }
-}
-
 /* ── The button ────────────────────────────────────────────────────────────── */
 
 body.hilal-dashboard .hm-hilal .hilal-orb {
@@ -837,7 +770,4 @@ body.hilal-dashboard .hm-hilal .hilal-stars-word {
   body.hilal-dashboard .hm-hilal[data-state="thinking"] .hilal-orb-ring { animation: none; opacity: 1; }
   body.hilal-dashboard .hm-hilal .hilal-dots i { animation: none; opacity: .7; }
 
-  /* The tag stops before it starts. The box then shows the beginning of the line, and
-     the whole sentence stays where it always was: the button's accessible name. */
-  body.hilal-dashboard .hm-hilal .hilal-tag-run { animation: none; }
 }

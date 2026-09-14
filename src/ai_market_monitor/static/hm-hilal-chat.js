@@ -175,7 +175,7 @@ class HilalChat {
    */
   keepControlsClear() {
     const parts = () =>
-      [...this.root.querySelectorAll("[data-hilal-tag], [data-hilal-open], .hm-ask-tag")]
+      [...this.root.querySelectorAll("[data-hilal-open], .hm-ask-tag")]
         .map((part) => part.getBoundingClientRect())
         .filter((box) => box.width > 0 && box.height > 0);
 

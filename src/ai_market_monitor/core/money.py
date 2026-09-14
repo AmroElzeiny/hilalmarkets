@@ -39,6 +39,11 @@ one starts, it must use this owner too.
 Rounding matches ``core/plans.price_after_percent`` — the owner of discount
 arithmetic — which quantises to the cent with ``ROUND_HALF_UP``. This module never
 re-decides what a charge is; it only decides how a decided amount is written down.
+
+The module owns one reading of stored money as well: :func:`money_kept`, the answer
+to "what does this payment still hold after what came back?". Every money reader uses
+it, because a refund that is subtracted twice — or in one place and not another — is
+the same class of disagreement this module exists to prevent on the way out.
 """
 
 from __future__ import annotations
@@ -188,3 +193,25 @@ def wire_json_body(
             f"{body.count(quoted)} times in the serialised payload."
         )
     return body.replace(quoted, number_text).encode("utf-8")
+
+
+def money_kept(paid_amount: Decimal, refunded_amount: Decimal | None) -> Decimal:
+    """The money this payment still holds: paid minus what came back, never below zero.
+
+    This is the single owner of that reading. It sits beside the wire owners because
+    it answers the same question the wire does — what is this payment worth in fiat —
+    just read back rather than sent out. Every reader of a payment's value (the plan-
+    move payout, the affiliate commission, the operations totals and per-payment view)
+    calls this and nothing else subtracts ``refunded_amount`` by hand: two readers that
+    disagreed about what a payment holds is the whole defect class this fix removes.
+
+    An unknown refund (``None``) and a zero refund both mean nothing came back yet, so
+    the whole payment is kept. A partial keeps the remainder. A full or over-full refund
+    keeps ``Decimal("0")`` — a payment never holds less than nothing, which is why the
+    clamp is here and not left to each caller.
+    """
+
+    refunded = refunded_amount or Decimal("0")
+    if refunded <= 0:
+        return paid_amount
+    return max(paid_amount - refunded, Decimal("0"))

@@ -58,7 +58,6 @@ from ai_market_monitor.db.models import (
     SupportRequest,
     SupportTicketMessage,
     TelegramConnection,
-    TelegramConversationState,
     Trial,
     User,
     UserExportJob,
@@ -185,6 +184,7 @@ from ai_market_monitor.services.setup_observability import (
 from ai_market_monitor.services.strategy import StrategyGateError, StrategyService
 from ai_market_monitor.services.support import support_priority
 from ai_market_monitor.services.support_intake import SupportIntakeGuard
+from ai_market_monitor.services.telegram_account_links import TelegramAccountLinkService
 from ai_market_monitor.services.template_catalog import builtin_template_payloads
 from ai_market_monitor.services.verified_strategy import (
     VerifiedStrategyError,
@@ -5047,44 +5047,11 @@ async def disconnect_telegram(
     if not csrf_token_matches(settings, principal.user_id, x_csrf_token):
         raise HTTPException(status_code=403, detail="Invalid form token.")
 
-    connection = await session.scalar(
-        select(TelegramConnection).where(TelegramConnection.user_id == principal.user_id)
+    removed = await TelegramAccountLinkService(session, settings).disconnect_dashboard(
+        user_id=principal.user_id
     )
-    if connection is None:
+    if removed is None:
         return {"ok": True, "telegram": None, "already_disconnected": True}
-
-    telegram_user_id = connection.telegram_user_id
-    identities = (
-        await session.scalars(
-            select(UserIdentity).where(
-                UserIdentity.user_id == principal.user_id,
-                UserIdentity.provider == IdentityProvider.TELEGRAM,
-            )
-        )
-    ).all()
-    conversations = (
-        await session.scalars(
-            select(TelegramConversationState).where(
-                TelegramConversationState.telegram_user_id == telegram_user_id
-            )
-        )
-    ).all()
-    for conversation in conversations:
-        await session.delete(conversation)
-    for identity in identities:
-        await session.delete(identity)
-    await session.delete(connection)
-    session.add(
-        AuditEvent(
-            actor_user_id=principal.user_id,
-            actor_type="dashboard_user",
-            action="telegram.disconnected",
-            target_type="telegram_connection",
-            target_id=telegram_user_id,
-            metadata_redacted={"source": "dashboard"},
-            created_at=datetime.now(UTC),
-        )
-    )
     await session.commit()
     return {"ok": True, "telegram": None}
 

@@ -282,7 +282,10 @@ function start(scope) {
   }
 
   for (const button of scope.querySelectorAll("[data-c-connect-telegram]")) {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      // The control is a real Telegram link when scripts are unavailable. With this
+      // enhancement running, keep the three short instructions in front of the person.
+      event.preventDefault();
       link.open(button);
       startWatching();
     });
@@ -323,12 +326,19 @@ function start(scope) {
     closers: ["[data-c-ask-close]", "[data-c-ask-cancel]"],
   });
   for (const button of scope.querySelectorAll("[data-c-unlink-telegram]")) {
-    button.addEventListener("click", () => ask.open(button));
+    button.addEventListener("click", (event) => {
+      // Its href opens the same confirmation on a server-rendered page when this module
+      // is missing. Prevent navigation only after the working dialog enhancement exists.
+      event.preventDefault();
+      ask.open(button);
+    });
   }
 
-  const confirm = askDialog?.querySelector("[data-c-ask-go]");
-  if (confirm) {
-    confirm.addEventListener("click", async () => {
+  const unlinkForm = askDialog?.querySelector("[data-c-unlink-form]");
+  const confirm = unlinkForm?.querySelector("[data-c-unlink-submit]");
+  if (unlinkForm && confirm) {
+    unlinkForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
       confirm.disabled = true;
       let trouble = null;
       try {

@@ -45,6 +45,13 @@ def _words(markup: str) -> str:
     return " ".join(document.text_content().split())
 
 
+def _csrf(markup: str) -> str:
+    document = lxml.html.fromstring(markup)
+    values = document.xpath('//input[@name="csrf_token"]/@value')
+    assert values, "the native unlink form has no form token"
+    return str(values[0])
+
+
 async def test_the_page_renders(test_context):
     page = await _page(test_context, "connections-render@example.com")
 
@@ -204,6 +211,24 @@ async def test_a_linked_telegram_can_always_be_unlinked(
     assert "data-c-unlink-telegram" in page
     assert "data-c-connect-telegram" not in page
 
+    confirmation = await test_context["client"].get(
+        f"{CONNECTIONS}?confirm_unlink=telegram"
+    )
+    assert confirmation.status_code == 200
+    assert "data-c-unlink-form" in confirmation.text
+    assert "<dialog class=\"t-dialog c-ask\"" in confirmation.text
+    assert " open" in confirmation.text
+
+    response = await test_context["client"].post(
+        f"{CONNECTIONS}/telegram/unlink",
+        data={"csrf_token": _csrf(confirmation.text)},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == CONNECTIONS
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(select(TelegramConnection)) is None
+
 
 async def test_an_unlinked_telegram_is_offered_the_link_flow(test_context):
     """The other half of the same rule. No account on record means Link, never Unlink."""
@@ -228,6 +253,44 @@ async def test_unlinking_refuses_a_request_with_no_form_token(test_context):
     )
 
     assert response.status_code == 403
+
+
+async def test_native_unlink_refuses_a_bad_form_token_and_is_idempotent(test_context):
+    await _signup_and_verify(test_context, email="tg-native-csrf@example.com")
+    async with test_context["session_factory"]() as session:
+        user = await session.scalar(select(User).order_by(User.created_at.desc()))
+        session.add(
+            TelegramConnection(
+                user_id=user.id,
+                telegram_user_id="tg-native-csrf",
+                chat_id="5552",
+                username="native_test",
+                status=ConnectionStatus.ACTIVE,
+            )
+        )
+        await session.commit()
+
+    refused = await test_context["client"].post(
+        f"{CONNECTIONS}/telegram/unlink",
+        data={"csrf_token": "not-the-token"},
+        follow_redirects=False,
+    )
+    assert refused.status_code == 403
+    async with test_context["session_factory"]() as session:
+        assert await session.scalar(select(TelegramConnection)) is not None
+
+    page = await test_context["client"].get(f"{CONNECTIONS}?confirm_unlink=telegram")
+    first = await test_context["client"].post(
+        f"{CONNECTIONS}/telegram/unlink",
+        data={"csrf_token": _csrf(page.text)},
+        follow_redirects=False,
+    )
+    second = await test_context["client"].post(
+        f"{CONNECTIONS}/telegram/unlink",
+        data={"csrf_token": _csrf(page.text)},
+        follow_redirects=False,
+    )
+    assert first.status_code == second.status_code == 303
 
 
 async def test_the_page_can_be_asked_whether_telegram_is_linked_yet(test_context):

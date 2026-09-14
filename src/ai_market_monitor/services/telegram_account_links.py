@@ -279,6 +279,57 @@ class TelegramAccountLinkService:
         await self.session.flush()
         return telegram_user_id
 
+    async def disconnect_dashboard(self, *, user_id: UUID) -> str | None:
+        """Remove the Telegram rows owned by one signed-in account.
+
+        Both dashboard entry points call this method. Keeping deletion here beside the
+        attach rule prevents the JSON endpoint and the native form fallback from
+        disagreeing about what "unlinked" means.
+        """
+
+        connection = await self.session.scalar(
+            select(TelegramConnection)
+            .where(TelegramConnection.user_id == user_id)
+            .with_for_update()
+        )
+        if connection is None:
+            return None
+
+        telegram_user_id = connection.telegram_user_id
+        identities = (
+            await self.session.scalars(
+                select(UserIdentity).where(
+                    UserIdentity.user_id == user_id,
+                    UserIdentity.provider == IdentityProvider.TELEGRAM,
+                )
+            )
+        ).all()
+        conversations = (
+            await self.session.scalars(
+                select(TelegramConversationState).where(
+                    TelegramConversationState.telegram_user_id == telegram_user_id
+                )
+            )
+        ).all()
+        for conversation in conversations:
+            await self.session.delete(conversation)
+        for identity in identities:
+            await self.session.delete(identity)
+        await self.session.delete(connection)
+        self.session.add(
+            AuditEvent(
+                actor_user_id=user_id,
+                actor_type="dashboard_user",
+                action="telegram.disconnected",
+                target_type="telegram_connection",
+                target_id=telegram_user_id,
+                metadata_redacted={"source": "dashboard"},
+                created_at=datetime.now(UTC),
+            )
+        )
+        await self.session.flush()
+        return telegram_user_id
+
     # ------------------------------------------------------------------
     # The rule
     # ------------------------------------------------------------------

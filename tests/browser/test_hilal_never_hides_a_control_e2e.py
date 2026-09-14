@@ -45,7 +45,7 @@ VIEWPORTS = {
 #: element over a rectangle's overlap with them belongs to the widget.
 _COVERED_BY_WIDGET = """
 const root = document.querySelector('.hm-hilal');
-const parts = [...root.querySelectorAll('[data-hilal-tag], [data-hilal-open], .hm-ask-tag')]
+const parts = [...root.querySelectorAll('[data-hilal-open], .hm-ask-tag')]
   .map(part => part.getBoundingClientRect())
   .filter(box => box.width > 0 && box.height > 0);
 const coveredBy = (box) => {

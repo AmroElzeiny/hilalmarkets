@@ -27,7 +27,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +49,7 @@ from ai_market_monitor.api.template_env import day_only as _day_only
 from ai_market_monitor.api.template_env import short_datetime as _short_datetime
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.config import Settings, get_settings
+from ai_market_monitor.core.csrf import csrf_token_matches
 from ai_market_monitor.core.dashboard_paths import (
     CONNECTIONS_PATH,
     LEGACY_MONITOR_PATH,
@@ -63,6 +64,7 @@ from ai_market_monitor.core.dashboard_paths import (
     SETTINGS_PATH,
     SUBSCRIPTION_PATH,
     SUPPORT_PATH,
+    TELEGRAM_UNLINK_PATH,
     monitor_edit_path,
 )
 from ai_market_monitor.core.database import get_db_session
@@ -785,6 +787,7 @@ def _channel_card(
 )
 async def connections_page(
     request: Request,
+    confirm_unlink: str | None = Query(default=None),
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
@@ -950,6 +953,11 @@ async def connections_page(
         telegram_start_command=telegram_start_command,
         telegram_connected=telegram_live,
         telegram_linked=telegram is not None,
+        telegram_unlink_confirmation=bool(
+            confirm_unlink == "telegram" and telegram is not None
+        ),
+        telegram_unlink_confirm_url=f"{CONNECTIONS_PATH}?confirm_unlink=telegram",
+        telegram_unlink_path=TELEGRAM_UNLINK_PATH,
         settings_path="/dashboard/settings",
         opportunities_path=OPPORTUNITIES_PATH,
         watchlists_path=MONITORS_PATH,
@@ -960,6 +968,22 @@ async def connections_page(
     return templates.TemplateResponse(
         request, "hilal/dashboard_test/connections.html", context
     )
+
+
+@router.post(TELEGRAM_UNLINK_PATH, include_in_schema=False)
+async def unlink_telegram_without_javascript(
+    csrf_token_value: str = Form(..., alias="csrf_token"),
+    user: User = Depends(_require_user),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Native form fallback for the account-recovery action on Connections."""
+
+    if not csrf_token_matches(settings, user.id, csrf_token_value):
+        raise HTTPException(status_code=403, detail="Invalid form token.")
+    await TelegramAccountLinkService(session, settings).disconnect_dashboard(user_id=user.id)
+    await session.commit()
+    return RedirectResponse(url=CONNECTIONS_PATH, status_code=303)
 
 
 # ── Opportunities ────────────────────────────────────────────────────────────

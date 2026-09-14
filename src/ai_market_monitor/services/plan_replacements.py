@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.money import money_kept
 from ai_market_monitor.core.plans import PURCHASABLE_PLAN_CODES, plan_name
 from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
@@ -395,6 +396,10 @@ class PaidPlanReplacementService:
             raise PlanReplacementError(
                 "replacement_plan_missing", "A paid plan record disappeared during the move."
             )
+        # What the payment still holds: the whole amount when nothing came back, the
+        # remainder after a partial refund, and this is the one place that figure is
+        # derived — ``money_kept`` is the owner, not a subtraction beside it.
+        source_kept = money_kept(source.amount, source.refunded_amount)
         amount = (
             # The frozen link above names the payment that bought the old plan, taken at
             # the moment the new payment page was opened. A refund can land in between:
@@ -405,11 +410,14 @@ class PaidPlanReplacementService:
             #
             # ``payment_that_bought`` excludes a refunded payment the same way; this is
             # the same rule read off the frozen row instead of the live search, because
-            # the frozen row is what this move was priced from.
+            # the frozen row is what this move was priced from. A *partial* refund keeps
+            # the row ``completed`` — the guard cannot see it — and the valuation reads
+            # the money kept instead of the money taken, so the customer is paid back
+            # only for unused time the company did not already return.
             Decimal("0.00")
             if source.status != SETTLED_PAYMENT_STATUS
             else money_owed_for_unused_time(
-                paid_amount=source.amount,
+                paid_amount=source_kept,
                 period_start=period_start,
                 period_end=period_end,
                 ended_at=moment,
@@ -432,7 +440,10 @@ class PaidPlanReplacementService:
             original_period_end=period_end,
             ended_at=moment,
             due_at=moment + timedelta(hours=MANUAL_RETURN_HOURS),
-            paid_amount=source.amount,
+            # The figure the payout was valued from — the money kept, not the money
+            # taken — so the row's own check ``amount_owed <= paid_amount`` stays true
+            # after a partial refund shrinks what the payment holds.
+            paid_amount=source_kept,
             amount_owed=amount,
             currency=source.currency.upper(),
             status=MONEY_OWED_PENDING_STATUS,

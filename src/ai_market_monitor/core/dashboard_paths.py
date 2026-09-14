@@ -124,6 +124,11 @@ OPPORTUNITIES_PATH: Final[str] = "/dashboard/opportunities"
 #: Where a person can be told: Telegram, WhatsApp, email, the dashboard itself.
 CONNECTIONS_PATH: Final[str] = "/dashboard/connections"
 
+#: Native form fallback for removing Telegram. The page normally enhances this with a
+#: dialog and a DELETE request, but account recovery must still work when its JavaScript
+#: module is stale, blocked, or fails to load.
+TELEGRAM_UNLINK_PATH: Final[str] = f"{CONNECTIONS_PATH}/telegram/unlink"
+
 #: The older name for the same page. Kept as a 308 rather than a second page, because
 #: outgoing email, the WhatsApp replies and the account-link flow all still write it.
 INTEGRATIONS_PATH: Final[str] = "/dashboard/integrations"

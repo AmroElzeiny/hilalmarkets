@@ -1,7 +1,7 @@
 {% extends "hilal/base_dashboard.html" %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260913-corner-clear">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-connections-test.css') }}?v=20260913-corner-clear">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260914-telegram-recovery">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-connections-test.css') }}?v=20260914-telegram-recovery">
 {% endblock %}
 {% block content %}
 
@@ -109,9 +109,15 @@
             because that account was already theirs, and never showed Unlink at all.
             There was no way forward and no way back. -#}
         {% elif channel.value == 'telegram' and not channel.linked %}
+        {% if telegram_connect_url %}
+        <a class="t-action is-primary" href="{{ telegram_connect_url }}" target="_blank" rel="noopener" data-c-connect-telegram>
+          <span data-icon="telegram" data-icon-class="icon-sm"></span>Link Telegram
+        </a>
+        {% else %}
         <button class="t-action is-primary" type="button" data-c-connect-telegram>
           <span data-icon="telegram" data-icon-class="icon-sm"></span>Link Telegram
         </button>
+        {% endif %}
 
         {% else %}
         {#- A real switch, not a link that looks like one. It says which way it is in
@@ -134,9 +140,9 @@
         {% endif %}
 
         {% if channel.value == 'telegram' and channel.linked %}
-        <button class="t-action is-quiet" type="button" data-c-unlink-telegram>
+        <a class="t-action is-quiet" href="{{ telegram_unlink_confirm_url }}" data-c-unlink-telegram>
           <span data-icon="unlink" data-icon-class="icon-sm"></span>Unlink Telegram
-        </button>
+        </a>
         {% endif %}
         {% endif %}
       </div>
@@ -236,8 +242,9 @@
 
 {#- Asking before unlinking. A browser confirm box is unstyled, unbranded, and not
     something a screen reader announces as a choice. -#}
-<dialog class="t-dialog c-ask" data-c-ask-dialog aria-labelledby="c-ask-title">
-  <div class="t-dialog-shell">
+<dialog class="t-dialog c-ask" data-c-ask-dialog aria-labelledby="c-ask-title"{% if telegram_unlink_confirmation %} open{% endif %}>
+  <form class="t-dialog-shell" method="post" action="{{ telegram_unlink_path }}" data-c-unlink-form>
+    <input type="hidden" name="csrf_token" value="{{ dashboard_csrf_token }}">
     <header class="t-dialog-head">
       <div>
         <span class="t-eyebrow"><span data-icon="unlink" data-icon-class="icon-sm"></span>Before you do</span>
@@ -253,12 +260,12 @@
     </div>
     <footer class="t-dialog-foot">
       <button class="t-action" type="button" data-c-ask-cancel>Keep it</button>
-      <button class="t-action is-danger" type="button" data-c-ask-go>
+      <button class="t-action is-danger" type="submit" data-c-unlink-submit>
         <span data-icon="unlink" data-icon-class="icon-sm"></span>Unlink it
       </button>
     </footer>
-  </div>
+  </form>
 </dialog>
 
 {% endblock %}
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-connections-test.js') }}?v=20260913-corner-clear"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-connections-test.js') }}?v=20260914-telegram-recovery"></script>{% endblock %}
