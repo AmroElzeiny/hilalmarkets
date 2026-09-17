@@ -18,7 +18,10 @@ from ai_market_monitor.db.models.enums import (
 )
 from ai_market_monitor.schemas.strategy import StrategyDefinition
 from ai_market_monitor.services.alert_emails import alert_email_address
-from ai_market_monitor.services.alert_limits import CHOSEN_CHANNEL_NOT_CONNECTED
+from ai_market_monitor.services.alert_limits import (
+    CHOSEN_CHANNEL_NOT_CONNECTED,
+    TELEGRAM_CHAT_NOT_CONNECTED,
+)
 from ai_market_monitor.services.alert_presentation import AlertPresentation
 from ai_market_monitor.services.email_delivery import email_delivery_available
 from ai_market_monitor.services.notification_preferences import NotificationPreferenceService
@@ -323,6 +326,24 @@ class TelegramDeliveryService:
                 processed.append(delivery)
                 continue
             chat_id = delivery.destination_key.removeprefix("chat:")
+            # The chat was written when the alert was queued. Since then the person may
+            # have unlinked it, replaced it with another Telegram, or it may have moved to
+            # another account. A queued or retried alert must only reach a chat that is
+            # still connected to the alert's owner, today.
+            still_connected = await self.session.scalar(
+                select(TelegramConnection.id).where(
+                    TelegramConnection.chat_id == chat_id,
+                    TelegramConnection.user_id == alert.user_id,
+                    TelegramConnection.status == ConnectionStatus.ACTIVE,
+                    TelegramConnection.alerts_enabled.is_(True),
+                )
+            )
+            if still_connected is None:
+                delivery.status = DeliveryStatus.CANCELED
+                delivery.last_error_code = TELEGRAM_CHAT_NOT_CONNECTED
+                delivery.next_retry_at = None
+                processed.append(delivery)
+                continue
             delivery.attempt_count += 1
             delivery.last_attempt_at = now
             try:

@@ -60,19 +60,24 @@ async def record_acceptance(
 
     if await has_accepted(session, user_id=user_id, version=version):
         return
-    resolved = identity_id
-    if resolved is None:
-        resolved = await session.scalar(
-            select(UserIdentity.id)
+    if identity_id is not None:
+        identity = await session.get(UserIdentity, identity_id)
+    else:
+        identity = await session.scalar(
+            select(UserIdentity)
             .where(UserIdentity.user_id == user_id)
             .order_by(UserIdentity.is_primary.desc(), UserIdentity.created_at.asc())
+            .limit(1)
         )
-    if resolved is None:
+    if identity is None:
         raise DisclaimerIdentityMissing("Account identity was not found.")
     session.add(
         DisclaimerAcceptance(
             user_id=user_id,
-            identity_id=resolved,
+            identity_id=identity.id,
+            # A copy, so the record still names the sign-in after that sign-in is removed.
+            identity_provider=str(identity.provider.value),
+            identity_subject=identity.provider_subject,
             disclaimer_version=version,
             acceptance_source=source,
             accepted_at=datetime.now(UTC),

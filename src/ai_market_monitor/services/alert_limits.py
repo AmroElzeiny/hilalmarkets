@@ -48,6 +48,9 @@ DELIVERY_BLOCK_DAILY_LIMIT = "daily_message_limit_reached"
 #: chosen channel with no live connection behind it, or email on an account with no
 #: address. Distinct from "no way of being told is on", because here one *is* on.
 CHOSEN_CHANNEL_NOT_CONNECTED = "chosen_channel_not_connected"
+#: A queued Telegram alert whose chat is no longer connected to the alert's owner — the
+#: Telegram was unlinked, replaced, or moved to another account after it was queued.
+TELEGRAM_CHAT_NOT_CONNECTED = "telegram_chat_not_connected"
 
 
 def effective_alerts_per_hour(*, monitor_limit: int, account_limit: int) -> int:

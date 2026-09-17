@@ -131,10 +131,17 @@ def test_null_telemetry_records_nothing_but_still_validates_stage_names() -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_a_stage_never_gets_more_time_than_the_turn_has_left() -> None:
-    deadline = TurnDeadline(started_at=time.monotonic(), budget_seconds=5.0)
+def test_a_stage_never_gets_more_time_than_the_turn_has_left(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The clock is held still. Reading it twice a few microseconds apart made the second
+    # reading smaller than the first, and the comparison failed with correct code.
+    now = time.monotonic()
+    monkeypatch.setattr(time, "monotonic", lambda: now)
+    deadline = TurnDeadline(started_at=now - 1.5, budget_seconds=5.0)
     assert deadline.timeout_for(60.0) <= deadline.remaining_seconds
-    assert deadline.timeout_for(1.0) == pytest.approx(1.0, abs=0.05)
+    assert deadline.timeout_for(60.0) == pytest.approx(3.5)
+    assert deadline.timeout_for(1.0) == pytest.approx(1.0)
 
 
 @pytest.mark.parametrize("reserve", (0.0, 2.0, 6.0))

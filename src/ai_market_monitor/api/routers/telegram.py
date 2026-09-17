@@ -188,6 +188,23 @@ async def process_telegram_update(
     return {"ok": True, "replayed": False, "message_ids": delivery.message_ids}
 
 
+async def telegram_polling_offset(session: AsyncSession) -> int | None:
+    """Where polling continues: just after the newest update *saved*.
+
+    Not the highest number ever saved. A new bot token starts its update numbers again
+    from a lower value, and the highest number from the old bot then sat above every new
+    update: Telegram was never told they had been read, returned the same messages every
+    five seconds, and would have gone quiet once a hundred of them piled up.
+    """
+
+    latest = await session.scalar(
+        select(TelegramUpdateReceipt.update_id)
+        .order_by(TelegramUpdateReceipt.created_at.desc())
+        .limit(1)
+    )
+    return int(latest) + 1 if latest is not None else None
+
+
 async def _receipt_after_rollback(
     session: AsyncSession,
     *,

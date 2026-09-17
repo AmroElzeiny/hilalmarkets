@@ -232,9 +232,15 @@ class DisclaimerAcceptance(UUIDPrimaryKeyMixin, Base):
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    identity_id: Mapped[UUID] = mapped_column(
-        ForeignKey("user_identities.id", ondelete="RESTRICT"), nullable=False
+    #: The live sign-in row, while it exists. Cleared when that sign-in is removed (an
+    #: unlinked Telegram), because the acceptance is a record that must outlive it.
+    identity_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user_identities.id", ondelete="SET NULL")
     )
+    #: Which sign-in gave the acceptance, copied at the time, so the record still says so
+    #: after ``identity_id`` has been cleared.
+    identity_provider: Mapped[str | None] = mapped_column(String(32))
+    identity_subject: Mapped[str | None] = mapped_column(String(255))
     disclaimer_version: Mapped[str] = mapped_column(String(40), nullable=False)
     acceptance_source: Mapped[str] = mapped_column(String(32), nullable=False)
     accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

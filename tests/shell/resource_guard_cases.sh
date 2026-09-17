@@ -34,12 +34,14 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 make_dumps() { for stamp in "$@"; do : > "$work/predeploy-$stamp.sql.gz"; done; }
+# Sorted byte by byte. Under a language setting such as en_US, sort skips the dot, so
+# ".env.production" landed after "backup.sql.gz" and the expected list failed on this server.
 dump_names() {
   find "$work" -maxdepth 1 -type f -name 'predeploy-*.sql.gz' -exec basename {} \; \
-    | sort | tr '\n' ' '
+    | LC_ALL=C sort | tr '\n' ' '
 }
 file_names() {
-  find "$work" -maxdepth 1 -type f -exec basename {} \; | sort | tr '\n' ' '
+  find "$work" -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort | tr '\n' ' '
 }
 
 echo "== reading the disk =="
