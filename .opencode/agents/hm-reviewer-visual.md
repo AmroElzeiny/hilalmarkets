@@ -5,7 +5,7 @@ description: Vision reviewer for screenshots against Claude's exact visual contr
 # subagent this reviewer could never actually see an image, which is the one
 # thing it exists to do. `all` keeps it callable both ways.
 mode: all
-model: opencode-go/deepseek-v4-flash-vision-exp
+model: opencode-go/glm-5.3-flash
 permission:
   read:
     "*": allow

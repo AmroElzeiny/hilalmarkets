@@ -1,7 +1,7 @@
 ---
 description: Independent logic reviewer. Finds correctness, contract, state, serialization, compatibility, and hidden-error risks without editing.
 mode: subagent
-model: opencode-go/minimax-m3
+model: opencode-go/glm-5.3-flash
 permission:
   read:
     "*": allow

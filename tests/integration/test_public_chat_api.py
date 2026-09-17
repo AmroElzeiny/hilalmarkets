@@ -449,7 +449,7 @@ async def test_public_support_greetings_are_ai_conversation_without_handoff(
 ):
     settings = test_context["settings"]
     settings.public_chat_ai_enabled = True
-    settings.openai_api_key = SecretStr("test-openai-key")
+    settings.opencode_go_api_key = SecretStr("test-opencode-key")
     fake = FakePublicSupportResponses(
         [
             _ai_answer(
@@ -485,7 +485,7 @@ async def test_public_support_greetings_are_ai_conversation_without_handoff(
 async def test_public_support_modes_cover_education_out_of_scope_and_safety(test_context):
     settings = test_context["settings"]
     settings.public_chat_ai_enabled = True
-    settings.openai_api_key = SecretStr("test-openai-key")
+    settings.opencode_go_api_key = SecretStr("test-opencode-key")
     fake = FakePublicSupportResponses(
         [
             _ai_answer(
@@ -550,7 +550,7 @@ async def test_public_support_modes_cover_education_out_of_scope_and_safety(test
 async def test_low_confidence_and_invalid_ai_output_never_authorize_form(test_context):
     settings = test_context["settings"]
     settings.public_chat_ai_enabled = True
-    settings.openai_api_key = SecretStr("test-openai-key")
+    settings.opencode_go_api_key = SecretStr("test-opencode-key")
     low_confidence = FakePublicSupportResponses(
         [
             _ai_answer(
@@ -600,7 +600,7 @@ async def test_low_confidence_and_invalid_ai_output_never_authorize_form(test_co
 async def test_public_support_timeout_returns_retry_without_form_authority(test_context):
     settings = test_context["settings"]
     settings.public_chat_ai_enabled = True
-    settings.openai_api_key = SecretStr("test-openai-key")
+    settings.opencode_go_api_key = SecretStr("test-opencode-key")
     async with test_context["session_factory"]() as session:
         service = PublicChatService(
             session,
@@ -639,7 +639,7 @@ async def test_public_support_timeout_returns_retry_without_form_authority(test_
 async def test_public_support_ai_uses_bounded_multi_turn_history(test_context):
     settings = test_context["settings"]
     settings.public_chat_ai_enabled = True
-    settings.openai_api_key = SecretStr("test-openai-key")
+    settings.opencode_go_api_key = SecretStr("test-opencode-key")
     fake = FakePublicSupportResponses(
         [
             _ai_answer(
@@ -688,7 +688,7 @@ async def test_public_support_ai_uses_bounded_multi_turn_history(test_context):
 async def test_public_support_ai_rejects_hallucinated_source_ids(test_context):
     settings = test_context["settings"]
     settings.public_chat_ai_enabled = True
-    settings.openai_api_key = SecretStr("test-openai-key")
+    settings.opencode_go_api_key = SecretStr("test-opencode-key")
     fake = FakePublicSupportResponses(
         [_ai_answer("An invented product claim.", source_ids=["invented:source"])]
     )
@@ -719,7 +719,7 @@ async def test_notion_context_cannot_authorize_current_product_facts(
 ):
     settings = test_context["settings"]
     settings.public_chat_ai_enabled = True
-    settings.openai_api_key = SecretStr("test-openai-key")
+    settings.opencode_go_api_key = SecretStr("test-opencode-key")
     notion_root = tmp_path / "Notion"
     notion_root.mkdir()
     (notion_root / "Roadmap.md").write_text(
@@ -763,7 +763,7 @@ async def test_notion_context_cannot_authorize_current_product_facts(
 async def test_public_support_ai_rejects_hallucinated_route_ids(test_context):
     settings = test_context["settings"]
     settings.public_chat_ai_enabled = True
-    settings.openai_api_key = SecretStr("test-openai-key")
+    settings.opencode_go_api_key = SecretStr("test-opencode-key")
     fake = FakePublicSupportResponses(
         [
             _ai_answer(
@@ -793,7 +793,7 @@ async def test_public_support_ai_uses_only_authenticated_server_owned_account_da
 ):
     settings = test_context["settings"]
     settings.public_chat_ai_enabled = True
-    settings.openai_api_key = SecretStr("test-openai-key")
+    settings.opencode_go_api_key = SecretStr("test-opencode-key")
     fake = FakePublicSupportResponses(
         [
             _ai_answer(
@@ -841,7 +841,7 @@ async def test_public_support_ai_uses_only_authenticated_server_owned_account_da
 async def test_public_support_ai_rejects_account_tool_for_anonymous_visitor(test_context):
     settings = test_context["settings"]
     settings.public_chat_ai_enabled = True
-    settings.openai_api_key = SecretStr("test-openai-key")
+    settings.opencode_go_api_key = SecretStr("test-opencode-key")
     fake = FakePublicSupportResponses(
         [
             _ai_answer(
@@ -978,7 +978,7 @@ async def test_explicit_contact_request_is_the_only_server_handoff_shortcut(
 ):
     settings = test_context["settings"]
     settings.public_chat_ai_enabled = True
-    settings.openai_api_key = SecretStr("test-openai-key")
+    settings.opencode_go_api_key = SecretStr("test-opencode-key")
     fake = FakePublicSupportResponses(
         [
             _ai_answer(

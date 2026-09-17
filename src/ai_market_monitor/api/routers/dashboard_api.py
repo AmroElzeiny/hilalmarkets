@@ -526,6 +526,28 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _explainer_model(settings: Settings) -> str | None:
+    """The model name recorded on an explanation row, or nothing.
+
+    The explainer itself is the stale Setup Chat path and still reads the
+    OpenAI key and model, so this gate reads the same pair through
+    ``is_configured``: identical answers for every configured deployment, and
+    a fail-closed blank instead of a stale name when the key is missing.
+    """
+
+    from ai_market_monitor.services.ai_provider import (
+        AIProviderConfigError,
+        is_configured,
+    )
+
+    try:
+        if is_configured(settings, settings.openai_model):
+            return settings.openai_model
+    except AIProviderConfigError:
+        return None
+    return None
+
+
 async def _require_missed_alert_investigations(
     session: AsyncSession,
     user_id: UUID,
@@ -3227,7 +3249,7 @@ async def explain_monitor_health(
         evidence_hash=explainer.evidence_hash(evidence),
         grounded_payload=evidence,
         response_text=explanation,
-        model=settings.openai_model if settings.openai_api_key else None,
+        model=_explainer_model(settings),
         created_at=_now(),
     )
     session.add(record)
@@ -3278,7 +3300,7 @@ async def explain_lifecycle_investigation(
         evidence_hash=explainer.evidence_hash(evidence),
         grounded_payload=evidence,
         response_text=explanation,
-        model=settings.openai_model if settings.openai_api_key else None,
+        model=_explainer_model(settings),
         created_at=_now(),
     )
     session.add(record)

@@ -39,6 +39,12 @@ from ai_market_monitor.services.agent_control import (
     OpenAIAgentResponsesClient,
 )
 from ai_market_monitor.services.agent_tools import strict_json_schema
+from ai_market_monitor.services.ai_provider import (
+    AIProviderConfigError,
+    extract_response_text,
+    is_configured,
+    resolve_provider,
+)
 from ai_market_monitor.services.system_brain import estimate_usage_cost
 from ai_market_monitor.services.system_brain_privacy import redact_customer_text
 from ai_market_monitor.services.system_brain_tools import (
@@ -402,7 +408,13 @@ class SystemBrainAgentService:
         admin_user_id: UUID,
         request: SystemBrainAgentTurnRequest,
     ) -> SystemBrainAgentTurnResponse:
-        if not self.settings.system_brain_ai_enabled or self.settings.openai_api_key is None:
+        try:
+            agent_configured = is_configured(
+                self.settings, self.settings.system_brain_ai_model
+            )
+        except AIProviderConfigError:
+            agent_configured = False
+        if not self.settings.system_brain_ai_enabled or not agent_configured:
             raise SystemBrainAgentUnavailable("The System Brain operational agent is unavailable.")
         started = monotonic()
         conversation = await SystemBrainConversationService()._owned(
@@ -568,13 +580,28 @@ class SystemBrainAgentService:
                 break
             try:
                 async with asyncio.timeout(max(0.1, deadline - monotonic())):
-                    raw = await self.client.create(
-                        payload,
-                        timeout_seconds=min(
-                            float(self.settings.system_brain_ai_timeout_seconds),
-                            max(0.1, deadline - monotonic()),
-                        ),
-                    )
+                    try:
+                        raw = await self.client.create(
+                            payload,
+                            timeout_seconds=min(
+                                float(self.settings.system_brain_ai_timeout_seconds),
+                                max(0.1, deadline - monotonic()),
+                            ),
+                            # One conversation, one provider session: the
+                            # conversation id, never an admin id or email.
+                            session_key=str(conversation.id),
+                        )
+                    except TypeError as exc:
+                        if "session_key" not in str(exc):
+                            raise
+                        # Test doubles that predate conversation grouping.
+                        raw = await self.client.create(
+                            payload,
+                            timeout_seconds=min(
+                                float(self.settings.system_brain_ai_timeout_seconds),
+                                max(0.1, deadline - monotonic()),
+                            ),
+                        )
             except httpx.HTTPStatusError as exc:
                 failure = f"provider:http_{exc.response.status_code}"
                 break
@@ -603,7 +630,10 @@ class SystemBrainAgentService:
             if calls:
                 # Responses continuation is stateless here (store=False), so the
                 # provider-authored call and our result must be replayed together.
-                input_items.extend(output)
+                # A turn may carry a message beside the call; that is kept. What
+                # is never sent back is the provider's working: reasoning items
+                # are read, never replayed.
+                input_items.extend(item for item in output if item.get("type") != "reasoning")
                 if (
                     run.tool_call_count + len(calls)
                     > self.settings.system_brain_agent_max_tool_calls
@@ -847,7 +877,7 @@ class SystemBrainAgentService:
                 user_id=admin_user_id,
                 chat_session_id=None,
                 operation="system_brain_agent",
-                provider="openai",
+                provider=resolve_provider(self.settings.system_brain_ai_model),
                 model=run.model,
                 reasoning_effort=run.reasoning_effort,
                 input_tokens=int(usage["input_tokens"]),
@@ -855,7 +885,11 @@ class SystemBrainAgentService:
                 output_tokens=int(usage["output_tokens"]),
                 reasoning_tokens=int(usage["reasoning_tokens"]),
                 estimated_cost_usd=Decimal(str(usage["estimated_cost_usd"])),
-                pricing_source="configured OpenAI model pricing",
+                pricing_source=(
+                    "configured "
+                    f"{resolve_provider(self.settings.system_brain_ai_model)}"
+                    " model pricing"
+                ),
                 raw_usage={"model_calls": run.step_count, "tool_calls": run.tool_call_count},
                 created_at=datetime.now(UTC),
             )
@@ -1113,18 +1147,7 @@ def _instructions() -> str:
 
 
 def _response_text(response: dict[str, Any]) -> str:
-    direct = response.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct.strip()
-    parts: list[str] = []
-    for item in response.get("output") or []:
-        if isinstance(item, dict) and item.get("type") == "message":
-            for content in item.get("content") or []:
-                if isinstance(content, dict) and isinstance(content.get("text"), str):
-                    parts.append(content["text"])
-    if not parts:
-        raise ValueError("The provider returned no final System Brain message.")
-    return "".join(parts)
+    return extract_response_text(response)
 
 
 def _grounded(final: SystemBrainAgentModelResponse, available: set[str]) -> bool:

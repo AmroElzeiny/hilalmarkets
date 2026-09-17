@@ -13,9 +13,25 @@
 import { createCardFilter } from "./hm-card-filter.js";
 import { manageDialog, paintIcons } from "./hm-dialog.js";
 import { prefersReducedMotion, whenSeen } from "./hm-motion.js";
+import { publish } from "./hm-page-context.js";
+import { pageNote } from "./hm-page-notes.js";
 
 const root = document.querySelector("[data-opportunities-root]");
 if (root) start(root);
+
+/* What this page found, in the cards' own words: each coin and the line its card
+ * carries about it. Read off the cards, never re-derived. */
+publish("opportunities", () => {
+  const cards = [...document.querySelectorAll("[data-o-card]")];
+  const lines = cards.map((card) => {
+    const symbol = (card.querySelector("h2") || {}).textContent || "";
+    const state = (card.querySelector(".o-state") || {}).textContent || "";
+    const line = `${symbol.trim()} ${state.trim().replace(/\s+/g, " ")}`.trim();
+    return line.replace(/\s+/g, " ");
+  }).filter(Boolean);
+  const count = `${cards.length} ${cards.length === 1 ? "opportunity" : "opportunities"}`;
+  return pageNote({ summary: `Opportunities: ${count}`, points: lines });
+});
 
 /** Where the drawing tool lives. Vendored, so nothing is fetched from another site. */
 const CHART_LIBRARY = "/static/vendor/lightweight-charts.standalone.production.js";

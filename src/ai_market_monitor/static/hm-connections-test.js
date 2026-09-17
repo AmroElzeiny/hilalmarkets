@@ -10,9 +10,25 @@
 
 import { manageDialog } from "./hm-dialog.js";
 import { animate, attention, prefersReducedMotion, settleIn } from "./hm-motion.js";
+import { publish } from "./hm-page-context.js";
+import { pageNote } from "./hm-page-notes.js";
 
 const root = document.querySelector("[data-connections-root]");
 if (root) start(root);
+
+/* Where the person is told, in the cards' own words: each way of being told with
+ * the state line the server rendered for it. Read off the cards, never decided. */
+publish("connections", () => {
+  const cards = [...document.querySelectorAll("[data-c-card]")];
+  const lines = cards.map((card) => {
+    const channel = (card.querySelector("h2") || {}).textContent || card.dataset.channel || "";
+    const state = (card.querySelector(".c-state") || {}).textContent || "";
+    const line = `${channel.trim()}: ${state.trim().replace(/\s+/g, " ")}`.trim();
+    return line.replace(/\s+/g, " ");
+  }).filter(Boolean);
+  const count = `${cards.length} ${cards.length === 1 ? "way" : "ways"} of being told`;
+  return pageNote({ summary: `Connections: ${count}`, points: lines });
+});
 
 /** What each switch says about itself, in both positions. */
 const SWITCH_WORDS = {

@@ -2,8 +2,9 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
+from ai_market_monitor.core.money import json_money_number, quantise_half_up
 from ai_market_monitor.schemas.timeframes import TIMEFRAME_MINUTES
 
 UNLIMITED_SYMBOL_CAP = 100_000
@@ -165,9 +166,11 @@ def is_discount_code_shaped(code: str) -> bool:
 COMING_SOON_LABEL = "Soon"
 
 #: Money is rounded to the cent, and never in the customer's disfavour by accident.
-#: ``ROUND_HALF_UP`` on a percentage of a whole-dollar price is exact for every price
-#: this product sells; it is named rather than left to the default so a future price with
-#: an odd cent cannot quietly round a charge up.
+#: The rounding itself is the owner's — ``core.money.quantise_half_up``, which is
+#: ``ROUND_HALF_UP`` on a percentage of a whole-dollar price and exact for every
+#: price this product sells; it is named there rather than left to decimal's
+#: default so a future price with an odd cent cannot quietly round a charge the
+#: other way. This constant is only the quantum.
 _CENTS = Decimal("0.01")
 
 
@@ -228,11 +231,11 @@ def price_after_percent(amount: Decimal, percent: Decimal) -> Decimal:
     would not charge.
     """
     if percent <= 0:
-        return amount.quantize(_CENTS, rounding=ROUND_HALF_UP)
+        return quantise_half_up(amount, _CENTS)
     if percent >= 100:
         return Decimal("0.00")
     kept = (Decimal("100") - percent) / Decimal("100")
-    return (amount * kept).quantize(_CENTS, rounding=ROUND_HALF_UP)
+    return quantise_half_up(amount * kept, _CENTS)
 
 
 def promotional_monthly_price(code: str, *, now: datetime | None = None) -> Decimal | None:
@@ -249,7 +252,7 @@ def promotional_monthly_price(code: str, *, now: datetime | None = None) -> Deci
     normal = PLAN_DEFINITIONS[code].monthly_price
     if price >= normal:
         return None
-    return price.quantize(_CENTS, rounding=ROUND_HALF_UP)
+    return quantise_half_up(price, _CENTS)
 
 
 def effective_monthly_price(code: str, *, now: datetime | None = None) -> Decimal:
@@ -318,8 +321,15 @@ def plan_offer_payload(code: str, *, now: datetime | None = None) -> dict[str, o
     is the number to cross out beside it, or ``None`` when there is nothing to cross out.
 
     There is no code in this payload any more. The launch price is reached by buying
-    before :data:`PROMOTION_ENDS_AT`, not by typing anything, so a card that named a code
-    would send people looking for a box that does not exist.
+    before :data:`PROMOTION_ENDS_AT`, not by typing anything, so a card that named a
+    code would send people looking for a box that does not exist.
+
+    The prices are ``Decimal`` (or ``None``), never ``float``: this payload is
+    embedded in the landing page and the dashboard as JSON, and ``float`` is where
+    ``9.00`` loses its cents text and ``10.05`` its value. The page writer is
+    ``core.money.money_json_dumps`` (installed as Jinja's ``tojson`` in
+    ``api/template_env.py``), which sends each amount as a bare JSON number with
+    the exact digits — the contract the React card does arithmetic on.
     """
     offer = plan_offer(code)
     charged = effective_monthly_price(code, now=now)
@@ -327,17 +337,19 @@ def plan_offer_payload(code: str, *, now: datetime | None = None) -> dict[str, o
     return {
         "monthlyAvailable": offer.monthly_available,
         "annualAvailable": offer.annual_available,
-        "monthlyPrice": float(charged) if offer.monthly_available else None,
+        "monthlyPrice": json_money_number(charged) if offer.monthly_available else None,
         "annualPrice": (
-            float(PUBLIC_PLAN_PRESENTATIONS[code].annual_price)
+            json_money_number(PUBLIC_PLAN_PRESENTATIONS[code].annual_price)
             if offer.annual_available and code in PUBLIC_PLAN_PRESENTATIONS
             else None
         ),
-        "originalMonthlyPrice": float(original) if original is not None else None,
+        "originalMonthlyPrice": (
+            json_money_number(original) if original is not None else None
+        ),
         # The same number as `monthlyPrice`, kept because three templates and the landing
         # bundle read it. It stopped being a *second* price the day the code went away:
         # what a checkout charges and what a card shows are now one figure by construction.
-        "fullMonthlyPrice": float(charged) if offer.monthly_available else None,
+        "fullMonthlyPrice": json_money_number(charged) if offer.monthly_available else None,
         "promotionEndsAt": PROMOTION_ENDS_AT.isoformat(),
         "promotionRunning": original is not None,
         "comingSoonLabel": COMING_SOON_LABEL,

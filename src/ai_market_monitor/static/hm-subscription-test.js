@@ -10,9 +10,23 @@
 
 import { manageDialog, paintIcons } from "./hm-dialog.js";
 import { animate, countTo, prefersReducedMotion, settleIn } from "./hm-motion.js";
+import { publish } from "./hm-page-context.js";
+import { pageNote } from "./hm-page-notes.js";
 
 const root = document.querySelector("[data-subscription-root]");
 if (root) start(root);
+
+/* The person's plan, in the page's own words: which plan is theirs and which plans
+ * are offered. Prices still come from the records; this only says what is shown. */
+publish("subscription", () => {
+  const cards = [...document.querySelectorAll("[data-plan]")];
+  const lines = cards.map((card) => {
+    const name = (card.querySelector("h2, h3") || {}).textContent || card.dataset.plan || "";
+    const mine = card.querySelector(".a-state") ? " (your plan)" : "";
+    return `${name.trim().replace(/\s+/g, " ")}${mine}`;
+  }).filter((line) => line && line !== " (your plan)");
+  return pageNote({ points: lines });
+});
 
 /** The last step. Named once, because three places ask "are we at the end yet?". */
 const LAST_STEP = 3;

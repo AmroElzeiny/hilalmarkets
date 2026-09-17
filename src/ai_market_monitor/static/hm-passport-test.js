@@ -7,11 +7,37 @@
  */
 
 import { settleIn, whenSeen } from "./hm-motion.js";
+import { publish } from "./hm-page-context.js";
+import { pageNote } from "./hm-page-notes.js";
 
 setUpSectionTracking();
 setUpCopyButtons();
 setUpProblemForm();
 setUpReportActions();
+
+/* The Passport in front of them, in the page's own words: which coin, what the
+ * answer reads as, and under which standard. Facts still come from the records;
+ * this only says what the person is looking at. */
+if (document.querySelector("[data-passport-page]")) {
+  publish("passport", () => {
+    const answer = document.querySelector(".t-pq-answer");
+    const facts = [...document.querySelectorAll(".t-facts > div")].map((fact) =>
+      fact.textContent.trim().replace(/\s+/g, " "),
+    ).filter(Boolean);
+    const summary = answer ? answer.textContent.trim().replace(/\s+/g, " ") : null;
+    return pageNote({ summary, points: facts });
+  });
+}
+
+/* The printable evidence report, in its own words: the coin and its sections. */
+if (document.querySelector("[data-report-page]")) {
+  publish("report", () => {
+    const sections = [...document.querySelectorAll(".t-report h2")].map((heading) =>
+      heading.textContent.trim().replace(/\s+/g, " "),
+    ).filter(Boolean);
+    return pageNote({ points: sections });
+  });
+}
 
 /** Keep the sticky section links pointing at the section actually on screen. */
 function setUpSectionTracking() {

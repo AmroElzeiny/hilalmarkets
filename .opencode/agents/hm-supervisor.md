@@ -1,7 +1,8 @@
 ---
 description: Primary economical supervisor. Decomposes Claude missions, delegates implementation, verifies evidence, and escalates only when required.
 mode: primary
-model: opencode-go/minimax-m3
+model: opencode-go/muse-spark-1.3-contributor
+variant: high
 permission:
   read:
     "*": allow

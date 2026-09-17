@@ -1,0 +1,66 @@
+﻿ M .hm-orchestrator/current/MISSION.md
+ M .hm-orchestrator/current/RUN.json
+ M .hm-orchestrator/current/VISUAL_CONTRACT.md
+ M .hm-orchestrator/models/LIVE_ENDPOINT.json
+ M .hm-orchestrator/models/LIVE_MODELS.md
+ M .hm-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+ M .hm-orchestrator/models/LIVE_MODEL_IDS.txt
+ M .hm-orchestrator/models/ROLE_MODEL_MAP.md
+ M .hm-orchestrator/policy/ROUTING_POLICY.md
+ M .hm-orchestrator/runs/20260913T224025Z-95c82040/WP1_AFTER.xml
+ M .hm-orchestrator/runs/20260913T224025Z-95c82040/WP1_NEIGHBOURS.xml
+ M .opencode/agents/hm-direct-read.md
+ M .opencode/agents/hm-direct-write.md
+ M .opencode/agents/hm-explorer.md
+ M .opencode/agents/hm-reviewer-adversarial.md
+ M .opencode/agents/hm-reviewer-logic.md
+ M .opencode/agents/hm-reviewer-visual.md
+ M .opencode/agents/hm-supervisor-deep.md
+ M .opencode/agents/hm-supervisor.md
+ M .opencode/agents/hm-test-debugger.md
+ M .opencode/agents/hm-worker-fast.md
+ M .opencode/agents/hm-worker-strong.md
+ M CLAUDE.md
+ M src/ai_market_monitor/api/template_env.py
+ M src/ai_market_monitor/core/money.py
+ M src/ai_market_monitor/core/plans.py
+ M src/ai_market_monitor/services/affiliate.py
+ M src/ai_market_monitor/services/affiliate_attribution.py
+ M src/ai_market_monitor/services/billing.py
+ M src/ai_market_monitor/services/payment_emails.py
+ M src/ai_market_monitor/services/plan_replacements.py
+ M src/ai_market_monitor/services/system_brain_payments.py
+ M tests/integration/test_system_brain_payments.py
+ M tests/unit/test_invariant_money_on_the_wire.py
+ M tools/hm-orchestrator/run-model.ps1
+ M tools/hm-orchestrator/verify-system.ps1
+?? .claude/settings.localstale.json
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP24_NEIGHBOURS.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP2_AFTER.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP2_BEFORE.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP3_AFTER.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP3_BEFORE.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP3_DESIGN.md
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP3_NEIGHBOURS.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP4_AFTER.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP4_BEFORE.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_LOGIC_R1R3.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_LOGIC_WP2WP4.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_LOGIC_partial_only.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_MONEY_DIFF_committed.patch
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_MONEY_DIFF_committed_and_worktree.patch
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_MONEY_DIFF_worktree.patch
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_negative_total.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_refund_edges.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_revalue_ticket.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_scan_holes.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_stripe_cumulative.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_collision.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_decimal_key.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_edges.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_kwargs.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_normaliser.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_sci.py
+?? .hm-orchestrator/runs/20260916T182445Z-e1b1762c/
+?? tests/unit/test_invariant_cancellation_time.py
+?? tests/unit/test_invariant_unfinished_attempts.py

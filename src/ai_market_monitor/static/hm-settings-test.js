@@ -14,9 +14,27 @@
 import { manageDialog } from "./hm-dialog.js";
 import { followSections } from "./hm-jump.js";
 import { animate, attention, prefersReducedMotion, settleIn } from "./hm-motion.js";
+import { publish } from "./hm-page-context.js";
+import { pageNote } from "./hm-page-notes.js";
 
 const root = document.querySelector("[data-settings-root]");
 if (root) start(root);
+
+/* What the person has switched on, in the page's own words: which ways of being
+ * told are chosen, as the boxes are actually ticked. Read, never decided. */
+publish("settings", () => {
+  const chosen = [...document.querySelectorAll("input[type='checkbox']:checked")]
+    .map((box) => {
+      const label = box.closest("label");
+      return ((label && label.textContent) || box.getAttribute("aria-label") || "")
+        .trim().replace(/\s+/g, " ");
+    })
+    .filter(Boolean);
+  return pageNote({
+    summary: chosen.length ? "Settings: some notices switched on" : "Settings",
+    points: chosen,
+  });
+});
 
 /** How long to wait after typing before saving. Long enough to finish a number. */
 const TYPING_PAUSE = 700;

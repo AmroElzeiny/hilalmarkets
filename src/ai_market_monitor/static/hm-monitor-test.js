@@ -1824,6 +1824,19 @@ async function start(scope) {
         needs: mechanic
           ? missingOn(mechanic, node.values).map((parameter) => parameter.label).slice(0, 6)
           : [],
+        // Every field on the card, filled or not, with the value as typed. The
+        // assistant repeats these as the person's own and never recommends one.
+        inputs: mechanic
+          ? (mechanic.parameters || []).slice(0, 6).map((parameter) => {
+            const raw = node.values ? node.values[parameter.name] : undefined;
+            const empty = raw === null || raw === undefined || raw === "";
+            return {
+              label: parameter.label,
+              filled: !empty,
+              value: empty ? null : String(raw),
+            };
+          })
+          : [],
       });
       if (cards.length >= 32) break;
     }

@@ -134,6 +134,27 @@ async def _paying_customer(test_context, *, email: str) -> User:
                 billing_profile={},
             )
         )
+        # And one attempt that is still open: the window has not closed and the person can
+        # still pay on it. "Unfinished" means this one, and only this one — see the
+        # assertion at the bottom of ``test_one_customer_shows_payments_forms_and_a_timelog``.
+        # The expired row above is a finished attempt that never became money: it is
+        # neither a payment nor an unfinished attempt.
+        session.add(
+            BillingCheckoutAttempt(
+                user_id=customer.id,
+                plan_id=plan.id,
+                billing_cycle="one_time_30_day",
+                provider="creem",
+                status="pending",
+                idempotency_key=f"payments-open-{customer.id}",
+                terms_version="2026-01",
+                amount=OLD_PLUS_PRICE,
+                currency="USD",
+                terms_accepted_at=now,
+                expires_at=now + timedelta(days=1),
+                billing_profile={},
+            )
+        )
         session.add(
             BillingEvent(
                 user_id=customer.id,
@@ -247,7 +268,10 @@ async def test_one_customer_shows_payments_forms_and_a_timelog(test_context):
     assert ">trader<" not in page
     assert ">demo<" not in page
 
-    # The attempt that never became money is counted, and counted separately.
+    # The unfinished count is the attempt that is still open, and nothing else: the
+    # expired row above is a finished attempt that never became money, so it is neither a
+    # payment nor an unfinished attempt. Counted by elimination ("not paid") it would read
+    # 2 here — which was defect R5.
     unfinished = page.split("Unfinished attempts", 1)[1].split("</div>", 1)[0]
     assert ">1<" in unfinished
 

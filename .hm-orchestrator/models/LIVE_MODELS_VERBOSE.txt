@@ -421,7 +421,7 @@ opencode-go/glm-5.3-flash
   "id": "glm-5.3-flash",
   "providerID": "opencode-go",
   "name": "GLM-5.3-Flash",
-  "family": "glm",
+  "family": "glm-flash",
   "api": {
     "id": "glm-5.3-flash",
     "url": "https://opencode.ai/zen/go/v1",
@@ -1757,4 +1757,53 @@ opencode-go/qwen3.8-max
       "reasoningEffort": "xhigh"
     }
   }
+}
+opencode-go/union-alpha
+{
+  "id": "union-alpha",
+  "providerID": "opencode-go",
+  "name": "Union Alpha Free",
+  "api": {
+    "id": "union-alpha",
+    "url": "https://opencode.ai/zen/go/v1",
+    "npm": "@ai-sdk/anthropic"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 262144,
+    "output": 131072
+  },
+  "capabilities": {
+    "temperature": false,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-09-16",
+  "variants": {}
 }

@@ -1,7 +1,7 @@
 ---
 description: Read-heavy repository explorer for call graphs, duplicate implementations, tests, contracts, and root-cause evidence.
 mode: subagent
-model: opencode-go/deepseek-v4.1-flash
+model: opencode-go/mimo-v2.5
 permission:
   read:
     "*": allow

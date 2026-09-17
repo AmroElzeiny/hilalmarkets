@@ -1,7 +1,8 @@
 ---
 description: Test and debugging worker. Builds reproducers, analyzes failures, and verifies focused/adjacent regressions.
 mode: subagent
-model: opencode-go/qwen3.8-flash
+model: opencode-go/muse-spark-1.3-contributor
+variant: high
 permission:
   read:
     "*": allow

@@ -6,6 +6,8 @@
  */
 
 import { animate, countTo, reveal, settleIn } from "./hm-motion.js";
+import { publish } from "./hm-page-context.js";
+import { pageNote } from "./hm-page-notes.js";
 import {
   assetTone,
   carriesCondition,
@@ -20,6 +22,39 @@ import {
 
 const root = document.querySelector("[data-market-root]");
 if (root) start(root);
+
+/* ── Telling Hilal what is on this page ────────────────────────────────────
+ *
+ * The page's own words, read off what it already shows: the counters that filter
+ * the list, and the coins the person follows. Nothing is worked out a second time
+ * here, so the assistant cannot describe the list differently from the list.
+ */
+publish("screened_market", () => {
+  const tiles = [...document.querySelectorAll(".t-tile")].map((tile) =>
+    tile.textContent.trim().replace(/\s+/g, " "),
+  ).filter(Boolean);
+  return pageNote({
+    summary: tiles.length ? `Halal Assets: ${tiles.join(" · ")}` : null,
+    points: tiles,
+  });
+});
+
+publish("watchlist", () => {
+  const holder = document.querySelector("[data-market-root]");
+  let symbols = [];
+  try {
+    const raw = JSON.parse((holder && holder.dataset.favoriteAssets) || "[]");
+    symbols = (Array.isArray(raw) ? raw : []).map((value) => String(value).toUpperCase());
+  } catch {
+    symbols = [];
+  }
+  return pageNote({
+    summary: symbols.length
+      ? `Coins you follow: ${symbols.length} ${symbols.length === 1 ? "coin" : "coins"}`
+      : "Coins you follow: none yet",
+    points: symbols,
+  });
+});
 
 function start(root) {
   const endpoint = root.dataset.endpoint;

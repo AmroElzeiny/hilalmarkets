@@ -1,0 +1,818 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="19" skipped="0" tests="29" time="16.356" timestamp="2026-09-14T05:23:44.579000+03:00" hostname="WIN-FOVCL5KBJ2M"><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_the_two_event_lists_cover_every_name_that_can_end_access" time="0.085" /><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_second_cancellation_event_keeps_the_first_cancellation_time[customer.subscription.deleted-stripe]" time="0.895"><failure message="AssertionError: stripe/customer.subscription.deleted moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 45, 674928): a second cancellation rewrote when access really ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 45, 674928) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8DCCBA70&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'customer.subscription.deleted', provider = 'stripe'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", CANCEL_EVENT_TYPES)
+    async def test_a_second_cancellation_event_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """A cancel webhook arriving after the plan is already closed restates nothing.
+    
+        The event is still accepted — the cancellation really did happen — but the date the
+        customer stopped having access stays the date it happened.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED, (
+            f"the seeded ending date did not survive the seed itself: {before!r}"
+        )
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type=event_type,
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: a "
+            "second cancellation rewrote when access really ended"
+        )
+E       AssertionError: stripe/customer.subscription.deleted moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 45, 674928): a second cancellation rewrote when access really ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 45, 674928) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:187: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_second_cancellation_event_keeps_the_first_cancellation_time[customer.subscription.deleted-creem]" time="0.522"><failure message="AssertionError: creem/customer.subscription.deleted moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 46, 519667): a second cancellation rewrote when access really ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 46, 519667) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8EE2CFE0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'customer.subscription.deleted', provider = 'creem'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", CANCEL_EVENT_TYPES)
+    async def test_a_second_cancellation_event_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """A cancel webhook arriving after the plan is already closed restates nothing.
+    
+        The event is still accepted — the cancellation really did happen — but the date the
+        customer stopped having access stays the date it happened.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED, (
+            f"the seeded ending date did not survive the seed itself: {before!r}"
+        )
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type=event_type,
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: a "
+            "second cancellation rewrote when access really ended"
+        )
+E       AssertionError: creem/customer.subscription.deleted moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 46, 519667): a second cancellation rewrote when access really ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 46, 519667) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:187: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_second_cancellation_event_keeps_the_first_cancellation_time[customer.subscription.deleted-nowpayments]" time="0.541"><failure message="AssertionError: nowpayments/customer.subscription.deleted moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 47, 56432): a second cancellation rewrote when access really ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 47, 56432) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8F47F1D0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'customer.subscription.deleted', provider = 'nowpayments'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", CANCEL_EVENT_TYPES)
+    async def test_a_second_cancellation_event_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """A cancel webhook arriving after the plan is already closed restates nothing.
+    
+        The event is still accepted — the cancellation really did happen — but the date the
+        customer stopped having access stays the date it happened.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED, (
+            f"the seeded ending date did not survive the seed itself: {before!r}"
+        )
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type=event_type,
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: a "
+            "second cancellation rewrote when access really ended"
+        )
+E       AssertionError: nowpayments/customer.subscription.deleted moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 47, 56432): a second cancellation rewrote when access really ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 47, 56432) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:187: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_second_cancellation_event_keeps_the_first_cancellation_time[subscription.deleted-stripe]" time="0.550"><failure message="AssertionError: stripe/subscription.deleted moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 47, 625298): a second cancellation rewrote when access really ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 47, 625298) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8F67AFF0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'subscription.deleted', provider = 'stripe'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", CANCEL_EVENT_TYPES)
+    async def test_a_second_cancellation_event_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """A cancel webhook arriving after the plan is already closed restates nothing.
+    
+        The event is still accepted — the cancellation really did happen — but the date the
+        customer stopped having access stays the date it happened.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED, (
+            f"the seeded ending date did not survive the seed itself: {before!r}"
+        )
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type=event_type,
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: a "
+            "second cancellation rewrote when access really ended"
+        )
+E       AssertionError: stripe/subscription.deleted moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 47, 625298): a second cancellation rewrote when access really ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 47, 625298) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:187: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_second_cancellation_event_keeps_the_first_cancellation_time[subscription.deleted-creem]" time="0.541"><failure message="AssertionError: creem/subscription.deleted moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 48, 175758): a second cancellation rewrote when access really ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 48, 175758) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8F63B170&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'subscription.deleted', provider = 'creem'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", CANCEL_EVENT_TYPES)
+    async def test_a_second_cancellation_event_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """A cancel webhook arriving after the plan is already closed restates nothing.
+    
+        The event is still accepted — the cancellation really did happen — but the date the
+        customer stopped having access stays the date it happened.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED, (
+            f"the seeded ending date did not survive the seed itself: {before!r}"
+        )
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type=event_type,
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: a "
+            "second cancellation rewrote when access really ended"
+        )
+E       AssertionError: creem/subscription.deleted moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 48, 175758): a second cancellation rewrote when access really ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 48, 175758) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:187: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_second_cancellation_event_keeps_the_first_cancellation_time[subscription.deleted-nowpayments]" time="0.543"><failure message="AssertionError: nowpayments/subscription.deleted moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 48, 726470): a second cancellation rewrote when access really ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 48, 726470) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8EDA1B20&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'subscription.deleted', provider = 'nowpayments'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", CANCEL_EVENT_TYPES)
+    async def test_a_second_cancellation_event_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """A cancel webhook arriving after the plan is already closed restates nothing.
+    
+        The event is still accepted — the cancellation really did happen — but the date the
+        customer stopped having access stays the date it happened.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED, (
+            f"the seeded ending date did not survive the seed itself: {before!r}"
+        )
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type=event_type,
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: a "
+            "second cancellation rewrote when access really ended"
+        )
+E       AssertionError: nowpayments/subscription.deleted moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 48, 726470): a second cancellation rewrote when access really ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 48, 726470) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:187: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_second_cancellation_event_keeps_the_first_cancellation_time[subscription.canceled-stripe]" time="0.545"><failure message="AssertionError: stripe/subscription.canceled moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 49, 278417): a second cancellation rewrote when access really ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 49, 278417) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8F5E9580&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'subscription.canceled', provider = 'stripe'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", CANCEL_EVENT_TYPES)
+    async def test_a_second_cancellation_event_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """A cancel webhook arriving after the plan is already closed restates nothing.
+    
+        The event is still accepted — the cancellation really did happen — but the date the
+        customer stopped having access stays the date it happened.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED, (
+            f"the seeded ending date did not survive the seed itself: {before!r}"
+        )
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type=event_type,
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: a "
+            "second cancellation rewrote when access really ended"
+        )
+E       AssertionError: stripe/subscription.canceled moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 49, 278417): a second cancellation rewrote when access really ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 49, 278417) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:187: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_second_cancellation_event_keeps_the_first_cancellation_time[subscription.canceled-creem]" time="0.514"><failure message="AssertionError: creem/subscription.canceled moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 49, 801320): a second cancellation rewrote when access really ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 49, 801320) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8F618500&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'subscription.canceled', provider = 'creem'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", CANCEL_EVENT_TYPES)
+    async def test_a_second_cancellation_event_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """A cancel webhook arriving after the plan is already closed restates nothing.
+    
+        The event is still accepted — the cancellation really did happen — but the date the
+        customer stopped having access stays the date it happened.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED, (
+            f"the seeded ending date did not survive the seed itself: {before!r}"
+        )
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type=event_type,
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: a "
+            "second cancellation rewrote when access really ended"
+        )
+E       AssertionError: creem/subscription.canceled moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 49, 801320): a second cancellation rewrote when access really ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 49, 801320) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:187: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_second_cancellation_event_keeps_the_first_cancellation_time[subscription.canceled-nowpayments]" time="0.526"><failure message="AssertionError: nowpayments/subscription.canceled moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 50, 331393): a second cancellation rewrote when access really ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 50, 331393) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8D88AE10&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'subscription.canceled', provider = 'nowpayments'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", CANCEL_EVENT_TYPES)
+    async def test_a_second_cancellation_event_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """A cancel webhook arriving after the plan is already closed restates nothing.
+    
+        The event is still accepted — the cancellation really did happen — but the date the
+        customer stopped having access stays the date it happened.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED, (
+            f"the seeded ending date did not survive the seed itself: {before!r}"
+        )
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type=event_type,
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: a "
+            "second cancellation rewrote when access really ended"
+        )
+E       AssertionError: nowpayments/subscription.canceled moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 50, 331393): a second cancellation rewrote when access really ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 50, 331393) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:187: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_second_cancellation_event_keeps_the_first_cancellation_time[subscription.expired-stripe]" time="0.540"><failure message="AssertionError: stripe/subscription.expired moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 50, 879140): a second cancellation rewrote when access really ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 50, 879140) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8F959CA0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'subscription.expired', provider = 'stripe'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", CANCEL_EVENT_TYPES)
+    async def test_a_second_cancellation_event_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """A cancel webhook arriving after the plan is already closed restates nothing.
+    
+        The event is still accepted — the cancellation really did happen — but the date the
+        customer stopped having access stays the date it happened.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED, (
+            f"the seeded ending date did not survive the seed itself: {before!r}"
+        )
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type=event_type,
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: a "
+            "second cancellation rewrote when access really ended"
+        )
+E       AssertionError: stripe/subscription.expired moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 50, 879140): a second cancellation rewrote when access really ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 50, 879140) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:187: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_second_cancellation_event_keeps_the_first_cancellation_time[subscription.expired-creem]" time="0.547"><failure message="AssertionError: creem/subscription.expired moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 51, 436538): a second cancellation rewrote when access really ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 51, 436538) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8F8F7BC0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'subscription.expired', provider = 'creem'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", CANCEL_EVENT_TYPES)
+    async def test_a_second_cancellation_event_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """A cancel webhook arriving after the plan is already closed restates nothing.
+    
+        The event is still accepted — the cancellation really did happen — but the date the
+        customer stopped having access stays the date it happened.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED, (
+            f"the seeded ending date did not survive the seed itself: {before!r}"
+        )
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type=event_type,
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: a "
+            "second cancellation rewrote when access really ended"
+        )
+E       AssertionError: creem/subscription.expired moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 51, 436538): a second cancellation rewrote when access really ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 51, 436538) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:187: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_second_cancellation_event_keeps_the_first_cancellation_time[subscription.expired-nowpayments]" time="0.542"><failure message="AssertionError: nowpayments/subscription.expired moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 51, 984589): a second cancellation rewrote when access really ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 51, 984589) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8F8F4EC0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'subscription.expired', provider = 'nowpayments'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", CANCEL_EVENT_TYPES)
+    async def test_a_second_cancellation_event_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """A cancel webhook arriving after the plan is already closed restates nothing.
+    
+        The event is still accepted — the cancellation really did happen — but the date the
+        customer stopped having access stays the date it happened.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED, (
+            f"the seeded ending date did not survive the seed itself: {before!r}"
+        )
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type=event_type,
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: a "
+            "second cancellation rewrote when access really ended"
+        )
+E       AssertionError: nowpayments/subscription.expired moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 51, 984589): a second cancellation rewrote when access really ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 51, 984589) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:187: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_refund_after_a_cancellation_keeps_the_first_cancellation_time[payment.refunded-stripe]" time="0.530"><failure message="AssertionError: stripe/payment.refunded moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 52, 523255): the refund of a period restated the day access ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 52, 523255) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8F9AD760&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'payment.refunded', provider = 'stripe'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", REFUND_ENDS_PLAN_NAMES)
+    async def test_a_refund_after_a_cancellation_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """The refund of a period is not a second cancellation.
+    
+        This is the ordinary sequence — the plan is cancelled, the money comes back afterwards
+        — and it is the one that reaches ``_end_refunded_plan``, which used to stamp the
+        refund's arrival as the end of access.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_refund_payload(
+                    event_type=event_type,
+                    attempt=attempt,
+                    user_id=user.id,
+                    subscription_reference=subscription.provider_subscription_id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: the "
+            "refund of a period restated the day access ended"
+        )
+E       AssertionError: stripe/payment.refunded moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 52, 523255): the refund of a period restated the day access ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 52, 523255) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:228: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_refund_after_a_cancellation_keeps_the_first_cancellation_time[payment.refunded-creem]" time="0.536"><failure message="AssertionError: creem/payment.refunded moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 53, 64903): the refund of a period restated the day access ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 53, 64903) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8F9AD880&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'payment.refunded', provider = 'creem'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", REFUND_ENDS_PLAN_NAMES)
+    async def test_a_refund_after_a_cancellation_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """The refund of a period is not a second cancellation.
+    
+        This is the ordinary sequence — the plan is cancelled, the money comes back afterwards
+        — and it is the one that reaches ``_end_refunded_plan``, which used to stamp the
+        refund's arrival as the end of access.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_refund_payload(
+                    event_type=event_type,
+                    attempt=attempt,
+                    user_id=user.id,
+                    subscription_reference=subscription.provider_subscription_id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: the "
+            "refund of a period restated the day access ended"
+        )
+E       AssertionError: creem/payment.refunded moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 53, 64903): the refund of a period restated the day access ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 53, 64903) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:228: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_refund_after_a_cancellation_keeps_the_first_cancellation_time[payment.refunded-nowpayments]" time="0.538"><failure message="AssertionError: nowpayments/payment.refunded moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 53, 610338): the refund of a period restated the day access ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 53, 610338) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8FC36E10&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'payment.refunded', provider = 'nowpayments'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", REFUND_ENDS_PLAN_NAMES)
+    async def test_a_refund_after_a_cancellation_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """The refund of a period is not a second cancellation.
+    
+        This is the ordinary sequence — the plan is cancelled, the money comes back afterwards
+        — and it is the one that reaches ``_end_refunded_plan``, which used to stamp the
+        refund's arrival as the end of access.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_refund_payload(
+                    event_type=event_type,
+                    attempt=attempt,
+                    user_id=user.id,
+                    subscription_reference=subscription.provider_subscription_id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: the "
+            "refund of a period restated the day access ended"
+        )
+E       AssertionError: nowpayments/payment.refunded moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 53, 610338): the refund of a period restated the day access ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 53, 610338) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:228: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_refund_after_a_cancellation_keeps_the_first_cancellation_time[refund.created-stripe]" time="0.536"><failure message="AssertionError: stripe/refund.created moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 54, 154747): the refund of a period restated the day access ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 54, 154747) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8FCCF3B0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'refund.created', provider = 'stripe'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", REFUND_ENDS_PLAN_NAMES)
+    async def test_a_refund_after_a_cancellation_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """The refund of a period is not a second cancellation.
+    
+        This is the ordinary sequence — the plan is cancelled, the money comes back afterwards
+        — and it is the one that reaches ``_end_refunded_plan``, which used to stamp the
+        refund's arrival as the end of access.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_refund_payload(
+                    event_type=event_type,
+                    attempt=attempt,
+                    user_id=user.id,
+                    subscription_reference=subscription.provider_subscription_id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: the "
+            "refund of a period restated the day access ended"
+        )
+E       AssertionError: stripe/refund.created moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 54, 154747): the refund of a period restated the day access ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 54, 154747) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:228: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_refund_after_a_cancellation_keeps_the_first_cancellation_time[refund.created-creem]" time="0.537"><failure message="AssertionError: creem/refund.created moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 54, 696407): the refund of a period restated the day access ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 54, 696407) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8FE29CD0&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'refund.created', provider = 'creem'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", REFUND_ENDS_PLAN_NAMES)
+    async def test_a_refund_after_a_cancellation_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """The refund of a period is not a second cancellation.
+    
+        This is the ordinary sequence — the plan is cancelled, the money comes back afterwards
+        — and it is the one that reaches ``_end_refunded_plan``, which used to stamp the
+        refund's arrival as the end of access.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_refund_payload(
+                    event_type=event_type,
+                    attempt=attempt,
+                    user_id=user.id,
+                    subscription_reference=subscription.provider_subscription_id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: the "
+            "refund of a period restated the day access ended"
+        )
+E       AssertionError: creem/refund.created moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 54, 696407): the refund of a period restated the day access ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 54, 696407) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:228: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_refund_after_a_cancellation_keeps_the_first_cancellation_time[refund.created-nowpayments]" time="0.538"><failure message="AssertionError: nowpayments/refund.created moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 55, 242793): the refund of a period restated the day access ended&#10;assert datetime.datetime(2026, 9, 14, 2, 23, 55, 242793) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8FF7B470&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+event_type = 'refund.created', provider = 'nowpayments'
+
+    @pytest.mark.parametrize("provider", REFUND_PROVIDERS)
+    @pytest.mark.parametrize("event_type", REFUND_ENDS_PLAN_NAMES)
+    async def test_a_refund_after_a_cancellation_keeps_the_first_cancellation_time(
+        test_context, event_type: str, provider: str
+    ) -&gt; None:
+        """The refund of a period is not a second cancellation.
+    
+        This is the ordinary sequence — the plan is cancelled, the money comes back afterwards
+        — and it is the one that reaches ``_end_refunded_plan``, which used to stamp the
+        refund's arrival as the end of access.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _cancelled_subscription(session, provider=provider)
+    
+        before = await _stored_canceled_at(test_context, subscription.id)
+        assert before == FIRST_CANCELLATION_STORED
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_refund_payload(
+                    event_type=event_type,
+                    attempt=attempt,
+                    user_id=user.id,
+                    subscription_reference=subscription.provider_subscription_id,
+                ),
+            )
+            await session.commit()
+    
+        after = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert after == before, (
+            f"{provider}/{event_type} moved canceled_at from {before!r} to {after!r}: the "
+            "refund of a period restated the day access ended"
+        )
+E       AssertionError: nowpayments/refund.created moved canceled_at from datetime.datetime(2026, 3, 1, 12, 30, 45, 123456) to datetime.datetime(2026, 9, 14, 2, 23, 55, 242793): the refund of a period restated the day access ended
+E       assert datetime.datetime(2026, 9, 14, 2, 23, 55, 242793) == datetime.datetime(2026, 3, 1, 12, 30, 45, 123456)
+
+tests\unit\test_invariant_cancellation_time.py:228: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_dispute_after_a_cancellation_changes_nothing_at_all[charge.refunded]" time="0.510" /><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_dispute_after_a_cancellation_changes_nothing_at_all[charge.dispute.created]" time="0.505" /><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_a_dispute_after_a_cancellation_changes_nothing_at_all[dispute.created]" time="0.498" /><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_the_first_cancellation_still_records_a_time[customer.subscription.deleted]" time="0.556" /><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_the_first_cancellation_still_records_a_time[subscription.deleted]" time="0.773" /><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_the_first_cancellation_still_records_a_time[subscription.canceled]" time="0.542" /><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_the_first_cancellation_still_records_a_time[subscription.expired]" time="0.564" /><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_the_first_cancellation_still_records_a_time[payment.refunded]" time="0.555" /><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_the_first_cancellation_still_records_a_time[refund.created]" time="0.560" /><testcase classname="tests.unit.test_invariant_cancellation_time" name="test_two_cancellations_in_a_row_keep_the_time_the_first_one_wrote" time="0.579"><failure message="AssertionError: the second cancellation moved the ending from datetime.datetime(2026, 9, 14, 2, 24, 0, 868982) to datetime.datetime(2026, 9, 14, 2, 24, 0, 904537)&#10;assert datetime.datetime(2026, 9, 14, 2, 24, 0, 904537) == datetime.datetime(2026, 9, 14, 2, 24, 0, 868982)">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x0000026B8FF78560&gt;, 'client': &lt;httpx.AsyncClient object at 0x0000026B...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+
+    async def test_two_cancellations_in_a_row_keep_the_time_the_first_one_wrote(
+        test_context,
+    ) -&gt; None:
+        """The whole story in order, with nothing pre-seeded: cancel, then a second cancel.
+    
+        Both events arrive through the real webhook service, so the recorded date is the one
+        the first event wrote and the second cannot move it. Payment companies produce exactly
+        this by retrying a delivery; a different event id means ``process_event`` cannot
+        short-circuit it for us.
+        """
+    
+        provider = "stripe"
+        async with test_context["session_factory"]() as session:
+            user, subscription, attempt = await _seed_paid_plan(session, provider=provider)
+            await session.commit()
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type="customer.subscription.deleted",
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                ),
+            )
+            await session.commit()
+    
+        first = await _stored_canceled_at(test_context, subscription.id)
+        assert first is not None, "the first cancellation recorded no ending time"
+    
+        async with test_context["session_factory"]() as session:
+            await BillingService(session, test_context["settings"]).process_event(
+                provider=provider,
+                payload=_cancel_payload(
+                    provider=provider,
+                    event_type="subscription.canceled",
+                    user=user,
+                    subscription=subscription,
+                    attempt_id=attempt.id,
+                    event_id="evt-second-delivery-of-the-same-ending",
+                ),
+            )
+            await session.commit()
+    
+        second = await _stored_canceled_at(test_context, subscription.id)
+&gt;       assert second == first, (
+            f"the second cancellation moved the ending from {first!r} to {second!r}"
+        )
+E       AssertionError: the second cancellation moved the ending from datetime.datetime(2026, 9, 14, 2, 24, 0, 868982) to datetime.datetime(2026, 9, 14, 2, 24, 0, 904537)
+E       assert datetime.datetime(2026, 9, 14, 2, 24, 0, 904537) == datetime.datetime(2026, 9, 14, 2, 24, 0, 868982)
+
+tests\unit\test_invariant_cancellation_time.py:365: AssertionError</failure></testcase></testsuite></testsuites>

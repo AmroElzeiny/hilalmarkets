@@ -27,6 +27,7 @@ class SecurityReviewService:
         "client_secret",
         "nowpayments_api_key",
         "openai_api_key",
+        "opencode_go_api_key",
         "password",
         "private_key",
         "seed_phrase",

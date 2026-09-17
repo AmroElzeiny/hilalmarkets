@@ -126,10 +126,10 @@ if (Get-Command opencode -ErrorAction SilentlyContinue) {
     $go = @($modelProbe.Output | Where-Object { $_ -match '^opencode-go/' })
     Check "OpenCode Go connected/models visible" (($modelProbe.ExitCode -eq 0) -and ($go.Count -gt 0)) "($($go.Count) models)"
     foreach ($need in @(
-        "opencode-go/minimax-m3",
-        "opencode-go/qwen3.8-flash",
-        "opencode-go/deepseek-v4.1-flash",
-        "opencode-go/deepseek-v4-flash-vision-exp"
+        "opencode-go/muse-spark-1.3-contributor",
+        "opencode-go/glm-5.3-flash",
+        "opencode-go/mimo-v2.5",
+        "opencode-go/qwen3.7-plus"
     )) {
         Check "Default model $need" ($go -contains $need)
     }

@@ -27,6 +27,7 @@ from fastapi.templating import Jinja2Templates
 
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.dashboard_paths import MONITOR_PATH, monitor_edit_path
+from ai_market_monitor.core.money import money_json_dumps, quantise_half_up
 from ai_market_monitor.core.plans import (
     DISCOUNT_CODE_PATTERN,
     PLAN_LIMIT_WORDS,
@@ -98,7 +99,10 @@ def day_only(value: datetime | None, timezone_name: str = "UTC") -> str:
 
 
 def reward_amount(value: Decimal) -> str:
-    value = value.quantize(Decimal("0.01"))
+    """A reward as a person reads it: ``$9.00``, halves rounded up like every other
+    money rounding in the product — through the one rounding owner."""
+
+    value = quantise_half_up(value, Decimal("0.01"))
     if value == Decimal("0.00"):
         return "$ 0.00"
     return f"${value:.2f}"
@@ -157,6 +161,15 @@ def hilal_chat_gate(chrome_flag: object, settings: object) -> bool:
 def register(templates: Jinja2Templates) -> Jinja2Templates:
     """Give one template environment everything the product's templates expect."""
 
+    # The JSON writer every ``| tojson`` in every template goes through. Jinja's
+    # default is ``json.dumps``, which cannot see a ``Decimal`` at all — it raises
+    # ``TypeError: Object of type Decimal is not JSON serializable`` — so the
+    # landing page and the dashboard plan cards (whose React contract is a JSON
+    # *number* somebody does arithmetic on) now get the exact number through
+    # ``core.money.money_json_dumps``, the same owner that already writes the
+    # payment provider's wire. Wiring it beside the filters is deliberate: it is
+    # what lets ``plan_offer_payload`` carry ``Decimal`` instead of ``float``.
+    templates.env.policies["json.dumps_function"] = money_json_dumps
     templates.env.filters["short_dt"] = short_datetime
     # A day, for the facts that are about a day rather than a moment. `short_dt` prints a
     # full machine timestamp, which is right for "this alert fired" and wrong for "your

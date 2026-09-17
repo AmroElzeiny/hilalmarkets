@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from hashlib import sha256
 from typing import Final
 from uuid import UUID
@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.core.money import money_kept
+from ai_market_monitor.core.money import money_kept, quantise_half_up
 from ai_market_monitor.core.plans import PURCHASABLE_PLAN_CODES, plan_name
 from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
@@ -124,13 +124,13 @@ def money_owed_for_unused_time(
 ) -> Decimal:
     """Return the unused share, in cents, without ever using binary floating point."""
 
-    paid = max(paid_amount, Decimal("0")).quantize(MONEY_QUANTUM, ROUND_HALF_UP)
+    paid = quantise_half_up(max(paid_amount, Decimal("0")), MONEY_QUANTUM)
     total = _microseconds(period_end - period_start)
     unused = _microseconds(period_end - ended_at)
     if paid == 0 or total <= 0 or unused <= 0:
         return Decimal("0.00")
     share = Decimal(min(unused, total)) / Decimal(total)
-    return min(paid, (paid * share).quantize(MONEY_QUANTUM, ROUND_HALF_UP))
+    return min(paid, quantise_half_up(paid * share, MONEY_QUANTUM))
 
 
 def _microseconds(value: timedelta) -> int:

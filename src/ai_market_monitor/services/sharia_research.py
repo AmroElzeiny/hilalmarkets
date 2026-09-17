@@ -33,6 +33,15 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import ReviewCaseType, ShariaMethodologyStatus
 from ai_market_monitor.services import sharia_dossier_state as dossier_state
+from ai_market_monitor.services.ai_provider import (
+    AIProviderConfigError,
+    build_responses_request,
+    extract_response_text,
+    is_configured,
+    provider_honours_service_tier,
+    resolve_feature_model,
+    resolve_provider,
+)
 from ai_market_monitor.services.provider_reliability import ProviderCallError
 from ai_market_monitor.services.provider_runtime import provider_call, provider_request
 
@@ -391,7 +400,13 @@ class ShariaAIResearchClient:
         self.transport = transport
 
     async def analyze(self, evidence_package: dict[str, Any]) -> AIAnalysisResult:
-        if self.settings.openai_api_key is None:
+        try:
+            model = resolve_feature_model(
+                self.settings.sharia_ai_model, setting_name="SHARIA_AI_MODEL"
+            )
+        except AIProviderConfigError as exc:
+            raise ShariaResearchError("sharia_ai_not_configured", str(exc)) from exc
+        if not is_configured(self.settings, model):
             raise ShariaResearchError(
                 "openai_key_missing", "Sharia research AI is not configured."
             )
@@ -406,7 +421,12 @@ class ShariaAIResearchClient:
             )
             response, retries = await self._post(payload)
             total_retries += retries
-            output_text = _extract_output_text(response)
+            try:
+                output_text = extract_response_text(response)
+            except ValueError as exc:
+                raise ShariaResearchError(
+                    "openai_output_missing", "OpenAI did not return a structured analysis."
+                ) from exc
             try:
                 analysis = ShariaFactualAnalysis.model_validate_json(output_text)
                 return AIAnalysisResult(
@@ -425,15 +445,16 @@ class ShariaAIResearchClient:
         raise AssertionError("unreachable")
 
     async def _post(self, payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
-        api_key = self.settings.openai_api_key
-        if api_key is None:
+        model = str(payload.get("model") or "")
+        try:
+            details = build_responses_request(self.settings, model)
+        except AIProviderConfigError as exc:
             raise ShariaResearchError(
                 "openai_key_missing", "Sharia research AI is not configured."
-            )
-        headers = {
-            "Authorization": f"Bearer {api_key.get_secret_value()}",
-            "Content-Type": "application/json",
-        }
+            ) from exc
+        headers = details.headers
+        url = details.url
+        provider_label = details.provider
         # Retrying an HTTP call is not this module's decision. It used to keep its own
         # status list, its own backoff and its own Retry-After reading, all of which had
         # already drifted from the shared matrix. What is genuinely local is the *service
@@ -446,8 +467,8 @@ class ShariaAIResearchClient:
                 outcome = await provider_call(
                     self.settings,
                     "POST",
-                    f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
-                    provider="openai",
+                    url,
+                    provider=provider_label,
                     operation="sharia_research",
                     model=str(payload.get("model") or ""),
                     timeout=self.settings.sharia_ai_timeout_seconds,
@@ -478,7 +499,11 @@ class ShariaAIResearchClient:
                     f"OpenAI returned HTTP {status_code}.",
                     retryable=True,
                 )
-            if service_tier == "flex" and self.settings.sharia_ai_allow_standard_fallback:
+            if (
+                service_tier == "flex"
+                and provider_honours_service_tier(provider_label)
+                and self.settings.sharia_ai_allow_standard_fallback
+            ):
                 payload = {**payload, "service_tier": "default"}
                 service_tier = "default"
                 continue
@@ -512,12 +537,13 @@ class ShariaAIResearchClient:
         input_value: dict[str, Any] = {"evidence_package": evidence_package}
         if repair and invalid_output:
             input_value["invalid_output_excerpt"] = invalid_output
-        return {
+        body: dict[str, Any] = {
             "model": self.settings.sharia_ai_model,
             "store": False,
-            "service_tier": service_tier,
             "reasoning": {"effort": self.settings.sharia_ai_reasoning_effort},
-            "max_output_tokens": 5000,
+            # High-effort reasoning measured 2118 tokens on a one-source fixture
+            # dossier (2873 output total); real dossiers carry many more sources.
+            "max_output_tokens": 8000,
             "instructions": instructions,
             "input": json.dumps(input_value, sort_keys=True, default=str),
             "text": {
@@ -529,6 +555,13 @@ class ShariaAIResearchClient:
                 }
             },
         }
+        # OpenCode Go does not honour service tiers: sending one would be a
+        # field the provider never asked for. OpenAI keeps its tier as before.
+        if provider_honours_service_tier(
+            resolve_provider(self.settings.sharia_ai_model)
+        ):
+            body["service_tier"] = service_tier
+        return body
 
 
 class ShariaResearchPipeline:
@@ -1002,7 +1035,7 @@ class ShariaResearchPipeline:
                 user_id=None,
                 chat_session_id=None,
                 operation="sharia_factual_dossier",
-                provider="openai",
+                provider=resolve_provider(self.settings.sharia_ai_model),
                 model=self.settings.sharia_ai_model,
                 reasoning_effort=self.settings.sharia_ai_reasoning_effort,
                 input_tokens=int(usage.get("input_tokens") or 0),
@@ -1016,7 +1049,7 @@ class ShariaResearchPipeline:
                     service_tier=result.returned_service_tier
                     or self.settings.sharia_ai_service_tier,
                 ),
-                pricing_source="configured_from_openai_pricing",
+                pricing_source=f"configured_from_{resolve_provider(self.settings.sharia_ai_model)}_pricing",
                 raw_usage=usage,
                 created_at=datetime.now(UTC),
             )
@@ -1302,20 +1335,6 @@ def _passport_enrichment_profile(
         plain_language_profile=f"{primary} {token_role}".strip(),
         provenance="HILALMARKETS_AI_ENRICHMENT_UNVERIFIED",
         manual_verification_required=True,
-    )
-
-
-def _extract_output_text(payload: dict[str, Any]) -> str:
-    if isinstance(payload.get("output_text"), str):
-        return payload["output_text"]
-    for item in payload.get("output", []):
-        if not isinstance(item, dict) or item.get("type") != "message":
-            continue
-        for content in item.get("content", []):
-            if isinstance(content, dict) and content.get("type") in {"output_text", "text"}:
-                return str(content.get("text") or "")
-    raise ShariaResearchError(
-        "openai_output_missing", "OpenAI did not return a structured analysis."
     )
 
 

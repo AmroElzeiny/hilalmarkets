@@ -17,6 +17,13 @@ from pydantic import BaseModel, ValidationError
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.services.agent_tools import strict_json_schema
+from ai_market_monitor.services.ai_provider import (
+    AIProviderConfigError,
+    build_responses_request,
+    extract_response_text,
+    is_configured,
+    provider_honours_service_tier,
+)
 from ai_market_monitor.services.ai_setup_evaluator_control import consume_evaluator_llm_fault
 from ai_market_monitor.services.provider_reliability import ProviderCallError
 from ai_market_monitor.services.provider_runtime import provider_request
@@ -105,31 +112,13 @@ def is_dns_failure(exc: BaseException) -> bool:
 
 
 def response_output_text(payload: dict[str, Any]) -> str:
-    """The single structured answer out of a Responses payload."""
+    """The single structured answer out of a Responses payload.
 
-    direct = payload.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct
-    fragments: list[str] = []
-    for item in payload.get("output") or []:
-        if not isinstance(item, dict):
-            continue
-        if item.get("type") != "message":
-            continue
-        for part in item.get("content") or []:
-            if not isinstance(part, dict):
-                continue
-            text = part.get("text")
-            if (
-                part.get("type") in {"output_text", "text"}
-                and isinstance(text, str)
-                and text
-            ):
-                fragments.append(text)
-    combined = "".join(fragments)
-    if combined.strip():
-        return combined
-    raise ValueError("the response carried no structured output")
+    Owned by ``services/ai_provider.py``. This name stays so every existing
+    caller keeps working unchanged.
+    """
+
+    return extract_response_text(payload)
 
 
 async def structured_call[ModelT: BaseModel](
@@ -165,7 +154,16 @@ async def structured_call[ModelT: BaseModel](
 
     provider_stage = "provider"
 
-    if settings.openai_api_key is None:
+    try:
+        configured = is_configured(settings, model)
+    except AIProviderConfigError as exc:
+        raise StructuredCallError(
+            "TARGET_PROVIDER_NOT_CONFIGURED",
+            f"Setup interpretation is temporarily unavailable: {exc}",
+            retryable=True,
+            stage=provider_stage,
+        ) from exc
+    if not configured:
         raise StructuredCallError(
             "TARGET_PROVIDER_NOT_CONFIGURED",
             "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
@@ -219,24 +217,22 @@ async def structured_call[ModelT: BaseModel](
         "instructions": instructions,
         "input": json.dumps(payload, ensure_ascii=False, sort_keys=True),
     }
-    if service_tier is not None:
-        request["service_tier"] = service_tier
-    api_key = (
-        settings.openai_api_key.get_secret_value().strip()
-        if settings.openai_api_key is not None
-        else ""
-    )
-    if not api_key:
+    try:
+        provider_details = build_responses_request(settings, model)
+    except AIProviderConfigError as exc:
         raise StructuredCallError(
             "TARGET_PROVIDER_NOT_CONFIGURED",
             "Setup interpretation is temporarily unavailable. Your draft is unchanged.",
             retryable=True,
             stage=provider_stage,
-        )
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+        ) from exc
+    if service_tier is not None and provider_honours_service_tier(
+        provider_details.provider
+    ):
+        request["service_tier"] = service_tier
+    headers = provider_details.headers
+    url = provider_details.url
+    provider_name = provider_details.provider
     usage: dict[str, Any] = {}
     raw_output = ""
     try:
@@ -245,8 +241,8 @@ async def structured_call[ModelT: BaseModel](
             response = await provider_request(
                 settings,
                 "POST",
-                f"{str(settings.openai_base_url).rstrip('/')}/responses",
-                provider="openai",
+                url,
+                provider=provider_name,
                 operation="responses",
                 # One paid answer per turn: this call is not repeated.
                 retry=False,
@@ -278,8 +274,20 @@ async def structured_call[ModelT: BaseModel](
         returned_service_tier = response_payload.get("service_tier")
         if isinstance(returned_service_tier, str) and returned_service_tier:
             usage["_setup_service_tier"] = returned_service_tier
+        if str(response_payload.get("status") or "") == "incomplete":
+            # The provider stopped for lack of room, not for lack of meaning.
+            # Reporting that as "invalid JSON" would blame the customer's rules
+            # for the provider running out of space.
+            raise StructuredCallError(
+                "TARGET_MAX_OUTPUT_TOKENS",
+                "The answer was cut off because it ran out of room. "
+                "Please try again with a shorter request.",
+                stage=provider_stage,
+            )
         raw_output = response_output_text(response_payload)
         parsed = schema_model.model_validate_json(raw_output)
+    except StructuredCallError:
+        raise
     except ProviderCallError as exc:
         # The shared circuit breaker refused before anything was sent. This used to be a
         # second breaker living inside the agent, with its own Redis coordination and its

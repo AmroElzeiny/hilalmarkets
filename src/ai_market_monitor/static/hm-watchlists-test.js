@@ -13,9 +13,25 @@
 import { createCardFilter } from "./hm-card-filter.js";
 import { manageDialog } from "./hm-dialog.js";
 import { animate, attention, prefersReducedMotion } from "./hm-motion.js";
+import { publish } from "./hm-page-context.js";
+import { pageNote } from "./hm-page-notes.js";
 
 const root = document.querySelector("[data-watchlists-root]");
 if (root) start(root);
+
+/* The person's monitors, in the cards' own words: each name with the status line
+ * the server rendered for it. Read off the cards, never re-derived. */
+publish("watch_plans", () => {
+  const cards = [...document.querySelectorAll("[data-w-card]")];
+  const lines = cards.map((card) => {
+    const name = (card.querySelector("h2") || {}).textContent || "";
+    const status = (card.querySelector(".w-status") || {}).textContent || "";
+    const line = `${name.trim()}: ${status.trim().replace(/\s+/g, " ")}`.trim();
+    return line.replace(/\s+/g, " ");
+  }).filter(Boolean);
+  const count = `${cards.length} ${cards.length === 1 ? "monitor" : "monitors"}`;
+  return pageNote({ summary: `Monitors: ${count}`, points: lines });
+});
 
 /** What each question asks, and what pressing the button really does. */
 const QUESTIONS = {

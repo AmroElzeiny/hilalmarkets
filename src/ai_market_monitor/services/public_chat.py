@@ -892,6 +892,7 @@ class PublicChatService:
                     knowledge_documents=documents,
                     allowed_tools=allowed_tools,
                     authenticated=user_id is not None,
+                    session_key=str(conversation.id),
                 )
                 ai_calls.append(first)
                 self._validate_ai_response(
@@ -928,6 +929,7 @@ class PublicChatService:
                         authenticated=user_id is not None,
                         tool_results=[item.model_dump(mode="json") for item in tool_results],
                         final_after_tools=True,
+                        session_key=str(conversation.id),
                     )
                     ai_calls.append(second)
                     if (
@@ -1145,7 +1147,7 @@ class PublicChatService:
                 state_json={},
                 stage="GREETING_AND_PROFILE",
                 message_count=0,
-                model=self.settings.public_chat_ai_model or self.settings.openai_model,
+                model=self.settings.public_chat_ai_model,
                 reasoning_effort=self.settings.public_chat_ai_reasoning_effort,
                 expires_at=now + timedelta(days=self.settings.public_chat_session_retention_days),
             )
@@ -1329,7 +1331,7 @@ class PublicChatService:
         conversation.state_json = state
         conversation.stage = stage
         conversation.message_count += 2
-        conversation.model = self.settings.public_chat_ai_model or self.settings.openai_model
+        conversation.model = self.settings.public_chat_ai_model
         conversation.reasoning_effort = self.settings.public_chat_ai_reasoning_effort
 
     def _validate_ai_response(

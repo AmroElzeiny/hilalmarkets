@@ -10,9 +10,20 @@
  */
 
 import { animate, attention, prefersReducedMotion, settleIn } from "./hm-motion.js";
+import { publish } from "./hm-page-context.js";
+import { pageNote } from "./hm-page-notes.js";
 
 const root = document.querySelector("[data-support-root]");
 if (root) start(root);
+
+/* The person's requests, in the page's own words: what each one is about and the
+ * state line the server rendered for it. Read off the list, never decided. */
+publish("support", () => {
+  const states = [...document.querySelectorAll(".a-state")].map((state) =>
+    state.textContent.trim().replace(/\s+/g, " "),
+  ).filter(Boolean);
+  return pageNote({ points: states });
+});
 
 /** What we accept, said once, and checked against the same list the server uses. */
 const PICTURE_TYPES = ["image/png", "image/jpeg", "image/webp"];

@@ -324,9 +324,11 @@ Only request a variant when the live OpenCode model metadata for opencode-go con
 Default preference:
 
 - use the cheapest model that has the required capability;
-- use `qwen3.8-flash` as the default implementation and test/debug model;
-- use `deepseek-v4.1-flash` for read-heavy exploration, deep supervision, or adversarial review when needed;
-- use `minimax-m3` for standard supervision and independent logic review;
+- only four OpenCode Go models are allowed: `muse-spark-1.3-contributor`, `glm-5.3-flash`, `mimo-v2.5`, `qwen3.7-plus` (role map and fallbacks: `.hm-orchestrator/models/ROLE_MODEL_MAP.md`);
+- use `muse-spark-1.3-contributor` for standard supervision, implementation and test/debug;
+- use `mimo-v2.5` for read-heavy exploration and direct reading;
+- use `glm-5.3-flash` for deep supervision, logic review and visual review (image input tested 2026-09-16);
+- use `qwen3.7-plus` for adversarial review, so review stays in a different model family from the Muse worker;
 - use a vision-capable model only when actual screenshot/image verification is required;
 - multi-file work does not by itself justify a more expensive model;
 - expensive models are escalation-only, never normal defaults.

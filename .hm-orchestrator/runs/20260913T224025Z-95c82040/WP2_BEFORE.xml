@@ -1,0 +1,359 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="13" skipped="0" tests="26" time="12.571" timestamp="2026-09-14T05:23:24.152355+03:00" hostname="WIN-FOVCL5KBJ2M"><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_unfinished_attempts_counts_only_an_attempt_that_is_still_open[creating]" time="0.781" /><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_unfinished_attempts_counts_only_an_attempt_that_is_still_open[pending]" time="0.676" /><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_unfinished_attempts_counts_only_an_attempt_that_is_still_open[processing]" time="0.498" /><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_unfinished_attempts_counts_only_an_attempt_that_is_still_open[completed]" time="0.502" /><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_unfinished_attempts_counts_only_an_attempt_that_is_still_open[succeeded]" time="0.476" /><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_unfinished_attempts_counts_only_an_attempt_that_is_still_open[paid]" time="0.507" /><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_unfinished_attempts_counts_only_an_attempt_that_is_still_open[refunded]" time="0.505"><failure message="AssertionError: an attempt reading 'refunded' was counted as 1 unfinished; only ['creating', 'pending', 'processing'] are still open, so this word is finished and must count zero&#10;assert 1 == 0&#10; +  where 1 = CustomerPayments(user_id=UUID('4c06419f-aa61-4bd8-b5cc-11e3decc3530'), display_name='R5 refunded', email='-', current_...first_paid_at=None, last_paid_at=None, unfinished_attempts=1, payments=(), plan_changes=(), timeline=(), currencies=()).unfinished_attempts">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x000001A3E943FCB0&gt;, 'client': &lt;httpx.AsyncClient object at 0x000001A3...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+status = 'refunded'
+
+    @pytest.mark.parametrize("status", ATTEMPT_STATUSES)
+    async def test_unfinished_attempts_counts_only_an_attempt_that_is_still_open(
+        test_context, status: str
+    ) -&gt; None:
+        """One attempt, one word: the count is 1 only while the attempt is open.
+    
+        ``refunded`` and ``cancelled`` are the reported defect (defect R5): the old code asked
+        "is it not paid?" and counted both. ``failed``, ``expired`` and ``partially_paid`` are
+        the same mistake in the same list, so they are checked by name too.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user = await _customer_with(session, display_name=f"R5 {status}", statuses=(status,))
+    
+        async with test_context["session_factory"]() as session:
+            view = await SystemBrainPaymentsService(session).customer(user.id)
+            assert view is not None, "the customer vanished from the payments view"
+            expected = 1 if status in OPEN_STATUSES else 0
+&gt;           assert view.unfinished_attempts == expected, (
+                f"an attempt reading {status!r} was counted as {view.unfinished_attempts} "
+                f"unfinished; only {sorted(OPEN_STATUSES)} are still open, so this word "
+                f"{'is finished and must count zero' if expected == 0 else 'is open'}"
+            )
+E           AssertionError: an attempt reading 'refunded' was counted as 1 unfinished; only ['creating', 'pending', 'processing'] are still open, so this word is finished and must count zero
+E           assert 1 == 0
+E            +  where 1 = CustomerPayments(user_id=UUID('4c06419f-aa61-4bd8-b5cc-11e3decc3530'), display_name='R5 refunded', email='-', current_...first_paid_at=None, last_paid_at=None, unfinished_attempts=1, payments=(), plan_changes=(), timeline=(), currencies=()).unfinished_attempts
+
+tests\unit\test_invariant_unfinished_attempts.py:130: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_unfinished_attempts_counts_only_an_attempt_that_is_still_open[cancelled]" time="0.507"><failure message="AssertionError: an attempt reading 'cancelled' was counted as 1 unfinished; only ['creating', 'pending', 'processing'] are still open, so this word is finished and must count zero&#10;assert 1 == 0&#10; +  where 1 = CustomerPayments(user_id=UUID('a095b2c9-0f8c-4ed3-ba47-5efedd1daa1e'), display_name='R5 cancelled', email='-', current...first_paid_at=None, last_paid_at=None, unfinished_attempts=1, payments=(), plan_changes=(), timeline=(), currencies=()).unfinished_attempts">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x000001A3E8CDBE60&gt;, 'client': &lt;httpx.AsyncClient object at 0x000001A3...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+status = 'cancelled'
+
+    @pytest.mark.parametrize("status", ATTEMPT_STATUSES)
+    async def test_unfinished_attempts_counts_only_an_attempt_that_is_still_open(
+        test_context, status: str
+    ) -&gt; None:
+        """One attempt, one word: the count is 1 only while the attempt is open.
+    
+        ``refunded`` and ``cancelled`` are the reported defect (defect R5): the old code asked
+        "is it not paid?" and counted both. ``failed``, ``expired`` and ``partially_paid`` are
+        the same mistake in the same list, so they are checked by name too.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user = await _customer_with(session, display_name=f"R5 {status}", statuses=(status,))
+    
+        async with test_context["session_factory"]() as session:
+            view = await SystemBrainPaymentsService(session).customer(user.id)
+            assert view is not None, "the customer vanished from the payments view"
+            expected = 1 if status in OPEN_STATUSES else 0
+&gt;           assert view.unfinished_attempts == expected, (
+                f"an attempt reading {status!r} was counted as {view.unfinished_attempts} "
+                f"unfinished; only {sorted(OPEN_STATUSES)} are still open, so this word "
+                f"{'is finished and must count zero' if expected == 0 else 'is open'}"
+            )
+E           AssertionError: an attempt reading 'cancelled' was counted as 1 unfinished; only ['creating', 'pending', 'processing'] are still open, so this word is finished and must count zero
+E           assert 1 == 0
+E            +  where 1 = CustomerPayments(user_id=UUID('a095b2c9-0f8c-4ed3-ba47-5efedd1daa1e'), display_name='R5 cancelled', email='-', current...first_paid_at=None, last_paid_at=None, unfinished_attempts=1, payments=(), plan_changes=(), timeline=(), currencies=()).unfinished_attempts
+
+tests\unit\test_invariant_unfinished_attempts.py:130: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_unfinished_attempts_counts_only_an_attempt_that_is_still_open[failed]" time="0.504"><failure message="AssertionError: an attempt reading 'failed' was counted as 1 unfinished; only ['creating', 'pending', 'processing'] are still open, so this word is finished and must count zero&#10;assert 1 == 0&#10; +  where 1 = CustomerPayments(user_id=UUID('b9c1e9b7-78c6-499f-9878-17bc6cbc767a'), display_name='R5 failed', email='-', current_pl...first_paid_at=None, last_paid_at=None, unfinished_attempts=1, payments=(), plan_changes=(), timeline=(), currencies=()).unfinished_attempts">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x000001A3E779F4A0&gt;, 'client': &lt;httpx.AsyncClient object at 0x000001A3...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+status = 'failed'
+
+    @pytest.mark.parametrize("status", ATTEMPT_STATUSES)
+    async def test_unfinished_attempts_counts_only_an_attempt_that_is_still_open(
+        test_context, status: str
+    ) -&gt; None:
+        """One attempt, one word: the count is 1 only while the attempt is open.
+    
+        ``refunded`` and ``cancelled`` are the reported defect (defect R5): the old code asked
+        "is it not paid?" and counted both. ``failed``, ``expired`` and ``partially_paid`` are
+        the same mistake in the same list, so they are checked by name too.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user = await _customer_with(session, display_name=f"R5 {status}", statuses=(status,))
+    
+        async with test_context["session_factory"]() as session:
+            view = await SystemBrainPaymentsService(session).customer(user.id)
+            assert view is not None, "the customer vanished from the payments view"
+            expected = 1 if status in OPEN_STATUSES else 0
+&gt;           assert view.unfinished_attempts == expected, (
+                f"an attempt reading {status!r} was counted as {view.unfinished_attempts} "
+                f"unfinished; only {sorted(OPEN_STATUSES)} are still open, so this word "
+                f"{'is finished and must count zero' if expected == 0 else 'is open'}"
+            )
+E           AssertionError: an attempt reading 'failed' was counted as 1 unfinished; only ['creating', 'pending', 'processing'] are still open, so this word is finished and must count zero
+E           assert 1 == 0
+E            +  where 1 = CustomerPayments(user_id=UUID('b9c1e9b7-78c6-499f-9878-17bc6cbc767a'), display_name='R5 failed', email='-', current_pl...first_paid_at=None, last_paid_at=None, unfinished_attempts=1, payments=(), plan_changes=(), timeline=(), currencies=()).unfinished_attempts
+
+tests\unit\test_invariant_unfinished_attempts.py:130: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_unfinished_attempts_counts_only_an_attempt_that_is_still_open[expired]" time="0.503"><failure message="AssertionError: an attempt reading 'expired' was counted as 1 unfinished; only ['creating', 'pending', 'processing'] are still open, so this word is finished and must count zero&#10;assert 1 == 0&#10; +  where 1 = CustomerPayments(user_id=UUID('646a2305-9eef-459e-a06e-8df787c60fef'), display_name='R5 expired', email='-', current_p...first_paid_at=None, last_paid_at=None, unfinished_attempts=1, payments=(), plan_changes=(), timeline=(), currencies=()).unfinished_attempts">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x000001A3E70AF7D0&gt;, 'client': &lt;httpx.AsyncClient object at 0x000001A3...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+status = 'expired'
+
+    @pytest.mark.parametrize("status", ATTEMPT_STATUSES)
+    async def test_unfinished_attempts_counts_only_an_attempt_that_is_still_open(
+        test_context, status: str
+    ) -&gt; None:
+        """One attempt, one word: the count is 1 only while the attempt is open.
+    
+        ``refunded`` and ``cancelled`` are the reported defect (defect R5): the old code asked
+        "is it not paid?" and counted both. ``failed``, ``expired`` and ``partially_paid`` are
+        the same mistake in the same list, so they are checked by name too.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user = await _customer_with(session, display_name=f"R5 {status}", statuses=(status,))
+    
+        async with test_context["session_factory"]() as session:
+            view = await SystemBrainPaymentsService(session).customer(user.id)
+            assert view is not None, "the customer vanished from the payments view"
+            expected = 1 if status in OPEN_STATUSES else 0
+&gt;           assert view.unfinished_attempts == expected, (
+                f"an attempt reading {status!r} was counted as {view.unfinished_attempts} "
+                f"unfinished; only {sorted(OPEN_STATUSES)} are still open, so this word "
+                f"{'is finished and must count zero' if expected == 0 else 'is open'}"
+            )
+E           AssertionError: an attempt reading 'expired' was counted as 1 unfinished; only ['creating', 'pending', 'processing'] are still open, so this word is finished and must count zero
+E           assert 1 == 0
+E            +  where 1 = CustomerPayments(user_id=UUID('646a2305-9eef-459e-a06e-8df787c60fef'), display_name='R5 expired', email='-', current_p...first_paid_at=None, last_paid_at=None, unfinished_attempts=1, payments=(), plan_changes=(), timeline=(), currencies=()).unfinished_attempts
+
+tests\unit\test_invariant_unfinished_attempts.py:130: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_unfinished_attempts_counts_only_an_attempt_that_is_still_open[partially_paid]" time="0.507"><failure message="AssertionError: an attempt reading 'partially_paid' was counted as 1 unfinished; only ['creating', 'pending', 'processing'] are still open, so this word is finished and must count zero&#10;assert 1 == 0&#10; +  where 1 = CustomerPayments(user_id=UUID('ef2f3f88-46e4-4346-9e64-26a67f4e306e'), display_name='R5 partially_paid', email='-', cu...first_paid_at=None, last_paid_at=None, unfinished_attempts=1, payments=(), plan_changes=(), timeline=(), currencies=()).unfinished_attempts">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x000001A3E96AB170&gt;, 'client': &lt;httpx.AsyncClient object at 0x000001A3...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+status = 'partially_paid'
+
+    @pytest.mark.parametrize("status", ATTEMPT_STATUSES)
+    async def test_unfinished_attempts_counts_only_an_attempt_that_is_still_open(
+        test_context, status: str
+    ) -&gt; None:
+        """One attempt, one word: the count is 1 only while the attempt is open.
+    
+        ``refunded`` and ``cancelled`` are the reported defect (defect R5): the old code asked
+        "is it not paid?" and counted both. ``failed``, ``expired`` and ``partially_paid`` are
+        the same mistake in the same list, so they are checked by name too.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user = await _customer_with(session, display_name=f"R5 {status}", statuses=(status,))
+    
+        async with test_context["session_factory"]() as session:
+            view = await SystemBrainPaymentsService(session).customer(user.id)
+            assert view is not None, "the customer vanished from the payments view"
+            expected = 1 if status in OPEN_STATUSES else 0
+&gt;           assert view.unfinished_attempts == expected, (
+                f"an attempt reading {status!r} was counted as {view.unfinished_attempts} "
+                f"unfinished; only {sorted(OPEN_STATUSES)} are still open, so this word "
+                f"{'is finished and must count zero' if expected == 0 else 'is open'}"
+            )
+E           AssertionError: an attempt reading 'partially_paid' was counted as 1 unfinished; only ['creating', 'pending', 'processing'] are still open, so this word is finished and must count zero
+E           assert 1 == 0
+E            +  where 1 = CustomerPayments(user_id=UUID('ef2f3f88-46e4-4346-9e64-26a67f4e306e'), display_name='R5 partially_paid', email='-', cu...first_paid_at=None, last_paid_at=None, unfinished_attempts=1, payments=(), plan_changes=(), timeline=(), currencies=()).unfinished_attempts
+
+tests\unit\test_invariant_unfinished_attempts.py:130: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_no_status_word_is_ever_counted_twice[creating]" time="0.498" /><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_no_status_word_is_ever_counted_twice[pending]" time="0.504" /><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_no_status_word_is_ever_counted_twice[processing]" time="0.511" /><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_no_status_word_is_ever_counted_twice[completed]" time="0.506" /><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_no_status_word_is_ever_counted_twice[succeeded]" time="0.509" /><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_no_status_word_is_ever_counted_twice[paid]" time="0.509" /><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_no_status_word_is_ever_counted_twice[refunded]" time="0.512"><failure message="AssertionError: assert (1 == 1) == ('refunded' in frozenset({'creating', 'pending', 'processing'}))">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x000001A3E99B0C20&gt;, 'client': &lt;httpx.AsyncClient object at 0x000001A3...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+status = 'refunded'
+
+    @pytest.mark.parametrize("status", ATTEMPT_STATUSES)
+    async def test_no_status_word_is_ever_counted_twice(test_context, status: str) -&gt; None:
+        """Paid and unfinished are two different questions, and one attempt answers at most one.
+    
+        A settled payment must not appear as an unfinished attempt (that is R5's twin: the
+        same row shown as both a sale and money still owed), and an open attempt must not
+        appear as a payment.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user = await _customer_with(session, display_name=f"R5-pair {status}", statuses=(status,))
+    
+        async with test_context["session_factory"]() as session:
+            view = await SystemBrainPaymentsService(session).customer(user.id)
+            assert view is not None
+            paid = view.payment_count
+            unfinished = view.unfinished_attempts
+            assert paid + unfinished &lt;= 1, (
+                f"{status!r} was counted as both money taken ({paid}) and an unfinished "
+                f"attempt ({unfinished}); one checkout attempt is at most one of those"
+            )
+            assert (paid == 1) == (status in PAID_WORDS), (
+                f"{status!r} counted as payment={paid}; the paid words are {sorted(PAID_WORDS)}"
+            )
+&gt;           assert (unfinished == 1) == (status in OPEN_STATUSES)
+E           AssertionError: assert (1 == 1) == ('refunded' in frozenset({'creating', 'pending', 'processing'}))
+
+tests\unit\test_invariant_unfinished_attempts.py:161: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_no_status_word_is_ever_counted_twice[cancelled]" time="0.506"><failure message="AssertionError: assert (1 == 1) == ('cancelled' in frozenset({'creating', 'pending', 'processing'}))">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x000001A3E97AEDE0&gt;, 'client': &lt;httpx.AsyncClient object at 0x000001A3...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+status = 'cancelled'
+
+    @pytest.mark.parametrize("status", ATTEMPT_STATUSES)
+    async def test_no_status_word_is_ever_counted_twice(test_context, status: str) -&gt; None:
+        """Paid and unfinished are two different questions, and one attempt answers at most one.
+    
+        A settled payment must not appear as an unfinished attempt (that is R5's twin: the
+        same row shown as both a sale and money still owed), and an open attempt must not
+        appear as a payment.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user = await _customer_with(session, display_name=f"R5-pair {status}", statuses=(status,))
+    
+        async with test_context["session_factory"]() as session:
+            view = await SystemBrainPaymentsService(session).customer(user.id)
+            assert view is not None
+            paid = view.payment_count
+            unfinished = view.unfinished_attempts
+            assert paid + unfinished &lt;= 1, (
+                f"{status!r} was counted as both money taken ({paid}) and an unfinished "
+                f"attempt ({unfinished}); one checkout attempt is at most one of those"
+            )
+            assert (paid == 1) == (status in PAID_WORDS), (
+                f"{status!r} counted as payment={paid}; the paid words are {sorted(PAID_WORDS)}"
+            )
+&gt;           assert (unfinished == 1) == (status in OPEN_STATUSES)
+E           AssertionError: assert (1 == 1) == ('cancelled' in frozenset({'creating', 'pending', 'processing'}))
+
+tests\unit\test_invariant_unfinished_attempts.py:161: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_no_status_word_is_ever_counted_twice[failed]" time="0.512"><failure message="AssertionError: assert (1 == 1) == ('failed' in frozenset({'creating', 'pending', 'processing'}))">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x000001A3E990FE30&gt;, 'client': &lt;httpx.AsyncClient object at 0x000001A3...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+status = 'failed'
+
+    @pytest.mark.parametrize("status", ATTEMPT_STATUSES)
+    async def test_no_status_word_is_ever_counted_twice(test_context, status: str) -&gt; None:
+        """Paid and unfinished are two different questions, and one attempt answers at most one.
+    
+        A settled payment must not appear as an unfinished attempt (that is R5's twin: the
+        same row shown as both a sale and money still owed), and an open attempt must not
+        appear as a payment.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user = await _customer_with(session, display_name=f"R5-pair {status}", statuses=(status,))
+    
+        async with test_context["session_factory"]() as session:
+            view = await SystemBrainPaymentsService(session).customer(user.id)
+            assert view is not None
+            paid = view.payment_count
+            unfinished = view.unfinished_attempts
+            assert paid + unfinished &lt;= 1, (
+                f"{status!r} was counted as both money taken ({paid}) and an unfinished "
+                f"attempt ({unfinished}); one checkout attempt is at most one of those"
+            )
+            assert (paid == 1) == (status in PAID_WORDS), (
+                f"{status!r} counted as payment={paid}; the paid words are {sorted(PAID_WORDS)}"
+            )
+&gt;           assert (unfinished == 1) == (status in OPEN_STATUSES)
+E           AssertionError: assert (1 == 1) == ('failed' in frozenset({'creating', 'pending', 'processing'}))
+
+tests\unit\test_invariant_unfinished_attempts.py:161: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_no_status_word_is_ever_counted_twice[expired]" time="0.497"><failure message="AssertionError: assert (1 == 1) == ('expired' in frozenset({'creating', 'pending', 'processing'}))">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x000001A3E9AA1BB0&gt;, 'client': &lt;httpx.AsyncClient object at 0x000001A3...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+status = 'expired'
+
+    @pytest.mark.parametrize("status", ATTEMPT_STATUSES)
+    async def test_no_status_word_is_ever_counted_twice(test_context, status: str) -&gt; None:
+        """Paid and unfinished are two different questions, and one attempt answers at most one.
+    
+        A settled payment must not appear as an unfinished attempt (that is R5's twin: the
+        same row shown as both a sale and money still owed), and an open attempt must not
+        appear as a payment.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user = await _customer_with(session, display_name=f"R5-pair {status}", statuses=(status,))
+    
+        async with test_context["session_factory"]() as session:
+            view = await SystemBrainPaymentsService(session).customer(user.id)
+            assert view is not None
+            paid = view.payment_count
+            unfinished = view.unfinished_attempts
+            assert paid + unfinished &lt;= 1, (
+                f"{status!r} was counted as both money taken ({paid}) and an unfinished "
+                f"attempt ({unfinished}); one checkout attempt is at most one of those"
+            )
+            assert (paid == 1) == (status in PAID_WORDS), (
+                f"{status!r} counted as payment={paid}; the paid words are {sorted(PAID_WORDS)}"
+            )
+&gt;           assert (unfinished == 1) == (status in OPEN_STATUSES)
+E           AssertionError: assert (1 == 1) == ('expired' in frozenset({'creating', 'pending', 'processing'}))
+
+tests\unit\test_invariant_unfinished_attempts.py:161: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_no_status_word_is_ever_counted_twice[partially_paid]" time="0.511"><failure message="AssertionError: assert (1 == 1) == ('partially_paid' in frozenset({'creating', 'pending', 'processing'}))">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x000001A3E9AD69F0&gt;, 'client': &lt;httpx.AsyncClient object at 0x000001A3...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+status = 'partially_paid'
+
+    @pytest.mark.parametrize("status", ATTEMPT_STATUSES)
+    async def test_no_status_word_is_ever_counted_twice(test_context, status: str) -&gt; None:
+        """Paid and unfinished are two different questions, and one attempt answers at most one.
+    
+        A settled payment must not appear as an unfinished attempt (that is R5's twin: the
+        same row shown as both a sale and money still owed), and an open attempt must not
+        appear as a payment.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user = await _customer_with(session, display_name=f"R5-pair {status}", statuses=(status,))
+    
+        async with test_context["session_factory"]() as session:
+            view = await SystemBrainPaymentsService(session).customer(user.id)
+            assert view is not None
+            paid = view.payment_count
+            unfinished = view.unfinished_attempts
+            assert paid + unfinished &lt;= 1, (
+                f"{status!r} was counted as both money taken ({paid}) and an unfinished "
+                f"attempt ({unfinished}); one checkout attempt is at most one of those"
+            )
+            assert (paid == 1) == (status in PAID_WORDS), (
+                f"{status!r} counted as payment={paid}; the paid words are {sorted(PAID_WORDS)}"
+            )
+&gt;           assert (unfinished == 1) == (status in OPEN_STATUSES)
+E           AssertionError: assert (1 == 1) == ('partially_paid' in frozenset({'creating', 'pending', 'processing'}))
+
+tests\unit\test_invariant_unfinished_attempts.py:161: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_a_customer_holding_every_status_word_is_counted_by_word_not_by_elimination" time="0.502"><failure message="AssertionError: the unfinished count is the number of still-open attempts, not the number of attempts that are not paid&#10;assert 8 == 3&#10; +  where 8 = CustomerPayments(user_id=UUID('96f0657a-95d9-4aff-a641-cf07a185ddbb'), display_name='R5 every word', email='-', curren...2, 23, 36, 686107), kind='payment', headline='Paid 17.00 USD for Pro', detail='Taken by creem.')), currencies=('USD',)).unfinished_attempts&#10; +  and   3 = len(frozenset({'creating', 'pending', 'processing'}))">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x000001A3E70D2FC0&gt;, 'client': &lt;httpx.AsyncClient object at 0x000001A3...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+
+    async def test_a_customer_holding_every_status_word_is_counted_by_word_not_by_elimination(
+        test_context,
+    ) -&gt; None:
+        """The whole family on one person: 11 attempts, 3 unfinished, 3 paid, nothing else.
+    
+        The old reading was a subtraction ("everything that is not paid"), so it grew with
+        every new word a payment company introduced. The new reading is a positive list, and
+        this test says what that list contains today: three open attempts and three payments,
+        and five finished attempts that are neither.
+        """
+    
+        async with test_context["session_factory"]() as session:
+            user = await _customer_with(
+                session, display_name="R5 every word", statuses=ATTEMPT_STATUSES
+            )
+    
+        async with test_context["session_factory"]() as session:
+            view = await SystemBrainPaymentsService(session).customer(user.id)
+            assert view is not None
+&gt;           assert view.unfinished_attempts == len(OPEN_STATUSES), (
+                "the unfinished count is the number of still-open attempts, not the number of "
+                "attempts that are not paid"
+            )
+E           AssertionError: the unfinished count is the number of still-open attempts, not the number of attempts that are not paid
+E           assert 8 == 3
+E            +  where 8 = CustomerPayments(user_id=UUID('96f0657a-95d9-4aff-a641-cf07a185ddbb'), display_name='R5 every word', email='-', curren...2, 23, 36, 686107), kind='payment', headline='Paid 17.00 USD for Pro', detail='Taken by creem.')), currencies=('USD',)).unfinished_attempts
+E            +  and   3 = len(frozenset({'creating', 'pending', 'processing'}))
+
+tests\unit\test_invariant_unfinished_attempts.py:183: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_the_open_words_have_exactly_one_owner" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.services.system_brain_payments' has no attribute 'OPEN_ATTEMPT_STATUSES'">def test_the_open_words_have_exactly_one_owner() -&gt; None:
+        """The view may not keep its own copy of the three open words.
+    
+        R5 was not only a wrong operator; it was a second list. Both the writer that decides
+        whether an event may still change an attempt and the page that counts unfinished
+        attempts ask the same question, so they read the same constant: same object, not two
+        equal-looking tables that can drift.
+        """
+    
+        from ai_market_monitor.services import billing, system_brain_payments
+    
+&gt;       assert system_brain_payments.OPEN_ATTEMPT_STATUSES is billing.OPEN_ATTEMPT_STATUSES, (
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            "the payments view no longer reads the billing service's open list: it has a copy "
+            "of its own again, which is the shape of the defect"
+        )
+E       AttributeError: module 'ai_market_monitor.services.system_brain_payments' has no attribute 'OPEN_ATTEMPT_STATUSES'
+
+tests\unit\test_invariant_unfinished_attempts.py:201: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_the_open_set_is_exactly_the_three_open_words" time="0.001"><failure message="ImportError: cannot import name 'OPEN_ATTEMPT_STATUSES' from 'ai_market_monitor.services.billing' (C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\billing.py)">def test_the_open_set_is_exactly_the_three_open_words() -&gt; None:
+        """What the one owner contains: still open, and nothing finished.
+    
+        ``refunded`` and ``cancelled`` must never join this set — a returned payment is not an
+        attempt the customer still owes.
+        """
+    
+&gt;       from ai_market_monitor.services.billing import OPEN_ATTEMPT_STATUSES
+E       ImportError: cannot import name 'OPEN_ATTEMPT_STATUSES' from 'ai_market_monitor.services.billing' (C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\Trading_assistant\src\ai_market_monitor\services\billing.py)
+
+tests\unit\test_invariant_unfinished_attempts.py:214: ImportError</failure></testcase><testcase classname="tests.unit.test_invariant_unfinished_attempts" name="test_paid_statuses_still_mean_money_taken" time="0.001" /></testsuite></testsuites>

@@ -1,6 +1,6 @@
 ﻿# Live OpenCode Go model snapshot
 
-Generated UTC: 2026-09-12T19:26:33.6017197Z
+Generated UTC: 2026-09-16T17:28:40.2042453Z
 
 Authority: local opencode models opencode-go --refresh --verbose.
 Do not invent variants. Inspect LIVE_MODELS_VERBOSE.txt for current metadata.
@@ -34,6 +34,7 @@ Do not invent variants. Inspect LIVE_MODELS_VERBOSE.txt for current metadata.
 - `opencode-go/qwen3.7-plus`
 - `opencode-go/qwen3.8-flash`
 - `opencode-go/qwen3.8-max`
+- `opencode-go/union-alpha`
 
 ## Go endpoint inventory
 
@@ -74,6 +75,7 @@ Do not invent variants. Inspect LIVE_MODELS_VERBOSE.txt for current metadata.
 - `opencode-go/qwen3.7-plus`
 - `opencode-go/qwen3.8-flash`
 - `opencode-go/qwen3.8-max`
+- `opencode-go/union-alpha`
 
 ## Drift
 

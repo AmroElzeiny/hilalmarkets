@@ -165,6 +165,15 @@ async def _build_context(**overrides: object) -> AsyncIterator[dict]:
                 "cached_input": 0.075,
                 "output": 4.50,
             },
+            # The product's default assistant model. The fixture mirrors the
+            # shipped priced set; without this entry every test that leaves
+            # the default model in place fails the cost gate it is not
+            # testing.
+            "muse-spark-1.3-contributor": {
+                "input": 0.1,
+                "cached_input": 0.002,
+                "output": 0.2,
+            },
         },
         disclaimer_version="test-2026-06",
         trial_days=7,

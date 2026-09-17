@@ -4,7 +4,7 @@ import logging
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256, sha512
 from typing import Any, Final, Literal, Protocol
 from uuid import UUID, uuid4
@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.core.money import money_kept, wire_json_body
+from ai_market_monitor.core.money import money_kept, quantise_half_up, wire_json_body
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PUBLIC_PLAN_PRESENTATIONS,
@@ -680,6 +680,23 @@ REFUNDED_ATTEMPT_STATUS: Final[str] = "refunded"
 #: (:func:`ai_market_monitor.services.plan_replacements.payment_that_bought`) asks for
 #: exactly this, which is why a refund has to leave it.
 SETTLED_ATTEMPT_STATUS: Final[str] = "completed"
+
+#: The checkout attempts that are still open — a person could still pay on them.
+#:
+#: ``creating``, ``pending`` and ``processing`` only. Anything else is finished one way or
+#: another: a settled payment (``completed``), money that came back (``refunded``), an
+#: attempt the customer walked away from or the company closed (``cancelled``, ``failed``,
+#: ``expired``, ``partially_paid``). So "unfinished" is a list of what is still open, and
+#: never "everything that is not paid" — reading it the other way round made a refunded or
+#: cancelled attempt look like a sale the customer still owed, on the staff payments page.
+#:
+#: One owner, because two readers ask the same question: this module's failure branch in
+#: :meth:`BillingService._record_checkout_event` (may this event still rewrite the
+#: attempt?) and the unfinished-attempt count in
+#: :func:`ai_market_monitor.services.system_brain_payments.SystemBrainPaymentsService.customer`.
+OPEN_ATTEMPT_STATUSES: Final[frozenset[str]] = frozenset(
+    {"creating", "pending", "processing"}
+)
 
 
 async def paid_access_can_be_repriced(
@@ -2532,7 +2549,9 @@ class BillingService:
         if raw is None:
             return None
         try:
-            return str((Decimal(str(raw)) / Decimal("100")).quantize(Decimal("0.01")))
+            # Minor units in, exact dollars out — through the money owner for the
+            # rounding; decimal's default (half-even) is not this product's rule.
+            return str(quantise_half_up(Decimal(str(raw)) / Decimal("100"), Decimal("0.01")))
         except (InvalidOperation, ValueError):
             return None
 
@@ -2541,7 +2560,7 @@ class BillingService:
         if raw is None:
             return None
         try:
-            return str((Decimal(str(raw)) / Decimal("100")).quantize(Decimal("0.01")))
+            return str(quantise_half_up(Decimal(str(raw)) / Decimal("100"), Decimal("0.01")))
         except (InvalidOperation, ValueError):
             return None
 
@@ -3008,7 +3027,13 @@ class BillingService:
             subscription = await self._upsert_subscription(
                 provider=provider, data=data, forced_status=SubscriptionStatus.CANCELED
             )
-            subscription.canceled_at = datetime.now(UTC)
+            # Keep the FIRST cancellation time. A second cancel-shaped event must not
+            # restate when access really ended — the staff payments page and any later
+            # reading of this row answer "when did they stop?" from this one column, and
+            # moving it forward hides a gap between what the customer held and what we
+            # now claim. Same rule as :meth:`_upsert_subscription`, one owner per word.
+            if subscription.canceled_at is None:
+                subscription.canceled_at = datetime.now(UTC)
             await EntitlementService(self.session).snapshot(subscription.user_id)
             await EntitlementService(self.session).pause_excess_after_downgrade(
                 subscription.user_id
@@ -3170,7 +3195,13 @@ class BillingService:
             data=data,
             forced_status=SubscriptionStatus.CANCELED,
         )
-        subscription.canceled_at = datetime.now(UTC)
+        # The first cancellation time is the fact worth keeping: a refund arriving after
+        # the plan already ended (or a second refund event for the same one) must not
+        # restate when access stopped. :meth:`_upsert_subscription` already stamps a
+        # cancellation that has no time yet, so this only says "if nothing was recorded,
+        # this event is the moment".
+        if subscription.canceled_at is None:
+            subscription.canceled_at = datetime.now(UTC)
         return subscription
 
     @staticmethod
@@ -3691,7 +3722,7 @@ class BillingService:
                 continue
             too_small = False
             if actual <= candidate + tolerance:
-                return actual.quantize(Decimal("0.01"), ROUND_HALF_UP)
+                return quantise_half_up(actual, Decimal("0.01"))
         if too_small:
             raise BillingError(
                 "payment_underpaid", "The verified payment is below the accepted amount."
@@ -3804,7 +3835,7 @@ class BillingService:
         }:
             # A settled attempt must never be downgraded to failed by a later event,
             # such as a cancellation webhook that still carries its metadata.
-            if current_status in {"creating", "pending", "processing"}:
+            if current_status in OPEN_ATTEMPT_STATUSES:
                 attempt.status = event_type.split(".", 1)[1]
                 attempt.last_error = event_type
         elif current_status in {"creating", "pending"}:

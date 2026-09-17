@@ -64,6 +64,7 @@ PROVIDER_CREDENTIALS: dict[str, str | None] = {
     "fasset": None,
     # ----- holds a credential ------------------------------------------------------
     "openai": "OPENAI_API_KEY",
+    "opencode_go": "OPENCODE_GO_API_KEY",
     "stripe": "STRIPE_SECRET_KEY",
     "creem": "CREEM_API_KEY",
     "nowpayments": "NOWPAYMENTS_API_KEY",

@@ -25,3 +25,4 @@ opencode-go/qwen3.7-max
 opencode-go/qwen3.7-plus
 opencode-go/qwen3.8-flash
 opencode-go/qwen3.8-max
+opencode-go/union-alpha

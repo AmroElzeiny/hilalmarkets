@@ -35,6 +35,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.money import quantise_half_up
 from ai_market_monitor.core.person_name import greeting_name
 from ai_market_monitor.db.models import (
     AccountEmailDelivery,
@@ -363,7 +364,7 @@ def _percent(value: object, *, field: str) -> Decimal:
             "percent_out_of_range",
             f"{field} must be more than 0 and no more than 100.",
         )
-    return number.quantize(Decimal("0.01"))
+    return quantise_half_up(number, Decimal("0.01"))
 
 
 def normalize_discount_code(raw: str) -> str:
@@ -769,12 +770,12 @@ class AffiliateService:
             code_uses=len(code_use_log),
             code_use_log=code_use_log,
             link_signups=sum(1 for row in earnings if row.joined_through_link),
-            total_commission_usd=total.quantize(Decimal("0.01")),
-            first_commission_usd=first_total.quantize(Decimal("0.01")),
-            subsequent_commission_usd=later_total.quantize(Decimal("0.01")),
+            total_commission_usd=quantise_half_up(total, Decimal("0.01")),
+            first_commission_usd=quantise_half_up(first_total, Decimal("0.01")),
+            subsequent_commission_usd=quantise_half_up(later_total, Decimal("0.01")),
             commission_log=commission_log,
-            requested_or_paid_usd=held_amount.quantize(Decimal("0.01")),
-            available_usd=max(Decimal("0"), available).quantize(Decimal("0.01")),
+            requested_or_paid_usd=quantise_half_up(held_amount, Decimal("0.01")),
+            available_usd=quantise_half_up(max(Decimal("0"), available), Decimal("0.01")),
             earnings=earnings,
         )
 
@@ -810,8 +811,8 @@ class AffiliateService:
                 customer_name=customer_display_name(customer),
                 joined_at=relationship.created_at,
                 converted_at=relationship.reward_granted_at,
-                commission_usd=Decimal(str(totals.get(customer.id, 0))).quantize(
-                    Decimal("0.01")
+                commission_usd=quantise_half_up(
+                    Decimal(str(totals.get(customer.id, 0))), Decimal("0.01")
                 ),
                 is_paid_conversion=relationship.reward_status in ELIGIBLE_REWARD_STATUSES,
                 joined_through_link=relationship.assignment_source == SOURCE_LINK,

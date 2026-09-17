@@ -186,6 +186,7 @@ def test_production_runtime_accepts_disabled_integrations_with_safe_core_config(
         ai_setup_evaluator_enabled=False,
         ai_setup_evaluator_faults_enabled=False,
         openai_api_key="production-openai-key",
+        opencode_go_api_key="production-opencode-go-key",
         email_adapter="smtp",
         smtp_host="smtp.example.com",
         smtp_username="production-smtp-user",
@@ -307,7 +308,9 @@ def test_deployed_sharia_governance_requires_safe_operational_dependencies():
     message = str(error.value)
     assert "SHARIA_ADMIN_TELEGRAM_CHAT_ID" in message
     assert "TELEGRAM_ENABLED" in message
-    assert "OPENAI_API_KEY" in message
+    # The default Sharia model is served by OpenCode Go, so the missing-key
+    # complaint names that key rather than the stale OpenAI one.
+    assert "OPENCODE_GO_API_KEY" in message
     assert "SHARIA_AI_SERVICE_TIER" in message
     assert "SHARIA_SCRAPER_OBEY_ROBOTS" in message
     assert "SHARIA_SCRAPER_DOWNLOAD_DELAY_SECONDS" in message

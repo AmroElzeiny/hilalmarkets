@@ -2,7 +2,11 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from ai_market_monitor.core.config import WHATSAPP_TEMPLATE_EVENTS, Settings
+from ai_market_monitor.core.config import (
+    WHATSAPP_TEMPLATE_EVENTS,
+    Settings,
+    is_placeholder_value,
+)
 from ai_market_monitor.core.plans import PURCHASABLE_PLAN_CODES, plan_offer
 from ai_market_monitor.engine.provider_families import (
     availability_from_settings,
@@ -27,19 +31,47 @@ def _secret_value(value) -> str | None:
 
 
 def _looks_like_placeholder(value) -> bool:
-    raw = _secret_value(value)
-    if raw is None:
-        return False
-    normalized = raw.strip().upper()
-    placeholder_tokens = (
-        "REPLACE_",
-        "REPLACE-WITH",
-        "CHANGE_ME",
-        "CHANGEME",
-        "YOUR_",
-        "INSERT_",
+    return is_placeholder_value(value)
+
+
+def _ai_key_error(
+    settings: Settings,
+    model: str | None,
+    *,
+    setting_name: str,
+    feature: str,
+) -> str | None:
+    """The startup complaint when a feature's AI provider has no usable key.
+
+    Every "is AI configured" gate goes through ``services/ai_provider.py``:
+    the feature's own model decides which key is required, so an active Muse
+    feature can never be satisfied by the stale OpenAI key. An unknown model
+    id is a configuration error, not a missing key.
+    """
+
+    from ai_market_monitor.services.ai_provider import (
+        AIProviderConfigError,
+        is_configured,
+        provider_credential_name,
+        resolve_feature_model,
+        resolve_provider,
     )
-    return any(token in normalized for token in placeholder_tokens)
+
+    try:
+        resolved = resolve_feature_model(model, setting_name=setting_name)
+    except AIProviderConfigError as exc:
+        return str(exc)
+    provider = resolve_provider(resolved)
+    key_name = provider_credential_name(provider)
+    key = settings.openai_api_key if provider == "openai" else settings.opencode_go_api_key
+    if _looks_like_placeholder(key):
+        return f"{key_name} must not use a placeholder value"
+    try:
+        if is_configured(settings, resolved):
+            return None
+    except AIProviderConfigError as exc:
+        return str(exc)
+    return f"{key_name} is required for {feature}"
 
 
 #: Passwords that are published somewhere: a compose default, a tutorial, a common
@@ -264,10 +296,14 @@ def validate_runtime_configuration(settings: Settings) -> None:
                 errors.append(
                     "TELEGRAM_ENABLED must be true for deployed Sharia governance notifications"
                 )
-            if settings.openai_api_key is None:
-                errors.append(
-                    "OPENAI_API_KEY is required for deployed Sharia factual research"
-                )
+            sharia_key_error = _ai_key_error(
+                settings,
+                settings.sharia_ai_model,
+                setting_name="SHARIA_AI_MODEL",
+                feature="deployed Sharia factual research",
+            )
+            if sharia_key_error is not None:
+                errors.append(sharia_key_error)
             if settings.sharia_ai_service_tier != "flex":
                 errors.append(
                     "SHARIA_AI_SERVICE_TIER must be flex for the configured research workflow"
@@ -298,12 +334,15 @@ def validate_runtime_configuration(settings: Settings) -> None:
             errors.append(
                 "MACRO_MARKET_API_URL and FRED_API_KEY are required when FRED_ENABLED=true"
             )
-        if settings.ai_interpreter_provider == "openai" and settings.openai_api_key is None:
-            errors.append("OPENAI_API_KEY is required when AI_INTERPRETER_PROVIDER=openai")
-        if settings.ai_interpreter_provider == "openai" and _looks_like_placeholder(
-            settings.openai_api_key
-        ):
-            errors.append("OPENAI_API_KEY must not use a placeholder value")
+        if settings.ai_interpreter_provider == "openai":
+            interpreter_key_error = _ai_key_error(
+                settings,
+                settings.openai_model,
+                setting_name="OPENAI_MODEL",
+                feature="AI_INTERPRETER_PROVIDER=openai",
+            )
+            if interpreter_key_error is not None:
+                errors.append(interpreter_key_error)
         if settings.ai_agent_control_enabled:
             if settings.ai_agent_shadow_mode:
                 errors.append(
@@ -317,8 +356,14 @@ def validate_runtime_configuration(settings: Settings) -> None:
                 errors.append(
                     "CAPABILITY_EXTENSION_ENABLED must be true when live agent control is enabled"
                 )
-            if settings.openai_api_key is None:
-                errors.append("OPENAI_API_KEY is required when live agent control is enabled")
+            agent_key_error = _ai_key_error(
+                settings,
+                settings.openai_model,
+                setting_name="OPENAI_MODEL",
+                feature="live agent control",
+            )
+            if agent_key_error is not None:
+                errors.append(agent_key_error)
         if (
             settings.capability_extension_enabled
             and settings.capability_extension_preflight_exchange != "binance"
@@ -331,10 +376,14 @@ def validate_runtime_configuration(settings: Settings) -> None:
                 errors.append(
                     "PUBLIC_CHAT_AI_ENABLED must be true when deployed public chat is enabled"
                 )
-            if settings.openai_api_key is None:
-                errors.append("OPENAI_API_KEY is required when the public chat is enabled")
-            elif _looks_like_placeholder(settings.openai_api_key):
-                errors.append("OPENAI_API_KEY must not use a placeholder value")
+            public_key_error = _ai_key_error(
+                settings,
+                settings.public_chat_ai_model,
+                setting_name="PUBLIC_CHAT_AI_MODEL",
+                feature="the public chat",
+            )
+            if public_key_error is not None:
+                errors.append(public_key_error)
             if settings.email_adapter != "smtp":
                 errors.append("EMAIL_ADAPTER=smtp is required when the public chat is enabled")
             required_public_chat_email = {

@@ -16,6 +16,11 @@ from ai_market_monitor.services.agent_control import (
     OpenAIAgentResponsesClient,
 )
 from ai_market_monitor.services.agent_tools import strict_json_schema
+from ai_market_monitor.services.ai_provider import (
+    AIProviderConfigError,
+    extract_response_text,
+    resolve_feature_model,
+)
 from ai_market_monitor.services.system_brain import estimate_usage_cost
 
 
@@ -83,9 +88,19 @@ class PublicSupportAIService:
         authenticated: bool,
         tool_results: list[dict[str, Any]] | None = None,
         final_after_tools: bool = False,
+        session_key: str | None = None,
     ) -> PublicSupportAICall:
+        """One grounded turn. ``session_key`` is the public-chat conversation id
+        (never a user id or email); ``None`` means one random id per call."""
+
         _CIRCUIT.assert_available()
-        model = self.settings.public_chat_ai_model or self.settings.openai_model
+        try:
+            model = resolve_feature_model(
+                self.settings.public_chat_ai_model,
+                setting_name="PUBLIC_CHAT_AI_MODEL",
+            )
+        except AIProviderConfigError as exc:
+            raise PublicSupportAIUnavailable(str(exc)) from exc
         reasoning = (
             self.settings.public_chat_ai_reasoning_effort
             or self.settings.openai_reasoning_effort
@@ -161,10 +176,20 @@ class PublicSupportAIService:
         for _ in range(self.settings.public_chat_ai_provider_attempts):
             try:
                 async with asyncio.timeout(self.settings.public_chat_ai_timeout_seconds):
-                    raw = await self.client.create(
-                        payload,
-                        timeout_seconds=self.settings.public_chat_ai_timeout_seconds,
-                    )
+                    try:
+                        raw = await self.client.create(
+                            payload,
+                            timeout_seconds=self.settings.public_chat_ai_timeout_seconds,
+                            session_key=session_key,
+                        )
+                    except TypeError as exc:
+                        if "session_key" not in str(exc):
+                            raise
+                        # Test doubles that predate conversation grouping.
+                        raw = await self.client.create(
+                            payload,
+                            timeout_seconds=self.settings.public_chat_ai_timeout_seconds,
+                        )
                 parsed = PublicSupportAIResponse.model_validate_json(
                     _response_output_text(raw)
                 )
@@ -204,22 +229,7 @@ class PublicSupportAIService:
 
 
 def _response_output_text(response: dict[str, Any]) -> str:
-    direct = response.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct.strip()
-    parts: list[str] = []
-    for item in response.get("output") or []:
-        if not isinstance(item, dict) or item.get("type") != "message":
-            continue
-        for content in item.get("content") or []:
-            if not isinstance(content, dict):
-                continue
-            text = content.get("text")
-            if isinstance(text, str):
-                parts.append(text)
-    if not parts:
-        raise ValueError("OpenAI returned no structured public-support response")
-    return "".join(parts).strip()
+    return extract_response_text(response)
 
 
 def _public_support_instructions(*, waitlist_mode: bool = False) -> str:

@@ -1,0 +1,113 @@
+﻿ M .env.example
+ M .env.production.example
+ M .hm-orchestrator/current/MISSION.md
+ M .hm-orchestrator/current/RUN.json
+ M .hm-orchestrator/current/VISUAL_CONTRACT.md
+ M .hm-orchestrator/models/LIVE_ENDPOINT.json
+ M .hm-orchestrator/models/LIVE_MODELS.md
+ M .hm-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+ M .hm-orchestrator/models/LIVE_MODEL_IDS.txt
+ M .hm-orchestrator/models/ROLE_MODEL_MAP.md
+ M .hm-orchestrator/policy/ROUTING_POLICY.md
+ M .hm-orchestrator/runs/20260913T224025Z-95c82040/WP1_AFTER.xml
+ M .hm-orchestrator/runs/20260913T224025Z-95c82040/WP1_NEIGHBOURS.xml
+ M .opencode/agents/hm-direct-read.md
+ M .opencode/agents/hm-direct-write.md
+ M .opencode/agents/hm-explorer.md
+ M .opencode/agents/hm-reviewer-adversarial.md
+ M .opencode/agents/hm-reviewer-logic.md
+ M .opencode/agents/hm-reviewer-visual.md
+ M .opencode/agents/hm-supervisor-deep.md
+ M .opencode/agents/hm-supervisor.md
+ M .opencode/agents/hm-test-debugger.md
+ M .opencode/agents/hm-worker-fast.md
+ M .opencode/agents/hm-worker-strong.md
+ M CLAUDE.md
+ M src/ai_market_monitor/api/routers/dashboard_api.py
+ M src/ai_market_monitor/api/routers/public.py
+ M src/ai_market_monitor/api/template_env.py
+ M src/ai_market_monitor/core/config.py
+ M src/ai_market_monitor/core/money.py
+ M src/ai_market_monitor/core/plans.py
+ M src/ai_market_monitor/core/startup.py
+ M src/ai_market_monitor/schemas/hilal_chat.py
+ M src/ai_market_monitor/services/affiliate.py
+ M src/ai_market_monitor/services/affiliate_attribution.py
+ M src/ai_market_monitor/services/agent_control.py
+ M src/ai_market_monitor/services/agent_policy.py
+ M src/ai_market_monitor/services/billing.py
+ M src/ai_market_monitor/services/hilal_chat.py
+ M src/ai_market_monitor/services/hilal_chat_agent.py
+ M src/ai_market_monitor/services/hilal_chat_knowledge.py
+ M src/ai_market_monitor/services/openai_structured_call.py
+ M src/ai_market_monitor/services/payment_emails.py
+ M src/ai_market_monitor/services/plan_replacements.py
+ M src/ai_market_monitor/services/provider_credentials.py
+ M src/ai_market_monitor/services/public_chat.py
+ M src/ai_market_monitor/services/public_support_ai.py
+ M src/ai_market_monitor/services/security_review.py
+ M src/ai_market_monitor/services/sharia_research.py
+ M src/ai_market_monitor/services/sharia_source_ai_discovery.py
+ M src/ai_market_monitor/services/system_brain_agent.py
+ M src/ai_market_monitor/services/system_brain_assistant.py
+ M src/ai_market_monitor/services/system_brain_payments.py
+ M src/ai_market_monitor/static/hm-connections-test.js
+ M src/ai_market_monitor/static/hm-market-test.js
+ M src/ai_market_monitor/static/hm-monitor-test.js
+ M src/ai_market_monitor/static/hm-opportunities-test.js
+ M src/ai_market_monitor/static/hm-page-context.js
+ M src/ai_market_monitor/static/hm-passport-test.js
+ M src/ai_market_monitor/static/hm-settings-test.js
+ M src/ai_market_monitor/static/hm-subscription-test.js
+ M src/ai_market_monitor/static/hm-support-test.js
+ M src/ai_market_monitor/static/hm-watchlists-test.js
+ M src/ai_market_monitor/templates/hilal/dashboard_test/research.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/research_detail.html
+ M tests/conftest.py
+ M tests/integration/test_public_chat_api.py
+ M tests/integration/test_system_brain_payments.py
+ M tests/unit/test_invariant_money_on_the_wire.py
+ M tests/unit/test_reliability_security.py
+ M tests/unit/test_system_brain_assistant.py
+ M tests/unit/test_system_brain_operational_agent.py
+ M tools/hm-orchestrator/run-model.ps1
+ M tools/hm-orchestrator/verify-system.ps1
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP24_NEIGHBOURS.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP2_AFTER.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP2_BEFORE.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP3_AFTER.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP3_BEFORE.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP3_DESIGN.md
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP3_NEIGHBOURS.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP4_AFTER.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP4_BEFORE.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_LOGIC_R1R3.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_LOGIC_WP2WP4.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_LOGIC_partial_only.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_MONEY_DIFF_committed.patch
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_MONEY_DIFF_committed_and_worktree.patch
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_MONEY_DIFF_worktree.patch
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_negative_total.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_refund_edges.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_revalue_ticket.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_scan_holes.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_stripe_cumulative.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_collision.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_decimal_key.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_edges.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_kwargs.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_normaliser.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_sci.py
+?? .hm-orchestrator/runs/20260916T182445Z-e1b1762c/
+?? .hm-orchestrator/runs/20260916T184200Z-dd1e00e6/
+?? .hm-orchestrator/runs/20260917T171532Z-1c371707/
+?? src/ai_market_monitor/services/ai_provider.py
+?? src/ai_market_monitor/static/hm-page-notes.js
+?? src/ai_market_monitor/static/hm-research-test.js
+?? tests/browser/test_hilal_page_context_e2e.py
+?? tests/integration/test_hilal_chat_evidence.py
+?? tests/unit/test_invariant_active_provider.py
+?? tests/unit/test_invariant_ai_provider.py
+?? tests/unit/test_invariant_cancellation_time.py
+?? tests/unit/test_invariant_hilal_page_context.py
+?? tests/unit/test_invariant_unfinished_attempts.py

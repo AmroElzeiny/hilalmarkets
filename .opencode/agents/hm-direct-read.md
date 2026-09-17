@@ -1,7 +1,7 @@
 ---
 description: Generic read-only agent used by the dynamic model runner so the supervisor can select any live OpenCode Go model.
 mode: all
-model: opencode-go/deepseek-v4.1-flash
+model: opencode-go/mimo-v2.5
 permission:
   read:
     "*": allow

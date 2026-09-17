@@ -37,6 +37,11 @@ from ai_market_monitor.services.agent_control import (
     OpenAIAgentResponsesClient,
 )
 from ai_market_monitor.services.agent_tools import strict_json_schema
+from ai_market_monitor.services.ai_provider import (
+    AIProviderConfigError,
+    extract_response_text,
+    resolve_feature_model,
+)
 from ai_market_monitor.services.system_brain import estimate_usage_cost
 
 
@@ -296,7 +301,13 @@ class HilalChatAgent:
         self.client = client or OpenAIAgentResponsesClient(settings)
 
     def model_for_turn(self) -> tuple[str, str]:
-        model = self.settings.hilal_chat_ai_model or self.settings.openai_model
+        try:
+            model = resolve_feature_model(
+                self.settings.hilal_chat_ai_model,
+                setting_name="HILAL_CHAT_AI_MODEL",
+            )
+        except AIProviderConfigError as exc:
+            raise HilalChatUnavailable(str(exc)) from exc
         effort = (
             self.settings.hilal_chat_ai_reasoning_effort
             or self.settings.openai_reasoning_effort
@@ -311,7 +322,12 @@ class HilalChatAgent:
         evidence: dict[str, Any],
         first_time: bool,
         display_name: str | None,
+        session_key: str | None = None,
     ) -> HilalChatCall:
+        """One grounded turn. ``session_key`` groups a conversation's turns for
+        the provider: the caller passes the Hilal conversation id, never a user
+        id or email. ``None`` means one random id for this call."""
+
         _CIRCUIT.assert_available()
         model, reasoning = self.model_for_turn()
 
@@ -354,10 +370,20 @@ class HilalChatAgent:
         for _ in range(self.settings.hilal_chat_ai_provider_attempts):
             try:
                 async with asyncio.timeout(self.settings.hilal_chat_ai_timeout_seconds):
-                    raw = await self.client.create(
-                        payload,
-                        timeout_seconds=self.settings.hilal_chat_ai_timeout_seconds,
-                    )
+                    try:
+                        raw = await self.client.create(
+                            payload,
+                            timeout_seconds=self.settings.hilal_chat_ai_timeout_seconds,
+                            session_key=session_key,
+                        )
+                    except TypeError as exc:
+                        if "session_key" not in str(exc):
+                            raise
+                        # Test doubles that predate conversation grouping.
+                        raw = await self.client.create(
+                            payload,
+                            timeout_seconds=self.settings.hilal_chat_ai_timeout_seconds,
+                        )
                 parsed = HilalChatReply.model_validate_json(_output_text(raw))
                 usage = dict(raw.get("usage") or {})
                 cost = float(estimate_usage_cost(self.settings, model=model, usage=usage))
@@ -387,19 +413,7 @@ class HilalChatAgent:
 
 
 def _output_text(response: dict[str, Any]) -> str:
-    direct = response.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct.strip()
-    parts: list[str] = []
-    for item in response.get("output") or []:
-        if not isinstance(item, dict) or item.get("type") != "message":
-            continue
-        for content in item.get("content") or []:
-            if isinstance(content, dict) and isinstance(content.get("text"), str):
-                parts.append(content["text"])
-    if not parts:
-        raise ValueError("the assistant returned no structured reply")
-    return "".join(parts).strip()
+    return extract_response_text(response)
 
 
 def _instructions() -> str:
@@ -454,10 +468,25 @@ def _instructions() -> str:
         # -- Shariah
         "Shariah status is never yours to give. You may only repeat what a named review "
         "recorded, under its named standard and version, and say when it was reviewed. "
+        "passport_records holds one row per coin per standard that screened it: status "
+        "words, why, qualifications, exclusion reasons, when reviewed, when the next "
+        "check is, and the names and dates of the evidence it rests on. Repeat a "
+        "status only under its named standard, with that standard's words beside it. "
+        "Our own standard is always named as an automated reading no scholar stands "
+        "behind — never as 'the' answer, never merged with an authority's result into "
+        "one winner, and never the default anything. There is no combined verdict "
+        "anywhere in the records, so never give one. "
         "Never say a coin is halal or haram in your own voice, never predict a status, "
         "never explain what a status 'really' means beyond what the record says, and "
         "never give a religious ruling of any kind. If somebody asks for one, say kindly "
         "that only the review process decides that, and show them what it recorded. "
+        "If the records say more exist than fit here, say that more exist rather than "
+        "filling them in. "
+        # -- their own account
+        "their_own_account holds this signed-in person's own monitors — each with its "
+        "name, whether it is running, paused or a draft, what it still needs, and when "
+        "it last checked — plus their plan and the alert channels they connected. "
+        "These are theirs: repeat them as theirs. "
         # -- one conversation, many subjects
         "This is one long conversation and people change the subject in it constantly. "
         "Answer the question in front of you, on its own terms. Somebody who was "
@@ -533,8 +562,10 @@ def _instructions() -> str:
         "Never invent a whole monitor, never hand them a finished set of conditions, "
         "and never answer 'what should I watch' — turn it back gently and ask what they "
         "already have in mind. Second, every number is theirs: the level, the "
-        "percentage, the threshold, the timeframe. Explain what a field means and what "
-        "the units are; never suggest what to put in it, never call a value sensible, "
+        "percentage, the threshold, the timeframe. The board may already carry values "
+        "they typed into its fields — those are their own doing, so repeat them as "
+        "theirs when asked what is there, and never recommend a value for a field, "
+        "never call a value sensible, "
         "typical, safe or common, and never repeat a number back as a recommendation. "
         "When you give this kind of help, add one short, calm line — in your own words, "
         "not the same one twice — that this guidance is new, that you can get it wrong, "

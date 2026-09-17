@@ -325,6 +325,9 @@ class HilalChatService:
             message=message,
             view=ask.view,
             earlier=[str(item["said"]) for item in history],
+            # Scoped to the person asking: their own monitors, plan and channels.
+            # Nobody else's rows may enter this turn.
+            user_id=user.id,
         )
 
         try:
@@ -334,6 +337,9 @@ class HilalChatService:
                 evidence=evidence.to_payload(),
                 first_time=conversation.message_count <= 1,
                 display_name=_first_name(user),
+                # One provider session per Hilal conversation, so all its turns
+                # share one id. The conversation id, never a user id or email.
+                session_key=str(conversation.id),
             )
         except HilalChatUnavailable as failure:
             # Nothing was produced, so nothing is charged. The person is told plainly

@@ -153,7 +153,7 @@ async def test_system_brain_agent_selects_tools_persists_and_replays_exactly(tes
 async def test_unexpected_provider_failure_is_persisted_and_replayed_safely(test_context):
     settings = test_context["settings"]
     settings.system_brain_ai_enabled = True
-    settings.openai_api_key = "test-key"
+    settings.opencode_go_api_key = "test-key"
     client = UnexpectedFailureClient()
     request = SystemBrainAgentTurnRequest(
         message="Inspect current revenue evidence",
@@ -195,7 +195,7 @@ async def test_unexpected_provider_failure_is_persisted_and_replayed_safely(test
 async def test_ungrounded_model_narrative_uses_only_deterministic_tool_evidence(test_context):
     settings = test_context["settings"]
     settings.system_brain_ai_enabled = True
-    settings.openai_api_key = "test-key"
+    settings.opencode_go_api_key = "test-key"
     client = SequencedResponsesClient(
         [
             {
@@ -467,7 +467,7 @@ async def test_deleted_customer_content_is_not_exposed(test_context):
 async def test_agent_failure_preserves_domain_state(test_context):
     settings = test_context["settings"]
     settings.system_brain_ai_enabled = True
-    settings.openai_api_key = "test-key"
+    settings.opencode_go_api_key = "test-key"
     client = SequencedResponsesClient([{"output_text": "not-json", "output": []}])
     async with test_context["session_factory"]() as session:
         admin = User(display_name="Admin", role=UserRole.ADMIN)
@@ -729,7 +729,7 @@ async def test_independent_read_tools_run_in_parallel_and_writes_remain_bounded(
 ):
     settings = test_context["settings"]
     settings.system_brain_ai_enabled = True
-    settings.openai_api_key = "test-key"
+    settings.opencode_go_api_key = "test-key"
     tools = ConcurrentEvidenceTools(settings)
     refs = ["metric:revenue_summary:test", "metric:trial_conversion:test"]
     client = SequencedResponsesClient(
@@ -851,7 +851,7 @@ async def test_unadapted_consequential_action_is_not_persisted(test_context):
 async def test_agent_rejects_model_authored_sharia_ruling(test_context):
     settings = test_context["settings"]
     settings.system_brain_ai_enabled = True
-    settings.openai_api_key = "test-key"
+    settings.opencode_go_api_key = "test-key"
     client = SequencedResponsesClient(
         [
             {
@@ -894,7 +894,7 @@ async def test_agent_rejects_model_authored_sharia_ruling(test_context):
 async def test_persisted_per_admin_budget_blocks_before_provider_call(test_context):
     settings = test_context["settings"]
     settings.system_brain_ai_enabled = True
-    settings.openai_api_key = "test-key"
+    settings.opencode_go_api_key = "test-key"
     settings.system_brain_agent_max_turns_per_hour = 1
     client = SequencedResponsesClient([])
     async with test_context["session_factory"]() as session:

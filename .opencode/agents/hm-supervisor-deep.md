@@ -1,7 +1,7 @@
 ---
 description: Stronger cheap supervisor for architecture-heavy, repeated-failure, or high-risk delegated missions.
 mode: primary
-model: opencode-go/deepseek-v4.1-flash
+model: opencode-go/glm-5.3-flash
 permission:
   read:
     "*": allow

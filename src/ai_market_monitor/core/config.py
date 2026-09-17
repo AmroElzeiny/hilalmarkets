@@ -50,6 +50,31 @@ def _is_optional_secret(field: Any) -> bool:
     return SecretStr in arguments and type(None) in arguments
 
 
+#: Values that are not keys but somebody's note to fill one in. One owner: the
+#: startup guard and the AI provider gate both refuse these, and both read
+#: this table rather than keeping their own copy of what "placeholder" means.
+PLACEHOLDER_TOKENS: frozenset[str] = frozenset(
+    {
+        "REPLACE_",
+        "REPLACE-WITH",
+        "CHANGE_ME",
+        "CHANGEME",
+        "YOUR_",
+        "INSERT_",
+    }
+)
+
+
+def is_placeholder_value(value: SecretStr | str | None) -> bool:
+    """Whether a credential-shaped value is really a fill-me-in note."""
+
+    if value is None:
+        return False
+    raw = value.get_secret_value() if isinstance(value, SecretStr) else str(value)
+    normalized = raw.strip().upper()
+    return any(token in normalized for token in PLACEHOLDER_TOKENS)
+
+
 #: Every rate-limited scope in the product, named once.
 #:
 #: There used to be two lists: the rules in ``api/request_guards.py`` and a hand-written
@@ -106,7 +131,7 @@ class AISetupEvaluatorTargetVersion(BaseModel):
 #: Fields whose ``.env`` value outranks the ambient environment. Restricted to
 #: credentials: a stale machine-wide copy causes an auth failure that is expensive
 #: to diagnose, while non-secret settings must stay overridable per process.
-CREDENTIAL_FIELDS: frozenset[str] = frozenset({"openai_api_key"})
+CREDENTIAL_FIELDS: frozenset[str] = frozenset({"openai_api_key", "opencode_go_api_key"})
 
 
 class CredentialDotEnvSource(PydanticBaseSettingsSource):
@@ -207,8 +232,10 @@ class Settings(BaseSettings):
     sc_malaysia_digital_assets_url: AnyHttpUrl = AnyHttpUrl("https://www.sc.com.my/digital-assets")
     fasset_shariah_reports_url: AnyHttpUrl = AnyHttpUrl("https://www.fasset.com/shariah-reports")
     fasset_minimum_profile_count: int = Field(default=100, ge=1, le=1000)
-    sharia_ai_model: str = "gpt-5.4-nano"
-    sharia_ai_reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] = "low"
+    sharia_ai_model: str = "muse-spark-1.3-contributor"
+    sharia_ai_reasoning_effort: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh"
+    ] = "high"
     sharia_ai_service_tier: Literal["default", "flex"] = "flex"
     sharia_ai_timeout_seconds: int = Field(default=900, ge=60, le=1800)
     sharia_ai_max_retries: int = Field(default=5, ge=1, le=10)
@@ -316,12 +343,15 @@ class Settings(BaseSettings):
     #: paid one; what it returns is filtered and proved exactly like a search result, so
     #: an invented address cannot become evidence.
     sharia_source_ai_discovery_enabled: bool = False
-    sharia_source_ai_model: str = "gpt-5.6-luna"
+    sharia_source_ai_model: str = "muse-spark-1.3-contributor"
     sharia_source_ai_reasoning_effort: Literal[
         "none", "minimal", "low", "medium", "high", "xhigh"
-    ] = "none"
-    sharia_source_ai_timeout_seconds: float = Field(default=45, ge=5, le=300)
-    sharia_source_ai_max_output_tokens: int = Field(default=900, ge=200, le=8000)
+    ] = "high"
+    #: High-effort reasoning spends most output tokens thinking: measured 1090
+    #: reasoning tokens on a 1k-input probe, so a 900-token cap truncates before
+    #: any answer. Sized from the WP3 live measurement with headroom.
+    sharia_source_ai_timeout_seconds: float = Field(default=90, ge=5, le=300)
+    sharia_source_ai_max_output_tokens: int = Field(default=2400, ge=200, le=8000)
     sharia_external_rights_enforcement: bool = True
     sharia_ai_enrichment_enabled: bool = True
     sharia_ai_enrichment_official_sources_only: bool = True
@@ -503,6 +533,12 @@ class Settings(BaseSettings):
     ai_interpreter_provider: Literal["rules", "openai"] = "openai"
     openai_api_key: SecretStr | None = None
     openai_base_url: AnyHttpUrl = AnyHttpUrl("https://api.openai.com/v1")
+    #: OpenCode Go (Zen) credential and endpoint for the active assistants. The
+    #: stale Setup Chat family stays on the OpenAI key above; the two keys are
+    #: never interchangeable, and ``is_configured`` in services/ai_provider.py
+    #: refuses a feature whose own provider's key is missing.
+    opencode_go_api_key: SecretStr | None = None
+    opencode_go_base_url: AnyHttpUrl = AnyHttpUrl("https://opencode.ai/zen/go/v1")
     openai_model: str = "gpt-5.4-nano"
     openai_reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] = "low"
     openai_timeout_seconds: int = Field(default=20, ge=1, le=120)
@@ -856,12 +892,15 @@ class Settings(BaseSettings):
     public_chat_email_max_attempts: int = Field(default=5, ge=1, le=20)
     public_chat_email_retry_minutes: int = Field(default=15, ge=1, le=1440)
     public_chat_email_claim_timeout_minutes: int = Field(default=10, ge=1, le=120)
-    public_chat_ai_model: str | None = None
+    public_chat_ai_model: str | None = "muse-spark-1.3-contributor"
     public_chat_ai_reasoning_effort: Literal[
         "none", "minimal", "low", "medium", "high", "xhigh"
-    ] = "low"
-    public_chat_ai_timeout_seconds: int = Field(default=30, ge=3, le=120)
-    public_chat_ai_max_output_tokens: int = Field(default=1200, ge=256, le=4000)
+    ] = "high"
+    #: Measured 2797 output / 2611 reasoning tokens on a small prompt with empty
+    #: knowledge documents; production prompts carry up to 36k characters of docs.
+    #: The 1200-token default truncated every real turn (WP3 live measurement).
+    public_chat_ai_timeout_seconds: int = Field(default=90, ge=3, le=120)
+    public_chat_ai_max_output_tokens: int = Field(default=6000, ge=256, le=8000)
     public_chat_ai_max_estimated_cost_usd_per_turn: float = Field(
         default=0.015,
         gt=0,
@@ -891,13 +930,17 @@ class Settings(BaseSettings):
     # It explains what is recorded. It never builds a strategy and never gives
     # financial advice — see `services/hilal_chat_agent.py`, which refuses both.
     hilal_chat_enabled: bool = True
-    #: Falls back to `openai_model` when unset, like every other assistant here.
-    hilal_chat_ai_model: str | None = None
+    #: The feature's own model. Read directly: it never inherits the stale
+    #: default, so an unset value fails closed in services/ai_provider.py
+    #: instead of silently becoming the Setup Chat model.
+    hilal_chat_ai_model: str | None = "muse-spark-1.3-contributor"
     hilal_chat_ai_reasoning_effort: Literal[
         "none", "minimal", "low", "medium", "high", "xhigh"
-    ] = "low"
-    hilal_chat_ai_timeout_seconds: int = Field(default=30, ge=3, le=120)
-    hilal_chat_ai_max_output_tokens: int = Field(default=900, ge=256, le=2400)
+    ] = "high"
+    #: Measured 1746 output tokens on a small prompt; history and evidence grow
+    #: it further. The 900-token default truncates real turns (WP3 measurement).
+    hilal_chat_ai_timeout_seconds: int = Field(default=90, ge=3, le=120)
+    hilal_chat_ai_max_output_tokens: int = Field(default=4000, ge=256, le=4000)
     hilal_chat_ai_max_estimated_cost_usd_per_turn: float = Field(
         default=0.02,
         gt=0,
@@ -926,6 +969,10 @@ class Settings(BaseSettings):
     #: How many evidence rows one turn may carry. A bound, so a large account cannot
     #: quietly turn one question into an expensive one.
     hilal_chat_max_evidence_assets: int = Field(default=24, ge=1, le=200)
+    #: How many characters one turn's evidence payload may hold. Passport rows are
+    #: dropped oldest-subject-first past this, never merged — so a three-coin
+    #: question stays cheap while each answer still names its standard.
+    hilal_chat_evidence_max_chars: int = Field(default=30000, ge=4000, le=200000)
     hilal_chat_retention_days: int = Field(default=365, ge=7, le=3650)
     # -- Durable operational measurements ---------------------------------------
     #
@@ -1033,12 +1080,14 @@ class Settings(BaseSettings):
     system_brain_access_client_id: str = ""
     system_brain_access_client_secret: SecretStr | None = None
     system_brain_ai_enabled: bool = True
-    system_brain_ai_model: str = "gpt-5.4-nano"
+    system_brain_ai_model: str = "muse-spark-1.3-contributor"
     system_brain_ai_reasoning_effort: Literal[
         "none", "minimal", "low", "medium", "high", "xhigh"
-    ] = "low"
-    system_brain_ai_timeout_seconds: int = Field(default=30, ge=3, le=120)
-    system_brain_ai_max_output_tokens: int = Field(default=900, ge=256, le=2400)
+    ] = "high"
+    #: The assistant context holds up to 24k characters of evidence; the 900-token
+    #: default truncated a real turn at the 2400-token bound (WP3 measurement).
+    system_brain_ai_timeout_seconds: int = Field(default=90, ge=3, le=120)
+    system_brain_ai_max_output_tokens: int = Field(default=4000, ge=256, le=8000)
     system_brain_ai_max_context_characters: int = Field(
         default=24_000,
         ge=4_000,
@@ -1053,7 +1102,9 @@ class Settings(BaseSettings):
     system_brain_agent_max_tool_calls: int = Field(default=8, ge=1, le=20)
     system_brain_agent_max_repeated_calls: int = Field(default=1, ge=0, le=2)
     system_brain_agent_tool_timeout_seconds: int = Field(default=10, ge=1, le=60)
-    system_brain_agent_turn_timeout_seconds: int = Field(default=50, ge=5, le=180)
+    #: A tool-loop turn makes several model calls in sequence (measured ~20s per
+    #: call); 50s starves a two-call turn. Sized from the WP3 live measurement.
+    system_brain_agent_turn_timeout_seconds: int = Field(default=150, ge=5, le=180)
     system_brain_agent_max_history_messages: int = Field(default=16, ge=2, le=40)
     system_brain_agent_evidence_ttl_seconds: int = Field(default=300, ge=30, le=3600)
     system_brain_agent_max_turns_per_hour: int = Field(default=30, ge=1, le=300)
@@ -1082,6 +1133,14 @@ class Settings(BaseSettings):
                 "input": 0.05,
                 "cached_input": 0.005,
                 "output": 0.40,
+            },
+            #: OpenCode Go Muse Spark, per the provider catalog: input 0.1,
+            #: output 0.2, cache read 0.002 USD per million tokens. Same shape
+            #: as every other entry so cost ceilings work unchanged.
+            "muse-spark-1.3-contributor": {
+                "input": 0.1,
+                "cached_input": 0.002,
+                "output": 0.2,
             },
         }
     )

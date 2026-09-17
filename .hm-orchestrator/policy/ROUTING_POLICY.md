@@ -4,6 +4,8 @@
 
 Use the cheapest currently selectable OpenCode Go model that is likely to finish the assigned role correctly.
 
+Only four models are allowed: `muse-spark-1.3-contributor`, `glm-5.3-flash`, `mimo-v2.5`, `qwen3.7-plus`. Each role's fallback is listed in `.hm-orchestrator/models/ROLE_MODEL_MAP.md`; never route outside these four.
+
 The live local OpenCode Go catalog is authoritative.
 Never invent a model or reasoning variant.
 
@@ -21,7 +23,7 @@ Do not use a more expensive model merely because a task is large or important.
 
 Default supervisor:
 
-`opencode-go/minimax-m3`
+`opencode-go/muse-spark-1.3-contributor`
 
 Use Standard for:
 - normal repository analysis;
@@ -50,7 +52,7 @@ Do not invoke extra agents unless the mission needs them.
 
 Default supervisor:
 
-`opencode-go/deepseek-v4.1-flash`
+`opencode-go/glm-5.3-flash`
 
 Use Deep only when the task materially involves one or more of:
 
@@ -74,47 +76,47 @@ Deep tier does not automatically justify expensive workers.
 
 Standard supervisor:
 
-`opencode-go/minimax-m3`
+`opencode-go/muse-spark-1.3-contributor`
 
 Deep supervisor:
 
-`opencode-go/deepseek-v4.1-flash`
+`opencode-go/glm-5.3-flash`
 
 Repository explorer:
 
-`opencode-go/deepseek-v4.1-flash`
+`opencode-go/mimo-v2.5`
 
 Fast implementation worker:
 
-`opencode-go/qwen3.8-flash`
+`opencode-go/muse-spark-1.3-contributor`
 
 Strong cross-file worker:
 
-`opencode-go/qwen3.8-flash`
+`opencode-go/muse-spark-1.3-contributor`
 
 Test/debug engineer:
 
-`opencode-go/qwen3.8-flash`
+`opencode-go/muse-spark-1.3-contributor`
 
 Independent logic reviewer:
 
-`opencode-go/minimax-m3`
+`opencode-go/glm-5.3-flash`
 
 Adversarial/high-risk reviewer:
 
-`opencode-go/deepseek-v4.1-flash`
+`opencode-go/qwen3.7-plus`
 
 Direct read:
 
-`opencode-go/deepseek-v4.1-flash`
+`opencode-go/mimo-v2.5`
 
 Direct write:
 
-`opencode-go/qwen3.8-flash`
+`opencode-go/muse-spark-1.3-contributor`
 
 Vision reviewer:
 
-Use the currently configured live vision-capable model only when actual visual verification is required.
+Use `opencode-go/glm-5.3-flash` (image input tested 2026-09-16) only when actual visual verification is required.
 
 ---
 
@@ -151,7 +153,7 @@ Do not repeat expensive calls simply because an answer was incomplete.
 
 Start implementation with:
 
-`opencode-go/qwen3.8-flash`
+`opencode-go/muse-spark-1.3-contributor`
 
 Use the same model for both narrow and multi-file implementation by default.
 
@@ -192,7 +194,7 @@ Use one independent logic reviewer.
 
 Preferred:
 
-`opencode-go/minimax-m3`
+`opencode-go/glm-5.3-flash`
 
 ### High-risk work
 
@@ -200,11 +202,11 @@ Use two independent reviewer perspectives when practical:
 
 Logic reviewer:
 
-`opencode-go/minimax-m3`
+`opencode-go/glm-5.3-flash`
 
 Adversarial reviewer:
 
-`opencode-go/deepseek-v4.1-flash`
+`opencode-go/qwen3.7-plus`
 
 High-risk areas include:
 - billing;
@@ -316,6 +318,11 @@ Only use reasoning/effort variants when current live metadata confirms that:
 - its extra cost is justified.
 
 Default to the cheapest normal variant.
+
+**Exception, owner decision 2026-09-16:** `muse-spark-1.3-contributor` always runs on the
+`high` variant — in every agent file that uses it and in `run-model.ps1`. Never lower it to
+save cost, and never pass a different `--variant` for Muse without the owner's instruction.
+See `.hm-orchestrator/models/ROLE_MODEL_MAP.md`.
 
 ---
 

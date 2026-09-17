@@ -33,6 +33,12 @@ from ai_market_monitor.services.agent_control import (
     OpenAIAgentResponsesClient,
 )
 from ai_market_monitor.services.agent_tools import strict_json_schema
+from ai_market_monitor.services.ai_provider import (
+    AIProviderConfigError,
+    extract_response_text,
+    is_configured,
+    resolve_provider,
+)
 from ai_market_monitor.services.sharia_admin_dashboard import (
     ShariaAdminDashboardService,
 )
@@ -133,8 +139,14 @@ class SystemBrainAssistantService:
             raise SystemBrainAssistantUnavailable(
                 "The System Brain assistant is disabled."
             )
-        if self.settings.openai_api_key is None:
-            raise SystemBrainAssistantUnavailable("OpenAI is not configured.")
+        try:
+            assistant_configured = is_configured(
+                self.settings, self.settings.system_brain_ai_model
+            )
+        except AIProviderConfigError:
+            assistant_configured = False
+        if not assistant_configured:
+            raise SystemBrainAssistantUnavailable("System Brain AI is not configured.")
 
         context = await self._context(session, request.message)
         model = self.settings.system_brain_ai_model
@@ -191,10 +203,22 @@ class SystemBrainAssistantService:
         started = monotonic()
         try:
             async with asyncio.timeout(self.settings.system_brain_ai_timeout_seconds):
-                raw = await self.client.create(
-                    payload,
-                    timeout_seconds=self.settings.system_brain_ai_timeout_seconds,
-                )
+                try:
+                    raw = await self.client.create(
+                        payload,
+                        timeout_seconds=self.settings.system_brain_ai_timeout_seconds,
+                        # No conversation id exists on this single-shot call, so
+                        # one random id per call. Never an admin id or email.
+                        session_key=None,
+                    )
+                except TypeError as exc:
+                    if "session_key" not in str(exc):
+                        raise
+                    # Test doubles that predate conversation grouping.
+                    raw = await self.client.create(
+                        payload,
+                        timeout_seconds=self.settings.system_brain_ai_timeout_seconds,
+                    )
             parsed = SystemBrainAssistantResponse.model_validate_json(
                 _response_output_text(raw)
             )
@@ -215,7 +239,7 @@ class SystemBrainAssistantService:
                 user_id=admin_user_id,
                 chat_session_id=None,
                 operation="system_brain_assistant",
-                provider="openai",
+                provider=resolve_provider(self.settings.system_brain_ai_model),
                 model=model,
                 reasoning_effort=effort,
                 input_tokens=int(usage.get("input_tokens") or 0),
@@ -225,7 +249,11 @@ class SystemBrainAssistantService:
                 output_tokens=int(usage.get("output_tokens") or 0),
                 reasoning_tokens=int(details.get("reasoning_tokens") or 0),
                 estimated_cost_usd=Decimal(str(cost)),
-                pricing_source="configured OpenAI model pricing",
+                pricing_source=(
+                    "configured "
+                    f"{resolve_provider(self.settings.system_brain_ai_model)}"
+                    " model pricing"
+                ),
                 raw_usage={
                     "input_tokens": int(usage.get("input_tokens") or 0),
                     "output_tokens": int(usage.get("output_tokens") or 0),
@@ -475,19 +503,7 @@ def _url_host(value: str) -> str:
 
 
 def _response_output_text(response: dict[str, Any]) -> str:
-    direct = response.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct.strip()
-    parts: list[str] = []
-    for item in response.get("output") or []:
-        if not isinstance(item, dict) or item.get("type") != "message":
-            continue
-        for content in item.get("content") or []:
-            if isinstance(content, dict) and isinstance(content.get("text"), str):
-                parts.append(content["text"])
-    if not parts:
-        raise ValueError("OpenAI returned no structured System Brain response.")
-    return "".join(parts).strip()
+    return extract_response_text(response)
 
 
 def _instructions() -> str:

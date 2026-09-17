@@ -22,14 +22,17 @@ expert on Hilal Markets, and on nothing else (rule B5).
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
@@ -44,11 +47,33 @@ from ai_market_monitor.db.models import (
     CanonicalAsset,
     ExchangeMarket,
     ShariaMethodology,
+    Strategy,
 )
-from ai_market_monitor.db.models.enums import ShariaAssetStatus, ShariaMethodologyStatus
+from ai_market_monitor.db.models.enums import (
+    ShariaAssetStatus,
+    ShariaMethodologyStatus,
+    StrategyStatus,
+)
 from ai_market_monitor.schemas.hilal_chat import HilalChatView
+from ai_market_monitor.services.entitlements import EntitlementService
+from ai_market_monitor.services.hilal_methodology import (
+    AUTOMATED_DISCLOSURE,
+    METHODOLOGY_PUBLIC_PATH,
+    UNDER_DEVELOPMENT_NOTICE,
+    is_automated,
+)
 from ai_market_monitor.services.hilal_product_words import product_words
-from ai_market_monitor.services.sharia_screening import STATUS_LABELS, canonical_asset
+from ai_market_monitor.services.monitor_scan_state import scan_state_for_version
+from ai_market_monitor.services.notification_preferences import (
+    NotificationPreferenceService,
+    deliverable_channels,
+)
+from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
+from ai_market_monitor.services.sharia_screening import (
+    STATUS_LABELS,
+    ShariaScreeningError,
+    canonical_asset,
+)
 
 #: Words that are part of how people say a coin's name rather than part of the name.
 #: Removing them is spelling, not vocabulary — "the bitcoin coin" and "Bitcoin" are the
@@ -140,34 +165,50 @@ class Evidence:
 
     asked_about: list[AssetFacts] = field(default_factory=list)
     methodologies: list[dict[str, Any]] = field(default_factory=list)
+    passports: list[dict[str, Any]] = field(default_factory=list)
     market_shape: dict[str, Any] = field(default_factory=dict)
     exchanges: list[str] = field(default_factory=list)
     categories: list[str] = field(default_factory=list)
     plans: list[dict[str, Any]] = field(default_factory=list)
     looked_for_but_not_listed: list[str] = field(default_factory=list)
     on_screen: dict[str, Any] = field(default_factory=dict)
+    #: This person's own monitors, plan and alert channels. Present only for a
+    #: signed-in person; anonymous turns carry nothing here.
+    account: dict[str, Any] = field(default_factory=dict)
+    #: True when the payload was cut to fit the size cap below. The model is told
+    #: more records wait, so it says so rather than inventing them.
+    trimmed_for_size: bool = False
     #: What this product's own words mean. See `services/hilal_product_words.py`.
     words: list[dict[str, Any]] = field(default_factory=list)
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "coins_the_question_mentions": [
                 item.to_evidence() for item in self.asked_about
             ],
+            "passport_records": self.passports,
             "names_that_are_not_listed_here": self.looked_for_but_not_listed,
             "screening_standards_in_use": self.methodologies,
             "how_many_coins_hold_each_status": self.market_shape,
             "exchanges_this_platform_covers": self.exchanges,
             "categories_this_platform_records": self.categories,
             "plans_and_prices": self.plans,
+            "their_own_account": self.account,
             "words_this_product_uses": self.words,
             "what_they_can_see": self.on_screen,
         }
+        if self.trimmed_for_size:
+            payload["note_more_records_waiting"] = (
+                "More records exist than fit in this turn. Say that more exist "
+                "rather than filling them in from memory."
+            )
+        return payload
 
     @property
     def ids(self) -> set[str]:
         found = {f"asset:{item.symbol}" for item in self.asked_about}
         found |= {str(item["id"]) for item in self.methodologies if "id" in item}
+        found |= {str(item["id"]) for item in self.passports if "id" in item}
         found |= {str(item["id"]) for item in self.plans if "id" in item}
         found |= {str(item["id"]) for item in self.words if "id" in item}
         if self.market_shape:
@@ -176,6 +217,12 @@ class Evidence:
             found.add("market:exchanges")
         if self.categories:
             found.add("market:categories")
+        if self.account.get("monitors"):
+            found.add("account:monitors")
+        if self.account.get("plan"):
+            found.add("account:plan")
+        if self.account.get("alert_channels"):
+            found.add("account:channels")
         return found
 
 
@@ -192,6 +239,7 @@ class HilalChatKnowledge:
         message: str,
         view: HilalChatView | None,
         earlier: list[str] | None = None,
+        user_id: UUID | None = None,
     ) -> Evidence:
         """Everything one turn may reason from.
 
@@ -205,6 +253,9 @@ class HilalChatKnowledge:
         listed here — inventing a negative about a coin the platform has. Rule B6 says
         never invent; saying "we do not have it" when we do is the same failure facing
         the other way.
+
+        ``user_id`` scopes the account records to the signed-in person. ``None``
+        means anonymous: no monitors, no plan, no channels — nothing about anybody.
         """
 
         evidence = Evidence()
@@ -234,6 +285,12 @@ class HilalChatKnowledge:
         )
         evidence.asked_about = found
         evidence.looked_for_but_not_listed = missing
+        evidence.passports = await self._passports(
+            [item.symbol for item in found], subject=subject.strip() or None
+        )
+        if user_id is not None:
+            evidence.account = await self._account(user_id)
+        self._fit_to_size(evidence)
         return evidence
 
     # -- what the question is about ---------------------------------------
@@ -530,10 +587,251 @@ class HilalChatKnowledge:
                 "version": item.version,
                 "what_it_is": item.description,
                 "governing_body": item.governing_body,
+                # Who stands behind it, in the stored row's own words. For our own
+                # standard this says no scholar does — and that sentence is the point.
+                "decided_by": item.reviewer_group,
+                # Where a reader can see the whole thing. Only our own standard
+                # publishes one; anything else stays missing rather than invented.
+                "source_document": (
+                    METHODOLOGY_PUBLIC_PATH if is_automated(item.code) else None
+                ),
+                # What uses this standard speaks about, from its own stored rules.
+                "screens": _screens_for(item.rules_json),
                 "in_force_from": _day(item.effective_from),
             }
             for item in rows
         ]
+
+    async def _passports(
+        self, symbols: list[str], *, subject: str | None = None
+    ) -> list[dict[str, Any]]:
+        """One Passport row per coin per standard that screened it.
+
+        Read through ``ShariaPassportReadService`` — the one owner for Passport
+        reads — never assembled here from parts. A coin with no assessment under a
+        standard gets no row under it, and the model is told to say so rather than
+        fill the gap. Only names and dates of evidence travel: never a link, because
+        the model may not output one.
+        """
+
+        ordered = list(dict.fromkeys([*(symbols or []), *([subject] if subject else [])]))
+        rows: list[dict[str, Any]] = []
+        reader = ShariaPassportReadService(self.session, self.settings)
+        for symbol in ordered[:8]:
+            methodology_ids = (
+                (
+                    await self.session.execute(
+                        select(AssetShariaAssessment.methodology_id)
+                        .where(AssetShariaAssessment.canonical_asset == symbol)
+                        .distinct()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for methodology_id in list(methodology_ids)[:8]:
+                try:
+                    passport = await reader.current(symbol, methodology_id=methodology_id)
+                except ShariaScreeningError:
+                    # Not screened, not published, or not this standard's to show.
+                    # Missing stays missing; the model says so.
+                    continue
+                row = await self._passport_row(passport)
+                if row is not None:
+                    rows.append(row)
+        return rows
+
+    async def _passport_row(self, passport: Any) -> dict[str, Any] | None:
+        """One coin under one named standard, small enough to send every turn."""
+
+        assessment = passport.assessment
+        code = assessment.methodology_code or ""
+        record = (
+            await self.session.execute(
+                select(AssetShariaAssessment)
+                .where(
+                    AssetShariaAssessment.canonical_asset == assessment.canonical_asset,
+                    AssetShariaAssessment.methodology_id == assessment.methodology_id,
+                )
+                .order_by(AssetShariaAssessment.valid_from.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        snapshot = dict((record.evidence_snapshot if record else None) or {})
+        automated = is_automated(code)
+        route = str(snapshot.get("admission") or "") or (
+            "automated_screen" if automated else "reviewed_decision"
+        )
+        exclusions = (
+            [
+                str(item.get("reason") or item.get("summary") or "").strip()
+                for item in (record.exclusion_reasons if record else []) or []
+                if isinstance(item, dict)
+            ]
+            if record
+            else []
+        )
+        next_checks = [
+            passport.next_review_at,
+            passport.evidence_expires_at,
+            passport.next_source_scan_at,
+        ]
+        review_at = _day(assessment.reviewed_at)
+        return {
+            "id": f"passport:{assessment.canonical_asset}:{code or 'unknown'}",
+            "kind": "passport_record",
+            "symbol": assessment.canonical_asset,
+            "methodology_code": code,
+            "methodology_name": assessment.methodology_name,
+            "methodology_version": assessment.methodology_version,
+            "status_words": assessment.status_label,
+            "why": (passport.why_this_status or "")[:300],
+            "qualifications": list(assessment.qualifications or [])[:3],
+            "exclusion_reasons": [item for item in exclusions if item][:3],
+            "reviewed_at": review_at,
+            "reviewed_by": assessment.reviewed_by,
+            "next_check": next(
+                (
+                    _day(moment)
+                    for moment in next_checks
+                    if _day(moment) is not None
+                ),
+                None,
+            ),
+            "evidence": [
+                {
+                    "name": source.title,
+                    "from": source.publisher,
+                    "retrieved": _day(source.retrieved_at),
+                }
+                for source in (passport.evidence_sources or [])[:6]
+            ],
+            "admission_route": route,
+            # Our own standard is always named as what it is: an automated reading
+            # no scholar stands behind. Never "the" answer, never merged, never default.
+            "automated_notice": (
+                f"{UNDER_DEVELOPMENT_NOTICE} {AUTOMATED_DISCLOSURE}"
+                if automated
+                else None
+            ),
+        }
+
+    async def _account(self, user_id: UUID) -> dict[str, Any]:
+        """This person's own monitors, plan and alert channels. Read-only.
+
+        Scoped by ``user_id`` at every query: every row read names this person, so
+        one person's turn can never carry another person's rows. Each half is read
+        from its existing owner — the monitor rows, the entitlement, the
+        notification preferences — never re-decided here.
+        """
+
+        strategies = (
+            (
+                await self.session.execute(
+                    select(Strategy)
+                    .where(
+                        Strategy.user_id == user_id,
+                        Strategy.archived_at.is_(None),
+                        Strategy.status != StrategyStatus.ARCHIVED,
+                    )
+                    .order_by(Strategy.created_at.desc())
+                    .limit(6)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        cockpit = StrategyCockpitService(self.session)
+        bottlenecks = await cockpit.stored_main_bottlenecks(
+            [strategy.id for strategy in strategies]
+        )
+        monitors: list[dict[str, Any]] = []
+        for strategy in strategies:
+            held_back = bottlenecks.get(strategy.id) or {}
+            scan = await scan_state_for_version(self.session, strategy.active_version_id)
+            monitors.append(
+                {
+                    "name": strategy.name,
+                    "state": _monitor_state(strategy),
+                    # What is holding it back, in the stored aggregate's own words —
+                    # the same sentence the Monitors page shows. Nothing when nothing
+                    # is recorded; a missing answer stays missing.
+                    "still_needs": held_back.get("condition_label"),
+                    "last_check": (
+                        _day(scan.last_checked_at)
+                        if scan.last_checked_at is not None
+                        else None
+                    ),
+                }
+            )
+        entitlement = await EntitlementService(self.session).current(user_id)
+        preference = await NotificationPreferenceService(
+            self.session, self.settings
+        ).current(user_id)
+        reachable = await deliverable_channels(
+            self.session, self.settings, user_id=user_id
+        )
+        return {
+            "monitors": monitors,
+            "plan": {"name": entitlement.plan.name},
+            "alert_channels": {
+                "chosen": sorted(channel.value for channel in preference.channels),
+                "connected": sorted(channel.value for channel in reachable),
+            },
+        }
+
+    def _fit_to_size(self, evidence: Evidence) -> None:
+        """Keep one turn under the payload cap. Drops whole rows, last first —
+        Passport rows, then on-screen card rows, then the page's own checklist,
+        then this person's monitor rows — never refuses the turn, and never
+        merges what is left into a single invented answer."""
+
+        cap = self.settings.hilal_chat_evidence_max_chars
+        if len(json.dumps(evidence.to_payload(), default=str)) <= cap:
+            return
+        trimmed = False
+        for row in evidence.passports:
+            if len(str(row.get("why") or "")) > 150:
+                row["why"] = str(row["why"])[:150]
+                trimmed = True
+        while (
+            evidence.passports
+            and len(json.dumps(evidence.to_payload(), default=str)) > cap
+        ):
+            evidence.passports.pop()
+            trimmed = True
+        board = evidence.on_screen.get("the_monitor_they_are_drawing")
+        if isinstance(board, dict):
+            cards = board.get("cards_on_the_board")
+            while (
+                isinstance(cards, list)
+                and cards
+                and len(json.dumps(evidence.to_payload(), default=str)) > cap
+            ):
+                cards.pop()
+                trimmed = True
+            checks = board.get("the_pages_own_checklist")
+            while (
+                isinstance(checks, list)
+                and checks
+                and len(json.dumps(evidence.to_payload(), default=str)) > cap
+            ):
+                checks.pop()
+                trimmed = True
+        monitors = (
+            evidence.account.get("monitors")
+            if isinstance(evidence.account, dict)
+            else None
+        )
+        while (
+            isinstance(monitors, list)
+            and monitors
+            and len(json.dumps(evidence.to_payload(), default=str)) > cap
+        ):
+            monitors.pop()
+            trimmed = True
+        if trimmed:
+            evidence.trimmed_for_size = True
 
     async def _market_shape(self) -> dict[str, Any]:
         """How many coins hold each status. The honest answer to "what do you cover?"."""
@@ -645,7 +943,29 @@ class HilalChatKnowledge:
         if view is None:
             return {}
         board = view.board
-        if not view.page and not view.subject and not view.section and board is None:
+        pages = {
+            name: getattr(view, name, None)
+            for name in (
+                "screened_market",
+                "opportunities",
+                "watch_plans",
+                "passport",
+                "watchlist",
+                "connections",
+                "research",
+                "settings",
+                "support",
+                "subscription",
+                "report",
+            )
+        }
+        if (
+            not view.page
+            and not view.subject
+            and not view.section
+            and board is None
+            and not any(pages.values())
+        ):
             return {}
         seen: dict[str, Any] = {
             "page": view.page,
@@ -656,6 +976,18 @@ class HilalChatKnowledge:
                 "or a plan must still come from the records above."
             ),
         }
+        for name, described in pages.items():
+            if described is None:
+                continue
+            seen[name] = {
+                "heading": described.heading,
+                "says": described.summary,
+                "parts": list(described.points),
+                "note": (
+                    "The page's own words about itself, for 'what is this page' "
+                    "questions. Never a source of facts about coins or standards."
+                ),
+            }
         if board is not None:
             seen["the_monitor_they_are_drawing"] = {
                 "reads_as": board.sentence,
@@ -668,6 +1000,16 @@ class HilalChatKnowledge:
                         "sits_in": card.inside,
                         "set_aside_from_the_monitor": card.set_aside,
                         "still_needs": list(card.needs),
+                        # Every field on the card, filled or not, with the value the
+                        # person themselves typed. Repeated as theirs, never as advice.
+                        "fields_the_person_filled_in": [
+                            {
+                                "field": item.label,
+                                "filled": item.filled,
+                                "value": item.value,
+                            }
+                            for item in (card.inputs or [])
+                        ],
                     }
                     for card in board.cards
                 ],
@@ -680,10 +1022,12 @@ class HilalChatKnowledge:
                 "how_this_board_is_worked": list(board.how_to),
                 "note": (
                     "This is their own draft, exactly as their page words it. It is "
-                    "the one thing here you may talk about directly. Only name a "
-                    "control that appears in the list above, and spell it the same "
-                    "way. Only describe a key or a gesture that appears in how this "
-                    "board is worked."
+                    "the one thing here you may talk about directly. The values in "
+                    "fields_the_person_filled_in are the person's own doing — repeat "
+                    "them as theirs, and never recommend a value for a field. Only "
+                    "name a control that appears in the list above, and spell it the "
+                    "same way. Only describe a key or a gesture that appears in how "
+                    "this board is worked."
                 ),
             }
         return seen
@@ -694,3 +1038,26 @@ def _day(value: datetime | None) -> str | None:
         return None
     moment = value if value.tzinfo else value.replace(tzinfo=UTC)
     return moment.astimezone(UTC).strftime("%d %B %Y")
+
+
+def _screens_for(rules: dict[str, Any] | None) -> list[str]:
+    """What uses this standard speaks about, from its own stored rules."""
+
+    uses = (rules or {}).get("use_cases") if isinstance(rules, dict) else None
+    if not isinstance(uses, list):
+        return []
+    return [
+        str(item.get("description") or item.get("label") or "").strip()
+        for item in uses
+        if isinstance(item, dict)
+    ][:4]
+
+
+def _monitor_state(strategy: Strategy) -> str:
+    """Running, paused or draft — the person's own monitor, in plain words."""
+
+    if strategy.status is StrategyStatus.PAUSED or strategy.paused_at is not None:
+        return "paused"
+    if strategy.status in (StrategyStatus.ACTIVE, StrategyStatus.FORWARD_TEST):
+        return "running"
+    return "draft"

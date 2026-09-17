@@ -1,7 +1,7 @@
 ---
 description: Second independent reviewer for high-risk work; attacks assumptions, scope, tests, security, and governed boundaries.
 mode: subagent
-model: opencode-go/deepseek-v4.1-flash
+model: opencode-go/qwen3.7-plus
 permission:
   read:
     "*": allow

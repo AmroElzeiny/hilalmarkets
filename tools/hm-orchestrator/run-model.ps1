@@ -14,10 +14,10 @@ $promptPath = (Resolve-Path $PromptFile).Path
 $available = @(& opencode models opencode-go | Where-Object { $_ -match '^opencode-go/' } | ForEach-Object { $_.Trim() })
 $modelRef = if ($Model.StartsWith("opencode-go/")) { $Model } else { "opencode-go/$Model" }
 $normalModels = @(
-    "opencode-go/minimax-m3",
-    "opencode-go/qwen3.8-flash",
-    "opencode-go/deepseek-v4.1-flash",
-    "opencode-go/deepseek-v4-flash-vision-exp"
+    "opencode-go/muse-spark-1.3-contributor",
+    "opencode-go/glm-5.3-flash",
+    "opencode-go/mimo-v2.5",
+    "opencode-go/qwen3.7-plus"
 )
 
 if ($modelRef -notin $normalModels) {
@@ -28,6 +28,14 @@ if ($modelRef -notin $available) {
 }
 
 $agent = if ($Mode -eq "Write") { "hm-direct-write" } else { "hm-direct-read" }
+
+# Owner decision 2026-09-16: Muse always runs on the "high" reasoning variant, whichever
+# agent carries it. The variant is proven in LIVE_MODELS_VERBOSE.txt. --variant on the
+# command line overrides the agent's own variant, so the read agent (MiMo by default)
+# still gets high when the caller routes it to Muse.
+if (-not $Variant -and $modelRef -eq "opencode-go/muse-spark-1.3-contributor") {
+    $Variant = "high"
+}
 $prompt = Get-Content -Raw $promptPath
 
 # IMPORTANT: OpenCode's --file is variadic. The positional message must be

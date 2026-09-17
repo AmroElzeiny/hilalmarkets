@@ -51,6 +51,10 @@ from ai_market_monitor.core.site_content import (
 from ai_market_monitor.core.site_content import (
     social_image_url as build_social_image_url,
 )
+from ai_market_monitor.services.ai_provider import (
+    AIProviderConfigError,
+    is_configured,
+)
 from ai_market_monitor.services.ai_setup_evaluator_control import (
     evaluator_fault_control_available,
 )
@@ -908,6 +912,15 @@ async def health(settings: Settings = Depends(get_settings)) -> dict[str, object
     }
 
 
+def _sharia_research_configured(settings: Settings) -> bool:
+    """Whether the Sharia research model holds a usable key. Never raises."""
+
+    try:
+        return is_configured(settings, settings.sharia_ai_model)
+    except AIProviderConfigError:
+        return False
+
+
 @router.get("/health/deep")
 async def deep_health(
     session: AsyncSession = Depends(get_db_session),
@@ -928,7 +941,7 @@ async def deep_health(
         ),
         "sharia_ai_research": (
             "ok"
-            if settings.openai_api_key is not None
+            if _sharia_research_configured(settings)
             and settings.sharia_ai_service_tier == "flex"
             else "degraded"
         ),

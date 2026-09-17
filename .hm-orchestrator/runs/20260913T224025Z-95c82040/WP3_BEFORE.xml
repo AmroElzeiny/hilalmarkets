@@ -1,0 +1,1811 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="92" skipped="0" tests="241" time="7.326" timestamp="2026-09-14T06:00:43.372316+03:00" hostname="WIN-FOVCL5KBJ2M"><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[demo.monthly:0.00]" time="0.093" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.monthly:15.00]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.monthly:25.00]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[creator.monthly:79.00]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[community.monthly:299.00]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[full_access.monthly:0.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[lifetime_partner.monthly:0.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[lifetime.monthly:0.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro_trial.monthly:0.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[demo.annual:0.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.annual:120.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.annual:220.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.charged_today:9.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.launch_offer:9.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.charged_today.SAVE10:8.10]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.charged_today.SAVE12HALF:7.88]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.charged_today.TAKE33:6.03]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.charged_today.HALFOFF:4.50]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.charged_today.QUARTER:2.25]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.charged_today.NINETY:0.90]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.charged_today.ALMOST:0.09]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.monthly.SAVE10:13.50]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.monthly.SAVE12HALF:13.13]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.monthly.TAKE33:10.05]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.monthly.HALFOFF:7.50]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.monthly.QUARTER:3.75]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.monthly.NINETY:1.50]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.monthly.ALMOST:0.15]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.annual.SAVE10:108.00]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.annual.SAVE12HALF:105.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.annual.TAKE33:80.40]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.annual.HALFOFF:60.00]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.annual.QUARTER:30.00]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.annual.NINETY:12.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[trader.annual.ALMOST:1.20]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.charged_today:17.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.launch_offer:17.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.charged_today.SAVE10:15.30]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.charged_today.SAVE12HALF:14.88]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.charged_today.TAKE33:11.39]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.charged_today.HALFOFF:8.50]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.charged_today.QUARTER:4.25]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.charged_today.NINETY:1.70]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.charged_today.ALMOST:0.17]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.monthly.SAVE10:22.50]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.monthly.SAVE12HALF:21.88]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.monthly.TAKE33:16.75]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.monthly.HALFOFF:12.50]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.monthly.QUARTER:6.25]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.monthly.NINETY:2.50]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.monthly.ALMOST:0.25]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.annual.SAVE10:198.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.annual.SAVE12HALF:192.50]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.annual.TAKE33:147.40]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.annual.HALFOFF:110.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.annual.QUARTER:55.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.annual.NINETY:22.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_invoice_price_amount_is_the_exact_decimal_text[pro.annual.ALMOST:2.20]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_family_covers_both_ways_a_float_loses_the_amount" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_text_is_the_quantised_decimal_with_no_float_anywhere[9.00-USD-9.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_text_is_the_quantised_decimal_with_no_float_anywhere[9-USD-9.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_text_is_the_quantised_decimal_with_no_float_anywhere[9.004-USD-9.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_text_is_the_quantised_decimal_with_no_float_anywhere[9.005-USD-9.01]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_text_is_the_quantised_decimal_with_no_float_anywhere[-9.005-USD--9.01]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_text_is_the_quantised_decimal_with_no_float_anywhere[0-usd-0.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_text_is_the_quantised_decimal_with_no_float_anywhere[10.05-EUR-10.05]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_text_is_the_quantised_decimal_with_no_float_anywhere[2.5-eur-2.50]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_text_is_the_quantised_decimal_with_no_float_anywhere[7.25-CHF-7.25]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_is_the_quantised_decimal_with_no_float_anywhere[9.00-USD-9.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_is_the_quantised_decimal_with_no_float_anywhere[9-USD-9.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_is_the_quantised_decimal_with_no_float_anywhere[9.004-USD-9.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_is_the_quantised_decimal_with_no_float_anywhere[9.005-USD-9.01]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_is_the_quantised_decimal_with_no_float_anywhere[-9.005-USD--9.01]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_is_the_quantised_decimal_with_no_float_anywhere[0-usd-0.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_is_the_quantised_decimal_with_no_float_anywhere[10.05-EUR-10.05]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_is_the_quantised_decimal_with_no_float_anywhere[2.5-eur-2.50]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_is_the_quantised_decimal_with_no_float_anywhere[7.25-CHF-7.25]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_json_body_emits_the_amount_as_a_bare_json_number" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_json_body_keeps_every_other_field_exactly_as_json_writes_it" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_refuses_an_amount_that_is_not_a_number[NaN]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_refuses_an_amount_that_is_not_a_number[-NaN]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_refuses_an_amount_that_is_not_a_number[sNaN]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_refuses_an_amount_that_is_not_a_number[Infinity]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_number_refuses_an_amount_that_is_not_a_number[-Infinity]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_json_body_refuses_a_payload_that_already_carries_the_field" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_wire_json_body_refuses_a_placeholder_collision" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_minor_units_map_and_default" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[demo.monthly:0.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.monthly:15.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.monthly:25.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[creator.monthly:79.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[community.monthly:299.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[full_access.monthly:0.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[lifetime_partner.monthly:0.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[lifetime.monthly:0.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro_trial.monthly:0.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[demo.annual:0.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.annual:120.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.annual:220.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.charged_today:9.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.launch_offer:9.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.charged_today.SAVE10:8.10]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.charged_today.SAVE12HALF:7.88]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.charged_today.TAKE33:6.03]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.charged_today.HALFOFF:4.50]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.charged_today.QUARTER:2.25]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.charged_today.NINETY:0.90]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.charged_today.ALMOST:0.09]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.monthly.SAVE10:13.50]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.monthly.SAVE12HALF:13.13]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.monthly.TAKE33:10.05]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.monthly.HALFOFF:7.50]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.monthly.QUARTER:3.75]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.monthly.NINETY:1.50]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.monthly.ALMOST:0.15]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.annual.SAVE10:108.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.annual.SAVE12HALF:105.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.annual.TAKE33:80.40]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.annual.HALFOFF:60.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.annual.QUARTER:30.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.annual.NINETY:12.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[trader.annual.ALMOST:1.20]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.charged_today:17.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.launch_offer:17.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.charged_today.SAVE10:15.30]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.charged_today.SAVE12HALF:14.88]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.charged_today.TAKE33:11.39]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.charged_today.HALFOFF:8.50]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.charged_today.QUARTER:4.25]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.charged_today.NINETY:1.70]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.charged_today.ALMOST:0.17]" time="0.003" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.monthly.SAVE10:22.50]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.monthly.SAVE12HALF:21.88]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.monthly.TAKE33:16.75]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.monthly.HALFOFF:12.50]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.monthly.QUARTER:6.25]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.monthly.NINETY:2.50]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.monthly.ALMOST:0.25]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.annual.SAVE10:198.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.annual.SAVE12HALF:192.50]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.annual.TAKE33:147.40]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.annual.HALFOFF:110.00]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.annual.QUARTER:55.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.annual.NINETY:22.00]" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_every_amount_already_in_minor_units_passes_through_unchanged[pro.annual.ALMOST:2.20]" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_quantise_half_up_rounds_a_half_cent_away_from_zero[0.125-0.13]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'">raw = '0.125', expected = '0.13'
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        (
+            # The reported case: a half cent. The default (banker's) mode would give 0.12.
+            ("0.125", "0.13"),
+            ("0.005", "0.01"),
+            ("0.135", "0.14"),
+            ("2.675", "2.68"),
+            ("-0.125", "-0.13"),
+            # Not a half: ordinary rounds must land where they always did.
+            ("9.004", "9.00"),
+            ("9.006", "9.01"),
+            ("9.00", "9.00"),
+        ),
+    )
+    def test_quantise_half_up_rounds_a_half_cent_away_from_zero(raw: str, expected: str) -&gt; None:
+        """Every money rounding goes through this one call, with this one mode."""
+    
+&gt;       assert money_owner.quantise_half_up(Decimal(raw), Decimal("0.01")) == Decimal(expected)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'
+
+tests\unit\test_invariant_money_on_the_wire.py:476: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_quantise_half_up_rounds_a_half_cent_away_from_zero[0.005-0.01]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'">raw = '0.005', expected = '0.01'
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        (
+            # The reported case: a half cent. The default (banker's) mode would give 0.12.
+            ("0.125", "0.13"),
+            ("0.005", "0.01"),
+            ("0.135", "0.14"),
+            ("2.675", "2.68"),
+            ("-0.125", "-0.13"),
+            # Not a half: ordinary rounds must land where they always did.
+            ("9.004", "9.00"),
+            ("9.006", "9.01"),
+            ("9.00", "9.00"),
+        ),
+    )
+    def test_quantise_half_up_rounds_a_half_cent_away_from_zero(raw: str, expected: str) -&gt; None:
+        """Every money rounding goes through this one call, with this one mode."""
+    
+&gt;       assert money_owner.quantise_half_up(Decimal(raw), Decimal("0.01")) == Decimal(expected)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'
+
+tests\unit\test_invariant_money_on_the_wire.py:476: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_quantise_half_up_rounds_a_half_cent_away_from_zero[0.135-0.14]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'">raw = '0.135', expected = '0.14'
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        (
+            # The reported case: a half cent. The default (banker's) mode would give 0.12.
+            ("0.125", "0.13"),
+            ("0.005", "0.01"),
+            ("0.135", "0.14"),
+            ("2.675", "2.68"),
+            ("-0.125", "-0.13"),
+            # Not a half: ordinary rounds must land where they always did.
+            ("9.004", "9.00"),
+            ("9.006", "9.01"),
+            ("9.00", "9.00"),
+        ),
+    )
+    def test_quantise_half_up_rounds_a_half_cent_away_from_zero(raw: str, expected: str) -&gt; None:
+        """Every money rounding goes through this one call, with this one mode."""
+    
+&gt;       assert money_owner.quantise_half_up(Decimal(raw), Decimal("0.01")) == Decimal(expected)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'
+
+tests\unit\test_invariant_money_on_the_wire.py:476: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_quantise_half_up_rounds_a_half_cent_away_from_zero[2.675-2.68]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'">raw = '2.675', expected = '2.68'
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        (
+            # The reported case: a half cent. The default (banker's) mode would give 0.12.
+            ("0.125", "0.13"),
+            ("0.005", "0.01"),
+            ("0.135", "0.14"),
+            ("2.675", "2.68"),
+            ("-0.125", "-0.13"),
+            # Not a half: ordinary rounds must land where they always did.
+            ("9.004", "9.00"),
+            ("9.006", "9.01"),
+            ("9.00", "9.00"),
+        ),
+    )
+    def test_quantise_half_up_rounds_a_half_cent_away_from_zero(raw: str, expected: str) -&gt; None:
+        """Every money rounding goes through this one call, with this one mode."""
+    
+&gt;       assert money_owner.quantise_half_up(Decimal(raw), Decimal("0.01")) == Decimal(expected)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'
+
+tests\unit\test_invariant_money_on_the_wire.py:476: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_quantise_half_up_rounds_a_half_cent_away_from_zero[-0.125--0.13]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'">raw = '-0.125', expected = '-0.13'
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        (
+            # The reported case: a half cent. The default (banker's) mode would give 0.12.
+            ("0.125", "0.13"),
+            ("0.005", "0.01"),
+            ("0.135", "0.14"),
+            ("2.675", "2.68"),
+            ("-0.125", "-0.13"),
+            # Not a half: ordinary rounds must land where they always did.
+            ("9.004", "9.00"),
+            ("9.006", "9.01"),
+            ("9.00", "9.00"),
+        ),
+    )
+    def test_quantise_half_up_rounds_a_half_cent_away_from_zero(raw: str, expected: str) -&gt; None:
+        """Every money rounding goes through this one call, with this one mode."""
+    
+&gt;       assert money_owner.quantise_half_up(Decimal(raw), Decimal("0.01")) == Decimal(expected)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'
+
+tests\unit\test_invariant_money_on_the_wire.py:476: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_quantise_half_up_rounds_a_half_cent_away_from_zero[9.004-9.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'">raw = '9.004', expected = '9.00'
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        (
+            # The reported case: a half cent. The default (banker's) mode would give 0.12.
+            ("0.125", "0.13"),
+            ("0.005", "0.01"),
+            ("0.135", "0.14"),
+            ("2.675", "2.68"),
+            ("-0.125", "-0.13"),
+            # Not a half: ordinary rounds must land where they always did.
+            ("9.004", "9.00"),
+            ("9.006", "9.01"),
+            ("9.00", "9.00"),
+        ),
+    )
+    def test_quantise_half_up_rounds_a_half_cent_away_from_zero(raw: str, expected: str) -&gt; None:
+        """Every money rounding goes through this one call, with this one mode."""
+    
+&gt;       assert money_owner.quantise_half_up(Decimal(raw), Decimal("0.01")) == Decimal(expected)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'
+
+tests\unit\test_invariant_money_on_the_wire.py:476: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_quantise_half_up_rounds_a_half_cent_away_from_zero[9.006-9.01]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'">raw = '9.006', expected = '9.01'
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        (
+            # The reported case: a half cent. The default (banker's) mode would give 0.12.
+            ("0.125", "0.13"),
+            ("0.005", "0.01"),
+            ("0.135", "0.14"),
+            ("2.675", "2.68"),
+            ("-0.125", "-0.13"),
+            # Not a half: ordinary rounds must land where they always did.
+            ("9.004", "9.00"),
+            ("9.006", "9.01"),
+            ("9.00", "9.00"),
+        ),
+    )
+    def test_quantise_half_up_rounds_a_half_cent_away_from_zero(raw: str, expected: str) -&gt; None:
+        """Every money rounding goes through this one call, with this one mode."""
+    
+&gt;       assert money_owner.quantise_half_up(Decimal(raw), Decimal("0.01")) == Decimal(expected)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'
+
+tests\unit\test_invariant_money_on_the_wire.py:476: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_quantise_half_up_rounds_a_half_cent_away_from_zero[9.00-9.00]" time="0.003"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'">raw = '9.00', expected = '9.00'
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        (
+            # The reported case: a half cent. The default (banker's) mode would give 0.12.
+            ("0.125", "0.13"),
+            ("0.005", "0.01"),
+            ("0.135", "0.14"),
+            ("2.675", "2.68"),
+            ("-0.125", "-0.13"),
+            # Not a half: ordinary rounds must land where they always did.
+            ("9.004", "9.00"),
+            ("9.006", "9.01"),
+            ("9.00", "9.00"),
+        ),
+    )
+    def test_quantise_half_up_rounds_a_half_cent_away_from_zero(raw: str, expected: str) -&gt; None:
+        """Every money rounding goes through this one call, with this one mode."""
+    
+&gt;       assert money_owner.quantise_half_up(Decimal(raw), Decimal("0.01")) == Decimal(expected)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'
+
+tests\unit\test_invariant_money_on_the_wire.py:476: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_quantise_half_up_disagrees_with_the_default_mode_on_a_half_cent" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'">def test_quantise_half_up_disagrees_with_the_default_mode_on_a_half_cent() -&gt; None:
+        """The defect was silent because the default mode agrees except on the half.
+    
+        ``Decimal("0.125")`` is exactly a half cent, so ``ROUND_HALF_EVEN`` — decimal's
+        default, and what the five un-routed money paths were using — records ``0.12``.
+        The owner records ``0.13``. This test pins that the difference is real, so a
+        "cleanup" that drops the explicit rounding mode cannot pass unnoticed.
+        """
+    
+        half_cent = Decimal("1.00") * Decimal("12.5") / Decimal("100")
+        assert half_cent.quantize(Decimal("0.01")) == Decimal("0.12")  # the default: half-even
+&gt;       assert money_owner.quantise_half_up(half_cent, Decimal("0.01")) == Decimal("0.13")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'quantise_half_up'
+
+tests\unit\test_invariant_money_on_the_wire.py:490: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_a_half_cent_commission_is_recorded_with_the_owner_rounding" time="0.954"><failure message="AssertionError: assert Decimal('0.12') == Decimal('0.13')&#10; +  where Decimal('0.13') = Decimal('0.13')">test_context = {'app': &lt;fastapi.applications.FastAPI object at 0x000001ED870FD010&gt;, 'client': &lt;httpx.AsyncClient object at 0x000001ED...rvability_candidate_stale_seconds=300, observability_live_poll_seconds=15, observability_max_candidates_per_user=5000)}
+
+    async def test_a_half_cent_commission_is_recorded_with_the_owner_rounding(test_context) -&gt; None:
+        """Stored commission rows are never rewritten — only new ones follow one rule."""
+    
+&gt;       assert await _half_cent_commission(test_context) == Decimal("0.13")
+E       AssertionError: assert Decimal('0.12') == Decimal('0.13')
+E        +  where Decimal('0.13') = Decimal('0.13')
+
+tests\unit\test_invariant_money_on_the_wire.py:554: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_json_money_number_returns_the_minor_unit_decimal_not_a_float" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'json_money_number'">def test_json_money_number_returns_the_minor_unit_decimal_not_a_float() -&gt; None:
+        """The value a page embeds is the *quantised amount*, still a ``Decimal``.
+    
+        The float was the defect; converting back at the payload would put it right
+        back. The number stays a Decimal and the page's JSON writer turns it into a
+        bare number with the exact digits.
+        """
+    
+&gt;       value = money_owner.json_money_number(Decimal("9.004"))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'json_money_number'
+
+tests\unit\test_invariant_money_on_the_wire.py:568: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[demo.monthly:0.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'demo.monthly', amount = Decimal('0.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.monthly:15.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.monthly', amount = Decimal('15.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.monthly:25.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.monthly', amount = Decimal('25.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[creator.monthly:79.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'creator.monthly', amount = Decimal('79.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[community.monthly:299.00]" time="0.003"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'community.monthly', amount = Decimal('299.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[full_access.monthly:0.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'full_access.monthly', amount = Decimal('0.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[lifetime_partner.monthly:0.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'lifetime_partner.monthly', amount = Decimal('0.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[lifetime.monthly:0.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'lifetime.monthly', amount = Decimal('0.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro_trial.monthly:0.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro_trial.monthly', amount = Decimal('0.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[demo.annual:0.00]" time="0.003"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'demo.annual', amount = Decimal('0.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.annual:120.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.annual', amount = Decimal('120.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.annual:220.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.annual', amount = Decimal('220.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.charged_today:9.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.charged_today', amount = Decimal('9.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.launch_offer:9.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.launch_offer', amount = Decimal('9.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.charged_today.SAVE10:8.10]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.charged_today.SAVE10', amount = Decimal('8.10')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.charged_today.SAVE12HALF:7.88]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.charged_today.SAVE12HALF', amount = Decimal('7.88')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.charged_today.TAKE33:6.03]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.charged_today.TAKE33', amount = Decimal('6.03')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.charged_today.HALFOFF:4.50]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.charged_today.HALFOFF', amount = Decimal('4.50')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.charged_today.QUARTER:2.25]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.charged_today.QUARTER', amount = Decimal('2.25')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.charged_today.NINETY:0.90]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.charged_today.NINETY', amount = Decimal('0.90')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.charged_today.ALMOST:0.09]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.charged_today.ALMOST', amount = Decimal('0.09')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.monthly.SAVE10:13.50]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.monthly.SAVE10', amount = Decimal('13.50')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.monthly.SAVE12HALF:13.13]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.monthly.SAVE12HALF', amount = Decimal('13.13')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.monthly.TAKE33:10.05]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.monthly.TAKE33', amount = Decimal('10.05')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.monthly.HALFOFF:7.50]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.monthly.HALFOFF', amount = Decimal('7.50')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.monthly.QUARTER:3.75]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.monthly.QUARTER', amount = Decimal('3.75')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.monthly.NINETY:1.50]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.monthly.NINETY', amount = Decimal('1.50')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.monthly.ALMOST:0.15]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.monthly.ALMOST', amount = Decimal('0.15')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.annual.SAVE10:108.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.annual.SAVE10', amount = Decimal('108.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.annual.SAVE12HALF:105.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.annual.SAVE12HALF', amount = Decimal('105.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.annual.TAKE33:80.40]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.annual.TAKE33', amount = Decimal('80.40')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.annual.HALFOFF:60.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.annual.HALFOFF', amount = Decimal('60.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.annual.QUARTER:30.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.annual.QUARTER', amount = Decimal('30.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.annual.NINETY:12.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.annual.NINETY', amount = Decimal('12.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[trader.annual.ALMOST:1.20]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'trader.annual.ALMOST', amount = Decimal('1.20')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.charged_today:17.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.charged_today', amount = Decimal('17.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.launch_offer:17.00]" time="0.003"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.launch_offer', amount = Decimal('17.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.charged_today.SAVE10:15.30]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.charged_today.SAVE10', amount = Decimal('15.30')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.charged_today.SAVE12HALF:14.88]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.charged_today.SAVE12HALF', amount = Decimal('14.88')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.charged_today.TAKE33:11.39]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.charged_today.TAKE33', amount = Decimal('11.39')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.charged_today.HALFOFF:8.50]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.charged_today.HALFOFF', amount = Decimal('8.50')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.charged_today.QUARTER:4.25]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.charged_today.QUARTER', amount = Decimal('4.25')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.charged_today.NINETY:1.70]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.charged_today.NINETY', amount = Decimal('1.70')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.charged_today.ALMOST:0.17]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.charged_today.ALMOST', amount = Decimal('0.17')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.monthly.SAVE10:22.50]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.monthly.SAVE10', amount = Decimal('22.50')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.monthly.SAVE12HALF:21.88]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.monthly.SAVE12HALF', amount = Decimal('21.88')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.monthly.TAKE33:16.75]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.monthly.TAKE33', amount = Decimal('16.75')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.monthly.HALFOFF:12.50]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.monthly.HALFOFF', amount = Decimal('12.50')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.monthly.QUARTER:6.25]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.monthly.QUARTER', amount = Decimal('6.25')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.monthly.NINETY:2.50]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.monthly.NINETY', amount = Decimal('2.50')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.monthly.ALMOST:0.25]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.monthly.ALMOST', amount = Decimal('0.25')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.annual.SAVE10:198.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.annual.SAVE10', amount = Decimal('198.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.annual.SAVE12HALF:192.50]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.annual.SAVE12HALF', amount = Decimal('192.50')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.annual.TAKE33:147.40]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.annual.TAKE33', amount = Decimal('147.40')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.annual.HALFOFF:110.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.annual.HALFOFF', amount = Decimal('110.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.annual.QUARTER:55.00]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.annual.QUARTER', amount = Decimal('55.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.annual.NINETY:22.00]" time="0.003"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.annual.NINETY', amount = Decimal('22.00')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number[pro.annual.ALMOST:2.20]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">label = 'pro.annual.ALMOST', amount = Decimal('2.20')
+
+    @pytest.mark.parametrize(("label", "amount"), MONEY_FAMILY, ids=_FAMILY_IDS)
+    def test_the_page_json_writer_emits_the_exact_amount_as_a_bare_number(
+        label: str, amount: Decimal
+    ) -&gt; None:
+        """Every money number the browser will do arithmetic on must arrive exact.
+    
+        The React pricing card types the price ``number | null`` and adds it up. A
+        ``Decimal`` through ``json.dumps`` either crashes (no ``Decimal`` encoder) or —
+        the shipped defect — is turned into a float first, losing ``9.00``'s cents text
+        and most two-decimal values entirely. ``money_json_dumps`` must write the exact
+        quantised text, unquoted, and nothing else about the document may change.
+        """
+    
+        expected_text = str(_cents(amount))
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:590: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_proof_covers_amounts_that_float_would_damage" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">def test_the_page_json_proof_covers_amounts_that_float_would_damage() -&gt; None:
+        """Self-check: at least one family amount loses its text through float while
+        the owner keeps it — otherwise section 4 could pass on an over-easy family."""
+    
+        damaged = [
+            (label, amount)
+            for label, amount in MONEY_FAMILY
+            if str(float(_cents(amount))) != str(_cents(amount))
+        ]
+        assert damaged, "no family amount loses its cents text through float"
+        label, amount = damaged[0]
+&gt;       out = money_owner.money_json_dumps({"v": money_owner.json_money_number(amount)})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:614: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_money_json_dumps_passes_kwargs_through_and_keeps_other_values_untouched" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">def test_money_json_dumps_passes_kwargs_through_and_keeps_other_values_untouched() -&gt; None:
+        """``json.dumps``'s own options (Jinja sets ``sort_keys=True``) still apply, and
+        anything that is not a Decimal is written byte-for-byte as before."""
+    
+        payload = {
+            "a": "text",
+            "b": True,
+            "nested": {"n": None, "list": [1, "two"]},
+        }
+&gt;       plain = money_owner.money_json_dumps(payload)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:631: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_money_json_dumps_writes_a_decimal_held_in_a_list_or_tuple" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">def test_money_json_dumps_writes_a_decimal_held_in_a_list_or_tuple() -&gt; None:
+        """Nested money is still money: the walk reaches inside sequences."""
+    
+&gt;       out = money_owner.money_json_dumps(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            {"xs": [Decimal("9.00")], "ys": (Decimal("10.05"), Decimal("11.00"))}
+        )
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:641: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_money_json_dumps_writes_the_same_amount_twice_as_two_exact_numbers" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">def test_money_json_dumps_writes_the_same_amount_twice_as_two_exact_numbers() -&gt; None:
+        """Each Decimal occurrence gets its own placeholder, so repeats are exact too."""
+    
+&gt;       out = money_owner.money_json_dumps({"a": Decimal("9.00"), "b": Decimal("9.00")})
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:653: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_money_json_dumps_refuses_a_decimal_that_is_not_a_number[NaN]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">not_money = 'NaN'
+
+    @pytest.mark.parametrize("not_money", ("NaN", "-NaN", "sNaN", "Infinity", "-Infinity"))
+    def test_money_json_dumps_refuses_a_decimal_that_is_not_a_number(not_money: str) -&gt; None:
+        """Fail closed: ``NaN`` is not money and is not a JSON number either."""
+    
+        with pytest.raises(ValueError):
+&gt;           money_owner.money_json_dumps({"v": Decimal(not_money)})
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:667: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_money_json_dumps_refuses_a_decimal_that_is_not_a_number[-NaN]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">not_money = '-NaN'
+
+    @pytest.mark.parametrize("not_money", ("NaN", "-NaN", "sNaN", "Infinity", "-Infinity"))
+    def test_money_json_dumps_refuses_a_decimal_that_is_not_a_number(not_money: str) -&gt; None:
+        """Fail closed: ``NaN`` is not money and is not a JSON number either."""
+    
+        with pytest.raises(ValueError):
+&gt;           money_owner.money_json_dumps({"v": Decimal(not_money)})
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:667: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_money_json_dumps_refuses_a_decimal_that_is_not_a_number[sNaN]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">not_money = 'sNaN'
+
+    @pytest.mark.parametrize("not_money", ("NaN", "-NaN", "sNaN", "Infinity", "-Infinity"))
+    def test_money_json_dumps_refuses_a_decimal_that_is_not_a_number(not_money: str) -&gt; None:
+        """Fail closed: ``NaN`` is not money and is not a JSON number either."""
+    
+        with pytest.raises(ValueError):
+&gt;           money_owner.money_json_dumps({"v": Decimal(not_money)})
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:667: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_money_json_dumps_refuses_a_decimal_that_is_not_a_number[Infinity]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">not_money = 'Infinity'
+
+    @pytest.mark.parametrize("not_money", ("NaN", "-NaN", "sNaN", "Infinity", "-Infinity"))
+    def test_money_json_dumps_refuses_a_decimal_that_is_not_a_number(not_money: str) -&gt; None:
+        """Fail closed: ``NaN`` is not money and is not a JSON number either."""
+    
+        with pytest.raises(ValueError):
+&gt;           money_owner.money_json_dumps({"v": Decimal(not_money)})
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:667: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_money_json_dumps_refuses_a_decimal_that_is_not_a_number[-Infinity]" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">not_money = '-Infinity'
+
+    @pytest.mark.parametrize("not_money", ("NaN", "-NaN", "sNaN", "Infinity", "-Infinity"))
+    def test_money_json_dumps_refuses_a_decimal_that_is_not_a_number(not_money: str) -&gt; None:
+        """Fail closed: ``NaN`` is not money and is not a JSON number either."""
+    
+        with pytest.raises(ValueError):
+&gt;           money_owner.money_json_dumps({"v": Decimal(not_money)})
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:667: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_money_json_dumps_refuses_a_placeholder_collision" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">def test_money_json_dumps_refuses_a_placeholder_collision() -&gt; None:
+        """A payload that already carries the token text would make the swap a guess,
+        so the writer refuses rather than shipping JSON it cannot vouch for."""
+    
+        with pytest.raises(ValueError):
+&gt;           money_owner.money_json_dumps({"a": Decimal("9.00"), "b": "__hm_decimal__0__"})
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:675: AttributeError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_owner_holds_exactly_one_rounding_statement" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_no_money_amount_is_pushed_through_a_binary_float" time="1.709"><failure message="AssertionError: money passed through float():&#10;  core/plans.py:330: &quot;monthlyPrice&quot;: float(charged) if offer.monthly_available else None,&#10;  core/plans.py:332: float(PUBLIC_PLAN_PRESENTATIONS[code].annual_price)&#10;  core/plans.py:340: &quot;fullMonthlyPrice&quot;: float(charged) if offer.monthly_available else None,&#10;  Money goes to a provider through core.money.wire_json_body/wire_text and to a page through core.money.money_json_dumps (the one owners); float(Decimal) is not the same number. If this line is genuinely not customer money (market data, model spend), add it to _NON_CUSTOMER_MONEY_FLOAT with the reason.&#10;assert not ['core/plans.py:330: &quot;monthlyPrice&quot;: float(charged) if offer.monthly_available else None,', 'core/plans.py:332: float(...NS[code].annual_price)', 'core/plans.py:340: &quot;fullMonthlyPrice&quot;: float(charged) if offer.monthly_available else None,']">def test_no_money_amount_is_pushed_through_a_binary_float() -&gt; None:
+        """No **customer** money value anywhere in ``src`` may pass through ``float``.
+    
+        The scan used to watch four service modules; the reported defect lived outside
+        them, in ``core/plans.py``, where every landing-page price went through
+        ``float``. It now walks every ``.py`` under ``src/ai_market_monitor``. The only
+        way a line is acceptable is by being named, with a reason, in
+        ``_NON_CUSTOMER_MONEY_FLOAT`` — so a new money float anywhere fails, and so
+        does the old defect shape in ``core/plans.py`` until it is fixed.
+        """
+    
+        for relative in _MONEY_MODULES:
+            assert (_SRC_ROOT / relative).exists(), (
+                f"{relative} moved or vanished — update this invariant with it"
+            )
+        offenders = [
+            f"{relative}:{hit}"
+            for relative, stripped, hit in _src_money_float_hits()
+            if (relative, stripped) not in _NON_CUSTOMER_MONEY_FLOAT
+        ]
+&gt;       assert not offenders, (
+            "money passed through float():\n"
+            + "\n".join(offenders)
+            + "\nMoney goes to a provider through core.money.wire_json_body/wire_text and "
+            "to a page through core.money.money_json_dumps (the one owners); "
+            "float(Decimal) is not the same number. If this line is genuinely not "
+            "customer money (market data, model spend), add it to "
+            "_NON_CUSTOMER_MONEY_FLOAT with the reason."
+        )
+E       AssertionError: money passed through float():
+E         core/plans.py:330: "monthlyPrice": float(charged) if offer.monthly_available else None,
+E         core/plans.py:332: float(PUBLIC_PLAN_PRESENTATIONS[code].annual_price)
+E         core/plans.py:340: "fullMonthlyPrice": float(charged) if offer.monthly_available else None,
+E         Money goes to a provider through core.money.wire_json_body/wire_text and to a page through core.money.money_json_dumps (the one owners); float(Decimal) is not the same number. If this line is genuinely not customer money (market data, model spend), add it to _NON_CUSTOMER_MONEY_FLOAT with the reason.
+E       assert not ['core/plans.py:330: "monthlyPrice": float(charged) if offer.monthly_available else None,', 'core/plans.py:332: float(...NS[code].annual_price)', 'core/plans.py:340: "fullMonthlyPrice": float(charged) if offer.monthly_available else None,']
+
+tests\unit\test_invariant_money_on_the_wire.py:848: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_float_scan_sees_the_defect_and_is_not_blind" time="0.001" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_float_allow_list_is_reasoned_current_and_never_money" time="1.715" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_no_money_is_rounded_outside_the_owner" time="0.162"><failure message="AssertionError: money rounded beside the owner:&#10;  core/plans.py:231: return amount.quantize(_CENTS, rounding=ROUND_HALF_UP)&#10;  core/plans.py:235: return (amount * kept).quantize(_CENTS, rounding=ROUND_HALF_UP)&#10;  core/plans.py:252: return price.quantize(_CENTS, rounding=ROUND_HALF_UP)&#10;  services/affiliate.py:772: total_commission_usd=total.quantize(Decimal(&quot;0.01&quot;)),&#10;  services/affiliate.py:773: first_commission_usd=first_total.quantize(Decimal(&quot;0.01&quot;)),&#10;  services/affiliate.py:774: subsequent_commission_usd=later_total.quantize(Decimal(&quot;0.01&quot;)),&#10;  services/affiliate.py:776: requested_or_paid_usd=held_amount.quantize(Decimal(&quot;0.01&quot;)),&#10;  services/affiliate.py:777: available_usd=max(Decimal(&quot;0&quot;), available).quantize(Decimal(&quot;0.01&quot;)),&#10;  services/affiliate.py:813: commission_usd=Decimal(str(totals.get(customer.id, 0))).quantize(&#10;  services/affiliate_attribution.py:529: earned = (charged * percent / Decimal(&quot;100&quot;)).quantize(Decimal(&quot;0.01&quot;))&#10;  services/affiliate_attribution.py:536: paid_amount_usd=charged.quantize(Decimal(&quot;0.01&quot;)),&#10;  services/plan_replacements.py:127: paid = max(paid_amount, Decimal(&quot;0&quot;)).quantize(MONEY_QUANTUM, ROUND_HALF_UP)&#10;  services/plan_replacements.py:133: return min(paid, (paid * share).quantize(MONEY_QUANTUM, ROUND_HALF_UP))&#10;  Use core.money.quantise_half_up(value, quantum) — the one ROUND_HALF_UP statement. (services/trials.py quantises a scan-coverage *fraction*, which is not money, and its line must not name money.)&#10;assert not ['core/plans.py:231: return amount.quantize(_CENTS, rounding=ROUND_HALF_UP)', 'core/plans.py:235: return (amount * kep...Decimal(&quot;0.01&quot;)),', 'services/affiliate.py:774: subsequent_commission_usd=later_total.quantize(Decimal(&quot;0.01&quot;)),', ...]">def test_no_money_is_rounded_outside_the_owner() -&gt; None:
+        """``core/money.py`` holds the system's only money rounding call.
+    
+        Five paths quantised with decimal's default ``ROUND_HALF_EVEN`` while the owner
+        (and the discount arithmetic) say ``ROUND_HALF_UP`` — a half cent rounded two
+        ways in one product. Every money ``.quantize(`` must now be a call to
+        ``core.money.quantise_half_up``; the scan proves no line in ``src`` carries a
+        money word and a raw ``.quantize(`` at once, anywhere except the owner itself.
+        """
+    
+        offenders: list[str] = []
+        for path in sorted(_SRC_ROOT.rglob("*.py")):
+            relative = path.relative_to(_SRC_ROOT).as_posix()
+            if relative == "core/money.py":
+                continue  # the owner: the one place a rounding call may sit
+            for hit in _money_quantize_lines(path.read_text(encoding="utf-8")):
+                offenders.append(f"{relative}:{hit}")
+&gt;       assert not offenders, (
+            "money rounded beside the owner:\n"
+            + "\n".join(offenders)
+            + "\nUse core.money.quantise_half_up(value, quantum) — the one ROUND_HALF_UP "
+            "statement. (services/trials.py quantises a scan-coverage *fraction*, which "
+            "is not money, and its line must not name money.)"
+        )
+E       AssertionError: money rounded beside the owner:
+E         core/plans.py:231: return amount.quantize(_CENTS, rounding=ROUND_HALF_UP)
+E         core/plans.py:235: return (amount * kept).quantize(_CENTS, rounding=ROUND_HALF_UP)
+E         core/plans.py:252: return price.quantize(_CENTS, rounding=ROUND_HALF_UP)
+E         services/affiliate.py:772: total_commission_usd=total.quantize(Decimal("0.01")),
+E         services/affiliate.py:773: first_commission_usd=first_total.quantize(Decimal("0.01")),
+E         services/affiliate.py:774: subsequent_commission_usd=later_total.quantize(Decimal("0.01")),
+E         services/affiliate.py:776: requested_or_paid_usd=held_amount.quantize(Decimal("0.01")),
+E         services/affiliate.py:777: available_usd=max(Decimal("0"), available).quantize(Decimal("0.01")),
+E         services/affiliate.py:813: commission_usd=Decimal(str(totals.get(customer.id, 0))).quantize(
+E         services/affiliate_attribution.py:529: earned = (charged * percent / Decimal("100")).quantize(Decimal("0.01"))
+E         services/affiliate_attribution.py:536: paid_amount_usd=charged.quantize(Decimal("0.01")),
+E         services/plan_replacements.py:127: paid = max(paid_amount, Decimal("0")).quantize(MONEY_QUANTUM, ROUND_HALF_UP)
+E         services/plan_replacements.py:133: return min(paid, (paid * share).quantize(MONEY_QUANTUM, ROUND_HALF_UP))
+E         Use core.money.quantise_half_up(value, quantum) — the one ROUND_HALF_UP statement. (services/trials.py quantises a scan-coverage *fraction*, which is not money, and its line must not name money.)
+E       assert not ['core/plans.py:231: return amount.quantize(_CENTS, rounding=ROUND_HALF_UP)', 'core/plans.py:235: return (amount * kep...Decimal("0.01")),', 'services/affiliate.py:774: subsequent_commission_usd=later_total.quantize(Decimal("0.01")),', ...]
+
+tests\unit\test_invariant_money_on_the_wire.py:955: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_quantize_scan_sees_money_and_leaves_fractions_alone" time="0.002" /><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_plan_offer_payload_prices_are_decimals_not_floats[community]" time="0.003"><failure message="assert False&#10; +  where False = isinstance(9.0, Decimal)">code = 'community'
+
+    @pytest.mark.parametrize("code", sorted(PLAN_DEFINITIONS))
+    def test_plan_offer_payload_prices_are_decimals_not_floats(code: str) -&gt; None:
+        """Every price the payload carries is a ``Decimal`` (or absent, as ``None``).
+    
+        Existing callers are safe because ``Decimal == float`` compares by value, the
+        templates use ``| int``, and the JSON boundary now writes exact numbers. A float
+        here would re-open the landing-page defect the moment ``tojson`` touched it.
+        """
+    
+        payload = plan_offer_payload(code, now=PROMOTION_ENDS_AT - timedelta(days=1))
+        for field in _PRICE_FIELDS:
+            value = payload[field]
+            assert not isinstance(value, float), f"{code}.{field} is a float: {value!r}"
+            assert value is None or isinstance(value, Decimal), (
+                f"{code}.{field} is {type(value).__name__}, not the owner's Decimal/None"
+            )
+        for purchasable in PURCHASABLE_PLAN_CODES:
+&gt;           assert isinstance(plan_offer_payload(purchasable)["monthlyPrice"], Decimal)
+E           assert False
+E            +  where False = isinstance(9.0, Decimal)
+
+tests\unit\test_invariant_money_on_the_wire.py:1009: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_plan_offer_payload_prices_are_decimals_not_floats[creator]" time="0.002"><failure message="assert False&#10; +  where False = isinstance(9.0, Decimal)">code = 'creator'
+
+    @pytest.mark.parametrize("code", sorted(PLAN_DEFINITIONS))
+    def test_plan_offer_payload_prices_are_decimals_not_floats(code: str) -&gt; None:
+        """Every price the payload carries is a ``Decimal`` (or absent, as ``None``).
+    
+        Existing callers are safe because ``Decimal == float`` compares by value, the
+        templates use ``| int``, and the JSON boundary now writes exact numbers. A float
+        here would re-open the landing-page defect the moment ``tojson`` touched it.
+        """
+    
+        payload = plan_offer_payload(code, now=PROMOTION_ENDS_AT - timedelta(days=1))
+        for field in _PRICE_FIELDS:
+            value = payload[field]
+            assert not isinstance(value, float), f"{code}.{field} is a float: {value!r}"
+            assert value is None or isinstance(value, Decimal), (
+                f"{code}.{field} is {type(value).__name__}, not the owner's Decimal/None"
+            )
+        for purchasable in PURCHASABLE_PLAN_CODES:
+&gt;           assert isinstance(plan_offer_payload(purchasable)["monthlyPrice"], Decimal)
+E           assert False
+E            +  where False = isinstance(9.0, Decimal)
+
+tests\unit\test_invariant_money_on_the_wire.py:1009: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_plan_offer_payload_prices_are_decimals_not_floats[demo]" time="0.002"><failure message="AssertionError: demo.monthlyPrice is a float: 0.0&#10;assert not True&#10; +  where True = isinstance(0.0, float)">code = 'demo'
+
+    @pytest.mark.parametrize("code", sorted(PLAN_DEFINITIONS))
+    def test_plan_offer_payload_prices_are_decimals_not_floats(code: str) -&gt; None:
+        """Every price the payload carries is a ``Decimal`` (or absent, as ``None``).
+    
+        Existing callers are safe because ``Decimal == float`` compares by value, the
+        templates use ``| int``, and the JSON boundary now writes exact numbers. A float
+        here would re-open the landing-page defect the moment ``tojson`` touched it.
+        """
+    
+        payload = plan_offer_payload(code, now=PROMOTION_ENDS_AT - timedelta(days=1))
+        for field in _PRICE_FIELDS:
+            value = payload[field]
+&gt;           assert not isinstance(value, float), f"{code}.{field} is a float: {value!r}"
+E           AssertionError: demo.monthlyPrice is a float: 0.0
+E           assert not True
+E            +  where True = isinstance(0.0, float)
+
+tests\unit\test_invariant_money_on_the_wire.py:1004: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_plan_offer_payload_prices_are_decimals_not_floats[full_access]" time="0.002"><failure message="assert False&#10; +  where False = isinstance(9.0, Decimal)">code = 'full_access'
+
+    @pytest.mark.parametrize("code", sorted(PLAN_DEFINITIONS))
+    def test_plan_offer_payload_prices_are_decimals_not_floats(code: str) -&gt; None:
+        """Every price the payload carries is a ``Decimal`` (or absent, as ``None``).
+    
+        Existing callers are safe because ``Decimal == float`` compares by value, the
+        templates use ``| int``, and the JSON boundary now writes exact numbers. A float
+        here would re-open the landing-page defect the moment ``tojson`` touched it.
+        """
+    
+        payload = plan_offer_payload(code, now=PROMOTION_ENDS_AT - timedelta(days=1))
+        for field in _PRICE_FIELDS:
+            value = payload[field]
+            assert not isinstance(value, float), f"{code}.{field} is a float: {value!r}"
+            assert value is None or isinstance(value, Decimal), (
+                f"{code}.{field} is {type(value).__name__}, not the owner's Decimal/None"
+            )
+        for purchasable in PURCHASABLE_PLAN_CODES:
+&gt;           assert isinstance(plan_offer_payload(purchasable)["monthlyPrice"], Decimal)
+E           assert False
+E            +  where False = isinstance(9.0, Decimal)
+
+tests\unit\test_invariant_money_on_the_wire.py:1009: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_plan_offer_payload_prices_are_decimals_not_floats[lifetime]" time="0.002"><failure message="assert False&#10; +  where False = isinstance(9.0, Decimal)">code = 'lifetime'
+
+    @pytest.mark.parametrize("code", sorted(PLAN_DEFINITIONS))
+    def test_plan_offer_payload_prices_are_decimals_not_floats(code: str) -&gt; None:
+        """Every price the payload carries is a ``Decimal`` (or absent, as ``None``).
+    
+        Existing callers are safe because ``Decimal == float`` compares by value, the
+        templates use ``| int``, and the JSON boundary now writes exact numbers. A float
+        here would re-open the landing-page defect the moment ``tojson`` touched it.
+        """
+    
+        payload = plan_offer_payload(code, now=PROMOTION_ENDS_AT - timedelta(days=1))
+        for field in _PRICE_FIELDS:
+            value = payload[field]
+            assert not isinstance(value, float), f"{code}.{field} is a float: {value!r}"
+            assert value is None or isinstance(value, Decimal), (
+                f"{code}.{field} is {type(value).__name__}, not the owner's Decimal/None"
+            )
+        for purchasable in PURCHASABLE_PLAN_CODES:
+&gt;           assert isinstance(plan_offer_payload(purchasable)["monthlyPrice"], Decimal)
+E           assert False
+E            +  where False = isinstance(9.0, Decimal)
+
+tests\unit\test_invariant_money_on_the_wire.py:1009: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_plan_offer_payload_prices_are_decimals_not_floats[lifetime_partner]" time="0.002"><failure message="assert False&#10; +  where False = isinstance(9.0, Decimal)">code = 'lifetime_partner'
+
+    @pytest.mark.parametrize("code", sorted(PLAN_DEFINITIONS))
+    def test_plan_offer_payload_prices_are_decimals_not_floats(code: str) -&gt; None:
+        """Every price the payload carries is a ``Decimal`` (or absent, as ``None``).
+    
+        Existing callers are safe because ``Decimal == float`` compares by value, the
+        templates use ``| int``, and the JSON boundary now writes exact numbers. A float
+        here would re-open the landing-page defect the moment ``tojson`` touched it.
+        """
+    
+        payload = plan_offer_payload(code, now=PROMOTION_ENDS_AT - timedelta(days=1))
+        for field in _PRICE_FIELDS:
+            value = payload[field]
+            assert not isinstance(value, float), f"{code}.{field} is a float: {value!r}"
+            assert value is None or isinstance(value, Decimal), (
+                f"{code}.{field} is {type(value).__name__}, not the owner's Decimal/None"
+            )
+        for purchasable in PURCHASABLE_PLAN_CODES:
+&gt;           assert isinstance(plan_offer_payload(purchasable)["monthlyPrice"], Decimal)
+E           assert False
+E            +  where False = isinstance(9.0, Decimal)
+
+tests\unit\test_invariant_money_on_the_wire.py:1009: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_plan_offer_payload_prices_are_decimals_not_floats[pro]" time="0.002"><failure message="AssertionError: pro.monthlyPrice is a float: 17.0&#10;assert not True&#10; +  where True = isinstance(17.0, float)">code = 'pro'
+
+    @pytest.mark.parametrize("code", sorted(PLAN_DEFINITIONS))
+    def test_plan_offer_payload_prices_are_decimals_not_floats(code: str) -&gt; None:
+        """Every price the payload carries is a ``Decimal`` (or absent, as ``None``).
+    
+        Existing callers are safe because ``Decimal == float`` compares by value, the
+        templates use ``| int``, and the JSON boundary now writes exact numbers. A float
+        here would re-open the landing-page defect the moment ``tojson`` touched it.
+        """
+    
+        payload = plan_offer_payload(code, now=PROMOTION_ENDS_AT - timedelta(days=1))
+        for field in _PRICE_FIELDS:
+            value = payload[field]
+&gt;           assert not isinstance(value, float), f"{code}.{field} is a float: {value!r}"
+E           AssertionError: pro.monthlyPrice is a float: 17.0
+E           assert not True
+E            +  where True = isinstance(17.0, float)
+
+tests\unit\test_invariant_money_on_the_wire.py:1004: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_plan_offer_payload_prices_are_decimals_not_floats[pro_trial]" time="0.002"><failure message="assert False&#10; +  where False = isinstance(9.0, Decimal)">code = 'pro_trial'
+
+    @pytest.mark.parametrize("code", sorted(PLAN_DEFINITIONS))
+    def test_plan_offer_payload_prices_are_decimals_not_floats(code: str) -&gt; None:
+        """Every price the payload carries is a ``Decimal`` (or absent, as ``None``).
+    
+        Existing callers are safe because ``Decimal == float`` compares by value, the
+        templates use ``| int``, and the JSON boundary now writes exact numbers. A float
+        here would re-open the landing-page defect the moment ``tojson`` touched it.
+        """
+    
+        payload = plan_offer_payload(code, now=PROMOTION_ENDS_AT - timedelta(days=1))
+        for field in _PRICE_FIELDS:
+            value = payload[field]
+            assert not isinstance(value, float), f"{code}.{field} is a float: {value!r}"
+            assert value is None or isinstance(value, Decimal), (
+                f"{code}.{field} is {type(value).__name__}, not the owner's Decimal/None"
+            )
+        for purchasable in PURCHASABLE_PLAN_CODES:
+&gt;           assert isinstance(plan_offer_payload(purchasable)["monthlyPrice"], Decimal)
+E           assert False
+E            +  where False = isinstance(9.0, Decimal)
+
+tests\unit\test_invariant_money_on_the_wire.py:1009: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_plan_offer_payload_prices_are_decimals_not_floats[trader]" time="0.002"><failure message="AssertionError: trader.monthlyPrice is a float: 9.0&#10;assert not True&#10; +  where True = isinstance(9.0, float)">code = 'trader'
+
+    @pytest.mark.parametrize("code", sorted(PLAN_DEFINITIONS))
+    def test_plan_offer_payload_prices_are_decimals_not_floats(code: str) -&gt; None:
+        """Every price the payload carries is a ``Decimal`` (or absent, as ``None``).
+    
+        Existing callers are safe because ``Decimal == float`` compares by value, the
+        templates use ``| int``, and the JSON boundary now writes exact numbers. A float
+        here would re-open the landing-page defect the moment ``tojson`` touched it.
+        """
+    
+        payload = plan_offer_payload(code, now=PROMOTION_ENDS_AT - timedelta(days=1))
+        for field in _PRICE_FIELDS:
+            value = payload[field]
+&gt;           assert not isinstance(value, float), f"{code}.{field} is a float: {value!r}"
+E           AssertionError: trader.monthlyPrice is a float: 9.0
+E           assert not True
+E            +  where True = isinstance(9.0, float)
+
+tests\unit\test_invariant_money_on_the_wire.py:1004: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_landing_page_embeds_prices_as_bare_exact_numbers" time="0.025"><failure message="AssertionError: the landing page does not carry 9.00 as an exact bare number — a float prints it as 9.0 (D3 on the browser path) or a writer quoted it (H-3)&#10;assert None&#10; +  where None = &lt;function search at 0x000001EDFAC794E0&gt;('&quot;monthlyPrice&quot;:\\s*9\\.00(?![0-9])', '&lt;!doctype html&gt;\n&lt;html lang=&quot;en&quot; data-consent-analytics=&quot;denied&quot; data-consent-functional=&quot;denied&quot; data-consent-market...ule&quot; src=&quot;http://testserver/static/landing/assets/landing.js?v=20260914-telegram-recovery&quot;&gt;&lt;/script&gt;\n&lt;/body&gt;\n&lt;/html&gt;')&#10; +    where &lt;function search at 0x000001EDFAC794E0&gt; = re.search">def test_the_landing_page_embeds_prices_as_bare_exact_numbers() -&gt; None:
+        """The browser's money contract, proven in the raw HTML of the shipped page.
+    
+        ``Pricing.tsx`` types ``monthlyPrice`` as ``number | null`` and does arithmetic
+        on it, so the page must carry a bare JSON number — and the number must keep the
+        exact cents text (``9.00``, not the ``9.0`` a float writes). This renders the
+        real ``react_site.html`` through the real registered environment: no template
+        and no bundle changed to get here, and the template still embeds
+        ``public_pricing_plans | tojson`` exactly as it always did.
+        """
+    
+        template_text = (_SRC_ROOT / "templates" / "hilal" / "public" / "react_site.html").read_text(
+            encoding="utf-8"
+        )
+        assert '"plans": public_pricing_plans' in template_text, "the page stopped embedding the plans"
+        assert "| tojson" in template_text, "the plans stopped travelling through tojson"
+    
+        when = PROMOTION_ENDS_AT - timedelta(days=1)
+        plans = [{"code": code, **plan_offer_payload(code, now=when)} for code in PUBLIC_PLAN_CODES]
+        html = _landing_html(plans)
+    
+        # ``trader`` is 9.00 during the offer: a bare number, exact cents text.
+&gt;       assert re.search(r'"monthlyPrice":\s*9\.00(?![0-9])', html), (
+            "the landing page does not carry 9.00 as an exact bare number — "
+            "a float prints it as 9.0 (D3 on the browser path) or a writer quoted it (H-3)"
+        )
+E       AssertionError: the landing page does not carry 9.00 as an exact bare number — a float prints it as 9.0 (D3 on the browser path) or a writer quoted it (H-3)
+E       assert None
+E        +  where None = &lt;function search at 0x000001EDFAC794E0&gt;('"monthlyPrice":\\s*9\\.00(?![0-9])', '&lt;!doctype html&gt;\n&lt;html lang="en" data-consent-analytics="denied" data-consent-functional="denied" data-consent-market...ule" src="http://testserver/static/landing/assets/landing.js?v=20260914-telegram-recovery"&gt;&lt;/script&gt;\n&lt;/body&gt;\n&lt;/html&gt;')
+E        +    where &lt;function search at 0x000001EDFAC794E0&gt; = re.search
+
+tests\unit\test_invariant_money_on_the_wire.py:1114: AssertionError</failure></testcase><testcase classname="tests.unit.test_invariant_money_on_the_wire" name="test_the_page_json_writer_is_installed_in_every_template_environment" time="0.002"><failure message="AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'">def test_the_page_json_writer_is_installed_in_every_template_environment() -&gt; None:
+        """``register`` is the one door every router's Jinja environment goes through;
+        wiring the writer there is what keeps ``| tojson`` alive on a ``Decimal``.
+        (Before it, ``tojson`` had ``json.dumps_function = None`` and raised
+        ``TypeError: Object of type Decimal is not JSON serializable``.)"""
+    
+        templates = register(Jinja2Templates(directory=str(_SRC_ROOT / "templates")))
+&gt;       assert templates.env.policies["json.dumps_function"] is money_owner.money_json_dumps
+                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'ai_market_monitor.core.money' has no attribute 'money_json_dumps'
+
+tests\unit\test_invariant_money_on_the_wire.py:1137: AttributeError</failure></testcase></testsuite></testsuites>

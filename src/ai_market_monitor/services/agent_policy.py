@@ -20,6 +20,10 @@ from ai_market_monitor.schemas.agent_control import (
     RunOneTimeScanArgs,
     ValidateCapabilitySelectionArgs,
 )
+from ai_market_monitor.services.ai_provider import (
+    AIProviderConfigError,
+    is_configured,
+)
 from ai_market_monitor.services.entitlements import EntitlementService
 
 ToolClassification = Literal["safe", "guarded", "confirmation_required", "forbidden"]
@@ -66,6 +70,19 @@ class AgentPolicyViolation(ValueError):
         super().__init__(message)
         self.code = code
         self.fatal = fatal
+
+
+def _extension_ai_configured(settings: Settings) -> bool:
+    """Whether the capability-extension draft model holds a usable key.
+
+    Unknown model ids fail closed (the extension stays off) rather than
+    raising through every turn that asks the policy a question.
+    """
+
+    try:
+        return is_configured(settings, settings.capability_extension_draft_model)
+    except AIProviderConfigError:
+        return False
 
 
 @dataclass(slots=True)
@@ -185,7 +202,7 @@ class AgentPolicyService:
         extension_enabled = bool(
             self.settings
             and self.settings.capability_extension_enabled
-            and self.settings.openai_api_key is not None
+            and _extension_ai_configured(self.settings)
         )
         requests_today = 0
         daily_limit = (

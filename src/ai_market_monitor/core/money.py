@@ -39,6 +39,12 @@ one starts, it must use this owner too.
 Rounding matches ``core/plans.price_after_percent`` — the owner of discount
 arithmetic — which quantises to the cent with ``ROUND_HALF_UP``. This module never
 re-decides what a charge is; it only decides how a decided amount is written down.
+Since WP3 the rounding itself lives here too: :func:`quantise_half_up` is the
+system's one ``.quantize`` on money, :func:`json_money_number` is the exact amount
+handed to a page, and :func:`money_json_dumps` — wired as the Jinja ``tojson``
+writer in ``api/template_env.py`` — is what makes that amount arrive in the
+browser as a bare JSON number with its cents text kept. The same D3/H-3 rule, at
+the second money boundary this product has.
 
 The module owns one reading of stored money as well: :func:`money_kept`, the answer
 to "what does this payment still hold after what came back?". Every money reader uses
@@ -50,7 +56,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Final
 
@@ -75,6 +81,21 @@ def minor_units(currency: str) -> int:
     return FIAT_MINOR_UNITS.get((currency or "").strip().upper(), DEFAULT_FIAT_MINOR_UNITS)
 
 
+def quantise_half_up(value: Decimal, quantum: Decimal) -> Decimal:
+    """``value`` to ``quantum``, halves away from zero — the one money rounding.
+
+    This is the system's only ``.quantize`` on money. Decimal's default rounding is
+    ``ROUND_HALF_EVEN`` (banker's rounding), which records ``1.00 × 12.5% = 0.125``
+    as ``0.12`` while this product's discount owner rounds the same half cent to
+    ``0.13``: two rules, one product, money in the middle. Every money path —
+    :func:`quantise` here, the invoice amounts, the commission ledger, the
+    replacement payout, the receipt — reaches ``ROUND_HALF_UP`` through this call
+    and holds no rounding statement of its own.
+    """
+
+    return value.quantize(quantum, rounding=ROUND_HALF_UP)
+
+
 def quantise(amount: Decimal, currency: str) -> Decimal:
     """``amount`` to the currency's minor unit, ``ROUND_HALF_UP``.
 
@@ -84,7 +105,21 @@ def quantise(amount: Decimal, currency: str) -> Decimal:
     """
 
     exponent = Decimal(1).scaleb(-minor_units(currency))
-    return amount.quantize(exponent, rounding=ROUND_HALF_UP)
+    return quantise_half_up(amount, exponent)
+
+
+def json_money_number(amount: Decimal, currency: str = "USD") -> Decimal:
+    """The amount to be written as a JSON **number**, quantised, still a ``Decimal``.
+
+    Pages do arithmetic on money (the React pricing card adds a price up), so the
+    browser must receive a number, not a string — but *this* is the last exact
+    stop, and ``float`` here is the defect it was on the wire: ``float`` prints
+    ``Decimal("9.00")`` as ``9.0`` and cannot represent ``10.05`` at all. Hand the
+    value to :func:`money_json_dumps` (wired as the Jinja ``tojson`` writer) and
+    it reaches the browser as ``9.00`` — a bare JSON number with its cents text.
+    """
+
+    return quantise(amount, currency)
 
 
 #: A complete JSON number token (RFC 8259): an optional minus, an integer part with
@@ -193,6 +228,76 @@ def wire_json_body(
             f"{body.count(quoted)} times in the serialised payload."
         )
     return body.replace(quoted, number_text).encode("utf-8")
+
+
+#: Prefix of the placeholder :func:`money_json_dumps` swaps each ``Decimal`` for.
+#: A deliberate fixed token, so a payload that already carries one fails the
+#: uniqueness check below instead of being quietly rewritten.
+_DECIMAL_PLACEHOLDER: Final[str] = "__hm_decimal__"
+
+
+def money_json_dumps(value: object, **kwargs: object) -> str:
+    """``json.dumps`` for pages: every ``Decimal`` becomes a **bare JSON number**
+    carrying its exact text — ``Decimal("9.00")`` must come out as ``9.00``, not
+    ``9.0`` and not ``"9.00"``.
+
+    This is wired as Jinja's ``tojson`` writer (``templates.env.policies`` in
+    ``api/template_env.py``), which is how the React landing page and the
+    dashboard's plan cards keep their ``number`` contract while the payload holds
+    ``Decimal``: the stdlib encoder can only write a float (inexact, and it drops
+    ``9.00``'s cents text — the D3 defect on the browser path) or quote a string
+    (the wrong type for arithmetic), and an un-wired ``Decimal`` simply raises
+    ``TypeError: Object of type Decimal is not JSON serializable``.
+
+    The technique is the one :func:`wire_json_body` already proves on the provider
+    wire: walk the structure, swap every ``Decimal`` for a unique placeholder
+    string, serialise everything else with ``json.dumps`` — passing ``**kwargs``
+    straight through, so Jinja's ``sort_keys=True`` (and any ``indent``) still
+    applies — then drop each placeholder's quoted form back in as the number text.
+
+    Fails closed with ``ValueError``, never a silent rewrite: a non-finite
+    ``Decimal`` is not money and not a JSON number, and a placeholder that is not
+    unique in the serialised text would make its swap a guess.
+    """
+
+    replacements: dict[str, str] = {}
+
+    def walk(node: object) -> object:
+        if isinstance(node, Decimal):
+            if not node.is_finite():
+                raise ValueError(
+                    f"{node} is not a finite money amount; it cannot be written "
+                    "as a JSON number on a page."
+                )
+            token = f"{_DECIMAL_PLACEHOLDER}{len(replacements)}__"
+            # ``str`` of a Decimal is its exact text (trailing zeros kept). A
+            # quantised amount is always plain minor-unit digits; an unquantised
+            # one may carry an exponent (``1E+2``), which is still valid JSON
+            # number syntax — no float is created on either path.
+            replacements[token] = str(node)
+            return token
+        if isinstance(node, Mapping):
+            return {key: walk(item) for key, item in node.items()}
+        if isinstance(node, (list, tuple)):
+            # json.dumps writes a tuple as a JSON array anyway; walking it as a
+            # list changes no bytes and reaches a Decimal held inside it.
+            return [walk(item) for item in node]
+        return node
+
+    # ``json.dumps`` is typed option-by-option; the policy that reaches here is
+    # Jinja's (``sort_keys``/``indent``), so the options travel untyped on purpose.
+    dumps: Callable[..., str] = json.dumps
+    body = dumps(walk(value), **kwargs)
+    for token, number_text in replacements.items():
+        quoted = json.dumps(token)
+        if body.count(quoted) != 1:
+            raise ValueError(
+                "a Decimal cannot be placed safely: the placeholder "
+                f"{token!r} appears {body.count(quoted)} times in the serialised "
+                "text, so the swap would be a guess."
+            )
+        body = body.replace(quoted, number_text)
+    return body
 
 
 def money_kept(paid_amount: Decimal, refunded_amount: Decimal | None) -> Decimal:

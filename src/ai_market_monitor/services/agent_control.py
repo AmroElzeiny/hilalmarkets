@@ -41,6 +41,11 @@ from ai_market_monitor.services.agent_tools import (
     strict_json_schema,
 )
 from ai_market_monitor.services.ai_model_routing import AISetupModelRoute, select_setup_model
+from ai_market_monitor.services.ai_provider import (
+    AIProviderConfigError,
+    build_responses_request,
+    extract_response_text,
+)
 from ai_market_monitor.services.ai_setup_evaluator_control import (
     consume_evaluator_llm_fault,
     evaluator_prompt_appendix,
@@ -61,6 +66,7 @@ class AgentResponsesClient(Protocol):
         payload: dict[str, Any],
         *,
         timeout_seconds: float,
+        session_key: str | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -74,21 +80,29 @@ class OpenAIAgentResponsesClient:
         self.settings = settings
         self.transport = transport
 
-    async def create(self, payload: dict[str, Any], *, timeout_seconds: float) -> dict[str, Any]:
-        if self.settings.openai_api_key is None:
-            raise ValueError("OPENAI_API_KEY is not configured")
+    async def create(
+        self,
+        payload: dict[str, Any],
+        *,
+        timeout_seconds: float,
+        session_key: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            request = build_responses_request(
+                self.settings,
+                str(payload.get("model") or ""),
+                session_key=session_key,
+            )
+        except AIProviderConfigError as exc:
+            raise ValueError(str(exc)) from exc
         injected = consume_evaluator_llm_fault()
         if injected is not None:
             return injected
-        headers = {
-            "Authorization": f"Bearer {self.settings.openai_api_key.get_secret_value()}",
-            "Content-Type": "application/json",
-        }
         response = await provider_request(
             self.settings,
             "POST",
-            f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
-            provider="openai",
+            request.url,
+            provider=request.provider,
             operation="agent_turn",
             # One paid answer per turn: this call is not repeated.
             retry=False,
@@ -97,7 +111,7 @@ class OpenAIAgentResponsesClient:
             deadline_seconds=max(1.0, timeout_seconds),
             mutation_committed=False,
             transport=self.transport,
-            headers=headers,
+            headers=request.headers,
             json=payload,
         )
         response.raise_for_status()
@@ -292,15 +306,29 @@ class AgentControlService:
                     stop_reason = "cost_budget"
                     break
                 await session.commit()
+                # Group every turn of one conversation for the provider. The key
+                # is the conversation id (chat.id): stable, random-looking after
+                # the uuid5 step in ai_provider, and never a user id or email.
+                turn_timeout = min(
+                    remaining_seconds,
+                    float(self.settings.openai_timeout_seconds),
+                )
                 try:
                     async with asyncio.timeout(remaining_seconds):
-                        response = await self.client.create(
-                            request_payload,
-                            timeout_seconds=min(
-                                remaining_seconds,
-                                float(self.settings.openai_timeout_seconds),
-                            ),
-                        )
+                        try:
+                            response = await self.client.create(
+                                request_payload,
+                                timeout_seconds=turn_timeout,
+                                session_key=str(chat.id),
+                            )
+                        except TypeError as exc:
+                            if "session_key" not in str(exc):
+                                raise
+                            # Test doubles that predate conversation grouping.
+                            response = await self.client.create(
+                                request_payload,
+                                timeout_seconds=turn_timeout,
+                            )
                 except (TimeoutError, httpx.HTTPError, ValueError, KeyError) as exc:
                     run.error_type = type(exc).__name__
                     if isinstance(exc, TimeoutError):
@@ -1143,18 +1171,7 @@ def _bounded_budget_response() -> AgentFinalResponse:
 
 
 def _response_output_text(payload: dict[str, Any]) -> str:
-    direct = payload.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct
-    for item in payload.get("output", []):
-        if not isinstance(item, dict) or item.get("type") != "message":
-            continue
-        for content in item.get("content", []):
-            if isinstance(content, dict) and content.get("type") in {"output_text", "text"}:
-                value = content.get("text")
-                if isinstance(value, str) and value.strip():
-                    return value
-    raise ValueError("OpenAI response did not contain a final text item")
+    return extract_response_text(payload)
 
 
 def _parse_agent_final(value: str) -> AgentFinalResponse:
@@ -1209,8 +1226,15 @@ def _request_cost_upper_bound(
     *,
     already_spent: float,
 ) -> float:
-    model = str(payload.get("model") or settings.openai_model)
-    pricing = settings.openai_model_pricing_usd_per_million[model]
+    # No fallback to the stale default: the caller always sets the payload's
+    # model from its own route, and an unpriced or unknown model is refused
+    # rather than costed as something else.
+    model = str(payload.get("model") or "")
+    pricing = settings.openai_model_pricing_usd_per_million.get(model)
+    if not pricing:
+        raise AIProviderConfigError(
+            f"Cannot estimate a turn for unknown or unpriced model {model!r}."
+        )
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     estimated_input_tokens = max(1, (len(serialized) + 3) // 4)
     maximum_output_tokens = int(payload.get("max_output_tokens") or 0)

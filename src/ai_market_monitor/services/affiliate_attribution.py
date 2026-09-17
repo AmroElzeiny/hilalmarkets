@@ -45,7 +45,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_market_monitor.core.money import money_kept
+from ai_market_monitor.core.money import money_kept, quantise_half_up
 from ai_market_monitor.core.plans import is_discount_code_shaped
 from ai_market_monitor.db.models import (
     AffiliateApplication,
@@ -526,14 +526,14 @@ class ReferralAttributionService:
             return None
 
         percent = rates_for(application).percent_for(kind)
-        earned = (charged * percent / Decimal("100")).quantize(Decimal("0.01"))
+        earned = quantise_half_up(charged * percent / Decimal("100"), Decimal("0.01"))
         commission = AffiliateCommission(
             affiliate_user_id=relationship.referrer_user_id,
             relationship_id=relationship.id,
             customer_user_id=customer_user_id,
             customer_name=customer_display_name(customer),
             sequence_kind=kind,
-            paid_amount_usd=charged.quantize(Decimal("0.01")),
+            paid_amount_usd=quantise_half_up(charged, Decimal("0.01")),
             commission_percent=percent,
             commission_usd=earned,
             earned_at=occurred_at or datetime.now(UTC),

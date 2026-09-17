@@ -54,6 +54,7 @@ from ai_market_monitor.db.models import (
     UserIdentity,
 )
 from ai_market_monitor.db.models.enums import IdentityProvider, SubscriptionStatus
+from ai_market_monitor.services.billing import OPEN_ATTEMPT_STATUSES
 from ai_market_monitor.services.plan_changes import reason_words
 
 __all__ = [
@@ -72,9 +73,16 @@ PAGE_SIZE: Final[int] = 25
 #: pulls an unbounded number of rows.
 TIMELINE_LIMIT: Final[int] = 200
 
-#: A checkout attempt that really took money. Everything else is an abandoned or failed
-#: attempt and is counted separately, because "tried to pay four times" and "paid four
-#: times" are very different facts about a customer.
+#: A checkout attempt that really took money, because "tried to pay four times" and "paid
+#: four times" are very different facts about a customer.
+#:
+#: This is not the other half of a two-way split. An attempt that is neither paid nor
+#: still open — ``refunded``, ``cancelled``, ``failed``, ``expired``, ``partially_paid``
+#: — is a finished attempt that never became money: it is neither counted here nor as
+#: unfinished. The unfinished count asks the positive question "is it still open?"
+#: against :data:`ai_market_monitor.services.billing.OPEN_ATTEMPT_STATUSES`, imported
+#: above, and never "is it not paid?". Counting a returned payment as an attempt the
+#: customer still owes was defect R5.
 PAID_STATUSES: Final[frozenset[str]] = frozenset({"completed", "succeeded", "paid"})
 
 
@@ -383,7 +391,11 @@ class SystemBrainPaymentsService:
         unfinished = await self.session.scalar(
             select(func.count(BillingCheckoutAttempt.id)).where(
                 BillingCheckoutAttempt.user_id == user_id,
-                BillingCheckoutAttempt.status.not_in(PAID_STATUSES),
+                # Unfinished means still open, not "not paid". The three words are the
+                # billing service's own list (:data:`OPEN_ATTEMPT_STATUSES`), so a
+                # refunded, cancelled, failed or expired attempt — an attempt that is
+                # over — is never shown to staff as money still owed by the customer.
+                BillingCheckoutAttempt.status.in_(OPEN_ATTEMPT_STATUSES),
             )
         )
         total = sum((row.amount for row in payments), start=Decimal("0"))

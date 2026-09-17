@@ -119,7 +119,7 @@ async def test_system_brain_assistant_fails_closed_on_provider_error(
     monkeypatch,
 ):
     settings = test_context["settings"]
-    settings.openai_api_key = "test-openai-key"
+    settings.opencode_go_api_key = "test-openai-key"
     settings.system_brain_ai_enabled = True
     client = FakeResponsesClient(httpx.ConnectError("provider unavailable"))
     service = SystemBrainAssistantService(settings, client=client)

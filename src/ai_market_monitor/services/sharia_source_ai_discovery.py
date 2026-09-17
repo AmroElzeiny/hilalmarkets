@@ -39,6 +39,15 @@ from typing import Any
 import httpx
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.services.ai_provider import (
+    AIProviderConfigError,
+    build_responses_request,
+    extract_response_text,
+    is_configured,
+    provider_credential_name,
+    resolve_feature_model,
+    resolve_provider,
+)
 from ai_market_monitor.services.provider_reliability import ProviderCallError
 from ai_market_monitor.services.provider_runtime import provider_call
 from ai_market_monitor.services.sharia_source_catalog import SearchResult
@@ -105,10 +114,19 @@ class AISourceDiscovery:
     def configured(self) -> bool:
         """Whether asking a model is switched on and possible."""
 
-        return bool(
-            self.settings.sharia_source_ai_discovery_enabled
-            and self.settings.openai_api_key is not None
-        )
+        if not self.settings.sharia_source_ai_discovery_enabled:
+            return False
+        try:
+            model = resolve_feature_model(
+                self.settings.sharia_source_ai_model,
+                setting_name="SHARIA_SOURCE_AI_MODEL",
+            )
+        except AIProviderConfigError:
+            return False
+        try:
+            return is_configured(self.settings, model)
+        except AIProviderConfigError:
+            return False
 
     def requirement(self) -> str:
         """What is missing, said plainly, for a person reading a case."""
@@ -118,8 +136,19 @@ class AISourceDiscovery:
                 "Asking a model for addresses is switched off "
                 "(SHARIA_SOURCE_AI_DISCOVERY_ENABLED=false)."
             )
-        if self.settings.openai_api_key is None:
-            return "Asking a model for addresses needs OPENAI_API_KEY."
+        try:
+            model = resolve_feature_model(
+                self.settings.sharia_source_ai_model,
+                setting_name="SHARIA_SOURCE_AI_MODEL",
+            )
+            provider = resolve_provider(model)
+        except AIProviderConfigError as exc:
+            return str(exc)
+        if not is_configured(self.settings, model):
+            return (
+                "Asking a model for addresses needs "
+                f"{provider_credential_name(provider)}."
+            )
         return ""
 
     async def suggest(
@@ -194,23 +223,23 @@ class AISourceDiscovery:
         }
 
     async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
-        api_key = self.settings.openai_api_key
-        if api_key is None:
-            raise ValueError("No API key is configured.")
+        try:
+            details = build_responses_request(
+                self.settings, str(payload.get("model") or "")
+            )
+        except AIProviderConfigError as exc:
+            raise ValueError(str(exc)) from exc
         outcome = await provider_call(
             self.settings,
             "POST",
-            f"{str(self.settings.openai_base_url).rstrip('/')}/responses",
-            provider="openai",
+            details.url,
+            provider=details.provider,
             operation="sharia_source_discovery",
             model=str(payload.get("model") or ""),
             timeout=self.settings.sharia_source_ai_timeout_seconds,
             mutation_committed=False,
             transport=self.transport,
-            headers={
-                "Authorization": f"Bearer {api_key.get_secret_value()}",
-                "Content-Type": "application/json",
-            },
+            headers=details.headers,
             json=payload,
         )
         response = outcome.response
@@ -220,16 +249,10 @@ class AISourceDiscovery:
 
 
 def _output_text(response: dict[str, Any]) -> str:
-    direct = response.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct.strip()
-    parts: list[str] = []
-    for item in response.get("output") or []:
-        if isinstance(item, dict) and item.get("type") == "message":
-            for content in item.get("content") or []:
-                if isinstance(content, dict) and isinstance(content.get("text"), str):
-                    parts.append(content["text"])
-    return "".join(parts)
+    try:
+        return extract_response_text(response)
+    except ValueError:
+        return ""
 
 
 def _rows_to_results(response: dict[str, Any]) -> tuple[SearchResult, ...]:

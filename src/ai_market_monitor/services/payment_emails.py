@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.dashboard_paths import MONITOR_PATH
+from ai_market_monitor.core.money import quantise_half_up
 from ai_market_monitor.core.plans import PLAN_LIMIT_WORDS, UNLIMITED_SYMBOL_CAP
 from ai_market_monitor.db.models import (
     BillingCheckoutAttempt,
@@ -521,7 +522,8 @@ def _decimal_or_none(value: Any) -> Decimal | None:
     if value in (None, ""):
         return None
     try:
-        return Decimal(str(value)).quantize(Decimal("0.01"))
+        # The receipt's money, to the cent, through the one rounding owner.
+        return quantise_half_up(Decimal(str(value)), Decimal("0.01"))
     except (InvalidOperation, ValueError):
         return None
 

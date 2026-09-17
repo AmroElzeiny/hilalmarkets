@@ -1,0 +1,827 @@
+﻿[0m
+> hm-supervisor · muse-spark-1.3-contributor
+[0m
+[0m→ [0mRead CLAUDE.md
+[0m→ [0mRead .hm-orchestrator/policy/ROUTING_POLICY.md
+[0m→ [0mRead .hm-orchestrator/models/LIVE_MODELS.md
+[0m→ [0mRead .hm-orchestrator/models/ROLE_MODEL_MAP.md
+[0m→ [0mRead .hm-orchestrator/policy/SUPERVISOR_REPORT_CONTRACT.md
+[0m→ [0mRead .hm-orchestrator/runs/20260917T171532Z-1c371707/BASELINE_STATUS.txt
+[0m→ [0mRead .hm-orchestrator/models/MODEL_METADATA_RULES.md
+[0m→ [0mRead .hm-orchestrator/runs/20260916T184200Z-dd1e00e6/MISSION.md
+[0m→ [0mRead .hm-orchestrator/runs/20260916T184200Z-dd1e00e6/BASELINE_STATUS.txt
+[0m
+[0m# [0mTodos
+[•] Establish baseline git state + mission R IDs
+[ ] WP-A: verify/finish WP4+WP5 (R15-R21) + joint milestone
+[ ] WP-B: two independent reviews (logic glm + adversarial qwen)
+[ ] WP-C: re-establish WP3 real-call evidence
+[ ] WP-D: final verification (ruff/mypy/pytest/integration)
+[ ] Final adversarial pass + WP-E reports (JSON+MD validated)
+[0m
+[0m→ [0mRead .hm-orchestrator/runs/20260917T171532Z-1c371707
+[0m→ [0mRead .agents/commands.json
+[0m→ [0mRead .hm-orchestrator/policy/supervisor-report.schema.json
+[0m
+[0m$ [0mgit status --porcelain; echo "---BRANCH---"; git branch --show-current; echo "---HEAD---"; git rev-parse HEAD
+M .env.example
+ M .env.production.example
+ M .hm-orchestrator/current/MISSION.md
+ M .hm-orchestrator/current/RUN.json
+ M .hm-orchestrator/current/VISUAL_CONTRACT.md
+ M .hm-orchestrator/models/LIVE_ENDPOINT.json
+ M .hm-orchestrator/models/LIVE_MODELS.md
+ M .hm-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+ M .hm-orchestrator/models/LIVE_MODEL_IDS.txt
+ M .hm-orchestrator/models/ROLE_MODEL_MAP.md
+ M .hm-orchestrator/policy/ROUTING_POLICY.md
+ M .hm-orchestrator/runs/20260913T224025Z-95c82040/WP1_AFTER.xml
+ M .hm-orchestrator/runs/20260913T224025Z-95c82040/WP1_NEIGHBOURS.xml
+ M .opencode/agents/hm-direct-read.md
+ M .opencode/agents/hm-direct-write.md
+ M .opencode/agents/hm-explorer.md
+ M .opencode/agents/hm-reviewer-adversarial.md
+ M .opencode/agents/hm-reviewer-logic.md
+ M .opencode/agents/hm-reviewer-visual.md
+ M .opencode/agents/hm-supervisor-deep.md
+ M .opencode/agents/hm-supervisor.md
+ M .opencode/agents/hm-test-debugger.md
+ M .opencode/agents/hm-worker-fast.md
+ M .opencode/agents/hm-worker-strong.md
+ M CLAUDE.md
+ M src/ai_market_monitor/api/routers/dashboard_api.py
+ M src/ai_market_monitor/api/routers/public.py
+ M src/ai_market_monitor/api/template_env.py
+ M src/ai_market_monitor/core/config.py
+ M src/ai_market_monitor/core/money.py
+ M src/ai_market_monitor/core/plans.py
+ M src/ai_market_monitor/core/startup.py
+ M src/ai_market_monitor/schemas/hilal_chat.py
+ M src/ai_market_monitor/services/affiliate.py
+ M src/ai_market_monitor/services/affiliate_attribution.py
+ M src/ai_market_monitor/services/agent_control.py
+ M src/ai_market_monitor/services/agent_policy.py
+ M src/ai_market_monitor/services/billing.py
+ M src/ai_market_monitor/services/hilal_chat.py
+ M src/ai_market_monitor/services/hilal_chat_agent.py
+ M src/ai_market_monitor/services/hilal_chat_knowledge.py
+ M src/ai_market_monitor/services/openai_structured_call.py
+ M src/ai_market_monitor/services/payment_emails.py
+ M src/ai_market_monitor/services/plan_replacements.py
+ M src/ai_market_monitor/services/provider_credentials.py
+ M src/ai_market_monitor/services/public_chat.py
+ M src/ai_market_monitor/services/public_support_ai.py
+ M src/ai_market_monitor/services/security_review.py
+ M src/ai_market_monitor/services/sharia_research.py
+ M src/ai_market_monitor/services/sharia_source_ai_discovery.py
+ M src/ai_market_monitor/services/system_brain_agent.py
+ M src/ai_market_monitor/services/system_brain_assistant.py
+ M src/ai_market_monitor/services/system_brain_payments.py
+ M src/ai_market_monitor/static/hm-connections-test.js
+ M src/ai_market_monitor/static/hm-market-test.js
+ M src/ai_market_monitor/static/hm-monitor-test.js
+ M src/ai_market_monitor/static/hm-opportunities-test.js
+ M src/ai_market_monitor/static/hm-page-context.js
+ M src/ai_market_monitor/static/hm-passport-test.js
+ M src/ai_market_monitor/static/hm-settings-test.js
+ M src/ai_market_monitor/static/hm-subscription-test.js
+ M src/ai_market_monitor/static/hm-support-test.js
+ M src/ai_market_monitor/static/hm-watchlists-test.js
+ M src/ai_market_monitor/templates/hilal/dashboard_test/research.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/research_detail.html
+ M tests/conftest.py
+ M tests/integration/test_public_chat_api.py
+ M tests/integration/test_system_brain_payments.py
+ M tests/unit/test_invariant_money_on_the_wire.py
+ M tests/unit/test_reliability_security.py
+ M tests/unit/test_system_brain_assistant.py
+ M tests/unit/test_system_brain_operational_agent.py
+ M tools/hm-orchestrator/run-model.ps1
+ M tools/hm-orchestrator/verify-system.ps1
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP24_NEIGHBOURS.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP2_AFTER.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP2_BEFORE.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP3_AFTER.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP3_BEFORE.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP3_DESIGN.md
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP3_NEIGHBOURS.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP4_AFTER.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/WP4_BEFORE.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_LOGIC_R1R3.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_LOGIC_WP2WP4.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_LOGIC_partial_only.xml
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_MONEY_DIFF_committed.patch
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_MONEY_DIFF_committed_and_worktree.patch
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_MONEY_DIFF_worktree.patch
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_negative_total.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_refund_edges.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_revalue_ticket.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_scan_holes.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_adv_stripe_cumulative.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_collision.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_decimal_key.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_edges.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_kwargs.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_normaliser.py
+?? .hm-orchestrator/runs/20260913T224025Z-95c82040/_logic_sci.py
+?? .hm-orchestrator/runs/20260916T182445Z-e1b1762c/
+?? .hm-orchestrator/runs/20260916T184200Z-dd1e00e6/
+?? .hm-orchestrator/runs/20260917T171532Z-1c371707/
+?? src/ai_market_monitor/services/ai_provider.py
+?? src/ai_market_monitor/static/hm-page-notes.js
+?? src/ai_market_monitor/static/hm-research-test.js
+?? tests/browser/test_hilal_page_context_e2e.py
+?? tests/integration/test_hilal_chat_evidence.py
+?? tests/unit/test_invariant_active_provider.py
+?? tests/unit/test_invariant_ai_provider.py
+?? tests/unit/test_invariant_cancellation_time.py
+?? tests/unit/test_invariant_hilal_page_context.py
+?? tests/unit/test_invariant_unfinished_attempts.py
+---BRANCH---
+main
+---HEAD---
+9a19d488746541b59ef92874ebc1a58a4bd95c36
+[0m
+[0m• [0mWP-A finish Hilal WP4+WP5[90m Hm-Worker-Strong Agent[0m
+[0m
+[0m$ [0mls $env:TEMP\opencode 2>$null; echo "---"; ls $env:TEMP\hm-live 2>$null; echo "---"; Get-ChildItem -LiteralPath ".hm-orchestrator\runs\20260916T184200Z-dd1e00e6" | Select-Object Name
+Directory: C:\Users\amroe\AppData\Local\Temp\opencode
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+Mode                 LastWriteTime         Length Name                                                                 
+----                 -------------         ------ ----                                                                 
+d-----         9/13/2026   9:50 PM                bench_manifest_check                                                 
+d-----         9/13/2026  11:36 AM                d1_pre                                                               
+d-----         9/13/2026   3:26 PM                d4probe                                                              
+d-----         9/13/2026   9:52 PM                dryreport                                                            
+d-----         9/10/2026   8:30 AM                gap_debug                                                            
+d-----         9/13/2026   9:29 PM                h3probe                                                              
+d-----         9/13/2026   1:41 AM                hm-crops                                                             
+d-----         9/13/2026   1:36 AM                hmcrops                                                              
+d-----         9/13/2026   1:29 AM                hm_crops                                                             
+d-----         9/16/2026  11:39 PM                missionB_backup                                                      
+d-----         9/16/2026  11:56 PM                missionB_backup2                                                     
+d-----         9/16/2026  11:27 PM                p2_baseline                                                          
+d-----         9/13/2026   1:43 AM                po3_compile                                                          
+d-----         9/13/2026   1:51 AM                po3_compile2                                                         
+d-----         9/13/2026   2:42 AM                po3_compile3                                                         
+d-----         9/10/2026   8:29 AM                sell_debug                                                           
+d-----         9/14/2026   4:56 AM                wp24_fixed                                                           
+d-----         9/13/2026  10:13 PM                wp2_worker                                                           
+d-----         9/16/2026  11:27 PM                wp3                                                                  
+d-----         9/13/2026   3:46 AM                wp4_falsify                                                          
+d-----         9/14/2026   4:52 AM                __pycache__                                                          
+-a----         9/16/2026  11:52 PM           2083 add_hilal_evidence_cap.py                                            
+-a----         9/10/2026   9:23 PM            243 adj.txt                                                              
+-a----         9/13/2026   9:25 PM         164182 adjacent_after.xml                                                   
+-a----         9/14/2026   4:52 AM            995 apply_edits.py                                                       
+-a----         9/13/2026   5:08 AM          24656 baseline_market_data.py                                              
+-a----         9/13/2026   4:01 AM          47076 bybitbridge_head.mqh                                                 
+-a----         9/10/2026   9:44 PM            571 check_plan_is_on_sale.py                                             
+-a----         9/16/2026  10:48 PM            704 collect.txt                                                          
+-a----         9/16/2026  10:49 PM            704 collect2.txt                                                         
+-a----         9/13/2026   2:04 AM          81036 Config_HEAD.mqh                                                      
+-a----         9/12/2026   6:48 PM          53786 corner_landing-corner-1024x768.png                                   
+-a----         9/12/2026   6:48 PM          36228 corner_landing-corner-1440x900.png                                   
+-a----         9/12/2026   6:48 PM          24927 corner_landing-corner-390x844.png                                    
+-a----         9/12/2026   6:48 PM          33484 corner_landing-corner-reduced-motion-1440x900.png                    
+-a----         9/13/2026   1:24 AM           7663 crop-banner-right.png                                                
+-a----         9/13/2026   1:24 AM           5739 crop-bottomright.png                                                 
+-a----         9/13/2026   1:24 AM          23868 crop-filter.png                                                      
+-a----         9/13/2026  11:36 AM           9299 d1_make_pre_tree.py                                                  
+-a----         9/13/2026  11:28 AM           1091 d1_probe2_test.py                                                    
+-a----         9/13/2026  11:27 AM           3423 d1_probe_test.py                                                     
+-a----         9/13/2026   3:11 PM           1562 d4_probe.py                                                          
+-a----         9/13/2026   3:16 PM           5980 d4_toggle.py                                                         
+-a----         9/10/2026   8:44 AM           1683 dbg4.py                                                              
+-a----         9/10/2026   8:43 AM           2886 dbg_bybit.py                                                         
+-a----         9/10/2026   8:49 AM           4221 debug_bybit_tests.py                                                 
+-a----         9/10/2026   8:50 AM           2485 debug_gap.py                                                         
+-a----         9/10/2026  12:52 AM           1103 debug_parser.py                                                      
+-a----         9/10/2026  12:52 AM            742 debug_parser2.py                                                     
+-a----         9/10/2026  12:53 AM            439 debug_parser3.py                                                     
+-a----         9/10/2026  12:54 AM            563 debug_parser4.py                                                     
+-a----         9/14/2026   4:53 AM           2700 edit_bridge_helper.py                                                
+-a----         9/14/2026   4:53 AM           3054 edit_bridge_menu.py                                                  
+-a----         9/14/2026   4:53 AM           2297 edit_bridge_menu2.py                                                 
+-a----         9/14/2026   4:52 AM           1348 edit_config.py                                                       
+-a----         9/13/2026   1:55 PM           5987 edit_gate.py                                                         
+-a----         9/13/2026   1:54 PM          31483 edit_provider.py                                                     
+-a----         9/16/2026  10:43 PM            326 full2.txt                                                            
+-a----         9/16/2026  10:43 PM              0 full3.txt                                                            
+-a----         9/10/2026   9:21 PM             81 full_checkout.txt                                                    
+-a----         9/16/2026  10:50 PM            326 full_default.txt                                                     
+-a----         9/16/2026  10:48 PM            326 full_norand.txt                                                      
+-a----         9/10/2026   8:29 AM           1901 gap_debug.py                                                         
+-a----         9/13/2026   2:24 AM        2153106 head_tradeengine.txt                                                 
+-a----         9/13/2026   2:24 AM        1076563 head_tradeengine_utf8.txt                                            
+-a----         9/16/2026  11:59 PM           6814 hilal_live_turn.py                                                   
+-a----         9/13/2026   1:52 PM            573 inspect.py                                                           
+-a----         9/10/2026   9:25 PM             81 inv.txt                                                              
+-a----         9/13/2026   3:14 PM          22859 issues_final_D4.py                                                   
+-a----         9/10/2026   9:25 PM             51 jinja.txt                                                            
+-a----         9/10/2026   2:23 AM            524 jinja_test.py                                                        
+-a----         9/10/2026   2:23 AM            578 jinja_test2.py                                                       
+-a----         9/10/2026   2:23 AM            484 jinja_test3.py                                                       
+-a----         9/13/2026   4:01 AM          39958 jsonlite_head.mqh                                                    
+-a----         9/12/2026   6:48 PM          24394 label10x_landing-corner-1024x768.png                                 
+-a----         9/12/2026   6:48 PM          22707 label10x_landing-corner-1440x900.png                                 
+-a----         9/12/2026   6:48 PM          27149 label10x_landing-corner-390x844.png                                  
+-a----         9/12/2026   6:48 PM          18435 label10x_landing-corner-reduced-motion-1440x900.png                  
+-a----         9/16/2026  10:23 PM            164 lockscope.txt                                                        
+-a----         9/16/2026  10:46 PM            164 lock_ai.txt                                                          
+-a----         9/13/2026   3:42 AM          34338 market_data.py.prefix                                                
+-a----         9/16/2026  10:41 PM            164 matrix.txt                                                           
+-a----         9/16/2026  11:40 PM          73098 mission_b.diff.txt                                                   
+-a----         9/13/2026   9:20 PM          25999 money_after.xml                                                      
+-a----         9/13/2026   9:19 PM          67238 money_before.xml                                                     
+-a----         9/13/2026   9:30 PM            656 money_final.txt                                                      
+-a----         9/13/2026   9:30 PM          25999 money_final.xml                                                      
+-a----         9/10/2026   9:19 PM             81 new_copy.txt                                                         
+-a----         9/16/2026  11:43 PM            226 p1.log                                                               
+-a----         9/16/2026  11:43 PM           9644 p1col.log                                                            
+-a----         9/16/2026  11:43 PM            988 p2.log                                                               
+-a----         9/13/2026   9:28 PM            708 peek_rd.py                                                           
+-a----         9/13/2026   2:04 AM          23362 preset_HEAD.set                                                      
+-a----         9/12/2026   7:46 AM           4643 probe_reject_identity.py                                             
+-a----         9/12/2026   7:47 AM           7912 probe_retry_identity.py                                              
+-a----         9/13/2026   9:26 PM           2218 probe_wire_bytes.py                                                  
+-a----         9/10/2026  12:39 AM           6937 pro_pay_probe.py                                                     
+-a----         9/16/2026  10:40 PM           1440 pytest_out.txt                                                       
+-a----         9/10/2026   4:12 AM           4377 repair_report_shape.py                                               
+-a----         9/12/2026  11:13 PM           1389 repro_dedupe_key_pre.py                                              
+-a----         9/13/2026   5:03 AM           4912 review_scratch_verify.py                                             
+-a----         9/10/2026  10:29 PM            772 search_static.py                                                     
+-a----         9/10/2026   8:29 AM           2275 sell_debug.py                                                        
+-a----         9/16/2026  10:41 PM            164 single.txt                                                           
+-a----         9/16/2026  10:47 PM            164 subset.txt                                                           
+-a----         9/13/2026   2:18 AM          32743 te.diff                                                              
+-a----         9/13/2026   3:27 AM          28496 test_bybit_spot_universe_market.py.prefix                            
+-a----         9/13/2026   2:03 AM        2153106 TE_HEAD.mqh                                                          
+-a----         9/12/2026   6:48 PM          13523 top_landing-corner-1024x768.png                                      
+-a----         9/12/2026   6:48 PM          14076 top_landing-corner-1440x900.png                                      
+-a----         9/12/2026   6:48 PM           9758 top_landing-corner-390x844.png                                       
+-a----         9/12/2026   6:48 PM          14076 top_landing-corner-reduced-motion-1440x900.png                       
+-a----         9/13/2026   2:18 AM          65482 tradeengine_diff.txt                                                 
+-a----         9/13/2026   2:18 AM          65482 tradeengine_diff_clean.txt                                           
+-a----         9/13/2026   2:18 AM          65482 tradeengine_diff_utf8.txt                                            
+-a----         9/13/2026   2:19 AM          32745 tradeengine_diff_utf8b.txt                                           
+-a----         9/10/2026   9:18 PM            243 unit_copy.txt                                                        
+-a----         9/13/2026   9:22 PM          40848 verify_after.xml                                                     
+-a----         9/13/2026   1:54 PM            855 verify_provider.py                                                   
+-a----         9/13/2026   2:57 AM          15580 wp1_bridge.diff                                                      
+-a----         9/13/2026   2:58 AM          25766 wp1_bridge2.diff                                                     
+-a----         9/13/2026   2:57 AM           1003 wp1_config.diff                                                      
+-a----         9/13/2026   2:57 AM           4645 wp1_json.diff                                                        
+-a----         9/13/2026   2:55 AM           4295 wp2_behavior_check.py                                                
+-a----         9/13/2026   2:52 AM           1624 wp2_config_check.py                                                  
+-a----         9/16/2026  10:19 PM           2913 wp2_env_examples.py                                                  
+-a----         9/16/2026  10:20 PM           4328 wp2_env_real.py                                                      
+-a----         9/16/2026  10:42 PM          49823 wp2_junit.xml                                                        
+-a----         9/16/2026  10:46 PM         229116 wp2_milestone.xml                                                    
+-a----         9/13/2026   2:56 AM           2853 wp2_r4_check.py                                                      
+-a----         9/14/2026   5:53 AM            993 wp3_float_keys.py                                                    
+-a----         9/14/2026   5:40 AM            988 wp3_float_scan.py                                                    
+-a----         9/16/2026   1:49 AM           2668 wp3_inspect.py                                                       
+-a----         9/16/2026  11:18 PM           7522 wp3_measure.py                                                       
+---
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+    Directory: C:\Users\amroe\AppData\Local\Temp\hm-live
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+Mode                 LastWriteTime         Length Name                                                                 
+----                 -------------         ------ ----                                                                 
+-a----         9/16/2026  11:59 PM           6814 hilal_live_turn.py                                                   
+---
+System.Management.Automation.RemoteException
+Name : BASELINE_COMMIT.txt
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+Name : BASELINE_DIFF.patch
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+Name : BASELINE_STATUS.txt
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+Name : LAUNCH_PROMPT.txt
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+Name : MISSION.md
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+Name : VISUAL_CONTRACT.md
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+Name : WP1_CALL_SITE_MAP.md
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+Name : WP1_HILAL_SURFACES.md
+[0m
+[0m✓ [0mWP-A finish Hilal WP4+WP5[90m Hm-Worker-Strong Agent[0m
+[0m→ [0mRead C:/Users/amroe/AppData/Local/Temp/opencode/wp3_measure.py
+[0m→ [0mRead C:/Users/amroe/AppData/Local/Temp/hm-live/hilal_live_turn.py
+[0m
+[0m$ [0mGet-ChildItem -LiteralPath "$env:TEMP\opencode\wp3" | Select-Object Name, Length; echo "---collect---"; Get-Content -LiteralPath "$env:TEMP\opencode\collect.txt"; echo "---collect2---"; Get-Content -LiteralPath "$env:TEMP\opencode\collect2.txt"; echo "---full2---"; Get-Content -LiteralPath "$env:TEMP\opencode\full2.txt"
+Name               Length
+----               ------
+wp3_agent_retry.py   2423
+wp3_env_real.py      2089
+wp3_env_resize.py    1811
+wp3_measure.py       7522
+wp3_probe.py         2470
+wp3_probe2.py        2108
+---collect---
+tests/test_ai_and_private_ws.py: 6
+tests/test_ai_decisions.py: 15
+tests/test_core.py: 11
+tests/test_crash_recovery.py: 10
+tests/test_execution_lifecycle.py: 3
+tests/test_failure_injection.py: 24
+tests/test_lifecycle_matrix.py: 22
+tests/test_lock_scope.py: 5
+tests/test_position_management.py: 9
+tests/test_reconciliation_and_guards.py: 15
+System.Management.Automation.RemoteException
+---collect2---
+tests/test_ai_and_private_ws.py: 6
+tests/test_ai_decisions.py: 15
+tests/test_core.py: 11
+tests/test_crash_recovery.py: 10
+tests/test_execution_lifecycle.py: 3
+tests/test_failure_injection.py: 24
+tests/test_lifecycle_matrix.py: 22
+tests/test_lock_scope.py: 5
+tests/test_position_management.py: 9
+tests/test_reconciliation_and_guards.py: 15
+System.Management.Automation.RemoteException
+---full2---
+........................................................................ [ 60%]
+................................................                         [100%]
+[0m
+[0m$ [0mSelect-String -Path "$env:TEMP\opencode\*.txt", "$env:TEMP\opencode\*.log" -Pattern "input_tokens|reasoning_tokens|latency_ms|payload_chars|estimated_cost" | Select-Object Filename, Line | Format-Table -AutoSize
+Filename                  Line                                                                                         
+--------                  ----                                                                                         
+head_tradeengine.txt            row += JsonKVStr("cost_source", p.estimated_cost_source) + ",";                        
+head_tradeengine.txt            p.estimated_cost_source = cost_source;                                                 
+head_tradeengine.txt            p.estimated_cost_sample_size = cost_samples;                                           
+head_tradeengine.txt            p.estimated_cost_stressed_per_lot = stressed_cost_per_lot;                             
+head_tradeengine.txt            p.estimated_cost_price = spread + p.estimated_slippage_price;                          
+head_tradeengine.txt            row += JsonKVNum("predicted_round_turn_cost", meta.estimated_cost_stressed_per_lot *...
+head_tradeengine.txt            row += JsonKVStr("cost_source", meta.estimated_cost_source) + ",";                     
+head_tradeengine.txt            row += JsonKVInt("cost_sample_size", meta.estimated_cost_sample_size) + ",";           
+head_tradeengine.txt            double predicted_round_turn_cost = meta.estimated_cost_stressed_per_lot * MathMax(0....
+head_tradeengine.txt                     + " source=" + meta.estimated_cost_source                                     
+head_tradeengine.txt                     + " sample_size=" + IntegerToString(meta.estimated_cost_sample_size)          
+head_tradeengine.txt            j += JsonKVNum("predicted_round_turn_cost", meta.estimated_cost_stressed_per_lot * M...
+head_tradeengine.txt            j += JsonKVStr("cost_source", meta.estimated_cost_source) + ",";                       
+head_tradeengine.txt            j += JsonKVInt("cost_sample_size", meta.estimated_cost_sample_size) + ",";             
+head_tradeengine.txt            j += JsonKVNum("estimated_cost_price", meta.estimated_cost_price, 8) + ",";            
+head_tradeengine_utf8.txt       row += JsonKVStr("cost_source", p.estimated_cost_source) + ",";                        
+head_tradeengine_utf8.txt       p.estimated_cost_source = cost_source;                                                 
+head_tradeengine_utf8.txt       p.estimated_cost_sample_size = cost_samples;                                           
+head_tradeengine_utf8.txt       p.estimated_cost_stressed_per_lot = stressed_cost_per_lot;                             
+head_tradeengine_utf8.txt       p.estimated_cost_price = spread + p.estimated_slippage_price;                          
+head_tradeengine_utf8.txt       row += JsonKVNum("predicted_round_turn_cost", meta.estimated_cost_stressed_per_lot *...
+head_tradeengine_utf8.txt       row += JsonKVStr("cost_source", meta.estimated_cost_source) + ",";                     
+head_tradeengine_utf8.txt       row += JsonKVInt("cost_sample_size", meta.estimated_cost_sample_size) + ",";           
+head_tradeengine_utf8.txt       double predicted_round_turn_cost = meta.estimated_cost_stressed_per_lot * MathMax(0....
+head_tradeengine_utf8.txt                + " source=" + meta.estimated_cost_source                                     
+head_tradeengine_utf8.txt                + " sample_size=" + IntegerToString(meta.estimated_cost_sample_size)          
+head_tradeengine_utf8.txt       j += JsonKVNum("predicted_round_turn_cost", meta.estimated_cost_stressed_per_lot * M...
+head_tradeengine_utf8.txt       j += JsonKVStr("cost_source", meta.estimated_cost_source) + ",";                       
+head_tradeengine_utf8.txt       j += JsonKVInt("cost_sample_size", meta.estimated_cost_sample_size) + ",";             
+head_tradeengine_utf8.txt       j += JsonKVNum("estimated_cost_price", meta.estimated_cost_price, 8) + ",";
+[0m
+[0m$ [0mGet-ChildItem -LiteralPath ".hm-orchestrator\runs\20260916T184200Z-dd1e00e6" | Select-Object Name; echo "---wp3dir---"; Get-Content -LiteralPath "$env:TEMP\opencode\wp3\wp3_env_resize.py"
+Name                 
+----                 
+BASELINE_COMMIT.txt  
+BASELINE_DIFF.patch  
+BASELINE_STATUS.txt  
+LAUNCH_PROMPT.txt    
+MISSION.md           
+VISUAL_CONTRACT.md   
+WP1_CALL_SITE_MAP.md 
+WP1_HILAL_SURFACES.md
+---wp3dir---
+"""WP3 budget resize across the four env files. Prints key names and counts only."""
+System.Management.Automation.RemoteException
+from __future__ import annotations
+System.Management.Automation.RemoteException
+import shutil
+System.Management.Automation.RemoteException
+CHANGES = {
+    "HILAL_CHAT_AI_TIMEOUT_SECONDS": "90",
+    "HILAL_CHAT_AI_MAX_OUTPUT_TOKENS": "4000",
+    "PUBLIC_CHAT_AI_TIMEOUT_SECONDS": "90",
+    "PUBLIC_CHAT_AI_MAX_OUTPUT_TOKENS": "6000",
+    "SYSTEM_BRAIN_AI_TIMEOUT_SECONDS": "90",
+    "SYSTEM_BRAIN_AI_MAX_OUTPUT_TOKENS": "4000",
+    "SYSTEM_BRAIN_AGENT_TURN_TIMEOUT_SECONDS": "150",
+    "SHARIA_SOURCE_AI_TIMEOUT_SECONDS": "90",
+    "SHARIA_SOURCE_AI_MAX_OUTPUT_TOKENS": "2400",
+}
+System.Management.Automation.RemoteException
+FILES = [".env.example", ".env.production.example", ".env", ".env.production"]
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+def key_count(lines: list[bytes]) -> int:
+    return sum(1 for line in lines if b"=" in line and not line.startswith(b"#"))
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+for name in FILES:
+    with open(name, "rb") as handle:
+        raw = handle.read()
+    ending = b"\r\n" if b"\r\n" in raw else b"\n"
+    lines = raw.split(ending)
+    before_keys = key_count(lines)
+    changed: list[str] = []
+    for index, line in enumerate(lines):
+        if b"=" not in line or line.startswith(b"#"):
+            continue
+        key = line.split(b"=", 1)[0].decode("ascii")
+        if key in CHANGES:
+            lines[index] = key.encode("ascii") + b"=" + CHANGES[key].encode("ascii")
+            changed.append(key)
+    assert sorted(changed) == sorted(CHANGES), f"{name}: changed {changed}"
+    assert key_count(lines) == before_keys, f"{name}: key count moved"
+    if name in {".env", ".env.production"}:
+        shutil.copyfile(name, name + ".bak-wp3-budgets")
+    with open(name, "wb") as handle:
+        handle.write(ending.join(lines))
+    print(f"{name}: keys={before_keys} changed={len(changed)} backup={name in {'.env', '.env.production'}}")
+print("changed_keys=" + ",".join(sorted(CHANGES)))
+[0m
+[0m$ [0mGet-ChildItem -LiteralPath "$env:TEMP\opencode\missionB_backup" | Select-Object Name; echo "---"; Get-ChildItem -LiteralPath "$env:TEMP\opencode\missionB_backup2" | Select-Object Name; echo "---p2---"; Get-Content -LiteralPath "$env:TEMP\opencode\p2.log"; echo "---pytest_out---"; Get-Content -LiteralPath "$env:TEMP\opencode\pytest_out.txt"
+Name            
+----            
+p1_src          
+compatibility.py
+---
+p1_src          
+compatibility.py
+---p2---
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.1.0, pluggy-1.6.0
+rootdir: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\amr_crypto\crypto_strategy_engine\crypto_strategy_engine
+configfile: pyproject.toml
+plugins: anyio-4.9.0
+collected 4 items
+System.Management.Automation.RemoteException
+tests\test_package1_compatibility.py ....                                [100%]
+System.Management.Automation.RemoteException
+============================== 4 passed in 0.03s ==============================
+---pytest_out---
+......................................................................F. [ 60%]
+................................................                         [100%]
+================================== FAILURES ===================================
+_______________________ test_ack_partial_then_full_fill _______________________
+tests\test_lifecycle_matrix.py:67: in test_ack_partial_then_full_fill
+    assert report["order_state"] == "FILLED"
+E   AssertionError: assert 'CANCELLED_REMAINDER' == 'FILLED'
+E     
+E     - FILLED
+E     + CANCELLED_REMAINDER
+=========================== short test summary info ===========================
+FAILED tests/test_lifecycle_matrix.py::test_ack_partial_then_full_fill - Asse...
+[0m
+[0m$ [0mGet-Content -LiteralPath "$env:TEMP\opencode\wp3\wp3_probe.py"; echo "===PROBE2==="; Get-Content -LiteralPath "$env:TEMP\opencode\wp3\wp3_probe2.py"
+"""One minimal diagnostic: what does the OpenCode Go Responses body look like?
+System.Management.Automation.RemoteException
+Prints ONLY structural facts: top-level keys, status, output item types and
+content part types, usage numbers. Never headers, keys or full text.
+"""
+System.Management.Automation.RemoteException
+from __future__ import annotations
+System.Management.Automation.RemoteException
+import asyncio
+import json
+import sys
+System.Management.Automation.RemoteException
+sys.path.insert(0, "C:/Users/amroe/Downloads/NovaAIS_Systems/Trading/Trading_assistant/src")
+System.Management.Automation.RemoteException
+import httpx
+System.Management.Automation.RemoteException
+from ai_market_monitor.core.config import Settings
+from ai_market_monitor.services.ai_provider import build_responses_request
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+async def main() -> None:
+    settings = Settings()
+    request = build_responses_request(settings, "muse-spark-1.3-contributor", session_key="probe")
+    print("url_host=opencode.ai path=/zen/go/v1/responses provider=" + request.provider)
+    print("header_names=" + ",".join(sorted(request.headers)))
+    body = {
+        "model": "muse-spark-1.3-contributor",
+        "store": False,
+        "max_output_tokens": 300,
+        "reasoning": {"effort": "high"},
+        "instructions": "Reply with the single word: hello.",
+        "input": "Say hello.",
+    }
+    async with httpx.AsyncClient(timeout=120) as client:
+        response = await client.post(request.url, headers=request.headers, json=body)
+    print("http_status=" + str(response.status_code))
+    payload = response.json()
+    print("top_keys=" + ",".join(sorted(str(k) for k in payload.keys())))
+    print("status_field=" + str(payload.get("status")))
+    print("has_output_text=" + str(isinstance(payload.get("output_text"), str)))
+    print("incomplete_details=" + json.dumps(payload.get("incomplete_details"))[:200])
+    print("error_field=" + json.dumps(payload.get("error"))[:300])
+    output = payload.get("output") or []
+    print("output_len=" + str(len(output)))
+    for item in output:
+        if not isinstance(item, dict):
+            print("item_non_dict=" + str(type(item)))
+            continue
+        print("item_type=" + str(item.get("type")) + " keys=" + ",".join(sorted(str(k) for k in item.keys())))
+        for part in item.get("content") or []:
+            if isinstance(part, dict):
+                text = part.get("text")
+                shown = (text[:40] if isinstance(text, str) else str(type(text))) if text is not None else "none"
+                print("  part_type=" + str(part.get("type")) + " text_sample=" + shown)
+    print("usage=" + json.dumps(payload.get("usage"))[:300])
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+if __name__ == "__main__":
+    asyncio.run(main())
+===PROBE2===
+"""Second diagnostic: structured-output request shaped like production.
+System.Management.Automation.RemoteException
+Prints ONLY structural facts and usage numbers. Never headers, keys or text.
+"""
+System.Management.Automation.RemoteException
+from __future__ import annotations
+System.Management.Automation.RemoteException
+import asyncio
+import json
+import sys
+System.Management.Automation.RemoteException
+sys.path.insert(0, "C:/Users/amroe/Downloads/NovaAIS_Systems/Trading/Trading_assistant/src")
+System.Management.Automation.RemoteException
+import httpx
+System.Management.Automation.RemoteException
+from ai_market_monitor.core.config import Settings
+from ai_market_monitor.services.agent_tools import strict_json_schema
+from ai_market_monitor.schemas.public_chat import PublicSupportAIResponse
+from ai_market_monitor.services.ai_provider import build_responses_request
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+async def main() -> None:
+    settings = Settings()
+    request = build_responses_request(settings, "muse-spark-1.3-contributor", session_key="probe2")
+    evidence = {"current_question": "What does Hilal Markets do?", "padding": "x" * 8000}
+    body = {
+        "model": "muse-spark-1.3-contributor",
+        "store": False,
+        "max_output_tokens": 1200,
+        "reasoning": {"effort": "high"},
+        "instructions": "You are a product assistant. Answer in the schema.",
+        "input": [{"role": "user", "content": json.dumps(evidence, sort_keys=True)}],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "probe",
+                "strict": True,
+                "schema": strict_json_schema(PublicSupportAIResponse),
+            }
+        },
+    }
+    async with httpx.AsyncClient(timeout=180) as client:
+        response = await client.post(request.url, headers=request.headers, json=body)
+    print("http_status=" + str(response.status_code))
+    payload = response.json()
+    print("status_field=" + str(payload.get("status")))
+    print("incomplete_details=" + json.dumps(payload.get("incomplete_details"))[:200])
+    output = payload.get("output") or []
+    print("output_len=" + str(len(output)))
+    for item in output:
+        if isinstance(item, dict):
+            print("item_type=" + str(item.get("type")))
+    print("usage=" + json.dumps(payload.get("usage"))[:300])
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+if __name__ == "__main__":
+    asyncio.run(main())
+[0m
+[0m• [0mWP-C real-call measurements[90m Hm-Worker-Strong Agent[0m
+[0m• [0mLogic review WP4+WP5[90m Hm-Reviewer-Logic Agent[0m
+[0m• [0mAdversarial review WP4+WP5[90m Hm-Reviewer-Adversarial Agent[0m
+[0m✓ [0mAdversarial review WP4+WP5[90m Hm-Reviewer-Adversarial Agent[0m
+[0m✓ [0mLogic review WP4+WP5[90m Hm-Reviewer-Logic Agent[0m
+[0m✓ [0mWP-C real-call measurements[90m Hm-Worker-Strong Agent[0m
+[0m→ [0mRead src/ai_market_monitor/services/hilal_chat_knowledge.py[90m [offset=770, limit=60][0m
+[0m→ [0mRead src/ai_market_monitor/static/hm-page-context.js[90m [offset=120, limit=80][0m
+[0m• [0mFix payload cap gaps[90m Hm-Worker-Strong Agent[0m
+[0m✓ [0mFix payload cap gaps[90m Hm-Worker-Strong Agent[0m
+[0m
+[0m# [0mTodos
+[✓] Establish baseline git state + mission R IDs
+[✓] WP-A: verify/finish WP4+WP5 (R15-R21) + joint milestone
+[✓] WP-B: two independent reviews (logic glm + adversarial qwen)
+[✓] WP-C: re-establish WP3 real-call evidence
+[✓] WP-B findings fix (R21 cap gaps, 3/3 fixed+tested)
+[•] WP-D: final verification (ruff/mypy/pytest/integration)
+[ ] Final adversarial pass + WP-E reports (JSON+MD validated)
+[0m
+[0m• [0mWP-D full verification run[90m Hm-Test-Debugger Agent[0m
+[0m✓ [0mWP-D full verification run[90m Hm-Test-Debugger Agent[0m
+[0m• [0mFinal adversarial whole-diff review[90m Hm-Reviewer-Adversarial Agent[0m
+[0m✓ [0mFinal adversarial whole-diff review[90m Hm-Reviewer-Adversarial Agent[0m
+[0m
+[0m# [0mTodos
+[✓] Establish baseline git state + mission R IDs
+[✓] WP-A: verify/finish WP4+WP5 (R15-R21) + joint milestone
+[✓] WP-B: two independent reviews (logic glm + adversarial qwen)
+[✓] WP-C: re-establish WP3 real-call evidence
+[✓] WP-B findings fix (R21 cap gaps, 3/3 fixed+tested)
+[✓] WP-D: final verification (ruff/mypy/pytest/integration)
+[•] Final adversarial pass + WP-E reports (JSON+MD validated)
+[0m
+[0m$ [0mgit status --porcelain > "$env:TEMP\hm-live\cur_status.txt"; $cur = Get-Content -LiteralPath "$env:TEMP\hm-live\cur_status.txt"; $base = Get-Content -LiteralPath ".hm-orchestrator\runs\20260916T184200Z-dd1e00e6\BASELINE_STATUS.txt"; $basePaths = $base | ForEach-Object { ($_ -replace '^...','').Trim() }; $mission = $cur | Where-Object { $p = ($_ -replace '^...','').Trim(); $basePaths -notcontains $p }; $mission; echo "---COUNT---"; ($mission | Measure-Object).Count
+M .env.example
+ M .env.production.example
+ M src/ai_market_monitor/api/routers/dashboard_api.py
+ M src/ai_market_monitor/api/routers/public.py
+ M src/ai_market_monitor/core/config.py
+ M src/ai_market_monitor/core/startup.py
+ M src/ai_market_monitor/schemas/hilal_chat.py
+ M src/ai_market_monitor/services/agent_control.py
+ M src/ai_market_monitor/services/agent_policy.py
+ M src/ai_market_monitor/services/hilal_chat.py
+ M src/ai_market_monitor/services/hilal_chat_agent.py
+ M src/ai_market_monitor/services/hilal_chat_knowledge.py
+ M src/ai_market_monitor/services/openai_structured_call.py
+ M src/ai_market_monitor/services/provider_credentials.py
+ M src/ai_market_monitor/services/public_chat.py
+ M src/ai_market_monitor/services/public_support_ai.py
+ M src/ai_market_monitor/services/security_review.py
+ M src/ai_market_monitor/services/sharia_research.py
+ M src/ai_market_monitor/services/sharia_source_ai_discovery.py
+ M src/ai_market_monitor/services/system_brain_agent.py
+ M src/ai_market_monitor/services/system_brain_assistant.py
+ M src/ai_market_monitor/static/hm-connections-test.js
+ M src/ai_market_monitor/static/hm-market-test.js
+ M src/ai_market_monitor/static/hm-monitor-test.js
+ M src/ai_market_monitor/static/hm-opportunities-test.js
+ M src/ai_market_monitor/static/hm-page-context.js
+ M src/ai_market_monitor/static/hm-passport-test.js
+ M src/ai_market_monitor/static/hm-settings-test.js
+ M src/ai_market_monitor/static/hm-subscription-test.js
+ M src/ai_market_monitor/static/hm-support-test.js
+ M src/ai_market_monitor/static/hm-watchlists-test.js
+ M src/ai_market_monitor/templates/hilal/dashboard_test/research.html
+ M src/ai_market_monitor/templates/hilal/dashboard_test/research_detail.html
+ M tests/conftest.py
+ M tests/integration/test_public_chat_api.py
+ M tests/unit/test_reliability_security.py
+ M tests/unit/test_system_brain_assistant.py
+ M tests/unit/test_system_brain_operational_agent.py
+?? .hm-orchestrator/runs/20260917T171532Z-1c371707/
+?? src/ai_market_monitor/services/ai_provider.py
+?? src/ai_market_monitor/static/hm-page-notes.js
+?? src/ai_market_monitor/static/hm-research-test.js
+?? tests/browser/test_hilal_page_context_e2e.py
+?? tests/integration/test_hilal_chat_evidence.py
+?? tests/unit/test_invariant_active_provider.py
+?? tests/unit/test_invariant_ai_provider.py
+?? tests/unit/test_invariant_hilal_page_context.py
+---COUNT---
+47
+[0m
+[0m$ [0mgit diff --check; echo "diff-check-exit=$?"; echo "---junit---"; Get-ChildItem -LiteralPath ".hm-orchestrator\runs\20260917T171532Z-1c371707\junit.xml" | Select-Object Name, Length; echo "---todo-debug---"; git diff --check -- src/ai_market_monitor/services/hilal_chat_knowledge.py src/ai_market_monitor/static/hm-page-context.js; echo "fixfiles-clean=$?"
+warning: in the working copy of '.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.env.production.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.hm-orchestrator/current/MISSION.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.hm-orchestrator/current/VISUAL_CONTRACT.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.hm-orchestrator/models/ROLE_MODEL_MAP.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/ai_market_monitor/api/routers/dashboard_api.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/ai_market_monitor/core/plans.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/ai_market_monitor/schemas/hilal_chat.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/ai_market_monitor/services/agent_policy.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/ai_market_monitor/services/hilal_chat_agent.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/ai_market_monitor/services/provider_credentials.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/ai_market_monitor/services/security_review.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/ai_market_monitor/services/sharia_source_ai_discovery.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/ai_market_monitor/services/system_brain_agent.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/ai_market_monitor/services/system_brain_assistant.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/ai_market_monitor/services/system_brain_payments.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/ai_market_monitor/static/hm-connections-test.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/unit/test_invariant_money_on_the_wire.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/unit/test_reliability_security.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/unit/test_system_brain_assistant.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/unit/test_system_brain_operational_agent.py', LF will be replaced by CRLF the next time Git touches it
+diff-check-exit=True
+---junit---
+System.Management.Automation.RemoteException
+Name       Length
+----       ------
+junit.xml 5122591
+---todo-debug---
+fixfiles-clean=True
+[0m
+[0m$ [0mSelect-String -Path ".hm-orchestrator\runs\20260916T184200Z-dd1e00e6\WP1_CALL_SITE_MAP.md" -Pattern "R7|STALE|ACTIVE" | Select-Object -First 40 Line; echo "===SURFACES==="; Get-Content -LiteralPath ".hm-orchestrator\runs\20260916T184200Z-dd1e00e6\WP1_HILAL_SURFACES.md" | Select-Object -First 30
+Line                                                                                                                   
+----                                                                                                                   
+| `onboarding_router` | `/api/v1` | Setup Chat (stale family) |                                                        
+| `telegram_router` | `/api/v1` | Telegram service (strategy interpretation - stale) |                                 
+| `research-unscreened-tradeable-coins` | `research_unscreened_coins` | No (deterministic scraping - see R7) |         
+| `recover-stalled-setup-chat-turns` | `recover_setup_chat_turns` | Yes - `setup_chat_recovery.py` (stale family) |    
+## 3. Classification Table: Active AI Call Sites                                                                       
+| `services/public_chat.py` | `PublicChatService.answer()` (line 788) | Public landing chat AI | **ACTIVE** | Mounte...
+| `services/public_support_ai.py` | `PublicSupportAIService.respond()` (line 75) | Public support AI | **ACTIVE** | ...
+| `services/hilal_chat_agent.py` | `HilalChatAgent.answer()` (line 306) | Hilal dashboard chat | **ACTIVE** | Mounte...
+| `services/agent_control.py` | `OpenAIAgentResponsesClient.create()` (line 77) | Shared AI client (Hilal, public su...
+| `services/system_brain_agent.py` | `SystemBrainAgentService.run_turn()` (line 397) | System Brain operational agen...
+| `services/system_brain_assistant.py` | `SystemBrainAssistantService.answer()` (line 125) | System Brain assistant ...
+| `services/openai_structured_call.py` | `structured_call()` (line 135) | Shared bounded structured AI call | **ACTI...
+| `services/sharia_research.py` | `ShariaAIResearchClient._post()` (line 427), `analyze()` (line 393) | Sharia factu...
+| `services/sharia_research.py` | `ShariaResearchPipeline.research_initial_asset()` (line 548) | Sharia research pip...
+| `services/sharia_source_monitoring.py` | `ShariaSourceMonitoringService.run_due()` (line 65) | Published Sharia so...
+| `services/sharia_source_ai_discovery.py` | `AISourceDiscovery.suggest()` (line 125) | Coin-website source bot | **...
+| `services/sharia_source_resolution.py` | `SourceResolutionService.resolve_pending()` (line 438) | Official source ...
+| `services/agent_policy.py` | `AgentPolicyService` (line 188) | Capability extension gate | **ACTIVE-check** | Guar...
+## 5. Classification Table: Stale Family (Strategy-from-Prompt - never edited, never switched)                         
+| `services/ai_setup_chat.py` | `OpenAISetupChatInterviewer` | Only stale callers (`onboarding.py`, stale dashboard ...
+| `services/openai_interpreter.py` | `configured_strategy_interpreter()` | Called by `telegram/service.py` (stale) |   
+| `services/setup_chat_launch.py` | `SetupChatLaunchService` | Only reachable from `onboarding.py` (stale router) |    
+| `services/setup_chat_agent.py` | `SetupChatAgent` (line 584; `structured_call` at 3254/3388/3637) | Only reachable...
+| `api/routers/onboarding.py` | onboarding routes | Serves stale Setup Chat flow |                                     
+| `telegram/service.py` | strategy interpretation path | Uses `openai_interpreter.py` (stale) |                        
+| `ai_explanations.py` | `OpenAISuggestionNarrator.narrate()` (line 34) | Called by ACTIVE dashboard routes but narr...
+| `services/capability_registry.py` | `OpenAIEmbeddingClient.embed()` (line 28) | ACTIVE app startup (`main.py` life...
+| `services/capability_extension_ai.py` | `CapabilityExtensionAI.draft()/.review()/.repair()` | ACTIVE beat `process...
+| `services/openai_structured_call.py` | `structured_call()` (line 135) | Shared by ACTIVE and stale callers (shared...
+| `services/setup_observability.py` | `GroundedObservabilityExplainer.explain()` (line 1509) | Called from ACTIVE da...
+| `setup_observability.py`: STALE | `GroundedObservabilityExplainer.explain()` called from ACTIVE dashboard routes -...
+| `setup_chat_agent.py`: missing | Added as STALE (only stale callers) |                                               
+| `capability_extension_ai.py` / `capability_registry.py`: STALE rows | Kept also as AMBIGUOUS (active beat/startup)...
+## 8. R7 Answer: "The bot that scrapes for coins in the Hilal strategy"                                                
+So R7 needs no model routing; the row stays as evidence that the scraper is deterministic.                             
+===SURFACES===
+# WP1: Hilal Surfaces �?" Complete Inventory
+System.Management.Automation.RemoteException
+**Date:** 2026-09-16
+**Run:** 20260916T184200Z-dd1e00e6
+System.Management.Automation.RemoteException
+---
+System.Management.Automation.RemoteException
+## 1. Dashboard pages showing the Hilal chat
+System.Management.Automation.RemoteException
+All 11 `dashboard_test.py` routes receiving `_PATH_CHROME` (which holds `"hilal_chat": True`, line 189):
+System.Management.Automation.RemoteException
+| Route handler | dashboard_test.py line |
+|---|---|
+| `screened_market_page` | 229 |
+| `opportunities_page` | 258 |
+| `watch_plans_page` | 296 |
+| `passport_page` | 387 |
+| `watchlist_page` | 415 |
+| `connections_page` | 658 |
+| `research_page` | 965 |
+| `settings_page` | 1450 |
+| `support_page` | 1927 |
+| `subscription_page` | 2124 |
+| `report_page` | 2300 |
+System.Management.Automation.RemoteException
+Gate: `hilal_chat_gate()` in `api/template_env.py:150-158` checks the chrome flag AND `settings.hilal_chat_enabled`.
+System.Management.Automation.RemoteException
+## 2. Client-side page context
+System.Management.Automation.RemoteException
+- `static/hm-page-context.js`: `ACCEPTED = new Set(["board"])` (line 27); pages publish via `publish(name, describe)` (line 39); `sectionInView()` (line 48) finds the visible section.
+[0m
+[0m← [0mWrite .hm-orchestrator/runs/20260917T171532Z-1c371707/SUPERVISOR_REPORT.json
+Wrote file successfully.
+[0m
+[0m$ [0m.venv/Scripts/python tools/hm-orchestrator/validate-report.py .hm-orchestrator/runs/20260917T171532Z-1c371707/SUPERVISOR_REPORT.json .hm-orchestrator/policy/supervisor-report.schema.json
+VALID
+[0m
+[0m← [0mWrite .hm-orchestrator/runs/20260917T171532Z-1c371707/SUPERVISOR_REPORT.md
+Wrote file successfully.
+[0m
+[0m# [0mTodos
+[✓] Establish baseline git state + mission R IDs
+[✓] WP-A: verify/finish WP4+WP5 (R15-R21) + joint milestone
+[✓] WP-B: two independent reviews (logic glm + adversarial qwen)
+[✓] WP-C: re-establish WP3 real-call evidence
+[✓] WP-B findings fix (R21 cap gaps, 3/3 fixed+tested)
+[✓] WP-D: final verification (ruff/mypy/pytest/integration)
+[✓] Final adversarial pass + WP-E reports (JSON+MD validated)
+[0m
+Mission complete. Verdict: **COMPLETE_VERIFIED**, no escalation.
+
+What was done, in short:
+
+- **WP-A**: R15–R21 all verified PASS with no code change. Browser file went from 1-failed/1-passed to 3 passed. Joint milestone: 579 hilal tests passed, ruff clean.
+- **WP-B**: logic review (GLM) APPROVE_WITH_NOTES — 1 major + 3 minor R21 cap gaps; adversarial review (Qwen) APPROVE with 15 attacks defeated.
+- **Fix round**: all 4 findings fixed with fail-before/pass-after tests (maxed board was 88,799 chars vs 30,000 cap; `_fit_to_size` now drops cards/checklist/monitors in order; trimmed flag only on real drops; JS string-note coercion). Only `hilal_chat_knowledge.py`, `hm-page-context.js`, and the invariant test file touched.
+- **WP-C**: real-call table re-established without repeating the paid Hilal turn — R2/R4/R5 measured (all HTTP 200, no truncation), budgets explicitly unchanged. ~USD 0.003 new spend.
+- **WP-D**: ruff clean, mypy clean (429 files), 28,636 passed / 0 failed, integration 167 passed, browser 3 passed, R8 stale-free proven, junit.xml in run dir.
+- **Final adversarial pass** over the whole mission diff: APPROVE, zero findings.
+
+Evidence written:
+- `.hm-orchestrator/runs/20260917T171532Z-1c371707/SUPERVISOR_REPORT.json` — validates (`VALID` against the schema)
+- `.hm-orchestrator/runs/20260917T171532Z-1c371707/SUPERVISOR_REPORT.md` — plain-language report incl. server step, privacy fact (training enabled, non-ZDR), quota risk, and continuation note
+
+No tests deleted, weakened, or skipped. Unrelated working-tree work preserved. `SUPERVISOR_STDOUT` files untouched.
