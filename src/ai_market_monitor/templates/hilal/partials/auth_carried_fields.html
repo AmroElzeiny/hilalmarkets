@@ -10,3 +10,9 @@
 {%- if request.query_params.get('telegram_link') -%}
   <input type="hidden" name="telegram_link" value="{{ request.query_params.get('telegram_link') }}">
 {%- endif -%}
+{#- The page somebody was trying to open when they were asked to sign in. It is checked
+    in `core/return_path.py` before it is written here, so a made-up address in the bar
+    never becomes a place this form can send anybody. -#}
+{%- if auth_return_path -%}
+  <input type="hidden" name="next" value="{{ auth_return_path }}">
+{%- endif -%}

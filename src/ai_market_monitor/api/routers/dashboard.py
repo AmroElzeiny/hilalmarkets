@@ -58,6 +58,12 @@ from ai_market_monitor.core.plans import (
     visible_plan_comparison_headers,
     visible_public_plan_codes,
 )
+from ai_market_monitor.core.return_path import (
+    RETURN_QUERY_KEY,
+    return_path_of,
+    safe_return_path,
+    sign_in_url,
+)
 from ai_market_monitor.core.site_content import (
     DASHBOARD_NAVIGATION,
     WAITLIST_ANCHOR,
@@ -286,9 +292,14 @@ async def _require_user(
 ) -> User:
     user = await _current_user(request, session, settings)
     if user is None:
-        next_path = request.url.path
-        return_url = f"/signin?next={next_path}&message=session_required"
-        raise HTTPException(status_code=303, headers={"Location": return_url})
+        # The address is built in `core/return_path.py`, and so is the judgement about
+        # which addresses may be carried at all. This used to paste the path into a query
+        # string by hand, which dropped the query string of the page being asked for and
+        # never escaped anything.
+        raise HTTPException(
+            status_code=303,
+            headers={"Location": sign_in_url(return_path_of(request))},
+        )
     return user
 
 
@@ -330,6 +341,64 @@ def _subscription_query(
         "plan_code": selected_plan,
         "billing_interval": selected_interval,
     }
+
+
+def _carried_query(
+    plan_code: str | None,
+    billing_interval: str | None,
+    telegram_link: str | None = None,
+    next_path: str | None = None,
+) -> dict[str, str]:
+    """Everything a person arrived with, carried on to the next sign-in screen.
+
+    There are three such things — a plan chosen on the pricing page, a Telegram
+    connection begun in the chat, and the page somebody was already trying to open when
+    their session ran out — and thirteen places used to assemble them by hand. Each place
+    only knew about the ones that existed when it was written, so the return address was
+    lost the moment a sign-in was refused once and had to be typed again.
+
+    Whether the return address may be carried at all is decided in
+    ``core/return_path.py``, never here.
+    """
+
+    query = _subscription_query(plan_code, billing_interval)
+    if telegram_link:
+        query["telegram_link"] = telegram_link
+    target = safe_return_path(next_path)
+    if target:
+        query[RETURN_QUERY_KEY] = target
+    return query
+
+
+def _destination_after_sign_in(
+    settings: Settings,
+    *,
+    plan_code: str | None,
+    billing_interval: str | None,
+    next_path: str | None,
+    default_message: str,
+) -> str:
+    """Where somebody lands the moment they are signed in.
+
+    A chosen plan wins, because that person came here to buy something and the checkout
+    screen is the thing they asked for. Otherwise, if they were bounced out of a page,
+    they go straight back to it — that is what makes an expired session feel like one
+    extra step rather than a dead end.
+
+    No "you are signed in" note is added to a returned page. The person asked for that
+    page, and a banner explaining the obvious on top of it is noise.
+    """
+
+    selected_plan, _ = _subscription_selection(plan_code, billing_interval)
+    target = safe_return_path(next_path)
+    if target and (selected_plan is None or selected_plan == "demo"):
+        return target
+    return _subscription_destination(
+        settings,
+        plan_code=plan_code,
+        billing_interval=billing_interval,
+        default_message=default_message,
+    )
 
 
 def _subscription_destination(
@@ -911,9 +980,11 @@ async def _context(
         request.query_params.get("plan_code"),
         request.query_params.get("billing_interval"),
     )
-    auth_query = _subscription_query(selected_plan_code, selected_billing_interval)
-    if request.query_params.get("telegram_link"):
-        auth_query["telegram_link"] = request.query_params["telegram_link"]
+    auth_query = _carried_query(
+        selected_plan_code, selected_billing_interval,
+        request.query_params.get("telegram_link"),
+        request.query_params.get(RETURN_QUERY_KEY),
+    )
     return {
         "request": request,
         "user": user,
@@ -1008,9 +1079,13 @@ async def _auth_context(
         request.query_params.get("plan_code"),
         request.query_params.get("billing_interval"),
     )
-    auth_query = _subscription_query(selected_plan_code, selected_billing_interval)
-    if request.query_params.get("telegram_link"):
-        auth_query["telegram_link"] = request.query_params["telegram_link"]
+    return_path = safe_return_path(request.query_params.get(RETURN_QUERY_KEY))
+    auth_query = _carried_query(
+        selected_plan_code,
+        selected_billing_interval,
+        request.query_params.get("telegram_link"),
+        return_path,
+    )
     suffix = f"?{urlencode(auth_query)}" if auth_query else ""
 
     # An error's "do this instead" button has to keep whatever the person arrived with.
@@ -1071,6 +1146,10 @@ async def _auth_context(
         auth_google_label=(
             "Sign up with Google" if page == "signup" else "Sign in with Google"
         ),
+        # The checked return address, for the hidden field every form on these pages
+        # carries. Checked here and never in the template, so one answer serves the
+        # forms, the links and the Google button alike.
+        auth_return_path=return_path or "",
         support_email=settings.support_email,
     )
 
@@ -1286,6 +1365,10 @@ async def signup_submit(
     telegram_link: str | None = Form(None),
     plan_code: str | None = Form(None),
     billing_interval: str | None = Form(None),
+    # The page they were already trying to open. It rides through every screen of
+    # the sign-in journey as a hidden field named "next", so a refused password or a
+    # mistyped code does not lose it.
+    next_path: str | None = Form(default=None, alias="next"),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -1307,9 +1390,7 @@ async def signup_submit(
     # the person can read, and it is the difference these routes' tests assert on.
     if clean_name:
         query["name"] = clean_name
-    query.update(_subscription_query(plan_code, billing_interval))
-    if telegram_link:
-        query["telegram_link"] = telegram_link
+    query.update(_carried_query(plan_code, billing_interval, telegram_link, next_path))
     try:
         await WebAuthService(session, settings).check_signup_details(
             email=email,
@@ -1357,6 +1438,10 @@ async def signup_password_submit(
     telegram_link: str | None = Form(None),
     plan_code: str | None = Form(None),
     billing_interval: str | None = Form(None),
+    # The page they were already trying to open. It rides through every screen of
+    # the sign-in journey as a hidden field named "next", so a refused password or a
+    # mistyped code does not lose it.
+    next_path: str | None = Form(default=None, alias="next"),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -1392,9 +1477,7 @@ async def signup_password_submit(
             query = {"error": code, "email": email}
             if clean_name:
                 query["name"] = clean_name
-            query.update(_subscription_query(plan_code, billing_interval))
-            if telegram_link:
-                query["telegram_link"] = telegram_link
+            query.update(_carried_query(plan_code, billing_interval, telegram_link, next_path))
             if code == "code_recently_sent":
                 query["message"] = "code_sent"
                 del query["error"]
@@ -1414,9 +1497,7 @@ async def signup_password_submit(
     query = {"message": "code_sent", "email": email}
     if clean_name:
         query["name"] = clean_name
-    query.update(_subscription_query(plan_code, billing_interval))
-    if telegram_link:
-        query["telegram_link"] = telegram_link
+    query.update(_carried_query(plan_code, billing_interval, telegram_link, next_path))
     return _redirect(f"/signup/verify?{urlencode(query)}")
 
 
@@ -1447,6 +1528,10 @@ async def signup_verify_resend(
     telegram_link: str | None = Form(None),
     plan_code: str | None = Form(None),
     billing_interval: str | None = Form(None),
+    # The page they were already trying to open. It rides through every screen of
+    # the sign-in journey as a hidden field named "next", so a refused password or a
+    # mistyped code does not lose it.
+    next_path: str | None = Form(default=None, alias="next"),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -1458,9 +1543,7 @@ async def signup_verify_resend(
     """
 
     query: dict[str, str] = {"email": email}
-    query.update(_subscription_query(plan_code, billing_interval))
-    if telegram_link:
-        query["telegram_link"] = telegram_link
+    query.update(_carried_query(plan_code, billing_interval, telegram_link, next_path))
     try:
         await WebAuthService(session, settings).resend_signup_email_code(email=email)
         await session.commit()
@@ -1480,6 +1563,10 @@ async def signup_verify_submit(
     telegram_link: str | None = Form(None),
     plan_code: str | None = Form(None),
     billing_interval: str | None = Form(None),
+    # The page they were already trying to open. It rides through every screen of
+    # the sign-in journey as a hidden field named "next", so a refused password or a
+    # mistyped code does not lose it.
+    next_path: str | None = Form(default=None, alias="next"),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -1512,9 +1599,7 @@ async def signup_verify_submit(
     except (WebAuthError, TelegramAccountLinkError) as exc:
         await session.rollback()
         query = {"error": getattr(exc, "code", "invalid_code"), "email": email}
-        query.update(_subscription_query(plan_code, billing_interval))
-        if telegram_link:
-            query["telegram_link"] = telegram_link
+        query.update(_carried_query(plan_code, billing_interval, telegram_link, next_path))
         return _redirect(f"/signup/verify?{urlencode(query)}")
 
     message = "telegram_connected" if telegram_connected else "account_created"
@@ -1525,10 +1610,11 @@ async def signup_verify_submit(
     )
     await _send_telegram_connected_notification(session, settings, linked_telegram_user_id)
     response = _redirect(
-        _subscription_destination(
+        _destination_after_sign_in(
             settings,
             plan_code=plan_code,
             billing_interval=billing_interval,
+            next_path=next_path,
             default_message=message,
         )
     )
@@ -1555,6 +1641,10 @@ async def signin_submit(
     telegram_link: str | None = Form(None),
     plan_code: str | None = Form(None),
     billing_interval: str | None = Form(None),
+    # The page they were already trying to open. It rides through every screen of
+    # the sign-in journey as a hidden field named "next", so a refused password or a
+    # mistyped code does not lose it.
+    next_path: str | None = Form(default=None, alias="next"),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -1576,15 +1666,14 @@ async def signin_submit(
         # Same reason as the sign-up path: a wrong password should not also cost a
         # person their email address.
         query = {"error": code, "email": email}
-        query.update(_subscription_query(plan_code, billing_interval))
-        if telegram_link:
-            query["telegram_link"] = telegram_link
+        query.update(_carried_query(plan_code, billing_interval, telegram_link, next_path))
         return _redirect(f"/signin?{urlencode(query)}")
     response = _redirect(
-        _subscription_destination(
+        _destination_after_sign_in(
             settings,
             plan_code=plan_code,
             billing_interval=billing_interval,
+            next_path=next_path,
             default_message=(
                 "telegram_connected" if telegram_connected else "login_successful"
             ),
@@ -1649,6 +1738,10 @@ async def signin_code_request(
     telegram_link: str | None = Form(None),
     plan_code: str | None = Form(None),
     billing_interval: str | None = Form(None),
+    # The page they were already trying to open. It rides through every screen of
+    # the sign-in journey as a hidden field named "next", so a refused password or a
+    # mistyped code does not lose it.
+    next_path: str | None = Form(default=None, alias="next"),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -1662,14 +1755,10 @@ async def signin_code_request(
     except (WebAuthError, EmailDeliveryError) as exc:
         await session.rollback()
         query = {"error": getattr(exc, "code", "email_unavailable")}
-        query.update(_subscription_query(plan_code, billing_interval))
-        if telegram_link:
-            query["telegram_link"] = telegram_link
+        query.update(_carried_query(plan_code, billing_interval, telegram_link, next_path))
         return _redirect(f"/signin/code?{urlencode(query)}")
     query = {"message": "code_sent", "email": email}
-    query.update(_subscription_query(plan_code, billing_interval))
-    if telegram_link:
-        query["telegram_link"] = telegram_link
+    query.update(_carried_query(plan_code, billing_interval, telegram_link, next_path))
     return _redirect(f"/signin/code?{urlencode(query)}")
 
 
@@ -1681,6 +1770,10 @@ async def signin_code_verify(
     telegram_link: str | None = Form(None),
     plan_code: str | None = Form(None),
     billing_interval: str | None = Form(None),
+    # The page they were already trying to open. It rides through every screen of
+    # the sign-in journey as a hidden field named "next", so a refused password or a
+    # mistyped code does not lose it.
+    next_path: str | None = Form(default=None, alias="next"),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
@@ -1703,16 +1796,15 @@ async def signin_code_verify(
             "error": getattr(exc, "code", "invalid_code"),
             "email": email,
         }
-        query.update(_subscription_query(plan_code, billing_interval))
-        if telegram_link:
-            query["telegram_link"] = telegram_link
+        query.update(_carried_query(plan_code, billing_interval, telegram_link, next_path))
         return _redirect(f"/signin/code?{urlencode(query)}")
     await _send_telegram_connected_notification(session, settings, linked_telegram_user_id)
     response = _redirect(
-        _subscription_destination(
+        _destination_after_sign_in(
             settings,
             plan_code=plan_code,
             billing_interval=billing_interval,
+            next_path=next_path,
             default_message=(
                 "telegram_connected" if telegram_connected else "login_successful"
             ),
@@ -1857,12 +1949,14 @@ async def google_start(
     plan_code: str | None = Query(default=None, max_length=20),
     billing_interval: str | None = Query(default=None, max_length=20),
     telegram_link: str | None = Query(default=None, max_length=200),
+    # Carried through Google and back in the signed state below, for the same reason
+    # the plan is: a person who was bounced out of a page should land on it again,
+    # whichever door they used to get back in.
+    next_path: str | None = Query(default=None, alias="next", max_length=512),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
     selected_plan, selected_interval = _subscription_selection(plan_code, billing_interval)
-    auth_query = _subscription_query(selected_plan, selected_interval)
-    if telegram_link:
-        auth_query["telegram_link"] = telegram_link
+    auth_query = _carried_query(selected_plan, selected_interval, telegram_link, next_path)
     suffix = f"?{urlencode(auth_query)}" if auth_query else ""
     chosen_mode = "signup" if mode == "signup" else "signin"
 
@@ -1881,6 +1975,7 @@ async def google_start(
                 "plan_code": selected_plan or "",
                 "billing_interval": selected_interval or "",
                 "telegram_link": telegram_link or "",
+                "next": safe_return_path(next_path) or "",
                 # Google compares the address sent here with the one sent when the code
                 # is redeemed, character for character. Carrying the exact string in the
                 # signed state means the two halves cannot drift apart.
@@ -1920,10 +2015,9 @@ async def google_callback(
     plan_code = carried.get("plan_code") or None
     billing_interval = carried.get("billing_interval") or None
     telegram_link = carried.get("telegram_link") or None
+    next_path = carried.get("next") or None
     is_popup = bool(carried.get("popup"))
-    auth_query = _subscription_query(plan_code, billing_interval)
-    if telegram_link:
-        auth_query["telegram_link"] = telegram_link
+    auth_query = _carried_query(plan_code, billing_interval, telegram_link, next_path)
     suffix = f"?{urlencode(auth_query)}" if auth_query else ""
 
     def _finish(target: str) -> Response:
@@ -1994,10 +2088,11 @@ async def google_callback(
     if telegram_connected:
         default_message = "telegram_connected"
     response = _finish(
-        _subscription_destination(
+        _destination_after_sign_in(
             settings,
             plan_code=plan_code,
             billing_interval=billing_interval,
+            next_path=next_path,
             default_message=default_message,
         )
     )

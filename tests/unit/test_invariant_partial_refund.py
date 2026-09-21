@@ -269,7 +269,11 @@ async def test_the_refund_amount_decides_full_or_partial(
             assert alert.state == "open"
             assert alert.occurrence_count == 1, "one alert per payment, not per redelivery"
             assert f"{amount:.2f}" in alert.summary, alert.summary
-            assert "8.50" in alert.summary, (
+            # Half of the payment, worked out from the payment itself. This said "8.50"
+            # — half of the launch price — and began failing on the morning the launch
+            # offer ended, 20 September 2026, when the same payment became 25.00.
+            refunded = _event_value("partial", amount)
+            assert f"{refunded:.2f}" in alert.summary, (
                 "the alert must say the money in plain words: " + alert.summary
             )
             assert str(settled.id) in " ".join(alert.evidence_refs)

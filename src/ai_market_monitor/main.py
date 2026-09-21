@@ -5,8 +5,11 @@ from pathlib import Path
 from time import perf_counter
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ai_market_monitor.api.request_guards import apply_request_guards
 from ai_market_monitor.api.routers import (
@@ -34,6 +37,12 @@ from ai_market_monitor.api.routers import (
 )
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.logging import configure_logging
+from ai_market_monitor.core.return_path import (
+    referring_path_of,
+    return_path_of,
+    sign_in_url,
+    wants_html_page,
+)
 from ai_market_monitor.core.startup import validate_runtime_configuration
 from ai_market_monitor.observability.asgi import record_http_request
 from ai_market_monitor.services.affiliate_attribution import capture_referral_link
@@ -124,6 +133,39 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     # `text/event-stream` alone by default, so the System Brain's live stream is
     # unaffected, and a client that does not offer gzip still receives plain bytes.
     application.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+
+    @application.exception_handler(StarletteHTTPException)
+    async def sign_in_instead_of_raw_refusal(
+        request: Request, exc: StarletteHTTPException
+    ) -> Response:
+        """Send a person to the sign-in page instead of showing them error text.
+
+        A page opened in a browser and a call made by script on a page already open are
+        two different things, and the answer "you are not signed in" has to look
+        different for each. Script gets the refusal it can read. A person gets taken to
+        the sign-in page, and back to the page they wanted the moment they are in.
+
+        The System Brain is where this was found: every one of its pages answered an
+        expired session with the bare words ``{"detail": "Dashboard session
+        required"}`` on a white screen, with nothing to click. It was never only those
+        pages — every page behind a sign-in had the same hole, so the rule is applied
+        once here rather than route by route.
+
+        Only 401 is redirected. A 403 means the person *is* signed in and this is simply
+        not theirs; sending them to sign in again would loop them through a door they
+        already came through.
+        """
+
+        if exc.status_code == 401 and wants_html_page(request):
+            # A refused form submit cannot be replayed, so the person goes back to the
+            # page the form was on rather than to the address the form posted to.
+            coming_from = (
+                return_path_of(request)
+                if request.method == "GET"
+                else referring_path_of(request)
+            )
+            return RedirectResponse(sign_in_url(coming_from), status_code=303)
+        return await http_exception_handler(request, exc)
 
     @application.middleware("http")
     async def add_process_time_header(request: Request, call_next):

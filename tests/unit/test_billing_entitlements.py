@@ -192,10 +192,15 @@ def test_paid_plans_are_priced_and_promoted_the_way_the_pages_say():
     before_the_deadline = PROMOTION_ENDS_AT - timedelta(days=1)
     after_the_deadline = PROMOTION_ENDS_AT + timedelta(days=1)
 
-    assert original_monthly_price("trader") == Decimal("15.00")
-    assert original_monthly_price("pro") == Decimal("25.00")
-    assert promotional_monthly_price("trader") == Decimal("9.00")
-    assert promotional_monthly_price("pro") == Decimal("17.00")
+    # Read at a fixed moment inside the offer. Left on the real clock, these four lines
+    # began failing on the morning the launch offer ended, 20 September 2026, although
+    # nothing about the prices had changed.
+    assert original_monthly_price("trader", now=before_the_deadline) == Decimal("15.00")
+    assert original_monthly_price("pro", now=before_the_deadline) == Decimal("25.00")
+    assert promotional_monthly_price("trader", now=before_the_deadline) == Decimal("9.00")
+    assert promotional_monthly_price("pro", now=before_the_deadline) == Decimal("17.00")
+    assert original_monthly_price("trader", now=after_the_deadline) is None
+    assert promotional_monthly_price("trader", now=after_the_deadline) is None
 
     for code, promoted, normal in (
         ("trader", Decimal("9.00"), Decimal("15.00")),
