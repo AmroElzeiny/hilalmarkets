@@ -16,11 +16,11 @@ from ai_market_monitor.core.dashboard_paths import HOME_PATH
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
-    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
     money_back_headline,
     plan_offer,
+    promotion_ends_at,
     promotion_is_active,
     visible_plan_comparison,
     visible_plan_comparison_headers,
@@ -378,7 +378,7 @@ def _public_context(
         "plan_offer_values": {
             code: plan_sale_payload(settings, code) for code in plan_codes
         },
-        "promotion_ends_at": PROMOTION_ENDS_AT.isoformat(),
+        "promotion_ends_at": promotion_ends_at(),
         "promotion_active": promotion_is_active(),
         "plan_comparison": visible_plan_comparison(
             billing_enabled=settings.billing_enabled

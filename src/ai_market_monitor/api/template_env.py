@@ -27,7 +27,7 @@ from fastapi.templating import Jinja2Templates
 
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.dashboard_paths import MONITOR_PATH, monitor_edit_path
-from ai_market_monitor.core.money import money_json_dumps, quantise_half_up
+from ai_market_monitor.core.money import display_usd, money_json_dumps, quantise_half_up
 from ai_market_monitor.core.plans import (
     DISCOUNT_CODE_PATTERN,
     PLAN_LIMIT_WORDS,
@@ -176,6 +176,9 @@ def register(templates: Jinja2Templates) -> Jinja2Templates:
     # plan ends", where the seconds are noise a beginner has to read past.
     templates.env.filters["day_dt"] = day_only
     templates.env.filters["reward_amount"] = reward_amount
+    # Every price a person reads: "$15", "$17.50". Templates used to write `| int`, which
+    # cuts off cents — see `core.money.display_usd`.
+    templates.env.filters["usd"] = display_usd
     templates.env.filters["plan_limit"] = plan_limit
     # The payment company's name, from the one place that owns it. Four pages used to
     # translate `creem` into "Creem" themselves, and the plan popup told everybody their

@@ -56,7 +56,7 @@ def annual_only_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
             plans.PlanOffer(
                 monthly_available=False,
                 annual_available=True,
-                promotional_monthly_price=offer.promotional_monthly_price,
+                takes_offer=offer.takes_offer,
             ),
         )
 

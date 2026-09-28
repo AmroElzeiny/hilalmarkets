@@ -320,3 +320,28 @@ def money_kept(paid_amount: Decimal, refunded_amount: Decimal | None) -> Decimal
     if refunded <= 0:
         return paid_amount
     return max(paid_amount - refunded, Decimal("0"))
+
+
+def display_usd(amount: object) -> str:
+    """A price the way this product prints it for a person: ``$15``, ``$17.50``.
+
+    Whole dollars without cents, any other amount with exactly two. The browser scripts
+    print money by the same rule (their ``money()`` helpers), so a figure a template draws
+    and the same figure a script redraws after a click read identically.
+
+    The single owner for templates. Pages used to write ``${{ price | int }}``, and
+    ``int`` cuts cents off: the day an offer made a plan cost $17.50, every card would
+    have said $17 while the checkout charged $17.50. Anything that is not a number is
+    printed as it came, never turned into a made-up price.
+    """
+
+    try:
+        value = Decimal(str(amount))
+    except (ArithmeticError, TypeError, ValueError):
+        return str(amount)
+    if not value.is_finite():
+        return str(amount)
+    cents = quantise_half_up(value, Decimal("0.01"))
+    if cents == cents.to_integral_value():
+        return f"${int(cents)}"
+    return f"${cents}"

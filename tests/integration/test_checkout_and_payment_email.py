@@ -19,11 +19,13 @@ from ai_market_monitor.core.plans import (
     PLAN_LIMIT_WORDS,
     PURCHASABLE_PLAN_CODES,
     RETIRED_DISCOUNT_CODES,
+    current_offer,
     effective_monthly_price,
     original_monthly_price,
     plan_name,
     plan_offer,
     price_after_percent,
+    promotion_ends_at,
     promotion_is_active,
 )
 from ai_market_monitor.db.models import (
@@ -306,7 +308,11 @@ async def test_the_review_page_quotes_the_price_it_will_charge(test_context, pla
         assert was is not None and was > charged
         assert f"{was} {plan_offer_currency}" in body
         assert 'class="price-original"' in body
-        assert "data-offer-countdown" in body
+        # The offer is named, and a countdown appears only when it has an end date.
+        offer = current_offer()
+        assert offer is not None
+        assert f'<code class="hm-code-chip">{offer.code}</code>' in body
+        assert ("data-offer-countdown" in body) is (promotion_ends_at() is not None)
     # A code that no longer works may never be named on a page that takes money.
     for retired in RETIRED_DISCOUNT_CODES:
         assert retired not in body

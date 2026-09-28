@@ -42,6 +42,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.official_hosts import site_host
 from ai_market_monitor.services.sharia_page_render import BrowserPageRenderer
 from ai_market_monitor.services.sharia_research import (
     FetchTarget,
@@ -244,8 +245,10 @@ def _normalise(url: str) -> str:
     parts = urlsplit(url.strip())
     if parts.scheme not in {"http", "https"} or not parts.netloc:
         return ""
-    host = parts.netloc.casefold()
-    host = host.removeprefix("www.")
+    # The site's identity from the one owner of "same website" (`core/official_hosts.py`),
+    # keeping any port the address named.
+    port = f":{parts.port}" if parts.port else ""
+    host = site_host(parts.hostname) + port
     path = parts.path.rstrip("/") or "/"
     return urlunsplit((parts.scheme, host, path, parts.query, ""))
 

@@ -2,8 +2,8 @@
 {% from "hilal/macros/payment_provider_badge.html" import payment_provider_badge %}
 {% from "hilal/macros/discount_code_box.html" import discount_code_box %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260914-telegram-recovery">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260914-telegram-recovery">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260928-hilal30">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20260928-hilal30">
 {% endblock %}
 {% block content %}
 
@@ -144,14 +144,19 @@
           {% elif plan.is_free %}
             <strong>Free</strong><span>and it stays free</span>
           {% else %}
-            {% if plan.was_price %}<s aria-label="Was ${{ plan.was_price | int }} a month">${{ plan.was_price | int }}</s>{% endif %}
-            <strong>${{ plan.monthly_price | int }}</strong><span>a month</span>
+            {% if plan.was_price %}<s aria-label="Was {{ plan.was_price | usd }} a month">{{ plan.was_price | usd }}</s>{% endif %}
+            <strong>{{ plan.monthly_price | usd }}</strong><span>a month</span>
           {% endif %}
         </p>
 
         {%- if plan.was_price and plan.for_sale and not plan.is_free %}
-          {#- The crossed-out price and timer already explain the temporary offer. -#}
+          {%- set offer = {"offerCode": plan.offer_code, "offerPercent": plan.offer_percent} %}
+          {% include "hilal/partials/offer_code_note.html" %}
+          {#- A countdown only for an offer that really ends. Given no date, the countdown
+              script decides the offer is over and hides the crossed-out price. -#}
+          {%- if promotion_ends_at %}
           <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" role="group" aria-label="Time left at this price" hidden></div>
+          {%- endif %}
         {%- endif %}
 
         {% if plan.highlight and plan.for_sale %}
@@ -203,7 +208,7 @@
                     type="button"
                     data-s-choose="{{ plan.code }}"
                     data-plan-name="{{ plan.name }}"
-                    data-plan-price="{{ plan.monthly_price | int }}">
+                    data-plan-price="{{ plan.monthly_price }}">
               <span data-icon="arrow" data-icon-class="icon-sm"></span>Choose {{ plan.name }}
             </button>
           {% else %}
@@ -343,8 +348,8 @@
           <small>You are buying</small>
           <strong data-s-order-plan>—</strong>
         </div>
-        {#- The price a code replaced, crossed out beside the new one. Hidden until there
-            is one, so a full-price order shows one number and not two. -#}
+        {#- The price an offer or a code replaced, crossed out beside the new one. Hidden
+            when there is none, so a full-price order shows one number and not two. -#}
         <s class="s-order-was" data-s-order-was hidden></s>
         <span class="s-order-total" data-s-order-total>—</span>
         {#- What paying does to somebody's money over time. The sentence belongs to the
@@ -486,6 +491,6 @@
 <script id="s-plan-facts" type="application/json">{{ plan_cards|tojson }}</script>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260914-telegram-recovery"></script>
-<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260914-telegram-recovery"></script>
+<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260928-hilal30"></script>
+<script type="module" src="{{ url_for('static', path='/hm-subscription-test.js') }}?v=20260928-hilal30"></script>
 {% endblock %}

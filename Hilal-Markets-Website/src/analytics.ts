@@ -57,7 +57,8 @@ type CommerceRuntimeConfig = {
   }>
   comparisonRows?: string[][]
   /** When the launch price stops, as an ISO instant. */
-  promotionEndsAt?: string
+  /** `null` when the running offer has no end date: then there is no countdown. */
+  promotionEndsAt?: string | null
   promotionActive?: boolean
 }
 

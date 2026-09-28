@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.official_hosts import same_official_host
 from ai_market_monitor.db.models import (
     AuditEvent,
     ExternalAssessment,
@@ -116,9 +117,8 @@ class FassetSourceFetcher:
                 "Fasset returned an anti-bot challenge instead of the published reports.",
             )
         final_url = str(response.url)
-        expected_host = urlparse(url).hostname
-        final_host = urlparse(final_url).hostname
-        if not expected_host or final_host != expected_host:
+        # Same website, `www.` or not — see `core/official_hosts.py`.
+        if not same_official_host(url, final_url):
             raise FassetImportError(
                 "fasset_source_redirected",
                 "Fasset redirected the importer outside the configured official host.",

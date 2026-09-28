@@ -36,10 +36,12 @@ from ai_market_monitor.cockpit_service import StrategyCockpitService
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
-    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_PRESENTATIONS,
     effective_monthly_price,
     original_monthly_price,
+    promotion_ends_at,
+    running_offer_code,
+    running_offer_percent,
 )
 from ai_market_monitor.db.models import (
     AssetShariaAssessment,
@@ -898,10 +900,10 @@ class HilalChatKnowledge:
             if code not in PUBLIC_PLAN_PRESENTATIONS:
                 continue
             # One price: what a checkout charges today, with nothing typed anywhere. While
-            # the launch offer runs that **is** the launch price, so Hilal quotes the same
-            # figure every pricing surface shows. The normal price travels beside it, with
-            # the day the offer ends, so Hilal can explain the offer rather than only name
-            # a number.
+            # the offer runs that **is** the offer price, so Hilal quotes the same figure
+            # every pricing surface shows. The normal price travels beside it, with the
+            # offer's name and — only when it has one — its end date, so Hilal can explain
+            # the offer rather than only name a number.
             charged = effective_monthly_price(code)
             was = original_monthly_price(code)
             row: dict[str, Any] = {
@@ -913,10 +915,14 @@ class HilalChatKnowledge:
             }
             if was is not None:
                 row["normal_price_per_month"] = f"{was} {definition.currency}"
-                row["launch_price_ends_at"] = PROMOTION_ENDS_AT.isoformat()
-                row["how_the_launch_price_is_reached"] = (
-                    "No code is needed. It is the price for anybody who pays before the "
-                    "date above."
+                row["offer_name"] = running_offer_code(code)
+                row["offer_percent_off"] = str(running_offer_percent(code))
+                ends_at = promotion_ends_at()
+                if ends_at is not None:
+                    row["offer_ends_at"] = ends_at
+                row["how_the_offer_price_is_reached"] = (
+                    "Nothing needs to be typed. The lower price is already what every "
+                    "buyer pays, by card or by crypto."
                 )
             rows.append(row)
         return rows[:8]

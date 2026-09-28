@@ -70,6 +70,9 @@ function start(scope) {
   /** What this order costs right now, after any code. Kept, so the sentence under the
    *  price can be rewritten when the way of paying changes without re-reading the DOM. */
   let orderAmount = 0;
+  /** The normal price the running offer replaced, for the plan being bought. A cleared
+   *  code puts the order back to the offer price with this crossed out beside it. */
+  let offerWas = "";
 
   const stepOf = dialog?.querySelector("[data-s-step-of]");
   const steps = [...(dialog?.querySelectorAll("[data-s-step]") || [])];
@@ -246,9 +249,12 @@ function start(scope) {
     // What a checkout really charges with no code. `monthly_price` is the card headline,
     // which already carries the launch-code discount.
     const price = Number(plan.full_price ?? plan.monthly_price) || 0;
+    // The normal price the running offer replaced, so the popup crosses it out exactly as
+    // the card behind it does. Empty when no offer applies.
+    offerWas = plan.was_price ? String(plan.was_price) : "";
     dialog.querySelector("[data-s-plan-code]").value = plan.code;
     dialog.querySelector("[data-s-order-plan]").textContent = plan.name;
-    paintOrder(price, "");
+    paintOrder(price, offerWas);
     const box = dialog.querySelector("[data-discount]");
     if (box) {
       // The box prices against the plan now being bought, so it has to be told which one
@@ -310,7 +316,7 @@ function start(scope) {
      how the other draws its half. */
   form?.addEventListener("hm:discount", (event) => {
     const { amount, was } = event.detail || {};
-    if (amount) paintOrder(amount, was || "");
+    if (amount) paintOrder(amount, was || offerWas);
   });
 
   /** Mark every empty required field, and say how many there are. */
@@ -347,7 +353,14 @@ function start(scope) {
 
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (pay?.disabled || pay?.dataset.busy === "true") return;
+    // A second press while the first is still on its way. It used to return without a
+    // word, which is exactly what "the button does nothing" looks like — so it says what
+    // is happening instead.
+    if (pay?.dataset.busy === "true") {
+      say("The payment page is already opening. Please wait.");
+      return;
+    }
+    if (pay?.disabled) return;
     if (!checkFields()) {
       step = 2;
       draw();

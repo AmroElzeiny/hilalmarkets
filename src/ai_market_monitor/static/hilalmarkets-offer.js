@@ -1,5 +1,6 @@
 /**
- * How long the launch price lasts, in days, hours, minutes and seconds.
+ * How long an offer price lasts, in days, hours, minutes and seconds — for an offer that
+ * has an end date. An offer without one gets no countdown element at all.
  *
  * The server renders the price and the deadline; this only counts down to the deadline
  * the server gave it. It counts live, one step per second, so a visitor sitting on the

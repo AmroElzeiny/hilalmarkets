@@ -15,7 +15,7 @@ code, one method or one price fails.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -23,7 +23,6 @@ import pytest
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
-    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
     PURCHASABLE_PLAN_CODES,
     RETIRED_DISCOUNT_CODES,
@@ -47,9 +46,15 @@ from ai_market_monitor.services.discount_codes import (
     DiscountCodeService,
     normalize_discount_code,
 )
+from tests.offer_support import AFTER_TEST_OFFER_ENDS, BEFORE_TEST_OFFER_ENDS, TEST_OFFER
 
-BEFORE_THE_END = PROMOTION_ENDS_AT - timedelta(days=1)
-AFTER_THE_END = PROMOTION_ENDS_AT
+BEFORE_THE_END = BEFORE_TEST_OFFER_ENDS
+AFTER_THE_END = AFTER_TEST_OFFER_ENDS
+
+#: Every test here reads "before" and "after" an offer's end, so every test runs with an
+#: offer that has one. The real offer (HILAL30) has no end date; the rules checked here
+#: are the rules the next dated offer must follow.
+pytestmark = pytest.mark.usefixtures("dated_offer")
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +239,38 @@ async def test_a_retired_code_is_refused_before_anything_is_asked(
             code, plan_code=plan_code, now=BEFORE_THE_END
         )
     assert refusal.value.code == "discount_code_expired"
+
+
+@pytest.mark.parametrize(
+    "typed", [TEST_OFFER.code, TEST_OFFER.code.lower(), f" {TEST_OFFER.code.title()} "]
+)
+@pytest.mark.parametrize("plan_code", PURCHASABLE_PLAN_CODES)
+@pytest.mark.anyio
+async def test_typing_the_running_offers_code_never_takes_it_off_twice(
+    typed: str, plan_code: str
+) -> None:
+    """The offer is already inside every price, so its name is refused as a typed code.
+
+    Honoured, it would take 30% off a price that already had 30% taken off — the crypto
+    invoice would be raised at a figure no page shows. Refused whatever case or spacing
+    it is typed in, and before Creem is ever asked.
+    """
+
+    settings = _settings(creem_api_key=None, billing_discount_codes={})
+    with pytest.raises(DiscountCodeError) as refusal:
+        await DiscountCodeService(settings).offer_for(
+            typed, plan_code=plan_code, now=BEFORE_THE_END
+        )
+    assert refusal.value.code == "discount_code_already_applied"
+    assert TEST_OFFER.code in str(refusal.value)
+
+
+def test_the_running_offers_code_cannot_be_configured_as_an_extra_code() -> None:
+    """Listing the offer's own name in BILLING_DISCOUNT_CODES stops the application."""
+
+    with pytest.raises(Exception) as raised:  # noqa: PT011 - pydantic wraps the message
+        _settings(billing_discount_codes=f"{TEST_OFFER.code}=30")
+    assert TEST_OFFER.code in str(raised.value)
 
 
 # ---------------------------------------------------------------------------

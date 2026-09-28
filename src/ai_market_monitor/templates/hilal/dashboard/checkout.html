@@ -66,15 +66,16 @@
       </strong>
     </div>
     {% if promotion_original_price %}
-      {# The price above is already the launch price. Nothing has to be typed for it, so
-         the page says what it normally costs and how long this lasts instead of naming a
-         code that no longer exists. #}
+      {# The price above already has the running offer taken off. Nothing has to be typed
+         for it, so the page names the offer and says what the plan normally costs. #}
       <p class="checkout-small">
-        Launch price. It normally costs
+        {% if offer_code %}<code class="hm-code-chip">{{ offer_code }}</code> {{ offer_percent }}% off, already taken off. {% endif %}It normally costs
         <s class="price-original">{{ promotion_original_price }} {{ plan.currency }}</s>
         a month.
       </p>
+      {% if promotion_ends_at %}
       <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" role="group" aria-label="Time left at this price" hidden></div>
+      {% endif %}
     {% endif %}
     <p class="muted">Payment details are entered only on the payment page run by the payment company, which comes next.</p>
     {% if already_subscribed %}
@@ -149,6 +150,6 @@
   data-event-scope="{{ checkout_attempt.id if checkout_attempt else checkout_request_id }}"
   hidden
 ></div>
-<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260914-telegram-recovery"></script>
-<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260914-telegram-recovery"></script>
+<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260928-hilal30"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-commerce-analytics.js') }}?v=20260928-hilal30"></script>
 {% endblock %}

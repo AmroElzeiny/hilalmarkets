@@ -47,8 +47,10 @@ from ai_market_monitor.core.plans import (
 )
 from ai_market_monitor.core.plans import (
     RETIRED_DISCOUNT_CODES,
+    current_offer,
     is_discount_code_shaped,
     price_after_percent,
+    promotion_is_active,
 )
 from ai_market_monitor.services.provider_reliability import ProviderCallError
 from ai_market_monitor.services.provider_runtime import provider_request
@@ -320,6 +322,18 @@ class DiscountCodeService:
                 "discount_code_expired",
                 "That code has finished. The lower price is already on the page — you do "
                 "not need a code for it.",
+            )
+        # The running offer's own name. Its percentage is already inside the price this
+        # code would be taken off (`core/plans.effective_monthly_price`), so honouring it
+        # here would take it off twice — and Creem, holding the undiscounted-by-code price,
+        # would then refuse the payment as underpaid. Answered before Creem is asked, for
+        # the same reason as a retired code.
+        offer = current_offer()
+        if offer is not None and code == offer.code and promotion_is_active(now):
+            raise DiscountCodeError(
+                "discount_code_already_applied",
+                f"{code} is already taken off the price you see. You do not need to type "
+                "it, and it cannot be added a second time.",
             )
         # Creem refuses by raising, so a refusal leaves this block rather than falling
         # through to the local list. `None` covers the two cases that are not refusals —

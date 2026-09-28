@@ -21,12 +21,12 @@ server-created checkout attempt before a subscription or receipt email is create
    annual keys may be left out. Plan names come from `core/plans.py` — check them there
    rather than trusting this list, which said "Monitor" for months after the rename.
 
-   **Each Creem product's price must equal what `core/plans.py` charges today.** While
-   the launch offer runs that is the launch price, not the normal one, because the offer
-   no longer needs a code: the lower figure simply *is* the price until
-   `PROMOTION_ENDS_AT`. When that date passes, the two Creem products have to be
-   re-priced to the normal figures by hand, or the site will show one price and Creem
-   will charge another.
+   **Each Creem product's price must equal what `core/plans.py` charges today.** While an
+   offer runs (`CURRENT_OFFER`, now **HILAL30**, 30% off, no end date) that is the offer
+   price, not the normal one: Plus **$10.50**, Pro **$17.50**. Creem does not follow the
+   offer by itself, so re-price both products the same day an offer starts, changes or
+   ends. `scripts/check_creem_prices.py` prints the comparison, and the daily
+   `check_card_prices` worker task sends the operator a Telegram message when they differ.
 2. Optionally configure `trader_trial` in Creem as a seven-day recurring trial. The application
    does not invent or override provider product terms, and leaves the trial CTA unavailable until
    that exact product is configured.
@@ -69,11 +69,13 @@ Official references:
 
 ## Discount codes
 
-**The launch price needs no code.** It used to: a customer typed `HILAL25` to reach the
-lower figure. That code is withdrawn — it is listed in `RETIRED_DISCOUNT_CODES` in
-`core/plans.py`, and tests refuse to let it appear on any page. The launch price is now
-simply the price until `PROMOTION_ENDS_AT`, on the card, at checkout and on the crypto
-invoice alike.
+**The offer price needs no code.** `HILAL30` is the *name* of the running offer: every
+pricing card shows it beside the crossed-out price, and the lower figure is already what
+the card, the checkout and the crypto invoice charge. Typing `HILAL30` into the code box is
+refused with "already taken off", so it can never be taken off twice. It must not be
+listed in `BILLING_DISCOUNT_CODES` (the application refuses to start) and must not exist
+as a discount in Creem (the price check reports it). The old launch code `HILAL25` stays
+withdrawn in `RETIRED_DISCOUNT_CODES`.
 
 Codes still exist for partners and campaigns. They are listed per deployment:
 

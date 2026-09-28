@@ -15,7 +15,6 @@ import pytest
 from ai_market_monitor.core.plans import (
     COMING_SOON_LABEL,
     PLAN_DEFINITIONS,
-    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
     PURCHASABLE_PLAN_CODES,
     effective_monthly_price,
@@ -80,6 +79,7 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     UnresolvedFieldV2,
 )
 from ai_market_monitor.services.strategy_patch_extractor import deterministic_strategy_patch
+from tests.offer_support import TEST_OFFER_ENDS_AT
 
 TURN = "turn-universe-1"
 RULE = "Monitor BTC/USDT on the 15m when the candle rises open-to-close by at least 5%"
@@ -1202,7 +1202,7 @@ def test_both_paid_plans_are_on_sale_and_only_monthly() -> None:
 
     for code in PURCHASABLE_PLAN_CODES:
         assert plan_offer(code).monthly_available is True, code
-        assert promotional_monthly_price(code, now=PROMOTION_ENDS_AT - timedelta(1)), code
+        assert promotional_monthly_price(code), code
     for code in PUBLIC_PLAN_CODES:
         assert plan_offer(code).annual_available is False, code
 
@@ -1215,17 +1215,18 @@ def test_an_unknown_plan_is_never_for_sale() -> None:
     assert offer.annual_available is False
 
 
-def test_the_launch_price_and_the_countdown_come_from_one_rule() -> None:
+def test_the_offer_price_and_the_countdown_come_from_one_rule(dated_offer) -> None:
     """A price on the page, the amount charged, and a timer beside them: one rule.
 
-    Nothing is typed to reach the launch price, so `effective_monthly_price` **is** the
-    launch price while the offer runs. That is what makes the card, the crypto invoice
-    and the Creem product check one number rather than three. The moment the deadline
-    passes, the same call returns the normal price and the crossed-out figure disappears.
+    Nothing is typed to reach the offer price, so `effective_monthly_price` **is** the
+    offer price while the offer runs. That is what makes the card, the crypto invoice
+    and the Creem product check one number rather than three. For an offer with an end
+    date, the moment it passes the same call returns the normal price and the crossed-out
+    figure disappears.
     """
 
-    before = PROMOTION_ENDS_AT - timedelta(minutes=1)
-    after = PROMOTION_ENDS_AT
+    before = TEST_OFFER_ENDS_AT - timedelta(minutes=1)
+    after = TEST_OFFER_ENDS_AT
     normal_price = PLAN_DEFINITIONS["trader"].monthly_price
     launch_price = promotional_monthly_price("trader", now=before)
     assert launch_price is not None and launch_price < normal_price
@@ -1244,16 +1245,16 @@ def test_the_launch_price_and_the_countdown_come_from_one_rule() -> None:
 @pytest.mark.parametrize("code", PUBLIC_PLAN_CODES)
 def test_a_plan_with_no_offer_has_nothing_crossed_out(code: str) -> None:
     if promotional_monthly_price(code) is not None:
-        pytest.skip("this plan is running a launch price")
+        pytest.skip("this plan is running an offer price")
     assert original_monthly_price(code) is None
     assert effective_monthly_price(code) == PLAN_DEFINITIONS[code].monthly_price
 
 
 @pytest.mark.parametrize("code", PUBLIC_PLAN_CODES)
-def test_the_offer_payload_carries_everything_a_card_needs(code: str) -> None:
+def test_the_offer_payload_carries_everything_a_card_needs(code: str, dated_offer) -> None:
     """The landing page and the dashboard read this same object."""
 
-    when = PROMOTION_ENDS_AT - timedelta(days=1)
+    when = TEST_OFFER_ENDS_AT - timedelta(days=1)
     payload = plan_offer_payload(code, now=when)
     assert set(payload) == {
         "monthlyAvailable",
@@ -1262,6 +1263,8 @@ def test_the_offer_payload_carries_everything_a_card_needs(code: str) -> None:
         "annualPrice",
         "originalMonthlyPrice",
         "fullMonthlyPrice",
+        "offerCode",
+        "offerPercent",
         "promotionEndsAt",
         "promotionRunning",
         "comingSoonLabel",
@@ -1271,9 +1274,10 @@ def test_the_offer_payload_carries_everything_a_card_needs(code: str) -> None:
     # An interval that is not open carries no number at all, so the page source cannot
     # leak a price for something nobody can buy.
     assert payload["annualPrice"] is None
-    assert payload["promotionEndsAt"] == PROMOTION_ENDS_AT.isoformat()
     promotional = promotional_monthly_price(code, now=when)
     if promotional is not None:
+        assert payload["promotionEndsAt"] == TEST_OFFER_ENDS_AT.isoformat()
+        assert payload["offerCode"] == dated_offer.code
         # The headline is the launch price, and the normal price travels with it so a card
         # can explain the number rather than only show it.
         assert payload["monthlyPrice"] == float(promotional)
@@ -1283,6 +1287,8 @@ def test_the_offer_payload_carries_everything_a_card_needs(code: str) -> None:
     else:
         assert payload["originalMonthlyPrice"] is None
         assert payload["promotionRunning"] is False
+        assert payload["promotionEndsAt"] is None
+        assert payload["offerCode"] is None
     if not payload["monthlyAvailable"]:
         assert payload["monthlyPrice"] is None
         assert payload["fullMonthlyPrice"] is None

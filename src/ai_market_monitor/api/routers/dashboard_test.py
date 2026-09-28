@@ -71,11 +71,11 @@ from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PLAN_LIMIT_WORDS,
-    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
     UNLIMITED_SYMBOL_CAP,
     plan_offer_payload,
+    promotion_ends_at,
     visible_plan_comparison,
     visible_plan_comparison_headers,
     visible_public_plan_codes,
@@ -1670,6 +1670,10 @@ def _plan_card(
         "monthly_price": offer["monthlyPrice"],
         "full_price": offer["fullMonthlyPrice"],
         "was_price": offer["originalMonthlyPrice"],
+        # The running offer's name and size ("HILAL30", 30), drawn under the crossed-out
+        # price by `partials/offer_code_note.html`. `None` when no offer applies.
+        "offer_code": offer["offerCode"],
+        "offer_percent": offer["offerPercent"],
         "is_free": offer["monthlyPrice"] == 0,
         "for_sale": bool(offer["monthlyAvailable"]),
         "coming_soon_label": offer["comingSoonLabel"],
@@ -1912,7 +1916,7 @@ async def subscription_page(
         # Each method carries its own sentence; this is the one that is true while none
         # of them has been chosen.
         charge_story_before_choosing=CHARGE_STORY_BEFORE_CHOOSING,
-        promotion_ends_at=PROMOTION_ENDS_AT.isoformat(),
+        promotion_ends_at=promotion_ends_at(),
         open_for_plan=open_for_plan,
         # Whether a payment in the popup would replace a paid plan held now. Read from
         # `plan_checkout_availability`, the one owner of "a different paid plan", and

@@ -20,13 +20,17 @@
       {% if offer.monthlyAvailable %}
         <div class="price">
           {% if offer.originalMonthlyPrice %}
-            <s class="price-original" data-offer-original-price aria-label="Was ${{ offer.originalMonthlyPrice | int }} per month">${{ offer.originalMonthlyPrice | int }}</s>
+            <s class="price-original" data-offer-original-price aria-label="Was {{ offer.originalMonthlyPrice | usd }} per month">{{ offer.originalMonthlyPrice | usd }}</s>
           {% endif %}
-          <strong>${{ offer.monthlyPrice | int }}</strong><span>{{ ' free forever' if offer.monthlyPrice == 0 else '/month' }}</span>
+          <strong>{{ offer.monthlyPrice | usd }}</strong><span>{{ ' free forever' if offer.monthlyPrice == 0 else '/month' }}</span>
         </div>
         {% if offer.originalMonthlyPrice %}
-          {# The crossed-out price and timer already explain the temporary offer. #}
-          <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" role="group" aria-label="Time left at this price" hidden></div>
+          {% include "hilal/partials/offer_code_note.html" %}
+          {#- A countdown only for an offer that really ends. Given no date, the countdown
+              script decides the offer is over and hides the crossed-out price. -#}
+          {% if offer.promotionEndsAt %}
+          <div class="offer-countdown" data-offer-countdown="{{ offer.promotionEndsAt }}" role="group" aria-label="Time left at this price" hidden></div>
+          {% endif %}
         {% endif %}
       {% else %}
         {# No number at all for something nobody can buy yet. A price beside "Soon"
@@ -36,7 +40,7 @@
         </div>
       {% endif %}
       {% if offer.annualAvailable and offer.annualPrice %}
-        <small>${{ offer.annualPrice | int }} per year. Save ${{ ((offer.monthlyPrice * 12) - offer.annualPrice) | int }}.</small>
+        <small>{{ offer.annualPrice | usd }} per year. Save {{ ((offer.monthlyPrice * 12) - offer.annualPrice) | usd }}.</small>
       {% elif presentation.annual_price > 0 %}
         <small class="annual-soon">Annual billing: {{ offer.comingSoonLabel|lower }}.</small>
       {% endif %}

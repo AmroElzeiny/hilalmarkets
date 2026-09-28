@@ -1,18 +1,30 @@
 import re
-from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
-    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
+    current_offer,
     plan_offer_payload,
+    promotion_ends_at,
     visible_plan_comparison,
 )
 
-#: The deadline exactly as the fallback in `Pricing.tsx` has to spell it.
-DEFAULT_PROMOTION_DEADLINE = PROMOTION_ENDS_AT.isoformat()
+
+def _js_number(value: object) -> str:
+    """A price as a JavaScript literal writes it: ``10.5``, ``15`` — never ``10.50``."""
+
+    text = format(Decimal(str(value)).normalize(), "f")
+    return text
+
+
+#: The deadline exactly as the fallback in `Pricing.tsx` has to spell it: `null` for an
+#: offer with no end date, which is what keeps the fallback from drawing a countdown.
+DEFAULT_PROMOTION_DEADLINE = (
+    f"'{promotion_ends_at()}'" if promotion_ends_at() is not None else "null"
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "Hilal-Markets-Website" / "src"
@@ -594,14 +606,17 @@ def test_pricing_uses_approved_plans_accessibility_and_real_handoff():
     # have sent. Every number is derived from `core.plans` rather than typed out here,
     # so a price changed in one place fails this test instead of quietly leaving the
     # landing page quoting the old one.
-    inside_promotion = PROMOTION_ENDS_AT - timedelta(days=1)
-    expected_numbers: list[str] = [DEFAULT_PROMOTION_DEADLINE]
+    expected_numbers: list[str] = [
+        f"DEFAULT_PROMOTION_ENDS_AT: string | null = {DEFAULT_PROMOTION_DEADLINE}"
+    ]
     for code in PURCHASABLE_PLAN_CODES:
-        offer = plan_offer_payload(code, now=inside_promotion)
-        expected_numbers.append(f"monthlyPrice: {int(offer['monthlyPrice'])}")  # type: ignore[arg-type]
+        offer = plan_offer_payload(code)
+        expected_numbers.append(f"monthlyPrice: {_js_number(offer['monthlyPrice'])}")
         expected_numbers.append(
-            f"originalMonthlyPrice: {int(offer['originalMonthlyPrice'])}"  # type: ignore[arg-type]
+            f"originalMonthlyPrice: {_js_number(offer['originalMonthlyPrice'])}"
         )
+        expected_numbers.append(f"offerCode: '{offer['offerCode']}'")
+        expected_numbers.append(f"offerPercent: {offer['offerPercent']}")
         expected_numbers.append(
             f"annualPrice: {int(PUBLIC_PLAN_PRESENTATIONS[code].annual_price)}"
         )
@@ -664,15 +679,20 @@ def test_the_shipped_bundle_carries_the_current_offer_not_the_last_one():
     bundle = (
         ROOT / "src/ai_market_monitor/static/landing/assets/landing.js"
     ).read_text(encoding="utf-8")
-    inside_promotion = PROMOTION_ENDS_AT - timedelta(days=1)
-    trader = plan_offer_payload("trader", now=inside_promotion)
-
-    assert PROMOTION_ENDS_AT.isoformat() in bundle, "the shipped deadline is stale"
-    assert f"monthlyPrice:{int(trader['monthlyPrice'])}" in bundle
-    assert f"originalMonthlyPrice:{int(trader['originalMonthlyPrice'])}" in bundle
-    # And no other deadline is left in the file to be read instead.
+    offer = current_offer()
+    assert offer is not None, "update this test for a product with no running offer"
+    for code in PURCHASABLE_PLAN_CODES:
+        payload = plan_offer_payload(code)
+        assert f"monthlyPrice:{_js_number(payload['monthlyPrice'])}" in bundle, code
+        assert (
+            f"originalMonthlyPrice:{_js_number(payload['originalMonthlyPrice'])}" in bundle
+        ), code
+    assert f"offerCode:`{offer.code}`" in bundle, "the shipped offer name is stale"
+    # Exactly the deadline the server has — none for an offer without an end date — and
+    # no leftover one for the fallback to count down to instead.
     deadlines = set(re.findall(r"\d{4}-\d{2}-\d{2}T00:00:00\+00:00", bundle))
-    assert deadlines == {PROMOTION_ENDS_AT.isoformat()}, sorted(deadlines)
+    expected = {promotion_ends_at()} - {None}
+    assert deadlines == expected, sorted(deadlines)
 
 
 def test_checkout_outcome_tracking_is_consent_aware_and_contains_no_payment_data():

@@ -253,7 +253,7 @@ body:not(.hm-react-site) strong{color:var(--ink)}
 .price-card{padding:28px;border-radius:25px;background:#fff;border:1px solid var(--line);position:relative}
 .price-card.is-featured{background:var(--emerald-900);color:#fff;transform:translateY(-10px);box-shadow:var(--shadow)}
 .price-card.is-featured p,.price-card.is-featured li{color:#bed0ca}
-.price{display:flex;align-items:baseline;gap:5px;margin:22px 0}
+.price{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px;margin:22px 0}
 .price strong{font-family:var(--hm-font-display);font-size:2.8rem}
 .feature-list{list-style:none;padding:0;margin:22px 0;display:grid;gap:11px}
 .feature-list li{display:flex;gap:9px;color:#53615c;font-size:.88rem}
@@ -296,6 +296,9 @@ body:not(.hm-react-site) strong{color:var(--ink)}
    offer does not cover. The stylesheet is the only thing that hides anything. */
 .offer-countdown[hidden],.offer-countdown:not([data-offer-live]),.offer-countdown[data-offer-inactive]{display:none}
 [data-offer-original-price][data-offer-inactive],[data-offer-card][data-offer-ended] [data-offer-original-price]{display:none}
+/* The offer's name travels with the crossed-out price: hidden on an interval the offer does
+   not cover, and when a dated offer ends. */
+[data-offer-code-note][data-offer-inactive],[data-offer-card][data-offer-ended] [data-offer-code-note]{display:none}
 .offer-countdown-label{color:var(--hm-apple-deep,#55712a);font-size:.78rem;font-weight:500}
 .offer-countdown-parts{display:flex;flex-wrap:wrap;gap:6px 14px}
 .offer-countdown-part{display:flex;align-items:baseline;gap:4px}
@@ -1007,6 +1010,31 @@ html[dir="rtl"] body.hilal-dashboard .readiness-candidate.state-invalidated{bord
   --code-chip-bg: var(--gold-2);
   --code-chip-line: var(--gold);
   --code-chip-ink: var(--ink);
+}
+
+/* "HILAL30 · 30% off" under a crossed-out price (`partials/offer_code_note.html`). The same
+   shape the landing page draws in `Hilal-Markets-Website/src/index.css`. */
+.price-code-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 10px 0 0;
+  color: var(--code-chip-ink);
+  font-size: 13.5px;
+}
+
+.price-code-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.price-code-note > span:last-child {
+  flex-basis: 100%;
+  color: var(--muted, #5f6470);
+  font-size: 12.5px;
 }
 
 .hm-code-chip {

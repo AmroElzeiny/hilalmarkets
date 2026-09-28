@@ -181,6 +181,15 @@ app.conf.update(
             "task": "ai_market_monitor.retry_sharia_admin_telegram",
             "schedule": 60,
         },
+        # Does Creem charge what the website shows? Card checkout sends Creem a product id
+        # and Creem charges its own price for it; when the two differ, the customer pays
+        # and the payment is refused as the wrong amount. That happened silently from
+        # 20 September 2026 until somebody ran the price script by hand. Daily, so the
+        # first day they disagree is the day the operator hears about it.
+        "check-card-prices-daily": {
+            "task": "ai_market_monitor.check_card_prices",
+            "schedule": 24 * 60 * 60,
+        },
         "retry-payment-emails-every-minute": {
             "task": "ai_market_monitor.retry_payment_emails",
             "schedule": 60,
@@ -616,6 +625,47 @@ def screen_researched_coins() -> dict:
 @app.task(name="ai_market_monitor.refresh_market_numbers")
 def refresh_market_numbers() -> dict:
     return _run_async_task(_refresh_market_numbers())
+
+
+@app.task(name="ai_market_monitor.check_card_prices")
+def check_card_prices() -> dict:
+    return _run_async_task(_check_card_prices())
+
+
+async def _check_card_prices() -> dict:
+    """Compare Creem's product prices with the website's, and tell the operator on a gap.
+
+    Read-only towards Creem. Skipped, not failed, where there is nothing to compare: card
+    checkout switched off, or no Creem account configured. The message carries plan keys
+    and prices only — never a key or a product id.
+    """
+
+    import httpx
+
+    from ai_market_monitor.services.admin_notifications import AdminNotificationService
+    from ai_market_monitor.services.billing import billing_method_provider
+    from ai_market_monitor.services.card_price_check import (
+        card_price_check_configured,
+        check_card_prices,
+        offer_code_problem,
+    )
+
+    settings = get_settings()
+    if not settings.billing_enabled or billing_method_provider(settings, "card") != "creem":
+        return {"status": "card_checkout_not_on_creem"}
+    if not card_price_check_configured(settings):
+        return {"status": "creem_not_configured"}
+    async with httpx.AsyncClient(timeout=settings.creem_timeout_seconds) as client:
+        results = await check_card_prices(settings, client)
+        offer_problem = await offer_code_problem(settings, client)
+    problems = [f"{item.product_key}: {item.problem}" for item in results if item.problem]
+    if offer_problem:
+        problems.append(offer_problem)
+    if problems:
+        await AdminNotificationService(settings).send(
+            "Card prices need attention.\n" + "\n".join(problems)
+        )
+    return {"status": "checked", "products": len(results), "problems": len(problems)}
 
 
 async def _evaluate_due_trial_cycles() -> dict:

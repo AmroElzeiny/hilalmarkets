@@ -1,13 +1,13 @@
-"""The launch offer, rendered. Landing page, public pricing page and dashboard.
+"""The running offer, rendered. Landing page, public pricing page and dashboard.
 
 Three surfaces show prices. Three surfaces is three chances to disagree, so each rule is
 asserted on every one of them, and on **every plan that is on sale** rather than on one
-named plan: the same struck-out price, the same new price, the same deadline.
+named plan: the same struck-out price, the same new price, the same offer name, and a
+countdown only when the offer really has an end date.
 
-The offer needs no code typed in. It used to: a customer had to enter ``HILAL25`` to reach
-the lower price, so every card carried a code beside the crossed-out figure. Now the lower
-price simply *is* the price until the deadline, which means one rule covers the card, the
-checkout and the crypto invoice — and there is no code left to leak into a page.
+The offer needs no code typed in. ``HILAL30`` is its *name*: every card shows it beside
+the crossed-out figure, and the lower price already is the charge — one rule covers the
+card, the checkout and the crypto invoice.
 """
 
 from __future__ import annotations
@@ -18,18 +18,20 @@ from decimal import Decimal
 
 import pytest
 
+from ai_market_monitor.core.money import display_usd
 from ai_market_monitor.core.plans import (
     COMING_SOON_LABEL,
-    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
     RETIRED_DISCOUNT_CODES,
     annual_saving,
+    current_offer,
     effective_monthly_price,
     maximum_annual_saving,
     original_monthly_price,
     plan_offer,
+    promotion_ends_at,
     promotion_is_active,
 )
 from tests.support.billing_config import configure_live_billing
@@ -75,6 +77,24 @@ def _struck_price_marks(body: str) -> tuple[bool, bool]:
     )
 
 
+def _assert_offer_named_and_timed(body: str) -> None:
+    """The offer's name is on the page, and a countdown appears only for a real deadline.
+
+    A countdown given no deadline is read by the countdown script as "already over", and
+    it then hides the crossed-out price on an offer that is still being charged.
+    """
+
+    offer = current_offer()
+    assert offer is not None
+    assert f'<code class="hm-code-chip">{offer.code}</code>' in body
+    assert "Already taken off this price" in body
+    deadline = promotion_ends_at()
+    if deadline is None:
+        assert "data-offer-countdown=" not in body
+    else:
+        assert f'data-offer-countdown="{deadline}"' in body
+
+
 def _runtime_commerce(html: str) -> dict:
     """The commerce block the landing page hands to the React app."""
 
@@ -104,7 +124,8 @@ async def test_the_landing_page_carries_the_offer_and_its_deadline(
 ) -> None:
     response = await test_context["client"].get("/")
     commerce = _runtime_commerce(response.text)
-    assert commerce["promotionEndsAt"] == PROMOTION_ENDS_AT.isoformat()
+    # `None` for an offer without an end date, and then the landing page draws no timer.
+    assert commerce["promotionEndsAt"] == promotion_ends_at()
 
     assert commerce["promotionActive"] is promotion_is_active()
 
@@ -121,9 +142,13 @@ async def test_the_landing_page_carries_the_offer_and_its_deadline(
         assert plan["originalMonthlyPrice"] == (float(was) if was is not None else None)
         assert (was is not None) is promotion_is_active(), code
         assert plan["monthlyAvailable"] is True, code
-        # Nothing has to be typed to reach the price, so no code may travel with a plan.
+        # Nothing has to be typed to reach the price, so no code to *type* travels with a
+        # plan — only the running offer's name, which the card shows as a label.
         assert "discountCode" not in plan, code
         assert "discountPercent" not in plan, code
+        offer = current_offer()
+        if was is not None and offer is not None:
+            assert plan["offerCode"] == offer.code, code
 
     for plan in commerce["plans"]:
         assert plan["annualAvailable"] is False, plan["code"]
@@ -139,16 +164,16 @@ async def test_the_public_pricing_page_shows_the_struck_price_and_the_timer(
     body = response.text
     for code in PURCHASABLE_PLAN_CODES:
         # Today's price always stands on the card.
-        assert f"<strong>${int(headline_price(code))}</strong>" in body, code
+        assert f"<strong>{display_usd(headline_price(code))}</strong>" in body, code
     struck, countdown = _struck_price_marks(body)
     was = original_monthly_price("trader")
     if promotion_is_active():
         # The old price is crossed out and the new one stands next to it.
         assert struck and was is not None
         for code in PURCHASABLE_PLAN_CODES:
-            assert f"${int(original_monthly_price(code))}" in body, code
+            assert display_usd(original_monthly_price(code)) in body, code
         # The countdown is rendered with the server's own deadline.
-        assert f'data-offer-countdown="{PROMOTION_ENDS_AT.isoformat()}"' in body
+        _assert_offer_named_and_timed(body)
     else:
         # An offer that ended leaves no trace: no crossed-out price and no timer.
         assert not struck and not countdown and was is None
@@ -171,7 +196,7 @@ async def test_every_plan_on_sale_shows_a_price_rather_than_soon(
     response = await test_context["client"].get("/pricing")
     body = response.text
     for code in PURCHASABLE_PLAN_CODES:
-        assert f"<strong>${int(headline_price(code))}</strong>" in body, code
+        assert f"<strong>{display_usd(headline_price(code))}</strong>" in body, code
         assert f"{PUBLIC_PLAN_PRESENTATIONS[code].cta_label}" in body, code
     assert "is coming soon" not in body
 
@@ -216,16 +241,35 @@ async def test_the_dashboard_shows_the_same_offer_as_the_public_page(
     assert response.status_code == 200
     body = response.text
     for code in PURCHASABLE_PLAN_CODES:
-        assert f"${int(headline_price(code))}" in body, code
+        assert display_usd(headline_price(code)) in body, code
     struck, countdown = _struck_price_marks(body)
     was = original_monthly_price("trader")
     if promotion_is_active():
         assert struck and was is not None
         for code in PURCHASABLE_PLAN_CODES:
-            assert f"${int(original_monthly_price(code))}" in body, code
-        assert f'data-offer-countdown="{PROMOTION_ENDS_AT.isoformat()}"' in body
+            assert display_usd(original_monthly_price(code)) in body, code
+        _assert_offer_named_and_timed(body)
     else:
         assert not struck and not countdown and was is None
+    for retired in RETIRED_DISCOUNT_CODES:
+        assert retired not in body
+
+
+@pytest.mark.anyio
+async def test_the_subscription_page_shows_the_same_offer(test_context: dict) -> None:
+    """The plan page with the three-step popup: same prices, same offer name, no timer."""
+
+    await _signup(test_context, "subscription-offer@example.com")
+    response = await test_context["client"].get("/dashboard/subscription")
+    assert response.status_code == 200
+    body = response.text
+    for code in PURCHASABLE_PLAN_CODES:
+        assert f"<strong>{display_usd(headline_price(code))}</strong>" in body, code
+        was = original_monthly_price(code)
+        if was is not None:
+            assert f">{display_usd(was)}</s>" in body, code
+    if promotion_is_active():
+        _assert_offer_named_and_timed(body)
     for retired in RETIRED_DISCOUNT_CODES:
         assert retired not in body
 

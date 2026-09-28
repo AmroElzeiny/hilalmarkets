@@ -616,6 +616,16 @@ body:hover *::-webkit-scrollbar-thumb {
   color: #a4aebc;
 }
 
+/* The fixed AI launcher sits in the bottom-right corner. At 1024px and below the legal
+   text can wrap low enough to run underneath it, so the bottom band keeps a clear 90px
+   column on the right. This rule was only ever in the built `landing.css`, patched in by
+   hand; it lives here now so a rebuild keeps it. */
+@media (max-width: 1024px) {
+  .hm-footer-bottom {
+    padding-right: 90px;
+  }
+}
+
 @media (min-width: 900px) {
   .hm-footer-top {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);

@@ -9,17 +9,18 @@ When they drift apart the customer really pays, and then
 amount does not match the checkout — so the money is gone and the plan never starts. That
 is the worst outcome this code has.
 
-The **launch price** makes that worse rather than better, because it moves on its own. It
-is not a code any more: until ``PROMOTION_ENDS_AT`` the plan simply costs less, and the
-moment that instant passes this application starts expecting the normal price. Creem's
-product price does not change by itself, so **the two Creem products must be re-priced on
-the day the offer ends** or every card payment after it will be refused as underpaid.
+An offer makes that worse, because it changes the website's price while Creem's stays
+where it was. ``core/plans.CURRENT_OFFER`` (HILAL30, 30% off) moves every monthly price,
+so **the Creem products must be re-priced the same day the offer starts, changes or
+ends**. On 20 September 2026 the old launch price ended here and not in Creem, and every
+card payment after it would have been refused. The comparison now lives in
+`services/card_price_check.py`, and the daily ``check_card_prices`` worker task runs it
+and tells the operator; this script prints the same comparison in full.
 
 Discount codes have the same shape of problem. The crypto route applies them here, in this
 application. The card route cannot: a card buyer types one on Creem's own page. A code this
-product has **retired** but Creem still holds is the dangerous case — it comes off a price
-that is already the launch price. Nothing offline can see Creem, so this script is the only
-thing that can catch any of it.
+product has **retired**, or the offer's own code, still active in Creem is the dangerous
+case — it comes off a price that already carries the offer.
 
 Run this whenever `core/plans.py` changes, and after creating or editing a product or a
 discount in Creem:
@@ -27,9 +28,9 @@ discount in Creem:
     .venv/Scripts/python scripts/check_creem_prices.py
     .venv/Scripts/python scripts/check_creem_prices.py --env-file .env.production
 
-It makes one read-only call per configured product plus one for the launch code. It prints
+It makes one read-only call per configured product plus one per code. It prints
 no key and no product id. Exit code 0 means Creem agrees with the website about every
-price and about the launch code.
+price and about every code.
 """
 
 from __future__ import annotations
@@ -46,29 +47,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ai_market_monitor.core.config import Settings  # noqa: E402
 from ai_market_monitor.core.plans import (  # noqa: E402
-    PROMOTION_ENDS_AT,
-    PUBLIC_PLAN_PRESENTATIONS,
     RETIRED_DISCOUNT_CODES,
-    effective_monthly_price,
-    promotional_monthly_price,
+    current_offer,
+    promotion_is_active,
 )
-
-
-def expected_price(product_key: str) -> Decimal | None:
-    """What this product must cost **today**, taken from the one owner of the prices.
-
-    "Today" is not a figure of speech: while the launch offer runs this is the launch
-    price, and the day it ends the same call returns the normal price instead.
-    """
-
-    plan_code, _, period = product_key.rpartition("_")
-    if period == "monthly":
-        return effective_monthly_price(plan_code)
-    if period == "annual":
-        presentation = PUBLIC_PLAN_PRESENTATIONS.get(plan_code)
-        return presentation.annual_price if presentation else None
-    # A trial product charges nothing up front, so there is no number to agree on.
-    return None
+from ai_market_monitor.services.card_price_check import (  # noqa: E402
+    card_price_check_configured,
+    check_card_prices,
+    offer_code_problem,
+)
 
 
 async def main() -> int:
@@ -78,65 +65,45 @@ async def main() -> int:
 
     settings = Settings(_env_file=arguments.env_file)  # type: ignore[call-arg]
     key = settings.creem_api_key
-    if key is None or not key.get_secret_value().strip():
-        print("No Creem API key in this environment. Nothing to check.")
-        return 0
-    if not settings.creem_product_ids:
-        print("No Creem products in this environment. Nothing to check.")
+    if not card_price_check_configured(settings) or key is None:
+        print("No Creem API key or no Creem products in this environment. Nothing to check.")
         return 0
 
     base = str(settings.creem_api_base).rstrip("/")
     problems = 0
-    running = [
-        (code, promotional_monthly_price(code))
-        for code in PUBLIC_PLAN_PRESENTATIONS
-        if promotional_monthly_price(code) is not None
-    ]
-    if running:
-        offer = ", ".join(f"{code} at {price} USD" for code, price in running)
+    offer = current_offer()
+    if offer is not None and promotion_is_active():
+        ends = (
+            f"ends {offer.ends_at:%d %B %Y}" if offer.ends_at is not None else "has no end date"
+        )
         print(
-            f"Launch offer is running ({offer}) and ends {PROMOTION_ENDS_AT:%d %B %Y}. "
-            "Re-price these Creem products that day, then run this again.\n"
+            f"Offer {offer.code} ({offer.percent}% off) is running and "
+            f"{ends}. The Creem products must carry the prices below.\n"
         )
     async with httpx.AsyncClient(timeout=settings.creem_timeout_seconds) as client:
-        for product_key, product_id in sorted(settings.creem_product_ids.items()):
-            wanted = expected_price(product_key)
-            response = await client.get(
-                f"{base}/v1/products",
-                params={"product_id": product_id},
-                headers={
-                    "x-api-key": key.get_secret_value(),
-                    "User-Agent": "HilalMarkets/1.0",
-                },
-            )
-            if response.status_code != 200:
-                print(f"{product_key}: Creem answered {response.status_code}. Cannot check.")
-                problems += 1
+        # The comparison itself is `services/card_price_check.py`, shared with the daily
+        # worker task, so the script and the alert can never disagree about a price.
+        for result in await check_card_prices(settings, client):
+            if result.expected is None and result.problem is None:
+                print(
+                    f"{result.product_key}: no fixed price to compare "
+                    f"({result.state}, {result.mode})."
+                )
                 continue
-            body = response.json()
-            smallest_unit = body.get("price")
-            currency = str(body.get("currency") or "")
-            state = str(body.get("status") or "")
-            mode = str(body.get("mode") or "")
-            if wanted is None:
-                print(f"{product_key}: no fixed price to compare ({state}, {mode}).")
-                continue
-            if not isinstance(smallest_unit, int):
-                print(f"{product_key}: Creem gave no price to compare.")
-                problems += 1
-                continue
-            charged = Decimal(smallest_unit) / 100
-            same = charged == wanted and currency.upper() == "USD"
+            verdict = "DIFFERENT" if result.problem else "same"
             print(
-                f"{product_key}: Creem charges {charged} {currency or '?'}, "
-                f"the website says {wanted} USD "
-                f"({state}, {mode}) -> {'same' if same else 'DIFFERENT'}"
+                f"{result.product_key}: Creem charges {result.charged} "
+                f"{result.currency or '?'}, the website says {result.expected} USD "
+                f"({result.state}, {result.mode}) -> {verdict}"
             )
-            if not same:
+            if result.problem:
+                print(f"  {result.problem}")
                 problems += 1
-            if state != "active":
-                print(f"{product_key}: this product is not active in Creem.")
-                problems += 1
+
+        offer_problem = await offer_code_problem(settings, client)
+        if offer_problem:
+            print(f"\n{offer_problem}")
+            problems += 1
 
         problems += await check_discount_codes(
             client, base, key.get_secret_value(), settings
@@ -155,9 +122,9 @@ async def main() -> int:
 def codes_this_deployment_honours(settings: Settings) -> list[tuple[str, Decimal]]:
     """Every code a buyer could type here, and what it is worth.
 
-    One list now: ``BILLING_DISCOUNT_CODES``. The launch offer used to add a code of its
-    own; it does not any more, because the launch price is simply the price until the
-    offer's timer runs out and nothing is typed to reach it.
+    One list: ``BILLING_DISCOUNT_CODES``. The running offer's code (``CURRENT_OFFER``) is
+    not on it and must never be: its percentage is already inside every price, and the
+    settings loader refuses to start with it listed.
 
     A code on this list is never advertised on a pricing card and is only accepted on the
     crypto route, so Creem not having it is a fact worth printing rather than a fault.
@@ -171,7 +138,7 @@ async def check_retired_codes(client: httpx.AsyncClient, base: str, key: str) ->
 
     This is the one discount check that can cost money. A card buyer reaches Creem's own
     checkout page, which has a discount box this application does not control. A retired
-    code still active there comes off a price that is **already** the launch price, so the
+    code still active there comes off a price that **already** carries the offer, so the
     payment arrives smaller than the amount recorded when the checkout was created — and
     the confirmation is then refused as underpaid. The buyer pays and gets nothing.
 

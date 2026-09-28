@@ -30,6 +30,7 @@ from ai_market_monitor.core.launch_stage import (
 )
 from ai_market_monitor.core.plans import (
     RETIRED_DISCOUNT_CODES,
+    current_offer,
     is_discount_code_shaped,
 )
 from ai_market_monitor.observability.metrics import MetricRetentionPolicy
@@ -1617,6 +1618,15 @@ class Settings(BaseSettings):
         writing into the file.
         """
 
+        # The running offer's name is refused here too. Its percentage is already inside
+        # every price, so listing it would take it off a second time on the crypto route.
+        offer = current_offer()
+        if offer is not None and offer.code in parsed:
+            raise ValueError(
+                f"BILLING_DISCOUNT_CODES holds {offer.code}, the name of the offer "
+                "that is already taken off every price (core/plans.py CURRENT_OFFER). "
+                "Remove it from BILLING_DISCOUNT_CODES, and do not create it in Creem."
+            )
         still_listed = sorted(code for code in RETIRED_DISCOUNT_CODES if code in parsed)
         if not still_listed:
             return

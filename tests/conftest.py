@@ -42,6 +42,16 @@ def isolate_settings_from_local_env_file() -> Iterator[None]:
         Settings.model_config["env_file"] = original
 
 
+@pytest.fixture
+def dated_offer() -> Iterator[object]:
+    """Install an offer with an end date for this test. See `tests/offer_support.py`."""
+
+    from tests.offer_support import TEST_OFFER, installed_offer
+
+    with installed_offer(TEST_OFFER) as offer:
+        yield offer
+
+
 @pytest.fixture(autouse=True)
 def reset_provider_runtime_between_tests() -> Iterator[None]:
     """Each test starts with a provider circuit that has never seen a failure.

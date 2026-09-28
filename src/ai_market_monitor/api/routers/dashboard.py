@@ -44,7 +44,6 @@ from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     COMING_SOON_LABEL,
     PLAN_DEFINITIONS,
-    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
@@ -53,7 +52,10 @@ from ai_market_monitor.core.plans import (
     original_monthly_price,
     plan_name,
     plan_offer,
+    plan_offer_payload,
+    promotion_ends_at,
     promotion_is_active,
+    running_offer_code,
     visible_plan_comparison,
     visible_plan_comparison_headers,
     visible_public_plan_codes,
@@ -3639,7 +3641,7 @@ async def billing_page(
                     billing_enabled=settings.billing_enabled
                 )
             },
-            promotion_ends_at=PROMOTION_ENDS_AT.isoformat(),
+            promotion_ends_at=promotion_ends_at(),
             promotion_active=promotion_is_active(),
             promotion_coming_soon_label=COMING_SOON_LABEL,
             # Computed from the prices beside it, so the toggle cannot promise a saving
@@ -4169,8 +4171,10 @@ async def billing_checkout_review(
             plan_features=dict(features.get("features") or {}),
             checkout_price=checkout_price,
             promotion_original_price=promotion_original,
+            offer_code=running_offer_code(plan.code),
+            offer_percent=plan_offer_payload(plan.code)["offerPercent"],
             discount_methods=list(DISCOUNT_CODE_METHODS),
-            promotion_ends_at=PROMOTION_ENDS_AT.isoformat(),
+            promotion_ends_at=promotion_ends_at(),
             # The customer chooses the payment method on this page. Keep the submitted
             # period neutral here; the selected provider converts it to recurring card
             # billing or one-time 30-day crypto access in one authoritative place.

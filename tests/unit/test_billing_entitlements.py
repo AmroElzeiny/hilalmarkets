@@ -11,7 +11,6 @@ from sqlalchemy import func, select
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
-    PROMOTION_ENDS_AT,
     PURCHASABLE_PLAN_CODES,
     STRATEGY_APPROVAL_LIMIT_KEY,
     STRATEGY_APPROVAL_WINDOW_DAYS,
@@ -74,6 +73,11 @@ from ai_market_monitor.services.plan_limits import plan_limit_notice
 from ai_market_monitor.services.referrals import ReferralError, ReferralService
 from ai_market_monitor.services.trials import TrialLifecycleService
 from tests.factories import load_strategy
+from tests.offer_support import (
+    AFTER_TEST_OFFER_ENDS,
+    BEFORE_TEST_OFFER_ENDS,
+    TEST_OFFER_ENDS_AT,
+)
 from tests.support.billing_config import live_billing_overrides
 
 MONITOR_CHECKOUT_AMOUNT = effective_monthly_price("trader")
@@ -182,37 +186,48 @@ def test_every_plan_carries_the_thirty_day_approval_limit():
 
 
 def test_paid_plans_are_priced_and_promoted_the_way_the_pages_say():
-    """The launch price is the price everywhere until it ends - no code needed.
+    """The offer price is the price everywhere - no code needed.
 
     Every surface (dashboard, landing page, checkout, crypto invoice) asks the same
     two functions, so a page can never print one number while checkout charges
-    another.
+    another. HILAL30 takes 30% off the normal price: $15 -> $10.50, $25 -> $17.50.
     """
 
-    before_the_deadline = PROMOTION_ENDS_AT - timedelta(days=1)
-    after_the_deadline = PROMOTION_ENDS_AT + timedelta(days=1)
-
-    # Read at a fixed moment inside the offer. Left on the real clock, these four lines
-    # began failing on the morning the launch offer ended, 20 September 2026, although
-    # nothing about the prices had changed.
-    assert original_monthly_price("trader", now=before_the_deadline) == Decimal("15.00")
-    assert original_monthly_price("pro", now=before_the_deadline) == Decimal("25.00")
-    assert promotional_monthly_price("trader", now=before_the_deadline) == Decimal("9.00")
-    assert promotional_monthly_price("pro", now=before_the_deadline) == Decimal("17.00")
-    assert original_monthly_price("trader", now=after_the_deadline) is None
-    assert promotional_monthly_price("trader", now=after_the_deadline) is None
-
     for code, promoted, normal in (
-        ("trader", Decimal("9.00"), Decimal("15.00")),
-        ("pro", Decimal("17.00"), Decimal("25.00")),
+        ("trader", Decimal("10.50"), Decimal("15.00")),
+        ("pro", Decimal("17.50"), Decimal("25.00")),
     ):
-        assert effective_monthly_price(code, now=before_the_deadline) == promoted
-        assert effective_monthly_price(code, now=after_the_deadline) == normal
-        payload = plan_offer_payload(code, now=before_the_deadline)
+        assert original_monthly_price(code) == normal
+        assert promotional_monthly_price(code) == promoted
+        assert effective_monthly_price(code) == promoted
+        payload = plan_offer_payload(code)
         assert payload["promotionRunning"] is True
-        assert payload["promotionEndsAt"] == PROMOTION_ENDS_AT.isoformat()
+        assert payload["offerCode"] == "HILAL30"
+        assert payload["offerPercent"] == 30
+        # No end date, so no countdown: the page must be handed no deadline at all.
+        assert payload["promotionEndsAt"] is None
         assert payload["monthlyAvailable"] is True
         assert "discountCode" not in payload
+
+
+def test_a_dated_offer_ends_by_itself(dated_offer):
+    """An offer with an end date stops at that instant, on every price at once."""
+
+    before, after = BEFORE_TEST_OFFER_ENDS, AFTER_TEST_OFFER_ENDS
+    for code, promoted, normal in (
+        ("trader", Decimal("10.50"), Decimal("15.00")),
+        ("pro", Decimal("17.50"), Decimal("25.00")),
+    ):
+        assert effective_monthly_price(code, now=before) == promoted
+        assert effective_monthly_price(code, now=after) == normal
+        assert original_monthly_price(code, now=after) is None
+        assert promotional_monthly_price(code, now=after) is None
+        assert plan_offer_payload(code, now=before)["promotionEndsAt"] == (
+            TEST_OFFER_ENDS_AT.isoformat()
+        )
+        after_payload = plan_offer_payload(code, now=after)
+        assert after_payload["promotionEndsAt"] is None
+        assert after_payload["offerCode"] is None
 
 
 async def test_basic_approval_limit_counts_distinct_strategies_over_30_days(test_context):

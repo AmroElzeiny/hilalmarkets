@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from ai_market_monitor.core.money import display_usd
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PUBLIC_PLAN_PRESENTATIONS,
@@ -528,13 +529,17 @@ async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
     # price left to show.
     for code in PURCHASABLE_PLAN_CODES:
         offer = plan_offer_payload(code)
-        assert f"${int(offer['monthlyPrice'])}" in pricing.text, code  # type: ignore[arg-type]
+        assert display_usd(offer["monthlyPrice"]) in pricing.text, code
         assert PUBLIC_PLAN_PRESENTATIONS[code].cta_label in pricing.text, code
         original = offer["originalMonthlyPrice"]
         if original:
-            assert f"${int(original)}" in pricing.text, code  # type: ignore[arg-type]
+            assert display_usd(original) in pricing.text, code
             assert 'class="price-original"' in pricing.text
-            assert "data-offer-countdown" in pricing.text
+            assert str(offer["offerCode"]) in pricing.text, code
+            # A countdown only for an offer that really ends.
+            assert ("data-offer-countdown" in pricing.text) is (
+                offer["promotionEndsAt"] is not None
+            )
     # Every public plan is on sale, so nothing on the page says "coming soon".
     assert "is coming soon" not in pricing.text
     assert money_back_note("pro") in pricing.text

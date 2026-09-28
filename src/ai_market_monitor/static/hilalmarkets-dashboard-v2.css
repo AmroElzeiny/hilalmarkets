@@ -2190,9 +2190,13 @@ body.hilal-dashboard .current-plan-label {
 
 body.hilal-dashboard .dashboard-plan-price {
   display: flex;
+  /* Wraps so "per month" drops under a wide price ("$17.50") instead of running out of
+     the card. Whole-dollar prices never needed the room, so this stayed hidden until an
+     offer produced cents. */
+  flex-wrap: wrap;
   min-height: 82px;
   align-items: baseline;
-  gap: 10px;
+  gap: 4px 10px;
   margin-top: 22px;
 }
 

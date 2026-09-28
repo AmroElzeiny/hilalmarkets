@@ -34,7 +34,7 @@ The rule is asserted for the whole family, not one price:
 
 * every catalogue price in both cycles — ``PLAN_DEFINITIONS`` monthly and
   ``PUBLIC_PLAN_PRESENTATIONS`` annual;
-* the launch offers (``PLAN_OFFERS.promotional_monthly_price``) and the price a
+* the running offer (``promotional_monthly_price``, HILAL30) and the price a
   checkout really charges today (``effective_monthly_price``);
 * every discount outcome — ``price_after_percent`` over every percent in
   ``settings.billing_discount_codes`` for each of those bases;
@@ -56,7 +56,6 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Final
@@ -85,14 +84,13 @@ from ai_market_monitor.core.money import (
 )
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
-    PLAN_OFFERS,
-    PROMOTION_ENDS_AT,
     PUBLIC_PLAN_CODES,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
     effective_monthly_price,
     plan_offer_payload,
     price_after_percent,
+    promotional_monthly_price,
 )
 from ai_market_monitor.db.models import User, UserIdentity
 from ai_market_monitor.db.models.enums import IdentityProvider, UserStatus
@@ -154,9 +152,9 @@ def _money_family() -> list[tuple[str, Decimal]]:
         family.append((f"{code}.annual", presentation.annual_price))
     for code in PURCHASABLE_PLAN_CODES:
         family.append((f"{code}.charged_today", effective_monthly_price(code)))
-        promotional = PLAN_OFFERS[code].promotional_monthly_price
+        promotional = promotional_monthly_price(code)
         if promotional is not None:
-            family.append((f"{code}.launch_offer", promotional))
+            family.append((f"{code}.offer", promotional))
         for base_label, base in (
             ("charged_today", effective_monthly_price(code)),
             ("monthly", PLAN_DEFINITIONS[code].monthly_price),
@@ -994,11 +992,11 @@ def test_plan_offer_payload_prices_are_decimals_not_floats(code: str) -> None:
     """Every price the payload carries is a ``Decimal`` (or absent, as ``None``).
 
     Existing callers are safe because ``Decimal == float`` compares by value, the
-    templates use ``| int``, and the JSON boundary now writes exact numbers. A float
+    templates print through ``| usd``, and the JSON boundary now writes exact numbers. A float
     here would re-open the landing-page defect the moment ``tojson`` touched it.
     """
 
-    payload = plan_offer_payload(code, now=PROMOTION_ENDS_AT - timedelta(days=1))
+    payload = plan_offer_payload(code)
     for field in _PRICE_FIELDS:
         value = payload[field]
         assert not isinstance(value, float), f"{code}.{field} is a float: {value!r}"
@@ -1066,7 +1064,7 @@ def _landing_html(plans: list[dict[str, object]]) -> str:
                 "annual_billing_supported": False,
                 "public_pricing_plans": plans,
                 "public_plan_comparison": [],
-                "promotion_ends_at": PROMOTION_ENDS_AT.isoformat(),
+                "promotion_ends_at": None,
                 "promotion_active": True,
                 "json_ld": [],
             },
@@ -1094,7 +1092,7 @@ def test_the_landing_page_embeds_prices_as_bare_exact_numbers() -> None:
 
     ``Pricing.tsx`` types ``monthlyPrice`` as ``number | null`` and does arithmetic
     on it, so the page must carry a bare JSON number — and the number must keep the
-    exact cents text (``9.00``, not the ``9.0`` a float writes). This renders the
+    exact cents text (``10.50``, not the ``10.5`` a float writes). This renders the
     real ``react_site.html`` through the real registered environment: no template
     and no bundle changed to get here, and the template still embeds
     ``public_pricing_plans | tojson`` exactly as it always did.
@@ -1106,25 +1104,24 @@ def test_the_landing_page_embeds_prices_as_bare_exact_numbers() -> None:
     assert '"plans": public_pricing_plans' in template_text, "the page stopped embedding the plans"
     assert "| tojson" in template_text, "the plans stopped travelling through tojson"
 
-    when = PROMOTION_ENDS_AT - timedelta(days=1)
-    plans = [{"code": code, **plan_offer_payload(code, now=when)} for code in PUBLIC_PLAN_CODES]
+    plans = [{"code": code, **plan_offer_payload(code)} for code in PUBLIC_PLAN_CODES]
     html = _landing_html(plans)
 
-    # ``trader`` is 9.00 during the offer: a bare number, exact cents text.
-    assert re.search(r'"monthlyPrice":\s*9\.00(?![0-9])', html), (
-        "the landing page does not carry 9.00 as an exact bare number — "
-        "a float prints it as 9.0 (D3 on the browser path) or a writer quoted it (H-3)"
+    # ``trader`` is 10.50 under HILAL30: a bare number, exact cents text.
+    assert re.search(r'"monthlyPrice":\s*10\.50(?![0-9])', html), (
+        "the landing page does not carry 10.50 as an exact bare number — "
+        "a float prints it as 10.5 (D3 on the browser path) or a writer quoted it (H-3)"
     )
     assert '"monthlyPrice": "' not in html, "a page price left quoted"
     match = re.search(r"window\.HilalMarketsRuntimeConfig = (\{.*?\});", html, re.DOTALL)
     assert match, "the landing page published no runtime config"
     commerce = json.loads(match.group(1), parse_float=Decimal, parse_int=Decimal)["commerce"]
     by_code = {plan["code"]: plan for plan in commerce["plans"]}
-    assert str(by_code["trader"]["monthlyPrice"]) == "9.00"
-    assert str(by_code["trader"]["fullMonthlyPrice"]) == "9.00"
+    assert str(by_code["trader"]["monthlyPrice"]) == "10.50"
+    assert str(by_code["trader"]["fullMonthlyPrice"]) == "10.50"
     assert str(by_code["trader"]["originalMonthlyPrice"]) == "15.00"
-    assert str(by_code["pro"]["monthlyPrice"]) == "17.00"
-    assert by_code["trader"]["monthlyPrice"] == Decimal("9")  # still the same money
+    assert str(by_code["pro"]["monthlyPrice"]) == "17.50"
+    assert by_code["trader"]["monthlyPrice"] == Decimal("10.5")  # still the same money
 
 
 def test_the_page_json_writer_is_installed_in_every_template_environment() -> None:

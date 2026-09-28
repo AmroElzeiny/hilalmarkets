@@ -40,8 +40,14 @@ type Plan = {
   /** False while an interval is not open yet: the card says "Soon" and shows no price. */
   monthlyAvailable?: boolean
   annualAvailable?: boolean
-  /** The normal price to cross out, or null when no launch offer is running. */
+  /** The normal price to cross out, or null when no offer is running. */
   originalMonthlyPrice?: number | null
+  /**
+   * The running offer's name and size — "HILAL30", 30 — shown under the crossed-out price.
+   * A label, not an instruction: the lower price is already what a checkout charges.
+   */
+  offerCode?: string | null
+  offerPercent?: number | null
   /**
    * What a checkout charges. The same number as `monthlyPrice` — they became one figure
    * the day the launch price stopped needing a code — and kept because the server sends
@@ -51,8 +57,11 @@ type Plan = {
   comingSoonLabel?: string
 }
 
-/** Server default, used only when the page is opened without runtime config. */
-const DEFAULT_PROMOTION_ENDS_AT = '2026-09-20T00:00:00+00:00'
+/**
+ * Server default, used only when the page is opened without runtime config. `null`: the
+ * running offer has no end date, so there is no countdown.
+ */
+const DEFAULT_PROMOTION_ENDS_AT: string | null = null
 const DEFAULT_COMING_SOON_LABEL = 'Soon'
 
 /**
@@ -88,9 +97,11 @@ const PLANS: Plan[] = [
   {
     code: 'trader',
     name: 'Plus',
-    monthlyPrice: 9,
+    monthlyPrice: 10.5,
     originalMonthlyPrice: 15,
-    fullMonthlyPrice: 9,
+    fullMonthlyPrice: 10.5,
+    offerCode: 'HILAL30',
+    offerPercent: 30,
     annualPrice: 120,
     monthlyAvailable: true,
     annualAvailable: false,
@@ -113,9 +124,11 @@ const PLANS: Plan[] = [
   {
     code: 'pro',
     name: 'Pro',
-    monthlyPrice: 17,
+    monthlyPrice: 17.5,
     originalMonthlyPrice: 25,
-    fullMonthlyPrice: 17,
+    fullMonthlyPrice: 17.5,
+    offerCode: 'HILAL30',
+    offerPercent: 30,
     annualPrice: 220,
     monthlyAvailable: true,
     annualAvailable: false,
@@ -172,6 +185,16 @@ type Price =
   | { kind: 'coming_soon'; label: string }
   | { kind: 'price'; amount: string; period: string; original?: string }
 
+/**
+ * Money as the product prints it: `$15`, and cents only when there are cents (`$17.50`).
+ * The same rule as the dashboard scripts and the server's `display_usd`. Writing
+ * `$${amount}` printed `$17.5` the day a price stopped being whole dollars.
+ */
+function money(amount: number): string {
+  const cents = Math.round(amount * 100) / 100
+  return Number.isInteger(cents) ? `$${cents}` : `$${cents.toFixed(2)}`
+}
+
 function priceLabel(
   plan: Plan,
   interval: BillingInterval,
@@ -185,20 +208,20 @@ function priceLabel(
   }
   if (amount === 0) return { kind: 'price', amount: '$0', period: 'Free forever' }
   if (interval === 'annual') {
-    return { kind: 'price', amount: `$${amount}`, period: 'per year' }
+    return { kind: 'price', amount: money(amount), period: 'per year' }
   }
   const discounted = Boolean(plan.originalMonthlyPrice && plan.originalMonthlyPrice > amount)
   if (discounted && !promotionRunning) {
     // The deadline passed while this page was open. The plan costs its normal price
     // again, so the page says so rather than holding an offer that has ended: the same
     // rule the server applies, applied to the copy the visitor is looking at.
-    return { kind: 'price', amount: `$${plan.originalMonthlyPrice}`, period: 'per month' }
+    return { kind: 'price', amount: money(plan.originalMonthlyPrice ?? amount), period: 'per month' }
   }
   return {
     kind: 'price',
-    amount: `$${amount}`,
+    amount: money(amount),
     period: 'per month',
-    original: discounted ? `$${plan.originalMonthlyPrice}` : undefined,
+    original: discounted && plan.originalMonthlyPrice ? money(plan.originalMonthlyPrice) : undefined,
   }
 }
 
@@ -302,10 +325,14 @@ export default function Pricing() {
     commerce?.plans?.length === PLANS.length ? commerce.plans : PLANS
   const comparisonRows =
     commerce?.comparisonRows?.length ? commerce.comparisonRows : COMPARISON_ROWS
-  const promotionEndsAt = commerce?.promotionEndsAt ?? DEFAULT_PROMOTION_ENDS_AT
+  const promotionEndsAt = commerce ? (commerce.promotionEndsAt ?? null) : DEFAULT_PROMOTION_ENDS_AT
   const now = useNow(SECOND)
-  const promotionEnd = Date.parse(promotionEndsAt)
-  const promotionRunning = !Number.isNaN(promotionEnd) && promotionEnd > now
+  // A dated offer ends by the clock, on this page as on the server. An offer with no end
+  // date runs for as long as the server says it does. Reading a missing date as "already
+  // over" is what would have hidden every crossed-out price on an offer still charged.
+  const promotionRunning = promotionEndsAt
+    ? Date.parse(promotionEndsAt) > now
+    : (commerce?.promotionActive ?? true)
 
   function setBillingInterval(next: BillingInterval) {
     setInterval(next)
@@ -420,7 +447,16 @@ export default function Pricing() {
                   <span>{price.period}</span>
                 </div>
               )}
-              {price.kind === 'price' && price.original && (
+              {price.kind === 'price' && price.original && plan.offerCode && (
+                <p className="price-code-note">
+                  <span className="price-code-line">
+                    <code className="hm-code-chip">{plan.offerCode}</code>
+                    {plan.offerPercent ? `${plan.offerPercent}% off` : null}
+                  </span>
+                  <span>Already taken off this price. You do not need to type it.</span>
+                </p>
+              )}
+              {price.kind === 'price' && price.original && promotionEndsAt && (
                 <OfferCountdown endsAt={promotionEndsAt} now={now} />
               )}
               <p

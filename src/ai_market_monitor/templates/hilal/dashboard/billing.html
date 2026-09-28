@@ -111,9 +111,9 @@
           data-dashboard-plan-price
           {# Empty when the interval is not open yet: no number, so nothing can leak a
              price for something nobody can buy. #}
-          data-monthly-price="{{ (offer.monthlyPrice | int) if offer.monthlyAvailable else '' }}"
-          data-annual-price="{{ (offer.annualPrice | int) if offer.annualAvailable else '' }}"
-          data-original-monthly-price="{{ (offer.originalMonthlyPrice | int) if offer.originalMonthlyPrice else '' }}"
+          data-monthly-price="{{ offer.monthlyPrice if offer.monthlyAvailable else '' }}"
+          data-annual-price="{{ offer.annualPrice if offer.annualAvailable else '' }}"
+          data-original-monthly-price="{{ offer.originalMonthlyPrice if offer.originalMonthlyPrice else '' }}"
           data-monthly-available="{{ 'true' if offer.monthlyAvailable else 'false' }}"
           data-annual-available="{{ 'true' if offer.annualAvailable else 'false' }}"
           data-coming-soon-label="{{ offer.comingSoonLabel }}"
@@ -127,10 +127,10 @@
               class="price-original"
               data-dashboard-plan-original
               data-offer-original-price
-              aria-label="Was ${{ offer.originalMonthlyPrice | int }} per month"
-            >${{ offer.originalMonthlyPrice | int }}</s>
+              aria-label="Was {{ offer.originalMonthlyPrice | usd }} per month"
+            >{{ offer.originalMonthlyPrice | usd }}</s>
           {% endif %}
-          <strong data-dashboard-plan-amount>{{ offer.comingSoonLabel if not offer.monthlyAvailable else '$' ~ (offer.monthlyPrice | int) }}</strong>
+          <strong data-dashboard-plan-amount>{{ offer.comingSoonLabel if not offer.monthlyAvailable else (offer.monthlyPrice | usd) }}</strong>
           <span data-dashboard-plan-period>{{ 'Not available yet' if not offer.monthlyAvailable else ('Free forever' if offer.monthlyPrice == 0 else 'per month') }}</span>
         </div>
         {# `and offer.monthlyAvailable`, because a plan nobody can buy shows "Soon" where
@@ -139,8 +139,12 @@
            reads as a charge the person is about to face for something they cannot buy.
            The public pricing card already gated this; the dashboard card did not. #}
         {% if offer.originalMonthlyPrice and offer.monthlyAvailable %}
-          {# The crossed-out price and timer already explain the temporary offer. #}
-          <div class="offer-countdown" data-offer-countdown="{{ promotion_ends_at }}" data-dashboard-offer-countdown role="group" aria-label="Time left at this price" hidden></div>
+          {% include "hilal/partials/offer_code_note.html" %}
+          {#- A countdown only for an offer that really ends. Given no date, the countdown
+              script decides the offer is over and hides the crossed-out price. -#}
+          {% if offer.promotionEndsAt %}
+          <div class="offer-countdown" data-offer-countdown="{{ offer.promotionEndsAt }}" data-dashboard-offer-countdown role="group" aria-label="Time left at this price" hidden></div>
+          {% endif %}
         {% endif %}
 
         {% if presentation.trial_note %}
@@ -446,7 +450,7 @@
 </section>
 {% endblock %}
 {% block page_scripts %}
-<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260914-telegram-recovery"></script>
-<script src="{{ url_for('static', path='/hm-plan-change.js') }}?v=20260914-telegram-recovery"></script>
-<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260914-telegram-recovery"></script>
+<script src="{{ url_for('static', path='/hilalmarkets-billing.js') }}?v=20260928-hilal30"></script>
+<script src="{{ url_for('static', path='/hm-plan-change.js') }}?v=20260928-hilal30"></script>
+<script type="module" src="{{ url_for('static', path='/hm-discount-code.js') }}?v=20260928-hilal30"></script>
 {% endblock %}

@@ -92,6 +92,7 @@
       const countdown = card
         ? card.querySelector("[data-dashboard-offer-countdown]")
         : null;
+      const codeNote = card ? card.querySelector("[data-offer-code-note]") : null;
       const free = price.getAttribute("data-free") === "true";
       const soonLabel = price.getAttribute("data-coming-soon-label") || "Soon";
       const available =
@@ -103,10 +104,15 @@
       // as a charge the user is about to face.
       price.classList.toggle("is-coming-soon", !available);
       if (amount) {
+        // Through `money`, like every other figure this file prints: the attribute holds
+        // the exact amount ("17.50"), and gluing a "$" onto it printed "$17.5"-style text
+        // the day a price stopped being a whole number of dollars.
         amount.textContent = available
-          ? `$${price.getAttribute(
-              interval === "annual" ? "data-annual-price" : "data-monthly-price"
-            ) || "0"}`
+          ? money(
+              price.getAttribute(
+                interval === "annual" ? "data-annual-price" : "data-monthly-price"
+              ) || "0"
+            )
           : soonLabel;
       }
       if (period) {
@@ -125,6 +131,7 @@
       const promoted = available && interval === "monthly" && Boolean(originalPrice);
       if (original) original.toggleAttribute("data-offer-inactive", !promoted);
       if (countdown) countdown.toggleAttribute("data-offer-inactive", !promoted);
+      if (codeNote) codeNote.toggleAttribute("data-offer-inactive", !promoted);
     });
     document.querySelectorAll("[data-dashboard-purchase-button]").forEach((button) => {
       const planCode = button.getAttribute("data-plan-code") || "";
@@ -229,10 +236,18 @@
       // does not come back is written as what it buys instead.
       const per = period === "annual" ? "per year" : "per month";
       const forOne = period === "annual" ? "for one year" : "for 30 days";
+      // The price replaced by a code, or else by the running offer, stays in the line so
+      // the discount is visible here exactly as it is on the card behind the popup.
+      const was =
+        period === "annual"
+          ? ""
+          : discounted
+            ? discounted.was
+            : plan.originalMonthly || "";
       priceLabel.textContent = trialSelected
         ? "$0 today"
-        : discounted && period !== "annual"
-          ? `${money(charged)} ${repeats ? per : forOne}, was ${money(discounted.was)}`
+        : was
+          ? `${money(charged)} ${repeats ? per : forOne}, was ${money(was)}`
           : `${money(charged)} ${repeats ? per : forOne}`;
     }
     if (termsLabel) {
