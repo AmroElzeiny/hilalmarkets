@@ -204,6 +204,20 @@ def test_the_offer_note_names_the_code_and_asks_nobody_to_type_it() -> None:
     assert "You do not need to type it" in note
 
 
+def test_the_offer_chip_says_it_is_applied_automatically_on_every_surface() -> None:
+    """The dashboard partial and the landing React card both say it, in the same words."""
+    note = (TEMPLATES / "hilal" / "partials" / "offer_code_note.html").read_text(
+        encoding="utf-8"
+    )
+    landing = (
+        Path(__file__).resolve().parents[2]
+        / "Hilal-Markets-Website" / "src" / "components" / "Pricing.tsx"
+    ).read_text(encoding="utf-8")
+    for source in (note, landing):
+        assert "price-code-auto" in source
+        assert "(Applied Automatically)" in source
+
+
 # ---------------------------------------------------------------------------
 # The Back button.
 # ---------------------------------------------------------------------------

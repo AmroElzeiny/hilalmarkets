@@ -452,6 +452,7 @@ export default function Pricing() {
                   <span className="price-code-line">
                     <code className="hm-code-chip">{plan.offerCode}</code>
                     {plan.offerPercent ? `${plan.offerPercent}% off` : null}
+                    <span className="price-code-auto">(Applied Automatically)</span>
                   </span>
                   <span>Already taken off this price. You do not need to type it.</span>
                 </p>

@@ -11,7 +11,7 @@
     Draws nothing when no offer applies. -#}
 {%- if offer.offerCode -%}
 <p class="price-code-note" data-offer-code-note>
-  <span class="price-code-line"><code class="hm-code-chip">{{ offer.offerCode }}</code>{{ offer.offerPercent }}% off</span>
+  <span class="price-code-line"><code class="hm-code-chip">{{ offer.offerCode }}</code>{{ offer.offerPercent }}% off <span class="price-code-auto">(Applied Automatically)</span></span>
   <span>Already taken off this price. You do not need to type it.</span>
 </p>
 {%- endif -%}

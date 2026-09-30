@@ -866,6 +866,14 @@ body:hover *::-webkit-scrollbar-thumb {
   font-size: 12.5px;
 }
 
+/* "(Applied Automatically)" beside "HILAL30 30% off": small and quiet, so it reads as a
+   side note and not as a second offer. */
+.price-code-auto {
+  color: var(--color-ink-soft);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
 .hm-code-chip {
   display: inline-block;
   padding: 2px 9px;

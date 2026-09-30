@@ -1037,6 +1037,14 @@ html[dir="rtl"] body.hilal-dashboard .readiness-candidate.state-invalidated{bord
   font-size: 12.5px;
 }
 
+/* "(Applied Automatically)" beside "HILAL30 30% off": small and quiet, so it reads as a
+   side note and not as a second offer. */
+.price-code-auto {
+  color: var(--muted, #5f6470);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
 .hm-code-chip {
   display: inline-block;
   padding: 2px 8px;
