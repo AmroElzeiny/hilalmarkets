@@ -1613,3 +1613,134 @@ body.hilal-dashboard .hm-t.t-report th[scope="row"] { width: 1%; white-space: no
   body.hilal-dashboard .hm-t :where(.t-tile, .t-asset, .t-action, .t-icon-btn):hover { transform: none; }
   body.hilal-dashboard .hm-t .t-logo img { animation: none; }
 }
+
+/* ── The public Market page ───────────────────────────────────────────────────
+ *
+ * The same list as Halal Assets, inside the public site's header and footer. Only the
+ * pieces a visitor without an account sees are new, and each is built from the tokens
+ * and components above: the locked rows are the ordinary cards and table blurred, the
+ * banner is an ordinary surface card, and its one apple-green element is the primary
+ * button — `brand guide.md` sections 9 and 12. It carries no chamfer: the page already
+ * has its one, on the live-status seal (section 6). */
+
+/* The landing header is fixed to the top of the window, so the page starts below it.
+   The width and side margins are the landing header's own (`.hm-header-bar`). */
+body.hm-public-market .hm-public-market-body {
+  display: block;
+  width: min(100%, 1360px);
+  margin-inline: auto;
+  padding: 112px clamp(16px, 4vw, 24px) 72px;
+}
+
+body.hm-public-market .hm-public-market-body:focus { outline: none; }
+
+/* Headings that keep their look and do not sort. Default cursor and no hover change, so
+   nothing suggests a click will do something. */
+body.hilal-dashboard .hm-t .t-table th button:disabled {
+  cursor: default;
+}
+
+body.hilal-dashboard .hm-t .t-table th button:disabled:hover { color: inherit; }
+
+body.hilal-dashboard .hm-t .t-locked {
+  display: grid;
+  isolation: isolate;
+}
+
+/* Preview and banner share one grid cell, so the section is always as tall as the
+   taller of the two — the banner can never hang off a short preview on a phone. */
+body.hilal-dashboard .hm-t .t-locked > * { grid-area: 1 / 1; }
+
+body.hilal-dashboard .hm-t .t-locked-preview {
+  max-height: 560px;
+  overflow: hidden;
+  filter: blur(6px) saturate(.85);
+  opacity: .8;
+  pointer-events: none;
+  user-select: none;
+  -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 45%, transparent 100%);
+}
+
+body.hilal-dashboard .hm-t .t-asset.is-decoy,
+body.hilal-dashboard .hm-t .t-asset.is-decoy:hover {
+  box-shadow: none;
+  transform: none;
+}
+
+body.hilal-dashboard .hm-t .t-locked-blank {
+  color: var(--t-copy);
+  letter-spacing: .12em;
+}
+
+body.hilal-dashboard .hm-t .t-locked-banner {
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-self: center;
+  justify-self: center;
+  gap: var(--t-4) var(--t-5);
+  width: min(720px, calc(100% - 2 * var(--t-4)));
+  margin-block: var(--t-6);
+  padding: var(--t-5);
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-xl);
+  background: var(--t-surface);
+  box-shadow: var(--hm-shadow-popover);
+}
+
+body.hilal-dashboard .hm-t .t-locked-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--t-r-md);
+  background: var(--t-accent-pale);
+  color: var(--t-ink);
+}
+
+body.hilal-dashboard .hm-t .t-locked-icon .icon { width: 24px; height: 24px; }
+
+body.hilal-dashboard .hm-t .t-locked-copy {
+  display: flex;
+  flex: 1 1 280px;
+  flex-direction: column;
+  gap: var(--t-1);
+}
+
+body.hilal-dashboard .hm-t .t-locked-copy h2 [data-locked-count] {
+  font-variant-numeric: tabular-nums;
+}
+
+body.hilal-dashboard .hm-t .t-locked-actions {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: var(--t-2);
+}
+
+body.hilal-dashboard .hm-t .t-locked-actions .t-action { flex: 0 0 auto; }
+
+@media (max-width: 560px) {
+  body.hilal-dashboard .hm-t .t-locked-banner { padding: var(--t-4); }
+  body.hilal-dashboard .hm-t .t-locked-actions .t-action { flex: 1 1 auto; }
+}
+
+body.hilal-dashboard dialog.t-account-dialog { width: min(520px, calc(100vw - 32px)); }
+
+body.hilal-dashboard dialog.t-account-dialog .t-dialog-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--t-2, 8px);
+  padding: 16px 24px 24px;
+}
+
+/* The landing sheet's reset sets every element's margin to zero, which removes the
+   browser's own `margin: auto` that centres a modal <dialog>. Given back here, on the
+   one page that loads both sheets. */
+body.hm-public-market dialog.t-dialog {
+  margin: auto;
+}

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -28,14 +27,26 @@ from ai_market_monitor.schemas.public_chat import (
     PublicSupportToolName,
     PublicSupportToolResult,
 )
+from ai_market_monitor.services.coin_mentions import CoinListingIndex
 from ai_market_monitor.services.entitlements import EntitlementService, UsageService
+
+#: Why a Passport lookup was refused for a visitor: the coin is behind an account.
+ACCOUNT_NEEDED = "account_needed"
 
 
 class PublicSupportReadTools:
     """Read-only account support adapters with server-derived ownership."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        public_coins: frozenset[str] | None = None,
+    ) -> None:
         self.session = session
+        #: The coins a visitor without an account may hear about — the ones the public
+        #: Market page shows. ``None`` for a signed-in person, who may hear about any.
+        self.public_coins = public_coins
 
     async def execute(
         self,
@@ -91,33 +102,13 @@ class PublicSupportReadTools:
             )
 
     async def _public_passport(self, question: str) -> PublicSupportToolResult:
-        candidates = {
-            item.upper()
-            for item in re.findall(r"\b[A-Za-z][A-Za-z0-9]{1,11}\b", question)
-        }
-        for name, symbol in {
-            "bitcoin": "BTC",
-            "ethereum": "ETH",
-            "solana": "SOL",
-        }.items():
-            if re.search(rf"\b{name}\b", question, flags=re.IGNORECASE):
-                candidates.add(symbol)
-        ignored = {
-            "ABOUT",
-            "ASSET",
-            "COIN",
-            "CURRENT",
-            "DOES",
-            "HALAL",
-            "HARAM",
-            "PASSPORT",
-            "STATUS",
-            "THE",
-            "TOKEN",
-            "WHAT",
-        }
-        candidates.difference_update(ignored)
-        if not candidates:
+        # The coin is found the way Hilal finds it — through every listing's symbol, name
+        # and exchange pair (`services/coin_mentions.py`). This used to be a regex and a
+        # table of three nicknames, so "is chainlink halal?" found LINK in the dashboard
+        # and nothing at all here.
+        index = await CoinListingIndex.load(self.session)
+        symbols = index.asked_about(question)
+        if not symbols:
             return PublicSupportToolResult(
                 tool_name="public_passport",
                 status="unavailable",
@@ -125,10 +116,28 @@ class PublicSupportReadTools:
                 evidence_refs=[],
                 route_id="help",
             )
+        symbol = symbols[0]
+        if self.public_coins is not None and symbol.upper() not in self.public_coins:
+            # A visitor without an account sees the first coins of the Market page and
+            # no others. The record is not read at all, so nothing about this coin can
+            # reach the answer — the assistant can only ask them to sign in.
+            return PublicSupportToolResult(
+                tool_name="public_passport",
+                status="blocked",
+                data={
+                    "asset": symbol,
+                    "reason_code": ACCOUNT_NEEDED,
+                    "reason": (
+                        "This coin is not on the public Market page. A free account, or "
+                        "signing in, is needed before anything about it is shown."
+                    ),
+                },
+                evidence_refs=[],
+                route_id="dashboard_entry",
+            )
         asset = await self.session.scalar(
             select(CanonicalAsset)
-            .where(func.upper(CanonicalAsset.symbol).in_(sorted(candidates)))
-            .order_by(CanonicalAsset.symbol)
+            .where(func.upper(CanonicalAsset.symbol) == symbol.upper())
             .limit(1)
         )
         if asset is None:

@@ -23,7 +23,6 @@ expert on Hilal Markets, and on nothing else (rule B5).
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -57,6 +56,12 @@ from ai_market_monitor.db.models.enums import (
     StrategyStatus,
 )
 from ai_market_monitor.schemas.hilal_chat import HilalChatView
+from ai_market_monitor.services.coin_mentions import (
+    CoinListingIndex,
+    names_in,
+    spelling_keys,
+    tickers_in,
+)
 from ai_market_monitor.services.entitlements import EntitlementService
 from ai_market_monitor.services.hilal_methodology import (
     AUTOMATED_DISCLOSURE,
@@ -77,40 +82,10 @@ from ai_market_monitor.services.sharia_screening import (
     canonical_asset,
 )
 
-#: Words that are part of how people say a coin's name rather than part of the name.
-#: Removing them is spelling, not vocabulary — "the bitcoin coin" and "Bitcoin" are the
-#: same listing, and no table of nicknames is needed to know it.
-_NOISE = re.compile(
-    r"\b(coin|coins|token|tokens|crypto|cryptocurrency|the|a|an|is|are|about|status)\b",
-    re.IGNORECASE,
-)
-_PUNCTUATION = re.compile(r"[^a-z0-9\s]+")
-
-#: One word as a person wrote it, keeping the marks that say "this is a ticker".
-#:
-#: A leading ``$`` and an inner ``/`` are both part of how a coin is written — ``$LTC``
-#: and ``LTC/USDT`` — so both stay attached to the word rather than splitting it in two.
-_TOKEN = re.compile(r"\$?[A-Za-z0-9][A-Za-z0-9/._-]*")
-
-
-def spelling_keys(value: str) -> set[str]:
-    """Every mechanical spelling of one name, for matching what a person typed.
-
-    Mechanical only: lower case, no ``$``, no punctuation, no filler words. This does
-    not know that "the king" means Bitcoin, and deliberately so — that would be an
-    opinion, and opinions about what a coin is called belong in the listing.
-    """
-
-    lowered = _PUNCTUATION.sub(" ", value.lower())
-    squeezed = " ".join(lowered.split())
-    if not squeezed:
-        return set()
-    keys = {squeezed}
-    without_noise = " ".join(_NOISE.sub(" ", squeezed).split())
-    if without_noise:
-        keys.add(without_noise)
-    keys.add(squeezed.replace(" ", ""))
-    return {key for key in keys if key}
+#: The spelling rules live in `services/coin_mentions.py`, shared with the public
+#: assistant. `spelling_keys` is re-exported here because this is where callers have
+#: always found it.
+__all__ = ["spelling_keys"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,61 +274,15 @@ class HilalChatKnowledge:
 
     @staticmethod
     def _names_in(message: str) -> list[str]:
-        """The words in a question that might be a coin, longest phrase first.
+        """The words in a question that might be a coin. See :func:`names_in`."""
 
-        Generous on purpose. Anything that turns out not to be a listing simply finds
-        nothing, and finding nothing is itself reported — so a wide net costs a lookup,
-        while a narrow one costs a wrong answer.
-
-        Ordered, not a set. The order decides which coins survive the cap on how many
-        may be looked up, and an unordered set made that a coin toss: the same question
-        could gather a different coin on a second run. Two-word names come first, so
-        "bitcoin cash" is preferred over the "bitcoin" inside it.
-
-        Written as the person wrote it, not lowered. Lowering here threw away the two
-        marks that say "I mean this as a ticker" — capitals and a leading ``$`` — and
-        with them the whole ability to report a coin as not listed. Matching does not
-        care about case; :func:`spelling_keys` handles that further down.
-        """
-
-        words = [
-            token
-            for token in _TOKEN.findall(message)
-            if 2 <= len(token.lstrip("$")) <= 24
-        ]
-        pairs = [f"{first} {second}" for first, second in zip(words, words[1:], strict=False)]
-        ordered: list[str] = []
-        for candidate in [*pairs, *words]:
-            if candidate not in ordered:
-                ordered.append(candidate)
-        return ordered
+        return names_in(message)
 
     @staticmethod
     def _tickers_in(message: str) -> list[str]:
-        """The words a person meant as a coin symbol, rather than as English.
+        """The words a person meant as a coin symbol. See :func:`tickers_in`."""
 
-        One owner for that judgement, because it decides what may be reported as "not
-        listed here" — and reporting every ordinary word would bury the one that
-        mattered under a wall of nonsense.
-
-        A message written entirely in capitals is not a message full of tickers. "IS
-        BTC HALAL" would otherwise announce that IS and HALAL are unlisted coins.
-        """
-
-        shouting = message == message.upper()
-        found: list[str] = []
-        for token in _TOKEN.findall(message):
-            # Judged on the coin half. "LTC/USDT" is as deliberate a way of naming a
-            # coin as "LTC" is, and reading the whole pair as one word made it neither
-            # alphanumeric nor short enough to count.
-            base = token.lstrip("$").partition("/")[0]
-            if not base or len(base) > 12:
-                continue
-            marked = token.startswith("$")
-            capitals = base.isupper() and base.isalnum() and len(base) >= 3 and not shouting
-            if (marked or capitals) and token not in found:
-                found.append(token)
-        return found
+        return tickers_in(message)
 
     async def _resolve(
         self,
@@ -397,68 +326,10 @@ class HilalChatKnowledge:
         )
         return found, missing[:8]
 
-    async def _listing_index(self) -> dict[str, str]:
-        """Every spelling of every listed coin, pointing at its symbol.
+    async def _listing_index(self) -> CoinListingIndex:
+        """Every spelling of every listed coin. One owner: :class:`CoinListingIndex`."""
 
-        Built from the listings themselves. All three tables are read:
-
-        * ``CanonicalAsset`` — the identity, its symbol and its name;
-        * ``AssetShariaAssessment`` — a coin can be reviewed before it has an identity
-          row, and a person asking about it should get its recorded status rather than
-          "not listed";
-        * ``ExchangeMarket`` — the market symbols this platform actually covers.
-
-        The third one is the answer to somebody typing **LTCUSDT**. A trader reads a
-        pair off a chart and types it whole; nothing here matched it, so Hilal reported
-        a coin the platform has as one it had never heard of. No list of quote
-        currencies is written anywhere for this. There is a row saying the market
-        ``LTC/USDT`` exists, and the mechanical spellings of that row already include
-        ``ltcusdt``. The data knows; it only had to be asked.
-        """
-
-        index: dict[str, str] = {}
-
-        rows = (
-            await self.session.execute(select(CanonicalAsset.symbol, CanonicalAsset.name))
-        ).all()
-        for symbol, name in rows:
-            for key in spelling_keys(symbol):
-                index.setdefault(key, symbol)
-            if name:
-                for key in spelling_keys(name):
-                    index.setdefault(key, symbol)
-
-        named = (
-            await self.session.execute(
-                select(
-                    AssetShariaAssessment.canonical_asset,
-                    AssetShariaAssessment.asset_name,
-                ).distinct()
-            )
-        ).all()
-        for symbol, name in named:
-            for key in spelling_keys(symbol):
-                index.setdefault(key, symbol)
-            if name:
-                for key in spelling_keys(name):
-                    index.setdefault(key, symbol)
-
-        # Added last, so a market symbol can never take a key that a coin's own symbol
-        # or name already owns.
-        pairs = (
-            await self.session.execute(
-                select(ExchangeMarket.market_symbol, CanonicalAsset.symbol)
-                .join(CanonicalAsset, CanonicalAsset.id == ExchangeMarket.canonical_asset_id)
-                .where(ExchangeMarket.is_active.is_(True))
-                .distinct()
-            )
-        ).all()
-        for market_symbol, symbol in pairs:
-            if not market_symbol:
-                continue
-            for key in spelling_keys(str(market_symbol)):
-                index.setdefault(key, symbol)
-        return index
+        return await CoinListingIndex.load(self.session)
 
     async def _facts_for(self, symbol: str) -> AssetFacts | None:
         """One coin's recorded position, or nothing at all.

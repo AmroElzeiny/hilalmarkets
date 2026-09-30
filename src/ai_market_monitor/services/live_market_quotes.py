@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import monotonic
 from typing import Any
-from uuid import UUID
 
 from ai_market_monitor.core.asset_logos import asset_logo_module_url
 from ai_market_monitor.core.config import Settings
@@ -30,8 +29,12 @@ class _QuoteCacheEntry:
 class LiveMarketQuoteService:
     """Provider-backed quotes attached to reviewed screening assessments."""
 
-    _cache: dict[tuple[int, str, str, UUID | None], _QuoteCacheEntry] = {}
-    _locks: dict[tuple[int, str, str, UUID | None], asyncio.Lock] = {}
+    #: Keyed by provider, exchange and quote currency — and deliberately *not* by
+    #: standard. The exchange's prices are the same whichever standard is being read;
+    #: keying them by standard as well made every standard its own round trip to the
+    #: exchange, so four standards cost four identical ticker downloads.
+    _cache: dict[tuple[int, str, str], _QuoteCacheEntry] = {}
+    _locks: dict[tuple[int, str, str], asyncio.Lock] = {}
 
     def __init__(self, provider: MarketDataProvider, settings: Settings):
         self.provider = provider
@@ -56,11 +59,12 @@ class LiveMarketQuoteService:
         *,
         exchange: str,
         quote_asset: str,
-        methodology_id: UUID | None = None,
     ) -> LiveSpotMarketResponse:
+        """The exchange's own prices, shared by every standard and every reader."""
+
         exchange_key = exchange.strip().lower()
         quote_key = quote_asset.strip().upper()
-        cache_key = (id(self.provider), exchange_key, quote_key, methodology_id)
+        cache_key = (id(self.provider), exchange_key, quote_key)
         now = monotonic()
         cached = self._cache.get(cache_key)
         if cached is not None and cached.expires_at > now:
@@ -76,7 +80,6 @@ class LiveMarketQuoteService:
                 snapshot = await self._load_snapshot(
                     exchange=exchange_key,
                     quote_asset=quote_key,
-                    methodology_id=methodology_id,
                 )
             except Exception:
                 if cached is None:
@@ -114,11 +117,7 @@ class LiveMarketQuoteService:
         the process and has no database session of its own: reaching for one from inside
         a shared cache is how one page's request ends up serving another page's data.
         """
-        snapshot = await self.snapshot(
-            exchange=exchange,
-            quote_asset=quote_asset,
-            methodology_id=methodology.id,
-        )
+        snapshot = await self.snapshot(exchange=exchange, quote_asset=quote_asset)
         by_asset = {item.canonical_asset: item for item in assessments}
         numbers = market_numbers or {}
         items = []
@@ -178,7 +177,6 @@ class LiveMarketQuoteService:
         *,
         exchange: str,
         quote_asset: str,
-        methodology_id: UUID | None,
     ) -> LiveSpotMarketResponse:
         symbols = await self.provider.list_symbols(exchange, [quote_asset])
         normalized_symbols = sorted({canonical_symbol(symbol) for symbol in symbols})
@@ -198,7 +196,7 @@ class LiveMarketQuoteService:
                     asset_name=str(values.get("asset_name") or asset),
                     exchange=exchange,
                     quote_asset=quote_asset,
-                    methodology_id=methodology_id,
+                    methodology_id=None,
                     bid=values.get("bid"),
                     ask=values.get("ask"),
                     last=values.get("last"),
@@ -225,7 +223,7 @@ class LiveMarketQuoteService:
         return LiveSpotMarketResponse(
             refresh_after_ms=self.refresh_after_ms(),
             methodology=LiveMarketMethodologySummary(
-                id=methodology_id,
+                id=None,
                 code="PROVIDER_QUOTE_SNAPSHOT",
                 name="Provider quote snapshot",
                 version="runtime",

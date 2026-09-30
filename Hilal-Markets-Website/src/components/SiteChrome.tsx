@@ -44,6 +44,19 @@ export function signInHref(): string {
   return window.HilalMarketsRuntimeConfig?.chrome?.signInHref || '/signin'
 }
 
+/**
+ * The header's "Markets" link, or `null` when the page is not open yet.
+ *
+ * The server says, because the launch stage decides: before accounts can be opened the
+ * Market page is hidden, and the Jinja header has already dropped the link. Only a page
+ * opened without the server shell falls back to the address itself.
+ */
+export function marketHref(): string | null {
+  const chrome = window.HilalMarketsRuntimeConfig?.chrome
+  if (chrome && 'marketHref' in chrome) return chrome.marketHref ?? null
+  return '/market'
+}
+
 /** Only for a page rendered without the server shell. The server list is the real one.
  *
  *  Kept identical to `FOOTER_NAVIGATION` in `core/site_content.py`, and
@@ -54,6 +67,7 @@ const FALLBACK_FOOTER_GROUPS = [
     items: [
       { label: 'Features', href: '/features' },
       { label: 'How it works', href: '/how-it-works' },
+      { label: 'Markets', href: '/market' },
       { label: 'Hilal Methodology', href: '/hilal-methodology' },
     ],
   },
@@ -154,9 +168,11 @@ export function SiteNav() {
     return () => wide.removeEventListener('change', settle)
   }, [])
 
+  const markets = marketHref()
   const links = [
     { label: 'How it works', href: '/how-it-works' },
     { label: 'Features', href: '/features' },
+    ...(markets ? [{ label: 'Markets', href: markets }] : []),
     { label: 'Pricing', href: path === '/' ? '#pricing' : '/#pricing' },
     { label: 'FAQ', href: path === '/' ? '#faq' : '/#faq' },
   ]

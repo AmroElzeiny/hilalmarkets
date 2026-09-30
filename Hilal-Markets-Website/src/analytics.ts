@@ -112,6 +112,8 @@ export type ChromeRuntimeConfig = {
   /** Where the footer's "Cookie settings" link goes when no script catches the click. */
   cookieSettingsHref?: string
   primaryCtaLabel?: string
+  /** The public Market page, or `null` while the launch stage hides it. */
+  marketHref?: string | null
 }
 
 /**

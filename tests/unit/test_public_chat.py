@@ -249,3 +249,25 @@ def test_public_chat_assets_use_the_current_cache_key_in_both_page_shells() -> N
         )
         assert len(chat_keys) == 2, chat_keys
         assert set(chat_keys) == set(re.findall(r"\?v=([a-zA-Z0-9-]+)", content))
+
+
+def test_the_launched_greeting_never_offers_the_private_beta() -> None:
+    """The greeting has two branches, one per stage, and each speaks for its own stage.
+
+    Both used to offer "private-beta access" — the words from before launch had been
+    copied into the branch every visitor now sees.
+    """
+
+    import re
+
+    root = Path(__file__).resolve().parents[2]
+    script = (root / "src/ai_market_monitor/static/hilalmarkets-public-chat.js").read_text(
+        encoding="utf-8"
+    )
+    branches = re.search(
+        r"const topics = waitlistMode\s*\?\s*(\"[^\"]*\")\s*:\s*(\"[^\"]*\");", script
+    )
+    assert branches, "the greeting no longer chooses its topics by stage"
+    before_launch, after_launch = branches.group(1), branches.group(2)
+    assert "private-beta" in before_launch
+    assert "private-beta" not in after_launch and "beta" not in after_launch

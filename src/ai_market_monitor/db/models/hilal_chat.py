@@ -27,6 +27,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -103,6 +104,11 @@ class HilalChatMessage(UUIDPrimaryKeyMixin, Base):
     latency_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     #: The short follow-up questions offered under the answer, if any.
     suggestions: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    #: The preview cards shown under the answer — the pages it was built from — exactly
+    #: as they were drawn, so reopening the chat shows the same cards.
+    sources: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, server_default=text("'[]'"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     retain_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

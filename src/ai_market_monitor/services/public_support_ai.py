@@ -23,6 +23,11 @@ from ai_market_monitor.services.ai_provider import (
 )
 from ai_market_monitor.services.system_brain import estimate_usage_cost
 
+#: The intent the model reports when a visitor without an account asks about a coin the
+#: public Market page does not show. The service replaces the whole answer when it sees
+#: it, so what the model wrote about that coin is never shown.
+COIN_NEEDS_ACCOUNT_INTENT = "coin_needs_account"
+
 
 @dataclass(frozen=True, slots=True)
 class PublicSupportAICall:
@@ -281,6 +286,11 @@ def _public_support_instructions(*, waitlist_mode: bool = False) -> str:
         "phase, requested_tools must be empty and the "
         "answer must reflect the tool status exactly. Never claim a tool ran merely because you "
         "requested it. Use only supplied source_ids and related_route_ids for internal grounding. "
+        "When conversation_state lists coins_open_without_an_account, the visitor is not signed "
+        "in and may only hear about those coins: for any other named coin, say nothing about the "
+        f"coin itself, set intent to {COIN_NEEDS_ACCOUNT_INTENT}, and say kindly that a free "
+        "account, or "
+        "signing in, shows every coin Hilal Markets has reviewed. "
         "Public site pages are under construction: do not output links, URLs, route paths, page "
         "recommendations, or instructions to click, open, or visit a website page. Explain the "
         "answer directly in chat instead."

@@ -114,7 +114,12 @@ class StageExposure:
 
 #: Pages that only make sense once anyone can open an account. Named once so the
 #: three narrower stages cannot drift apart from each other.
-_PRE_LAUNCH_HIDDEN_PAGES: Final[frozenset[str]] = frozenset({"pricing", "screened_market"})
+#:
+#: `market` is the public Market page. It ends in an invitation to open an account, so
+#: before anybody can open one it is an invitation to a closed door.
+_PRE_LAUNCH_HIDDEN_PAGES: Final[frozenset[str]] = frozenset(
+    {"pricing", "screened_market", "market"}
+)
 
 STAGE_EXPOSURE: Final[dict[LaunchStage, StageExposure]] = {
     LaunchStage.INTERNAL: StageExposure(

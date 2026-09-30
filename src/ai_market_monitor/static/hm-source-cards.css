@@ -1,0 +1,165 @@
+/* The preview cards under an assistant answer: the pages the answer was built from.
+ *
+ * One stylesheet for every chat — the public assistant and Hilal load this same file —
+ * so a source looks the same wherever it is cited. Every value is a brand token from
+ * `hilalmarkets-brand.css`, read through `var()` where the page has loaded that file
+ * and falling back to the very same value where it has not (the public pages). Nothing
+ * here is a new colour. The card is a quiet surface: no apple green, because the answer
+ * above it is the focus and the card is where it came from (`brand guide.md` 9 and 12). */
+
+.hm-sources {
+  --src-ink: var(--hm-ink, #2b2e35);
+  --src-copy: var(--hm-copy, #50555e);
+  --src-muted: var(--hm-muted, #63696f);
+  --src-line: var(--hm-hairline, #e1e5ea);
+  --src-line-strong: var(--hm-hairline-strong, #d0d6de);
+  --src-surface: var(--hm-surface, #ffffff);
+  --src-quiet: var(--hm-surface-soft, #fafbfc);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* The cards take the width the answer gives them and never set it. Their one-line
+     titles and addresses are long, and without this they widened Hilal's answer bubble
+     past its own limit and pushed the whole conversation out of the window. */
+  contain: inline-size;
+  width: 100%;
+  min-width: 240px;
+  max-width: 420px;
+  margin-top: 8px;
+  font-family: var(--hm-font-ui, "Onest", ui-sans-serif, system-ui, sans-serif);
+}
+
+.hm-sources-label {
+  margin: 0;
+  color: var(--src-copy);
+  font-size: .72rem;
+  font-weight: 500;
+  letter-spacing: .02em;
+}
+
+.hm-source {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 8px;
+  border: 1px solid var(--src-line);
+  border-radius: 14px;
+  background: var(--src-surface);
+  color: var(--src-ink);
+  text-decoration: none;
+  transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.hm-source:hover {
+  border-color: var(--src-ink);
+  box-shadow: 0 14px 28px -25px rgba(43, 46, 53, .65);
+  transform: translateY(-1px);
+}
+
+.hm-source-shot {
+  position: relative;
+  flex: 0 0 112px;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border: 1px solid var(--src-line);
+  border-radius: 9px;
+  background: var(--src-quiet);
+}
+
+.hm-source-shot img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+
+.hm-source-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  justify-content: center;
+}
+
+.hm-source-title {
+  overflow: hidden;
+  color: var(--src-ink);
+  font-size: .82rem;
+  font-weight: 500;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hm-source-text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--src-copy);
+  font-size: .74rem;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.hm-source-address {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--src-muted);
+  font-size: .7rem;
+  white-space: nowrap;
+}
+
+.hm-source-address svg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+
+.hm-source-address span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The one action a "sign in first" answer ends with. Here, not in either chat's own
+   sheet, because it belongs to the same answer shape as the cards above. */
+.hm-account-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.hm-account-prompt a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--hm-hairline-strong, #d0d6de);
+  border-radius: 999px;
+  background: var(--hm-surface, #ffffff);
+  color: var(--hm-ink, #2b2e35);
+  font-family: var(--hm-font-ui, "Onest", ui-sans-serif, system-ui, sans-serif);
+  font-size: .82rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.hm-account-prompt a.is-primary {
+  border-color: var(--hm-apple, #cbfa4d);
+  background: var(--hm-apple, #cbfa4d);
+}
+
+.hm-account-prompt a:hover {
+  border-color: var(--hm-ink, #2b2e35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-source,
+  .hm-source:hover { transition: none; transform: none; }
+}

@@ -1,10 +1,16 @@
-/* The the redesigned dashboard screened market.
+/* The screened market, for the dashboard and for the public Market page.
  *
  * Reads the same endpoint the live page reads. Every value on screen comes from that
  * response or from the server-rendered page: nothing here estimates, rounds a missing
  * number into existence, or lets a price change a Shariah status.
+ *
+ * One script for both audiences, told apart by `data-audience` on the root. The public
+ * page is the same list cut after the first coins; what a visitor cannot do there —
+ * follow a coin, open a Passport, sort or search a list they only partly see — opens a
+ * prompt to sign up instead. See `templates/hilal/partials/market_list.html`.
  */
 
+import { manageDialog, paintIcons as paintDialogIcons } from "./hm-dialog.js";
 import { animate, countTo, reveal, settleIn } from "./hm-motion.js";
 import { publish } from "./hm-page-context.js";
 import { pageNote } from "./hm-page-notes.js";
@@ -60,6 +66,10 @@ function start(root) {
   const endpoint = root.dataset.endpoint;
   const basePath = root.dataset.basePath || "/dashboard/market";
   const methodologyId = root.dataset.methodologyId || "";
+  /* A visitor without an account. Decided by the server, which is the only side that
+     knows whether anybody is signed in. */
+  const isPublic = root.dataset.audience === "public";
+  const accountGate = isPublic ? setUpAccountGate(root) : null;
 
   const find = (selector) => root.querySelector(selector);
   const cards = find("[data-cards]");
@@ -79,6 +89,9 @@ function start(root) {
   const liveToggleLabel = find("[data-live-toggle-label]");
   const standardSelect = find("[data-standard]");
   const standardForm = find("[data-standard-form]");
+  const locked = find("[data-locked]");
+  const lockedPreview = find("[data-locked-preview]");
+  const lockedCount = find("[data-locked-count]");
 
   const favorites = new Set(
     JSON.parse(root.dataset.favoriteAssets || "[]").map((value) => String(value).toUpperCase()),
@@ -100,6 +113,11 @@ function start(root) {
     sort: { key: "volume", direction: "desc" },
     paused: false,
     firstPaint: true,
+    /* The public feed sends only the visible coins, and these three numbers about the
+       rest. They name no coin; they are what the counters and the locked banner say. */
+    total: 0,
+    hiddenCount: 0,
+    statusCounts: null,
   };
 
   let controller = null;
@@ -252,7 +270,11 @@ function start(root) {
     setFavoriteState(favorite, asset);
 
     const full = node.querySelector("[data-full-passport]");
-    full.setAttribute("href", passportHref(item));
+    /* For a visitor the Passport is behind an account, so the link is the way to one —
+       and it brings them back to this coin's Passport once they are in. The click is
+       caught below and opens the prompt first; the address is what is left without
+       scripting or in a new tab. */
+    full.setAttribute("href", isPublic ? accountGate.href("signup", passportHref(item)) : passportHref(item));
 
     /* "The provider says its data is good" and "there is a price to show" are two
        different facts. Keying the honesty note off the first let a card display `--`
@@ -427,9 +449,13 @@ function start(root) {
     });
 
     const total = items.size;
+    const waiting = isPublic ? hiddenFor(state.filter, visible.length) : 0;
     cards.hidden = state.view !== "cards" || visible.length === 0;
     tableWrap.hidden = state.view !== "table" || visible.length === 0;
-    emptyState.hidden = visible.length !== 0 || total === 0;
+    /* On the public page a filter that matches nothing among the visible coins may
+       still match coins behind the line. Then the locked banner is the answer, not
+       "nothing matches". */
+    emptyState.hidden = visible.length !== 0 || total === 0 || waiting > 0;
 
     if (emptyMessage && visible.length === 0 && total > 0) {
       emptyMessage.textContent = state.search
@@ -437,13 +463,65 @@ function start(root) {
         : "No coin matches this filter right now.";
     }
 
+    const exchangeName = state.exchange === "bybit" ? "Bybit" : "Binance";
     if (resultNote) {
       resultNote.textContent = total === 0
         ? "No coins to show yet."
-        : `Showing ${visible.length} of ${total} screened coins on ${state.exchange === "bybit" ? "Bybit" : "Binance"}.`;
+        : `Showing ${visible.length} of ${isPublic ? state.total : total} screened coins on ${exchangeName}.`;
     }
 
+    if (isPublic) paintLocked(waiting);
     updateCounts();
+  }
+
+  /* ── The public page: what is behind the line ─────────────────────────── */
+
+  /** How many coins under one filter the visitor cannot see. From the feed's counts. */
+  function hiddenFor(filter, visibleCount) {
+    if (!state.statusCounts || filter === "following") return 0;
+    const matching = Object.entries(state.statusCounts)
+      .filter(([status]) => (filter === "clean"
+        ? assetTone(status) === "eligible" && !carriesCondition(status)
+        : filter === "conditional" ? carriesCondition(status) : true))
+      .reduce((sum, [, count]) => sum + count, 0);
+    return Math.max(0, matching - visibleCount);
+  }
+
+  /* Placeholders in the shape of the view that is showing, blurred under the banner.
+     They carry no coin, no price and no status — the feed sent none, and a made-up
+     number here would be inventing market data. Only the count in the banner is real. */
+  function paintLocked(waiting) {
+    if (!locked) return;
+    locked.hidden = waiting === 0 || items.size === 0;
+    if (locked.hidden) return;
+    lockedCount.textContent = String(waiting);
+    const shape = state.view === "table" ? "table" : "cards";
+    const count = Math.min(waiting, shape === "table" ? 6 : 8);
+    if (lockedPreview.dataset.shape === shape && Number(lockedPreview.dataset.count) === count) return;
+    lockedPreview.dataset.shape = shape;
+    lockedPreview.dataset.count = String(count);
+    const blank = '<span class="t-locked-blank" aria-hidden="true">&#8226;&#8226;&#8226;</span>';
+    if (shape === "cards") {
+      lockedPreview.innerHTML = `<div class="t-grid">${Array.from({ length: count }, () => `
+        <article class="t-asset is-decoy">
+          <div class="t-asset-top">
+            <span class="t-logo"></span>
+            <span class="t-asset-name"><span class="t-asset-symbol">${blank}</span><span class="t-asset-full">Screened coin</span></span>
+          </div>
+          <div class="t-price-row"><span class="t-price t-figure">${blank}</span><span class="t-change" data-direction="flat">${blank}</span></div>
+          <span class="t-status" data-tone="neutral">Shariah screened</span>
+          <div class="t-asset-meta"><span>24h volume ${blank}</span></div>
+          <div class="t-asset-actions"><span class="t-action is-primary">See the evidence</span><span class="t-action">Full Passport</span></div>
+        </article>`).join("")}</div>`;
+    } else {
+      lockedPreview.innerHTML = `<div class="t-table-wrap"><table class="t-table"><tbody>${Array.from({ length: count }, () => `
+        <tr>
+          <td><span class="t-cell-coin"><span class="t-logo"></span><span class="t-asset-name"><span class="t-asset-symbol">${blank}</span><span class="t-asset-full">Screened coin</span></span></span></td>
+          <td><span class="t-pill" data-tone="neutral">Shariah screened</span></td>
+          <td class="t-num">${blank}</td><td class="t-num">${blank}</td><td class="t-num">${blank}</td>
+          <td class="t-num">${blank}</td><td class="t-num">${blank}</td><td></td>
+        </tr>`).join("")}</tbody></table></div>`;
+    }
   }
 
   function updateCounts() {
@@ -455,6 +533,15 @@ function start(root) {
       conditional: conditional.length,
       following: favorites.size,
     };
+    /* A visitor is shown every screened coin in the counters, not only the ones on the
+       page — read from the feed's own counts through the same status words the list
+       uses, so a counter can never disagree with a filter. */
+    if (isPublic && state.statusCounts) {
+      tally.all = hiddenFor("all", 0);
+      tally.clean = hiddenFor("clean", 0);
+      tally.conditional = hiddenFor("conditional", 0);
+      tally.following = 0;
+    }
     Object.entries(tally).forEach(([key, value]) => {
       const node = root.querySelector(`[data-count="${key}"]`);
       if (node) countTo(node, value);
@@ -525,6 +612,13 @@ function start(root) {
 
   function absorb(payload) {
     const arriving = Array.isArray(payload.items) ? payload.items : [];
+    if (isPublic) {
+      state.total = Number(payload.total) || 0;
+      state.hiddenCount = Number(payload.hidden_count) || 0;
+      state.statusCounts = payload.status_counts && typeof payload.status_counts === "object"
+        ? payload.status_counts
+        : null;
+    }
     const seen = new Set();
     const fresh = [];
 
@@ -629,6 +723,18 @@ function start(root) {
 
   [cards, tableBody].forEach((scope) => {
     scope.addEventListener("click", (event) => {
+      if (isPublic) {
+        /* Everything on a coin that needs an account asks for one, and remembers what
+           was asked for so signing up lands on it. */
+        const control = event.target.closest("[data-favorite], [data-quick-view], [data-full-passport]");
+        const item = control && itemFor(control);
+        if (!item) return;
+        event.preventDefault();
+        const asset = String(item.canonical_asset || "").toUpperCase();
+        if (control.matches("[data-favorite]")) accountGate.open("follow", { asset, trigger: control });
+        else accountGate.open("passport", { asset, next: passportHref(item), trigger: control });
+        return;
+      }
       const favorite = event.target.closest("[data-favorite]");
       if (favorite) {
         const item = itemFor(favorite);
@@ -657,6 +763,10 @@ function start(root) {
 
   root.querySelectorAll("[data-filter]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (button.dataset.accountGate) {
+        accountGate?.open(button.dataset.accountGate, { trigger: button });
+        return;
+      }
       state.filter = button.dataset.filter;
       root.querySelectorAll("[data-filter]").forEach((other) => {
         other.setAttribute("aria-pressed", String(other === button));
@@ -697,6 +807,8 @@ function start(root) {
   });
 
   root.querySelectorAll("[data-sort]").forEach((button) => {
+    /* The public page draws its headings without sorting; see the template. */
+    if (button.disabled) return;
     button.addEventListener("click", () => {
       const key = button.dataset.sort;
       state.sort = state.sort.key === key
@@ -748,6 +860,10 @@ function start(root) {
   standardSelect?.addEventListener("change", () => standardForm?.requestSubmit());
 
   root.querySelector("[data-open-favorites]")?.addEventListener("click", (event) => {
+    if (event.currentTarget.dataset.accountGate) {
+      accountGate?.open(event.currentTarget.dataset.accountGate, { trigger: event.currentTarget });
+      return;
+    }
     window.HilalFavorites?.open(favorites, favoriteWatchlistId, event.currentTarget);
   });
 
@@ -793,4 +909,68 @@ function start(root) {
       window.HilalFavorites?.open(favorites, favoriteWatchlistId, null),
     );
   }
+}
+
+/* ── The public page's one prompt to open an account ──────────────────────
+ *
+ * Every control on the public page that needs an account opens this, with words for
+ * what was pressed. Both buttons carry `next`, so the visitor lands on what they asked
+ * for — the full list, or one coin's Passport — once they are signed in.
+ */
+function setUpAccountGate(root) {
+  const dialog = document.querySelector("[data-account-dialog]");
+  const title = dialog?.querySelector("[data-account-title]");
+  const text = dialog?.querySelector("[data-account-text]");
+  const signup = dialog?.querySelector("[data-account-signup]");
+  const signin = dialog?.querySelector("[data-account-signin]");
+  const { open, close } = manageDialog(dialog);
+  dialog?.querySelectorAll("[data-account-close]").forEach((button) => {
+    button.addEventListener("click", () => close());
+  });
+  paintDialogIcons(dialog);
+
+  /* The sign-up or sign-in address with a different place to come back to. The server
+     wrote both addresses, on the product's own hostname when it has one; only `next`
+     is changed here. */
+  function href(kind, next) {
+    const base = kind === "signin" ? root.dataset.signinHref : root.dataset.signupHref;
+    if (!base) return kind === "signin" ? "/signin" : "/signup";
+    const address = new URL(base, window.location.origin);
+    if (next) address.searchParams.set("next", next);
+    return address.origin === window.location.origin
+      ? `${address.pathname}${address.search}`
+      : address.href;
+  }
+
+  const WORDS = {
+    follow: (asset) => ({
+      title: asset ? `Follow ${asset} with a free account` : "Follow coins with a free account",
+      text: "Tap the heart on any coin and we will tell you when its Shariah status changes. It takes a minute to sign up, and it is free.",
+    }),
+    favorites: () => ({
+      title: "Keep the coins you care about in one list",
+      text: "A free account keeps your favorite coins together and tells you when the Shariah status of any of them changes.",
+    }),
+    passport: (asset) => ({
+      title: asset ? `Read the evidence for ${asset}` : "Read the evidence for this coin",
+      text: "Every coin has an Evidence Passport: the standard that screened it, the reasons, the sources and the date it was reviewed. Open a free account to read it.",
+    }),
+  };
+
+  return {
+    href,
+    open(reason, { asset = "", next = "", trigger = null } = {}) {
+      if (!dialog) {
+        window.location.assign(href("signup", next));
+        return;
+      }
+      const words = (WORDS[reason] || WORDS.follow)(asset);
+      title.textContent = words.title;
+      text.textContent = words.text;
+      const destination = next || new URL(root.dataset.signupHref || "/", window.location.origin).searchParams.get("next") || "";
+      signup.setAttribute("href", href("signup", destination));
+      signin.setAttribute("href", href("signin", destination));
+      open(trigger);
+    },
+  };
 }

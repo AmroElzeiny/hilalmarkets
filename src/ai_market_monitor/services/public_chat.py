@@ -39,6 +39,7 @@ from ai_market_monitor.db.models import (
     User,
 )
 from ai_market_monitor.schemas.public_chat import (
+    PublicChatAccountPrompt,
     PublicChatAnswerFeedbackRequest,
     PublicChatAnswerFeedbackResponse,
     PublicChatAnswerRequest,
@@ -50,16 +51,30 @@ from ai_market_monitor.schemas.public_chat import (
     PublicSupportMode,
     PublicSupportStage,
 )
+from ai_market_monitor.schemas.source_preview import SourcePreview
 from ai_market_monitor.services.agent_control import AgentResponsesClient
+from ai_market_monitor.services.coin_mentions import CoinListingIndex, tickers_in
 from ai_market_monitor.services.email_branding import plain_text_block
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
+from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.market_provider import market_data_provider
 from ai_market_monitor.services.notion_knowledge import NotionKnowledgeService
+from ai_market_monitor.services.public_market import (
+    PUBLIC_MARKET_VISIBLE_COUNT,
+    PublicMarketService,
+    market_account_links,
+)
 from ai_market_monitor.services.public_support_ai import (
+    COIN_NEEDS_ACCOUNT_INTENT,
     PublicSupportAICall,
     PublicSupportAIService,
     PublicSupportAIUnavailable,
 )
-from ai_market_monitor.services.public_support_tools import PublicSupportReadTools
+from ai_market_monitor.services.public_support_tools import (
+    ACCOUNT_NEEDED,
+    PublicSupportReadTools,
+)
+from ai_market_monitor.services.source_previews import source_previews
 from ai_market_monitor.services.web_auth import normalize_email
 
 logger = logging.getLogger(__name__)
@@ -75,6 +90,7 @@ PUBLIC_ROUTE_PATHS: dict[str, tuple[str, str]] = {
     # but it was withdrawn from every menu and page body, so the assistant must not be
     # the one surface that still sends visitors there. Screening questions go to the
     # Help Center. See UNLINKED_PAGES in core/site_content.py.
+    "market": ("Market", "/market"),
     "pricing": ("Pricing", "/pricing"),
     "help": ("Help Center", "/help"),
     "contact": ("Contact", "/contact"),
@@ -771,6 +787,19 @@ class PublicChatSessionLimitExceeded(RuntimeError):
     pass
 
 
+#: The read tools whose records live on one page of the product, and that page's key in
+#: `services/source_previews.py`. The public Passport lookup is decided separately: a
+#: visitor sees its coin on the public Market page, a member on the coin's Passport.
+_TOOL_SOURCE_PAGES: dict[str, str] = {
+    "account_state": "dashboard_entry",
+    "telegram_status": "dashboard_entry",
+    "watch_plan_summary": "monitors",
+    "recent_alerts": "monitors",
+    "entitlement_usage": "subscription",
+    "screened_watchlist": "halal_assets",
+}
+
+
 class PublicChatService:
     def __init__(
         self,
@@ -778,12 +807,121 @@ class PublicChatService:
         settings: Settings,
         *,
         ai_client: AgentResponsesClient | None = None,
+        market_provider: MarketDataProvider | None = None,
     ):
         self.session = session
         self.settings = settings
         self.knowledge = PublicKnowledgeService(settings)
         self.notion_knowledge = NotionKnowledgeService(settings)
         self.ai_client = ai_client
+        self.market_provider = market_provider
+
+    # -- what a visitor without an account may hear about -----------------------
+
+    async def _public_coins(self) -> frozenset[str]:
+        """The coins the public Market page shows, in any of its views.
+
+        Empty when the page is hidden by the launch stage, and empty when the list
+        cannot be read. Both are the fail-closed direction: a coin is public only when
+        a visitor could really have seen it.
+        """
+
+        if "market" in self.settings.stage_exposure.hidden_pages:
+            return frozenset()
+        provider = self.market_provider or market_data_provider(self.settings)
+        try:
+            market = PublicMarketService(self.session, self.settings, provider)
+            return await market.visible_symbols()
+        except Exception:
+            logger.warning("public_market_visible_coins_unavailable", exc_info=True)
+            return frozenset()
+
+    async def _coins_needing_account(
+        self, question: str, index: CoinListingIndex
+    ) -> list[str]:
+        """Coins a visitor marked as a symbol (``$XRP``, ``XRP``) that the page does not show.
+
+        Checked before the model is asked anything, so a question about a hidden coin
+        costs no model call and cannot be answered by one. Only symbols the visitor
+        *marked* count here: "why can I not sign in?" must not read "not" as a coin. A
+        coin named in plain words is caught one step later, by the Passport lookup.
+        """
+
+        marked = tickers_in(question)
+        if not marked:
+            return []
+        named = index.symbols_in(marked)
+        if not named:
+            return []
+        public = await self._public_coins()
+        return [symbol for symbol in named if symbol.upper() not in public]
+
+    def _account_needed_message(self, symbols: list[str]) -> str:
+        names = [item.upper() for item in symbols[:3]]
+        subject = ", ".join(names) if names else "that coin"
+        exposure = self.settings.stage_exposure
+        if not exposure.assistant_may_offer_account:
+            return (
+                f"I can't share details about {subject} yet. Every coin Hilal Markets has "
+                "reviewed opens up once accounts do. "
+                f"{exposure.primary_cta_label} and we will tell you when that happens."
+            )
+        verb = "is not one of them" if len(names) <= 1 else "are not among them"
+        return (
+            f"Before you sign in, I can only talk about the {PUBLIC_MARKET_VISIBLE_COUNT} "
+            f"coins shown on the Market page, and {subject} {verb}. Open a free account, "
+            "or sign in, and I can tell you what Hilal Markets has recorded about it, with "
+            "the evidence behind it."
+        )
+
+    def _account_prompt(self) -> PublicChatAccountPrompt | None:
+        exposure = self.settings.stage_exposure
+        if not exposure.assistant_may_offer_account:
+            return None
+        links = market_account_links(self.settings)
+        return PublicChatAccountPrompt(
+            signup_href=links["signup"],
+            signin_href=links["signin"],
+            signup_label=exposure.primary_cta_label,
+        )
+
+    def _source_cards(
+        self,
+        *,
+        status: str,
+        source_ids: list[str],
+        tool_results: list[Any],
+        user_id: UUID | None,
+    ) -> list[SourcePreview]:
+        """Preview cards for the pages this answer was actually built from.
+
+        A cited product document leads to the page it belongs to; a record read by a
+        tool leads to the page that shows it. Nothing the model only proposed as
+        "related" becomes a card, and a page the launch stage hides never does.
+        """
+
+        if status != "answered":
+            return []
+        offerable = offerable_route_ids(self.settings)
+        routes = {entry.source_id: entry.route_id for entry in self.knowledge.entries}
+        wanted: list[tuple[str, str | None]] = []
+        for source_id in source_ids:
+            route = routes.get(source_id)
+            if route and route in offerable:
+                wanted.append((route, None))
+        for item in tool_results:
+            if item.status != "success":
+                continue
+            if item.tool_name == "public_passport":
+                if user_id is not None:
+                    wanted.append(("passport", str(item.data.get("asset") or "") or None))
+                elif "market" in offerable:
+                    wanted.append(("market", None))
+                continue
+            page = _TOOL_SOURCE_PAGES.get(item.tool_name)
+            if page and user_id is not None:
+                wanted.append((page, None))
+        return source_previews(wanted, self.settings)
 
     async def answer(
         self,
@@ -804,6 +942,18 @@ class PublicChatService:
         )
         ai_calls: list[PublicSupportAICall] = []
         tool_results = []
+        #: Set when the answer must be "sign in first": the coins it was about, or an
+        #: empty list when the model recognised a coin the server could not name.
+        account_needed: list[str] | None = None
+        #: The listed coins a visitor's question names. Read once, and only for somebody
+        #: who is not signed in — a member may hear about every coin.
+        mentioned: list[str] = []
+        if boundary is None and user_id is None:
+            index = await CoinListingIndex.load(self.session)
+            mentioned = index.asked_about(payload.question)
+            hidden = await self._coins_needing_account(payload.question, index)
+            if hidden:
+                account_needed = hidden
         validation_failure: str | None = None
         safety_boundary: str | None = None
         authenticated_context_used = False
@@ -823,6 +973,13 @@ class PublicChatService:
             answer_complete = True
             follow_ups = ["What can Hilal Markets monitor for me?"]
             safety_boundary = gap
+        elif account_needed is not None:
+            # Filled in by the one block below that every "sign in first" answer shares.
+            status, message, score, source_ids, route_ids, gap = (
+                "answered", "", 1.0, [], [], None
+            )
+            stage, mode, intent = "ANSWER", "PRODUCT_CONVERSATION", ACCOUNT_NEEDED
+            clarification, answer_complete, follow_ups = None, True, []
         elif not self.settings.public_chat_ai_enabled:
             if is_greeting:
                 status = "answered"
@@ -869,6 +1026,18 @@ class PublicChatService:
                 account_name = greeting_name(user.display_name) if user is not None else ""
                 if account_name:
                     ai_state["visitor_profile"] = {"name": account_name}
+            public_coins: frozenset[str] | None = None
+            if user_id is None:
+                # Read only when the question names a listed coin: the list costs a
+                # price lookup, and a question about alerts should not wait for one.
+                # With no coin named the Passport lookup finds nothing to show, and an
+                # empty set keeps it closed all the same.
+                public_coins = await self._public_coins() if mentioned else frozenset()
+                if mentioned:
+                    # The model is told which coins it may talk about, and the Passport
+                    # lookup below refuses every other one — so the rule holds even if
+                    # the model does not follow it.
+                    ai_state["coins_open_without_an_account"] = sorted(public_coins)
             allowed_tools = ["public_passport"]
             if user_id is not None:
                 allowed_tools.extend(
@@ -908,7 +1077,7 @@ class PublicChatService:
                         "The assistant requested too many account reads."
                     )
                 if requested_tools:
-                    tools = PublicSupportReadTools(self.session)
+                    tools = PublicSupportReadTools(self.session, public_coins=public_coins)
                     for tool_name in requested_tools:
                         tool_results.append(
                             await tools.execute(
@@ -917,6 +1086,17 @@ class PublicChatService:
                                 question=payload.question,
                             )
                         )
+                    refused = [
+                        str(item.data.get("asset") or "")
+                        for item in tool_results
+                        if item.status == "blocked"
+                        and item.data.get("reason_code") == ACCOUNT_NEEDED
+                    ]
+                    if refused:
+                        # No second model call: there is nothing it may say about the
+                        # coin, and the answer is the same fixed one either way.
+                        account_needed = [item for item in refused if item]
+                if requested_tools and account_needed is None:
                     second = await PublicSupportAIService(
                         self.settings,
                         client=self.ai_client,
@@ -994,6 +1174,8 @@ class PublicChatService:
                         stage = "KNOWLEDGE_GAP"
                         answer_complete = False
                         gap = gap or "low_confidence"
+                if user_id is None and generated.intent == COIN_NEEDS_ACCOUNT_INTENT:
+                    account_needed = account_needed or []
             except PublicSupportAIUnavailable as exc:
                 validation_failure = type(exc).__name__
                 mode = "PRODUCT_CONVERSATION" if is_greeting else "PRODUCT_FACT"
@@ -1022,6 +1204,41 @@ class PublicChatService:
                 support_handoff_reason = gap if support_handoff_available else None
                 safety_boundary = "product_scope_only"
 
+        # Every "sign in first" answer, however it was reached — a symbol the visitor
+        # typed, a Passport lookup the server refused, or the model recognising a coin —
+        # is this one fixed answer. Nothing the model wrote about the coin survives it.
+        account_prompt: PublicChatAccountPrompt | None = None
+        if account_needed is not None:
+            status = "answered"
+            message = self._account_needed_message(account_needed)
+            score = 1.0
+            source_ids = []
+            route_ids = [
+                route
+                for route in ("dashboard_entry",)
+                if route in offerable_route_ids(self.settings)
+            ]
+            gap = None
+            stage = "ANSWER"
+            mode = "PRODUCT_CONVERSATION"
+            intent = ACCOUNT_NEEDED
+            clarification = None
+            answer_complete = True
+            follow_ups = []
+            support_handoff_available = False
+            support_handoff_reason = None
+            authenticated_context_used = False
+            account_prompt = self._account_prompt()
+        sources = (
+            []
+            if account_needed is not None
+            else self._source_cards(
+                status=status,
+                source_ids=source_ids,
+                tool_results=tool_results,
+                user_id=user_id,
+            )
+        )
         support_handoff_explicitly_requested = bool(
             explicit_support_request and mode not in {"OUT_OF_SCOPE", "SAFETY_REFUSAL"}
         )
@@ -1098,6 +1315,8 @@ class PublicChatService:
             support_handoff_reason=support_handoff_reason,
             support_handoff_explicitly_requested=(support_handoff_explicitly_requested),
             answer_event_id=event.id,
+            sources=sources,
+            account_prompt=account_prompt,
         )
         turn.status = "completed"
         turn.response_json = response.model_dump(mode="json")

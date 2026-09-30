@@ -2,17 +2,21 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.api.template_env import register as register_template_helpers
+from ai_market_monitor.core.app_links import app_host, app_link
 from ai_market_monitor.core.config import Settings, get_settings
-from ai_market_monitor.core.dashboard_paths import HOME_PATH
+from ai_market_monitor.core.dashboard_paths import HOME_PATH, MARKET_PATH
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
@@ -67,6 +71,15 @@ from ai_market_monitor.services.billing import (
 )
 from ai_market_monitor.services.hilal_methodology import (
     page_payload as hilal_page_payload,
+)
+from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.public_market import (
+    MARKET_EXCHANGE_PATTERN,
+    MARKET_EXCHANGES,
+    PUBLIC_MARKET_QUOTE,
+    PUBLIC_MARKET_VISIBLE_COUNT,
+    PublicMarketService,
+    market_account_links,
 )
 from ai_market_monitor.services.public_site import PublicSiteReadService
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
@@ -345,6 +358,14 @@ def _public_context(
             "signInHref": app_link(settings, "/signin"),
             "cookieSettingsHref": COOKIE_SETTINGS_PATH,
             "primaryCtaLabel": settings.stage_exposure.primary_cta_label,
+            # The React header's "Markets" link, or null while the stage hides the page.
+            # The React header writes its own links, so it is told this one fact rather
+            # than left to show a link the Jinja header has already removed.
+            "marketHref": (
+                None
+                if "market" in settings.stage_exposure.hidden_pages
+                else request.url_for("public_market").path
+            ),
         },
         # Pre-launch state of the public site. While it is on, every public page asks
         # the visitor to join the waitlist instead of offering an account or a plan.
@@ -494,25 +515,6 @@ async def _render_public_page(
 MAIN_DASHBOARD_PATH = HOME_PATH
 
 
-def app_host(settings: Settings) -> str | None:
-    """The hostname the dashboard is served on, or ``None`` if it has none of its own.
-
-    "None of its own" is the important half. Locally, and in any deployment that runs the
-    whole product on one name, ``APP_BASE_URL`` and ``PUBLIC_BASE_URL`` are the same host
-    — and taking the root over there would replace the landing page with a redirect to
-    sign-in for every visitor, including the ones who have never heard of the product.
-    So the root only becomes the dashboard when the two names really are different.
-    """
-
-    if settings.app_base_url is None:
-        return None
-    host = (settings.app_base_url.host or "").strip().lower()
-    public = (settings.public_base_url.host or "").strip().lower()
-    if not host or host == public:
-        return None
-    return host
-
-
 def is_app_host(request: Request, settings: Settings) -> bool:
     """Whether this request arrived on the dashboard's own hostname.
 
@@ -525,28 +527,6 @@ def is_app_host(request: Request, settings: Settings) -> bool:
     if wanted is None:
         return False
     return (request.url.hostname or "").strip().lower() == wanted
-
-
-def app_link(settings: Settings, path: str) -> str:
-    """A link into the product, on the product's own hostname when it has one.
-
-    The whole point of `APP_BASE_URL` is that the dashboard is served at
-    `https://app.hilalmarkets.com`. That was half true: the *root* of that hostname
-    served the dashboard, but every way into the product from the marketing site was a
-    plain path — "Start free", "Sign in", "Open dashboard" — so a visitor who pressed one
-    stayed on `hilalmarkets.com` and used the whole product from there. Two hostnames
-    served the same signed-in pages, and the one named after the product was the one
-    almost nobody reached.
-
-    When the two names are the same — locally, and in any single-domain install — this
-    returns the plain path, so nothing changes and no absolute URL is written into a page
-    that does not need one.
-    """
-
-    host = app_host(settings)
-    if host is None:
-        return path
-    return f"{str(settings.app_base_url).rstrip('/')}{path}"
 
 
 @router.get("/", response_class=HTMLResponse, include_in_schema=False, name="public_home")
@@ -659,6 +639,63 @@ async def hilal_methodology(
         settings=settings,
         page="hilal_methodology",
     )
+
+
+@router.get("/market", response_class=HTMLResponse, include_in_schema=False, name="public_market")
+async def market(
+    request: Request,
+    methodology_id: str | None = Query(default=None, max_length=64),
+    exchange: str = Query(default=MARKET_EXCHANGES[0], pattern=MARKET_EXCHANGE_PATTERN),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+) -> Response:
+    """The screened market, for visitors without an account.
+
+    The dashboard's Halal Assets list, the same coins in the same order, cut after the
+    first :data:`PUBLIC_MARKET_VISIBLE_COUNT`. Somebody who is already signed in has
+    nothing to unlock, so they are sent to the full list instead of being shown a page
+    that asks them to sign up.
+    """
+
+    if "market" in settings.stage_exposure.hidden_pages:
+        return RedirectResponse(settings.stage_exposure.primary_cta_href, status_code=303)
+    user = await WebAuthService(session, settings).current_user(
+        request.cookies.get(SESSION_COOKIE_NAME)
+    )
+    requested: UUID | None
+    try:
+        requested = UUID(methodology_id) if methodology_id else None
+    except ValueError:
+        requested = None
+    if user is not None:
+        carried = {"exchange": exchange}
+        if requested is not None:
+            carried["methodology_id"] = str(requested)
+        return RedirectResponse(
+            app_link(settings, f"{MARKET_PATH}?{urlencode(carried)}"), status_code=303
+        )
+
+    service = PublicMarketService(session, settings, provider)
+    methodologies = await service.methodologies()
+    chosen = await service.choose(methodologies, requested)
+    metadata = PUBLIC_PAGE_BY_PAGE["market"]
+    context = _public_context(
+        request,
+        settings,
+        page=metadata.page,
+        title=metadata.title,
+        description=metadata.description,
+        path=metadata.path,
+        methodologies=methodologies,
+        selected_methodology_id=chosen.id if chosen else None,
+        selected_exchange=exchange,
+        selected_quote_asset=PUBLIC_MARKET_QUOTE,
+        market_visible_limit=PUBLIC_MARKET_VISIBLE_COUNT,
+        market_account_links=market_account_links(settings),
+        market_passport_path=MARKET_PATH,
+    )
+    return templates.TemplateResponse(request=request, name=metadata.template, context=context)
 
 
 @router.get(

@@ -27,6 +27,7 @@ from ai_market_monitor.api.routers import (
     onboarding_router,
     public_chat_router,
     public_forms_router,
+    public_market_router,
     public_router,
     sharia_router,
     site_analytics_router,
@@ -206,6 +207,7 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     application.include_router(public_router)
     application.include_router(public_chat_router, prefix="/api/v1")
     application.include_router(public_forms_router, prefix="/api/v1")
+    application.include_router(public_market_router, prefix="/api/v1")
     application.include_router(site_analytics_router, prefix="/api/v1")
     application.include_router(dashboard_router)
     application.include_router(dashboard_test_router)

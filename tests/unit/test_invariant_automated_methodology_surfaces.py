@@ -34,7 +34,9 @@ NOTICE = "hilal/partials/automated_methodology_notice.html"
 #: Passport and its popup are where one coin's answer is *read*; the two research pages
 #: exist only for this standard's output.
 SURFACES = [
-    ("hilal/dashboard_test/market.html", "the list of screened coins"),
+    # The market list is one partial, drawn by the dashboard's Halal Assets and by the
+    # public Market page; the partial carries the notice for both.
+    ("hilal/partials/market_list.html", "the list of screened coins"),
     ("hilal/dashboard_test/monitor.html", "where a monitor is built"),
     ("hilal/dashboard_test/passport.html", "one coin's full record"),
     ("hilal/dashboard_test/partials/passport_quick_view.html", "the Passport popup"),
@@ -173,3 +175,14 @@ def test_an_admission_record_never_names_an_exchange():
         blob = repr(row).lower()
         assert "binance" not in blob
         assert "bybit" not in blob
+
+
+@pytest.mark.parametrize(
+    "template",
+    ["hilal/dashboard_test/market.html", "hilal/public/market.html"],
+)
+def test_both_market_pages_draw_the_list_that_carries_the_warning(template):
+    """The member page and the public page both draw the shared list, notice and all."""
+
+    text = (TEMPLATES / template).read_text(encoding="utf-8")
+    assert 'include "hilal/partials/market_list.html"' in text

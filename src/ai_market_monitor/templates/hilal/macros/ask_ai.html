@@ -5,7 +5,8 @@
 
     The macro must be imported `with context` because it reaches for `hilal_chat` and
     `settings` to decide whether the assistant is on. When the gate is off, nothing is
-    rendered — there is no disabled button and no dead control.
+    rendered — there is no disabled button and no dead control. On a public page, where
+    Hilal never runs, it opens the public assistant when that one is on.
 
     The visible label is always "Ask AI". The accessible name is passed by the caller
     and must start with those words (WCAG 2.5.3). The button is not a toggle: it opens
@@ -15,6 +16,13 @@
 {%- macro ask_ai(name, topic=none, compact=false) -%}
   {%- if hilal_chat_gate(hilal_chat|default(false), settings) -%}
     <button type="button" class="t-action t-action-is-ask{% if compact %} is-compact{% endif %}" aria-haspopup="dialog" aria-controls="hilal-window" data-hilal-ask{% if topic %} data-hilal-topic="{{ topic }}"{% endif %} aria-label="{{ name }}">
+      <span data-icon="spark" data-icon-class="icon-sm"></span>
+      Ask AI
+    </button>
+  {%- elif public_chat_enabled|default(false) -%}
+    {#- A public page has no Hilal. The same button opens the public assistant, which
+        is the one a visitor without an account can use. -#}
+    <button type="button" class="t-action t-action-is-ask{% if compact %} is-compact{% endif %}" aria-haspopup="dialog" aria-controls="public-product-chat" data-public-chat-open aria-label="{{ name }}">
       <span data-icon="spark" data-icon-class="icon-sm"></span>
       Ask AI
     </button>

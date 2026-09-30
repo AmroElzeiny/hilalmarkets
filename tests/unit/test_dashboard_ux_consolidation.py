@@ -66,9 +66,13 @@ def test_one_market_page_owns_the_list_of_coins_a_person_keeps():
     """
 
     market = _read("templates/hilal/dashboard_test/market.html")
+    # The list itself is one partial, shared with the public Market page, so the page
+    # a member opens and the page a visitor opens cannot drift apart.
+    shared_list = _read("templates/hilal/partials/market_list.html")
+    assert 'include "hilal/partials/market_list.html"' in market
 
     # Favorites lives in one included partial, so the dialog exists once per document.
-    assert "data-open-favorites" in market
+    assert "data-open-favorites" in shared_list
     assert 'include "hilal/dashboard_test/partials/favorites_dialog.html"' in market
     assert not (ROOT / "templates/hilal/dashboard/market.html").exists()
     assert not (ROOT / "templates/hilal/dashboard/partials/live_market.html").exists()

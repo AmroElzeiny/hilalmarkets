@@ -133,6 +133,7 @@ async def hilal_message(
         "mode": turn.reply.mode,
         "language": turn.reply.language,
         "suggestions": turn.reply.suggestions,
+        "sources": list(turn.sources),
         "status": turn.status,
     }
 

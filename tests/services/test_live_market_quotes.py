@@ -159,3 +159,40 @@ async def test_screened_snapshot_omits_assets_absent_from_selected_exchange():
     assert result.methodology.id == aggregate_id
     assert result.items == []
     assert result.total == 0
+
+
+async def test_every_standard_reads_the_same_exchange_prices_once():
+    """The exchange's prices do not depend on the standard, so they are fetched once.
+
+    The cache used to be keyed by standard as well, so reading the same exchange under
+    four standards — the public Market page's assistant does exactly that — made four
+    identical ticker downloads. Asserted across several standards and both exchanges.
+    """
+
+    LiveMarketQuoteService.clear_cache()
+    provider = QuoteProvider()
+    service = LiveMarketQuoteService(provider, _settings())
+    now = datetime.now(UTC)
+    for exchange in ("binance", "bybit"):
+        for _ in range(4):
+            await service.screened_snapshot(
+                exchange=exchange,
+                quote_asset="USDT",
+                methodology=MethodologySummary(
+                    id=uuid4(),
+                    code="SOME_STANDARD",
+                    name="Some standard",
+                    version="1",
+                    description="One of several standards.",
+                    status=ShariaMethodologyStatus.ACTIVE,
+                    governing_body=None,
+                    reviewer_group=None,
+                    published_at=now,
+                    effective_from=now,
+                    effective_to=None,
+                ),
+                assessments=[],
+            )
+
+    assert provider.symbol_calls == 2
+    assert provider.metadata_calls == 2

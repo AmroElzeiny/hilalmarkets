@@ -1,0 +1,85 @@
+"""The price feed behind the public Market page.
+
+Anonymous on purpose, and narrow on purpose. It answers with the first
+:data:`PUBLIC_MARKET_VISIBLE_COUNT` screened coins and only a *count* of the rest, so a
+visitor who opens the network tab learns nothing the page does not already show. The
+full list stays behind ``/api/v1/sharia/market-quotes``, which needs an account.
+
+Every reply is served from a short in-process cache in :class:`PublicMarketService`, so
+however many visitors keep the page open, the database and the exchange are asked at
+most once per refresh interval for each view.
+"""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ai_market_monitor.api.dependencies import get_market_data_provider
+from ai_market_monitor.api.route_security import public_api
+from ai_market_monitor.core.config import Settings, get_settings
+from ai_market_monitor.core.database import get_db_session
+from ai_market_monitor.schemas.sharia import PublicMarketResponse
+from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.public_market import (
+    MARKET_EXCHANGE_PATTERN,
+    MARKET_EXCHANGES,
+    PublicMarketService,
+    PublicMarketUnavailable,
+)
+from ai_market_monitor.services.sharia_screening import ShariaScreeningError
+
+#: The page key the launch stage hides before accounts can be opened. Read here so the
+#: feed is closed whenever the page is.
+PUBLIC_MARKET_PAGE = "market"
+
+router = APIRouter(prefix="/public-market", tags=["public-market"])
+
+
+@router.get("/quotes", response_model=PublicMarketResponse)
+@public_api(
+    "Publishes the first screened coins of the public Market page and only a count of "
+    "the rest; the full list needs an account."
+)
+async def public_market_quotes(
+    methodology_id: UUID | None = None,
+    exchange: str = Query(default=MARKET_EXCHANGES[0], pattern=MARKET_EXCHANGE_PATTERN),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+) -> PublicMarketResponse:
+    if PUBLIC_MARKET_PAGE in settings.stage_exposure.hidden_pages:
+        raise HTTPException(status_code=404, detail="Not found")
+    service = PublicMarketService(session, settings, provider)
+    methodologies = await service.methodologies()
+    if methodology_id is None:
+        chosen = await service.choose(methodologies, None)
+        if chosen is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "no_screening_standard",
+                    "message": "No Shariah standard is published yet, so no coin is listed.",
+                },
+            )
+        methodology_id = chosen.id
+    try:
+        return await service.view(methodology_id=methodology_id, exchange=exchange)
+    except (PublicMarketUnavailable, ShariaScreeningError) as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "standard_not_offered",
+                "message": "That Shariah standard is not offered on this page.",
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "live_market_unavailable",
+                "message": "Live spot quotes are unavailable; no prices were invented.",
+            },
+        ) from exc

@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
+from ai_market_monitor.schemas.source_preview import SourcePreview
+
 InquiryCategory = Literal[
     "product",
     "screening",
@@ -110,6 +112,18 @@ class PublicChatRelatedLink(BaseModel):
     path: str
 
 
+class PublicChatAccountPrompt(BaseModel):
+    """The two buttons shown when an answer needs the visitor to sign up or sign in.
+
+    Built by the server, with ``next`` already on both addresses, so the visitor lands
+    on the full Market list once they are in. Never written by a model.
+    """
+
+    signup_href: str
+    signin_href: str
+    signup_label: str
+
+
 class PublicChatAnswerResponse(BaseModel):
     status: PublicChatAnswerStatus
     message: str
@@ -130,6 +144,11 @@ class PublicChatAnswerResponse(BaseModel):
     support_handoff_reason: str | None = None
     support_handoff_explicitly_requested: bool = False
     answer_event_id: UUID | None = None
+    #: The pages this answer was built from, as preview cards. Only real sources: the
+    #: product documents the answer cited and the records a read tool returned.
+    sources: list[SourcePreview] = Field(default_factory=list)
+    #: Set when the answer asks the visitor to open an account before it can continue.
+    account_prompt: PublicChatAccountPrompt | None = None
 
 
 class PublicSupportAIResponse(StrictPublicChatModel):

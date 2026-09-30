@@ -13,6 +13,7 @@ from ai_market_monitor.api.routers.onboarding import router as onboarding_router
 from ai_market_monitor.api.routers.public import router as public_router
 from ai_market_monitor.api.routers.public_chat import router as public_chat_router
 from ai_market_monitor.api.routers.public_forms import router as public_forms_router
+from ai_market_monitor.api.routers.public_market import router as public_market_router
 from ai_market_monitor.api.routers.sharia import router as sharia_router
 from ai_market_monitor.api.routers.site_analytics import router as site_analytics_router
 from ai_market_monitor.api.routers.status import router as status_router
@@ -36,6 +37,7 @@ __all__ = [
     "public_router",
     "public_chat_router",
     "public_forms_router",
+    "public_market_router",
     "sharia_router",
     "site_analytics_router",
     "status_router",

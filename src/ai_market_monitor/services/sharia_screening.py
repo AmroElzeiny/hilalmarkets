@@ -129,6 +129,23 @@ def methodology_is_development_only(methodology: ShariaMethodology) -> bool:
     return methodology.code.startswith(DEVELOPMENT_METHODOLOGY_PREFIX)
 
 
+def market_default_methodology(
+    methodologies: list[ShariaMethodology],
+) -> ShariaMethodology | None:
+    """The standard the market list opens on when nobody has picked one.
+
+    "All approved standards" when it exists. One owner, because two pages open the same
+    list — the dashboard's Halal Assets and the public Market page — and a visitor who
+    signs up must land on the list they were just reading, not on a different standard
+    chosen by a second copy of this rule.
+    """
+
+    return next(
+        (item for item in methodologies if item.code == AGGREGATE_METHODOLOGY_CODE),
+        None,
+    )
+
+
 def sharia_evidence_from_proof(proof: object) -> dict[str, object]:
     """Read immutable screening evidence from current and legacy proof layouts."""
     if not isinstance(proof, dict):

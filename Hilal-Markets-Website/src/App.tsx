@@ -446,6 +446,16 @@ export default function App() {
   if (path === '/features') return <FeaturesPage />
   if (path === '/how-it-works') return <HowItWorksPage />
   if (path === '/hilal-methodology') return <MethodologyPage />
+  // The Market page's list is drawn by the server, between this header and the footer
+  // `main.tsx` puts into `#hm-site-footer`. Only the chrome is React here.
+  if (path === '/market') {
+    return (
+      <>
+        <SiteNav />
+        <BackToTop />
+      </>
+    )
+  }
   return (
     <div className="hm-page min-h-screen bg-canvas text-ink">
       <SiteNav />

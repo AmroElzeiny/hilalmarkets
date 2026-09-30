@@ -60,6 +60,8 @@ from ai_market_monitor.services.hilal_chat_agent import (
     refusal_for,
 )
 from ai_market_monitor.services.hilal_chat_knowledge import HilalChatKnowledge
+from ai_market_monitor.services.hilal_methodology import is_automated
+from ai_market_monitor.services.source_previews import source_previews
 
 logger = structlog.get_logger(__name__)
 
@@ -84,6 +86,50 @@ class Turn:
     message_id: str
     reply: HilalChatReply
     status: dict[str, Any]
+    #: The preview cards under the answer: the pages it was built from.
+    sources: tuple[dict[str, Any], ...] = ()
+
+
+def hilal_source_cards(
+    grounded_in: list[str],
+    *,
+    known: set[str],
+    settings: Settings,
+) -> list[dict[str, Any]]:
+    """Cards for the pages behind the evidence rows an answer says it rests on.
+
+    Only rows that were really handed to the model this turn count — ``known`` is the
+    evidence's own id set — so an id the model made up leads nowhere. Each kind of row
+    leads to the page where a person can read the same record:
+
+    * a coin or one of its Passports — that coin's Passport;
+    * our own published standard — its public methodology page (other standards have no
+      page of their own, so they have no card);
+    * a plan or the person's own plan — Plan and billing;
+    * the person's monitors — Monitors;
+    * counts of the market, its exchanges or categories — Halal Assets.
+
+    The meaning of a product word is Hilal's own glossary, not a page, so it has no card.
+    """
+
+    wanted: list[tuple[str, str | None]] = []
+    for row in grounded_in:
+        if row not in known:
+            continue
+        kind, _, rest = row.partition(":")
+        if kind == "asset" and rest:
+            wanted.append(("passport", rest))
+        elif kind == "passport" and rest:
+            wanted.append(("passport", rest.partition(":")[0]))
+        elif kind == "methodology" and is_automated(rest):
+            wanted.append(("hilal_methodology", None))
+        elif kind == "plan" or row == "account:plan":
+            wanted.append(("subscription", None))
+        elif row == "account:monitors":
+            wanted.append(("monitors", None))
+        elif kind == "market":
+            wanted.append(("halal_assets", None))
+    return [card.model_dump() for card in source_previews(wanted, settings)]
 
 
 def daily_allowance(settings: Settings, *, paying: bool) -> Decimal:
@@ -231,6 +277,7 @@ class HilalChatService:
                 "text": row.content,
                 "mode": row.mode,
                 "suggestions": list(row.suggestions or []),
+                "sources": list(row.sources or []),
                 "at": row.created_at.isoformat(),
             }
             for row in reversed(rows)
@@ -350,6 +397,12 @@ class HilalChatService:
                 "Hilal could not answer that one just now. Please try again in a moment.",
             ) from failure
 
+        # What the answer rests on, as cards. Worked out before anything is written, so
+        # the transcript stores exactly what the person is shown.
+        sources = hilal_source_cards(
+            call.reply.grounded_in, known=evidence.ids, settings=self.settings
+        )
+
         # 4. What it really cost.
         await guard.settle_turn(
             spend,
@@ -372,6 +425,7 @@ class HilalChatService:
             output_tokens=call.output_tokens,
             cost=Decimal(str(call.estimated_cost_usd)),
             latency_ms=call.latency_ms,
+            sources=sources,
         )
         logger.info(
             "hilal_chat_answered",
@@ -384,6 +438,7 @@ class HilalChatService:
             message_id=str(stored.id),
             reply=call.reply,
             status=await self.status_for(user.id),
+            sources=tuple(sources),
         )
 
     async def _already_asked(
@@ -441,6 +496,7 @@ class HilalChatService:
                 suggestions=list(answer.suggestions or []),
             ),
             status=await self.status_for(conversation.user_id),
+            sources=tuple(answer.sources or []),
         )
 
     async def _recent(self, conversation: HilalChatConversation) -> list[dict[str, str]]:
@@ -477,6 +533,7 @@ class HilalChatService:
         output_tokens: int = 0,
         cost: Decimal = Decimal("0"),
         latency_ms: int = 0,
+        sources: list[dict[str, Any]] | None = None,
     ) -> HilalChatMessage:
         now = datetime.now(UTC)
         sequence = conversation.next_sequence
@@ -498,6 +555,7 @@ class HilalChatService:
             estimated_cost_usd=cost,
             latency_ms=latency_ms,
             suggestions=list(suggestions or []),
+            sources=list(sources or []),
             created_at=now,
             retain_until=now + timedelta(days=self.settings.hilal_chat_retention_days),
         )

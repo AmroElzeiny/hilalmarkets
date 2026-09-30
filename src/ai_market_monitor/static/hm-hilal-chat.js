@@ -636,6 +636,7 @@ class HilalChat {
         text: payload.reply,
         mode: payload.mode,
         id: payload.message_id,
+        sources: payload.sources || [],
       });
       this.offer(payload.suggestions || []);
       this.applyStatus(payload.status);
@@ -701,6 +702,13 @@ class HilalChat {
       note.innerHTML = icon(mark.icon, "icon-sm");
       note.append(document.createTextNode(mark.text));
       bubble.append(note);
+    }
+    /* The pages the answer was built from, as cards that open in a new tab. Drawn by
+       `hm-source-cards.js`, the renderer the public assistant uses too, from cards the
+       server built and stored with the answer — so a reload shows the same ones. */
+    if (message.role !== "user") {
+      const sources = window.HilalSourceCards?.render(message.sources);
+      if (sources) bubble.append(sources);
     }
     row.append(bubble);
 

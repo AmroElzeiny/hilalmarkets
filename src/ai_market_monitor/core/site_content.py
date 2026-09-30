@@ -125,6 +125,10 @@ def social_image_url(base_url: str, configured: str | None = None) -> str:
 PUBLIC_NAVIGATION = (
     NavigationItem("Features", "public_features", "features"),
     NavigationItem("How It Works", "public_how_it_works", "how_it_works"),
+    # The screened coins, open to everybody. The first twenty are shown in full and the
+    # rest ask for a free account — see `services/public_market.py`. Hidden with Pricing
+    # before launch, because an invitation to sign up is all the page ends with.
+    NavigationItem("Markets", "public_market", "market"),
     NavigationItem("Pricing", "public_pricing", "pricing"),
     NavigationItem("Help Center", "public_help", "help"),
 )
@@ -149,6 +153,9 @@ FOOTER_NAVIGATION = (
         (
             NavigationItem("Features", "public_features", "features"),
             NavigationItem("How it works", "public_how_it_works", "how_it_works"),
+            # The public Market page, not the dashboard's Halal Assets: it opens without
+            # an account, which is the only kind of page this footer may lead to.
+            NavigationItem("Markets", "public_market", "market"),
             # The published screening standard. In the footer because it has to be
             # reachable *before* somebody meets a result from it — the warnings inside
             # the product link here, but a person deciding whether to trust this product
@@ -533,6 +540,19 @@ PUBLIC_PAGES = (
             "evidence, what it skips, and which coins it has judged."
         ),
         "hilal/public/hilal_methodology.html",
+    ),
+    PublicPageMetadata(
+        # The dashboard's Halal Assets list, opened to visitors without an account. It
+        # shows the first twenty coins in full and asks for a free account for the rest.
+        "market",
+        "public_market",
+        "/market",
+        "Market",
+        (
+            "See Shariah-screened crypto coins with live spot prices, the review status "
+            "of each one, and the standard that screened it."
+        ),
+        "hilal/public/market.html",
     ),
     PublicPageMetadata(
         "pricing",

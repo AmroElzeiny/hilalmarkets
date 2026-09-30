@@ -211,11 +211,11 @@ from ai_market_monitor.services.product_language import (
 )
 from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_screening import (
-    AGGREGATE_METHODOLOGY_CODE,
     DEFAULT_ALLOWED_STATUSES,
     ShariaScreeningError,
     ShariaScreeningService,
     canonical_asset,
+    market_default_methodology,
     methodology_is_development_only,
     sharia_evidence_from_proof,
 )
@@ -2233,14 +2233,7 @@ async def screened_market_context(
     # user preference remains useful after a user deliberately picks another
     # methodology, but it must not silently replace the product default.
     if methodology_id is None and not (methodology_id_input or "").strip():
-        aggregate = next(
-            (
-                item
-                for item in methodologies
-                if item.code == AGGREGATE_METHODOLOGY_CODE
-            ),
-            None,
-        )
+        aggregate = market_default_methodology(methodologies)
         methodology_id = aggregate.id if aggregate is not None else None
     if methodology_id is None and preference_methodology:
         try:

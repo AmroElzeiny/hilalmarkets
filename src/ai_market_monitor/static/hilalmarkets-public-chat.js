@@ -256,9 +256,11 @@
       // Pre-launch there is no published price, so naming pricing as a topic invites a
       // question the assistant is not allowed to answer. The server stamps the state on
       // the panel; the greeting follows it rather than keeping its own idea of it.
+      // The launched greeting used to offer "private-beta access" too: the words from
+      // before launch had been copied into the branch shown after it.
       const topics = waitlistMode
         ? "screening evidence, private-beta access, the waitlist, and product boundaries"
-        : "screening evidence, private-beta access, pricing, and product boundaries";
+        : "screening evidence, the coins on the Market page, opening an account, pricing, and product boundaries";
       appendMessage("assistant", `Hi ${firstName(state.profile?.name)}. I can explain Hilal Markets, ${topics}. What would you like to know?`);
     }
     window.setTimeout(() => view.input?.focus(), 30);
@@ -340,6 +342,12 @@
     if (role === "assistant") appendSafeBoldText(bubble, text);
     else bubble.textContent = text;
     wrapper.append(bubble);
+    /* The pages this answer was built from, and the sign-up buttons when it asks for an
+       account. Both are drawn by `hm-source-cards.js`, the renderer every chat shares. */
+    const sources = window.HilalSourceCards?.render(options.sources);
+    if (sources) wrapper.append(sources);
+    const prompt = window.HilalSourceCards?.accountPrompt(options.accountPrompt);
+    if (prompt) wrapper.append(prompt);
     if (options.clarification) {
       const clarification = document.createElement("p");
       clarification.className = "public-chat-clarification";
@@ -432,6 +440,8 @@
       appendMessage("assistant", result.message, {
         clarification: result.clarification_question,
         followUps: result.suggested_follow_ups,
+        sources: result.sources,
+        accountPrompt: result.account_prompt,
       });
       showAnswerFeedback(result.answer_event_id);
       if (result.support_handoff_explicitly_requested) {
@@ -617,6 +627,14 @@
   }
 
   launcher.addEventListener("click", openChat);
+  /* Any "Ask AI" button on a public page opens this assistant — the Market page's
+     button is drawn by the shared `ask_ai` macro with this marker. */
+  document.addEventListener("click", (event) => {
+    const opener = event.target.closest?.("[data-public-chat-open]");
+    if (!opener) return;
+    event.preventDefault();
+    openChat();
+  });
   view.close.addEventListener("click", closeChat);
   view.newConversation.addEventListener("click", resetConversation);
   backdrop.addEventListener("click", closeChat);

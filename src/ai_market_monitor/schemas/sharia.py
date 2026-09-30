@@ -418,6 +418,24 @@ class LiveSpotMarketResponse(BaseModel):
     warning: str | None = None
 
 
+class PublicMarketResponse(LiveSpotMarketResponse):
+    """The Market page a signed-out visitor sees: the first coins, and a count of the rest.
+
+    ``items`` holds only the coins a visitor may see. The rest are never sent — not
+    blurred on the page, not hidden with a style, simply absent — so reading the network
+    tab reveals no more than the page does. What *is* sent about them is how many there
+    are, and how many hold each status, because those are the numbers the page's four
+    counters show and they name no coin.
+    """
+
+    #: How many coins a visitor may see. The page says this number out loud.
+    visible_limit: int
+    #: How many screened coins are not shown. The locked rows count up to this.
+    hidden_count: int
+    #: Every screened coin under this standard, counted by its recorded status.
+    status_counts: dict[str, int]
+
+
 class ShariaUniverseExclusion(BaseModel):
     symbol: str
     canonical_asset: str

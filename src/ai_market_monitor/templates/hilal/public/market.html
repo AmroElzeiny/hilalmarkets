@@ -1,0 +1,30 @@
+{% extends "hilal/public/react_site.html" %}
+{#- The public Market page: the dashboard's Halal Assets list, inside the landing page's
+    own header and footer.
+
+    The header and footer are the landing page's React ones — the site's visual source of
+    truth — drawn into `#root` and `#hm-site-footer` by the landing bundle. They are not
+    the dashboard's side menu and top bar: a visitor without an account has nowhere in the
+    product to go from here except "sign up".
+
+    The list between them is the dashboard's own, drawn from the same partial, so it looks
+    and behaves the same. `hilal-dashboard` on the body is what switches the list's styles
+    on; every one of them is scoped under it, so none reaches the header or footer. -#}
+{% block body_class %} hilal-dashboard hm-public-market{% endblock %}
+{% block page_styles %}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20260930-public-market">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20260930-public-market">
+{% endblock %}
+{% block body %}
+  <a class="figma-bypass-link" href="#top">Skip to content</a>
+  <div id="root"></div>
+  <main id="top" class="hm-public-market-body" tabindex="-1">
+    {% set market_audience = 'public' %}
+    {% include "hilal/partials/market_list.html" %}
+  </main>
+  <div id="hm-site-footer"></div>
+{% endblock %}
+{% block page_scripts %}
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20260930-public-market"></script>
+  <script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20260930-public-market"></script>
+{% endblock %}
