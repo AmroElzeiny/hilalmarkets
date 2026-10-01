@@ -29,7 +29,7 @@ import { useMemo, useRef, useState } from 'react'
 import { Icon, IconBadge, type IconName } from '../components/Icon'
 import { useTilt } from '../components/interactions'
 import { Reveal } from '../components/Reveal'
-import { BackToTop, dashboardEntryHref, SiteFooter, SiteNav } from '../components/SiteChrome'
+import { BackToTop, dashboardEntryHref, homeHref, SiteFooter, SiteNav } from '../components/SiteChrome'
 import { TrackedCta } from '../components/Tracking'
 import { DURATION, moveEach } from '../motion'
 
@@ -429,7 +429,7 @@ export default function FeaturesPage() {
                     <Icon name="arrow" className="size-4" />
                   </TrackedCta>
                   <TrackedCta
-                    href="/#pricing"
+                    href={homeHref('#pricing')}
                     analyticsName="pricing"
                     analyticsLocation="features_closer"
                     className="hm-btn hm-btn--quiet"

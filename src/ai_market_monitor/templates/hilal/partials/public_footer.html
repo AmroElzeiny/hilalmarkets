@@ -19,7 +19,7 @@
             marks in the same place on the same site, and only one of them was the
             logo. It is the wordmark file now, 31px tall, which is the height the header
             already uses. `.hm-jinja-footer` turns it white for the dark ground. -#}
-        <a class="logo hm-footer-logo" href="{{ url_for('public_home') }}" aria-label="Hilal Markets home">
+        <a class="logo hm-footer-logo" href="{{ site_link(settings, '/') }}" aria-label="Hilal Markets home">
           <img src="{{ url_for('static', path='/hilal-markets-logo.svg') }}" alt="Hilal Markets">
         </a>
         <p>A platform for Muslim traders to build strategies and monitor setups in line with Islamic principles. Not a broker. No trade execution.</p>

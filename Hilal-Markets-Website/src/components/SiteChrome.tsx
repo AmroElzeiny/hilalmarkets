@@ -45,6 +45,17 @@ export function signInHref(): string {
 }
 
 /**
+ * The home page, or an anchor on it (`homeHref('#pricing')`).
+ *
+ * These pages are also served on the product's own hostname, where `/` is the
+ * dashboard: a plain `/` there sent a visitor who is not signed in to sign-in. The
+ * server hands over the marketing site's address instead.
+ */
+export function homeHref(anchor = ''): string {
+  return `${window.HilalMarketsRuntimeConfig?.chrome?.homeHref || '/'}${anchor}`
+}
+
+/**
  * The header's "Markets" link, or `null` when the page is not open yet.
  *
  * The server says, because the launch stage decides: before accounts can be opened the
@@ -173,8 +184,8 @@ export function SiteNav() {
     { label: 'How it works', href: '/how-it-works' },
     { label: 'Features', href: '/features' },
     ...(markets ? [{ label: 'Markets', href: markets }] : []),
-    { label: 'Pricing', href: path === '/' ? '#pricing' : '/#pricing' },
-    { label: 'FAQ', href: path === '/' ? '#faq' : '/#faq' },
+    { label: 'Pricing', href: path === '/' ? '#pricing' : homeHref('#pricing') },
+    { label: 'FAQ', href: path === '/' ? '#faq' : homeHref('#faq') },
   ]
   const current = (href: string) => href === path
 
@@ -182,7 +193,7 @@ export function SiteNav() {
     <header className={`hm-header ${scrolled ? 'is-scrolled' : ''}`} data-menu-open={menuOpen}>
       <div className="hm-header-bar">
         <TrackedCta
-          href="/"
+          href={homeHref()}
           analyticsName="home_logo"
           analyticsLocation="header"
           aria-label="Hilal Markets home"
@@ -364,7 +375,7 @@ export function SiteFooter() {
         <div className="hm-footer-inner">
           <div className="hm-footer-top">
             <div className="hm-footer-brand">
-              <a href="/" aria-label="Hilal Markets home" className="hm-footer-logo">
+              <a href={homeHref()} aria-label="Hilal Markets home" className="hm-footer-logo">
                 <FigmaLogo />
               </a>
               <p>

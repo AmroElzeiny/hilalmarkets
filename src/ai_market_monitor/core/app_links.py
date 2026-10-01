@@ -50,3 +50,21 @@ def app_link(settings: Settings, path: str) -> str:
     if host is None:
         return path
     return f"{str(settings.app_base_url).rstrip('/')}{path}"
+
+
+def site_link(settings: Settings, path: str) -> str:
+    """A link to the marketing site, on the marketing hostname when the product has its own.
+
+    The mirror of `app_link`. The sign-in page, and every public page a signed-in person
+    opens from the dashboard, is served on `app.hilalmarkets.com` — and there `/` is the
+    dashboard, which sends a visitor who is not signed in straight back to sign-in. So
+    "Back to the website", the logo, and every `/#pricing`-style anchor written as a plain
+    path reloaded the sign-in page instead of leaving it.
+
+    Every link to the home page, or to an anchor on it, is built here. When the two names
+    are the same this returns the plain path, so a local run writes no absolute URL.
+    """
+
+    if app_host(settings) is None:
+        return path
+    return f"{str(settings.public_base_url).rstrip('/')}{path}"

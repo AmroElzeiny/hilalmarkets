@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.api.dependencies import get_market_previewer
 from ai_market_monitor.api.template_env import register as register_template_helpers
 from ai_market_monitor.cockpit_service import StrategyCockpitService
+from ai_market_monitor.core.app_links import site_link
 from ai_market_monitor.core.auth_pages import (
     CODE_RESEND_SECONDS,
     PRODUCT_PROMISES,
@@ -1279,7 +1280,7 @@ async def subscribe(
         # The landing page has no pricing section while the site is pre-launch, so a
         # bad plan link would otherwise send the visitor to an anchor that is not there.
         return _redirect(
-            WAITLIST_ANCHOR if settings.waitlist_mode else "/#pricing"
+            site_link(settings, WAITLIST_ANCHOR if settings.waitlist_mode else "/#pricing")
         )
     user = await _current_user(request, session, settings)
     if user is None:

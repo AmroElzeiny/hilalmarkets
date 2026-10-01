@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.api.template_env import register as register_template_helpers
-from ai_market_monitor.core.app_links import app_host, app_link
+from ai_market_monitor.core.app_links import app_host, app_link, site_link
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.dashboard_paths import HOME_PATH, MARKET_PATH
 from ai_market_monitor.core.database import get_db_session
@@ -356,6 +356,9 @@ def _public_context(
             # and served them the whole dashboard from there.
             "dashboardEntryHref": app_link(settings, "/dashboard-entry"),
             "signInHref": app_link(settings, "/signin"),
+            # The home page, absolute when the product has its own hostname: the React
+            # logo and its `#pricing` / `#faq` links are built from it.
+            "homeHref": site_link(settings, "/"),
             "cookieSettingsHref": COOKIE_SETTINGS_PATH,
             "primaryCtaLabel": settings.stage_exposure.primary_cta_label,
             # The React header's "Markets" link, or null while the stage hides the page.
@@ -372,7 +375,7 @@ def _public_context(
         # The wording comes from one place so the header, the closing section on every
         # page and the assistant cannot describe the same state in three different ways.
         "waitlist_mode": waitlist_mode,
-        "waitlist_url": WAITLIST_ANCHOR,
+        "waitlist_url": site_link(settings, WAITLIST_ANCHOR),
         "waitlist_eyebrow": WAITLIST_EYEBROW,
         "waitlist_headline": WAITLIST_HEADLINE,
         "waitlist_body": WAITLIST_BODY,
@@ -677,7 +680,9 @@ async def market(
     """
 
     if "market" in settings.stage_exposure.hidden_pages:
-        return RedirectResponse(settings.stage_exposure.primary_cta_href, status_code=303)
+        return RedirectResponse(
+            site_link(settings, settings.stage_exposure.primary_cta_href), status_code=303
+        )
     user = await WebAuthService(session, settings).current_user(
         request.cookies.get(SESSION_COOKIE_NAME)
     )
@@ -735,7 +740,7 @@ async def pricing(
         # The plans and the comparison table are hidden together with every other way
         # to buy. An old link, a bookmark or a search result lands on the waitlist
         # instead of on prices nobody can pay yet.
-        return RedirectResponse(WAITLIST_ANCHOR, status_code=303)
+        return RedirectResponse(site_link(settings, WAITLIST_ANCHOR), status_code=303)
     return await _render_public_page(
         request=request,
         session=session,

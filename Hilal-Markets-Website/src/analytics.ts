@@ -109,6 +109,8 @@ export type ChromeRuntimeConfig = {
   dashboardEntryHref?: string
   /** Sign-in, on the product's own hostname when it has one. */
   signInHref?: string
+  /** The home page, on the marketing hostname when the product has its own. */
+  homeHref?: string
   /** Where the footer's "Cookie settings" link goes when no script catches the click. */
   cookieSettingsHref?: string
   primaryCtaLabel?: string
