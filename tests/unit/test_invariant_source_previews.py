@@ -106,8 +106,8 @@ def test_public_pages_stay_on_the_public_hostname():
     )
     card = source_preview("market", settings)
     assert card is not None
-    assert card.url == "/market"
-    assert card.address == "hilalmarkets.com/market"
+    assert card.url == "/markets"
+    assert card.address == "hilalmarkets.com/markets"
 
 
 def test_cards_are_capped_and_never_repeated():

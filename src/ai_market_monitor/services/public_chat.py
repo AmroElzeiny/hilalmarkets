@@ -90,7 +90,7 @@ PUBLIC_ROUTE_PATHS: dict[str, tuple[str, str]] = {
     # but it was withdrawn from every menu and page body, so the assistant must not be
     # the one surface that still sends visitors there. Screening questions go to the
     # Help Center. See UNLINKED_PAGES in core/site_content.py.
-    "market": ("Market", "/market"),
+    "market": ("Market", "/markets"),
     "pricing": ("Pricing", "/pricing"),
     "help": ("Help Center", "/help"),
     "contact": ("Contact", "/contact"),

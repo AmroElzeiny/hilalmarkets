@@ -209,6 +209,7 @@ from ai_market_monitor.services.product_language import (
     freshness_words,
     market_checking_notice,
 )
+from ai_market_monitor.services.screened_market import followed_coins
 from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_screening import (
     DEFAULT_ALLOWED_STATUSES,
@@ -2337,15 +2338,7 @@ async def screened_market_context(
         }
         for row, watchlist_name in saved_asset_rows
     ]
-    default_watchlist = next((item for item in watchlists if item.is_default), None)
-    favorite_assets = sorted(
-        {
-            item["canonical_asset"]
-            for item in saved_assets
-            if default_watchlist is not None
-            and item["watchlist_id"] == default_watchlist.id
-        }
-    )
+    favorite_watchlist_id, favorite_assets = await followed_coins(session, user.id)
     market_query: list[tuple[str, str]] = [("view", view), ("quote_asset", quote_asset)]
     if methodology_id:
         market_query.append(("methodology_id", str(methodology_id)))
@@ -2387,7 +2380,7 @@ async def screened_market_context(
         watchlists=watchlists,
         saved_assets=saved_assets,
         favorite_assets=favorite_assets,
-        favorite_watchlist_id=(default_watchlist.id if default_watchlist else None),
+        favorite_watchlist_id=favorite_watchlist_id,
         market_base_path=base_path,
         market_previous_url=(market_page_url(screened.page - 1) if screened.page > 1 else None),
         market_next_url=(

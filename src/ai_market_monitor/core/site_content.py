@@ -546,7 +546,7 @@ PUBLIC_PAGES = (
         # shows the first twenty coins in full and asks for a free account for the rest.
         "market",
         "public_market",
-        "/market",
+        "/markets",
         "Market",
         (
             "See Shariah-screened crypto coins with live spot prices, the review status "

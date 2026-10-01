@@ -15,5 +15,5 @@ class SourcePreview(BaseModel):
     url: str
     #: The screenshot, or ``None`` when it has not been taken yet.
     image_url: str | None = None
-    #: The address as a person reads it, such as ``hilalmarkets.com/market``.
+    #: The address as a person reads it, such as ``hilalmarkets.com/markets``.
     address: str

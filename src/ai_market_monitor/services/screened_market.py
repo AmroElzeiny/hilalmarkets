@@ -15,9 +15,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.db.models import ApprovedWatchlist, ApprovedWatchlistAsset
 from ai_market_monitor.schemas.sharia import LiveSpotMarketResponse
 from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.live_market_quotes import LiveMarketQuoteService
@@ -65,3 +67,29 @@ async def screened_market_snapshot(
         warning=screened.warning,
         market_numbers=market_numbers,
     )
+
+
+
+async def followed_coins(session: AsyncSession, user_id: UUID) -> tuple[UUID | None, list[str]]:
+    """The list one person follows coins with, and the coins in it, sorted.
+
+    "Follow" on both pages that list the market means "is in my default list" — the
+    first default list by name, should there ever be two. Read here, by both pages, so
+    the hearts on the public page and on the dashboard can never disagree about which
+    coins somebody follows. ``(None, [])`` when the person has no default list yet.
+    """
+
+    default = await session.scalar(
+        select(ApprovedWatchlist)
+        .where(ApprovedWatchlist.user_id == user_id, ApprovedWatchlist.is_default.is_(True))
+        .order_by(ApprovedWatchlist.name.asc())
+        .limit(1)
+    )
+    if default is None:
+        return None, []
+    rows = await session.scalars(
+        select(ApprovedWatchlistAsset.canonical_asset).where(
+            ApprovedWatchlistAsset.watchlist_id == default.id
+        )
+    )
+    return default.id, sorted(set(rows.all()))

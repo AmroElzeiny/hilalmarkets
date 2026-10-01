@@ -1,12 +1,17 @@
 """What a signed-out visitor may see of the screened market.
 
-The public Market page (``/market``) is the dashboard's Halal Assets list with one
+The public Market page (``/markets``) is the dashboard's Halal Assets list with one
 difference: a visitor sees the first :data:`PUBLIC_MARKET_VISIBLE_COUNT` coins, and the
 rest ask them to open a free account. This module is the one owner of that line.
 
+Somebody who is already signed in sees the same page with nothing behind the line: they
+already have the account the line asks for. ``unlocked`` is how the caller says so, and
+only the caller can, because only it has read the session.
+
 Three things read it, and all three must draw it in the same place:
 
-* the page's price feed, which sends only the visible coins;
+* the page's price feed, which sends only the visible coins (all of them to a reader
+  who is signed in);
 * the public assistant, which asks a visitor to sign up before it talks about a coin
   that is not on the page (:meth:`PublicMarketService.visible_symbols`);
 * the page itself, which says how many coins are behind the line.
@@ -94,6 +99,25 @@ class _CachedSymbols:
     expires_at: float
 
 
+def _cut(whole: PublicMarketResponse, *, unlocked: bool) -> PublicMarketResponse:
+    """The list as one reader may see it. The only place the line is drawn.
+
+    A copy every time: the cached list is shared by every reader, and a visitor's cut
+    must never be able to change what the next signed-in reader is sent.
+    """
+
+    if unlocked:
+        return whole.model_copy()
+    shown = whole.items[:PUBLIC_MARKET_VISIBLE_COUNT]
+    return whole.model_copy(
+        update={
+            "items": shown,
+            "visible_limit": PUBLIC_MARKET_VISIBLE_COUNT,
+            "hidden_count": whole.total - len(shown),
+        }
+    )
+
+
 class PublicMarketUnavailable(RuntimeError):
     """The standard asked for is not one the public page offers."""
 
@@ -160,8 +184,13 @@ class PublicMarketService:
         methodology_id: UUID,
         exchange: str,
         quote_asset: str = PUBLIC_MARKET_QUOTE,
+        unlocked: bool = False,
     ) -> PublicMarketResponse:
         """The visible coins for one standard on one exchange, and a count of the rest.
+
+        ``unlocked`` is for a signed-in reader: every coin, and nothing behind the line.
+        Both answers are cut from one cached list, so a visitor and a member can never be
+        shown two different orders of the same coins.
 
         Raises :class:`PublicMarketUnavailable` for a standard the page does not offer.
         A price failure is raised as it came, for the caller to report honestly.
@@ -173,8 +202,18 @@ class PublicMarketService:
         quote_key = quote_asset.strip().upper()
         key = (id(self.provider), methodology_id, exchange_key, quote_key)
         cached = self._views.get(key)
-        if cached is not None and cached.expires_at > monotonic():
-            return cached.value
+        if cached is None or cached.expires_at <= monotonic():
+            cached = await self._snapshot(key, methodology_id, exchange_key, quote_key)
+        return _cut(cached.value, unlocked=unlocked)
+
+    async def _snapshot(
+        self,
+        key: tuple[int, UUID, str, str],
+        methodology_id: UUID,
+        exchange_key: str,
+        quote_key: str,
+    ) -> _Cached:
+        """The whole screened list for one view, cached; :func:`_cut` draws the line."""
 
         offered = await self.methodologies()
         if not any(item.id == methodology_id for item in offered):
@@ -189,22 +228,22 @@ class PublicMarketService:
             quote_asset=quote_key,
         )
         everything = list(snapshot.items)
-        shown = everything[:PUBLIC_MARKET_VISIBLE_COUNT]
-        response = PublicMarketResponse(
+        whole = PublicMarketResponse(
             **snapshot.model_dump(exclude={"items", "total"}),
-            items=shown,
+            items=everything,
             total=len(everything),
-            visible_limit=PUBLIC_MARKET_VISIBLE_COUNT,
-            hidden_count=len(everything) - len(shown),
+            visible_limit=len(everything),
+            hidden_count=0,
             status_counts=dict(Counter(str(item.status) for item in everything)),
         )
         # Never trusted for longer than the price snapshot underneath it, so the public
         # page can never show a price older than the dashboard's.
-        self._views[key] = _Cached(
-            value=response,
+        cached = _Cached(
+            value=whole,
             expires_at=monotonic() + self.settings.sharia_live_quote_cache_seconds,
         )
-        return response
+        self._views[key] = cached
+        return cached
 
     async def visible_symbols(self) -> frozenset[str]:
         """Every coin a signed-out visitor can see on the Market page, in any view of it.

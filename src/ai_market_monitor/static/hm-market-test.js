@@ -69,7 +69,10 @@ function start(root) {
   /* A visitor without an account. Decided by the server, which is the only side that
      knows whether anybody is signed in. */
   const isPublic = root.dataset.audience === "public";
-  const accountGate = isPublic ? setUpAccountGate(root) : null;
+  /* The public page, read by somebody already signed in: every coin is sent, and what
+     needs an account opens in their dashboard instead of asking them to sign up. */
+  const isUnlocked = isPublic && root.dataset.unlocked === "true";
+  const accountGate = isPublic && !isUnlocked ? setUpAccountGate(root) : null;
 
   const find = (selector) => root.querySelector(selector);
   const cards = find("[data-cards]");
@@ -274,7 +277,7 @@ function start(root) {
        and it brings them back to this coin's Passport once they are in. The click is
        caught below and opens the prompt first; the address is what is left without
        scripting or in a new tab. */
-    full.setAttribute("href", isPublic ? accountGate.href("signup", passportHref(item)) : passportHref(item));
+    full.setAttribute("href", accountGate ? accountGate.href("signup", passportHref(item)) : passportHref(item));
 
     /* "The provider says its data is good" and "there is a price to show" are two
        different facts. Keying the honesty note off the first let a card display `--`
@@ -358,9 +361,13 @@ function start(root) {
     button.setAttribute("aria-pressed", String(active));
     button.setAttribute(
       "aria-label",
-      active
-        ? `Stop following ${asset}. You will no longer be told when its status changes.`
-        : `Follow ${asset} and be told when its Shariah status changes.`,
+      isUnlocked
+        ? active
+          ? `You follow ${asset}. Open its Passport in your dashboard to stop.`
+          : `Follow ${asset} from its Passport in your dashboard.`
+        : active
+          ? `Stop following ${asset}. You will no longer be told when its status changes.`
+          : `Follow ${asset} and be told when its Shariah status changes.`,
     );
     const label = button.querySelector("[data-favorite-label]");
     if (label) label.textContent = active ? `Following ${asset}` : `Follow ${asset}`;
@@ -540,7 +547,7 @@ function start(root) {
       tally.all = hiddenFor("all", 0);
       tally.clean = hiddenFor("clean", 0);
       tally.conditional = hiddenFor("conditional", 0);
-      tally.following = 0;
+      tally.following = isUnlocked ? favorites.size : 0;
     }
     Object.entries(tally).forEach(([key, value]) => {
       const node = root.querySelector(`[data-count="${key}"]`);
@@ -723,6 +730,17 @@ function start(root) {
 
   [cards, tableBody].forEach((scope) => {
     scope.addEventListener("click", (event) => {
+      if (isUnlocked) {
+        /* Following a coin and reading its evidence happen in the dashboard. The
+           coin's Passport is where both are, so the heart and "See the evidence" open
+           it; "Full Passport" is already a link to it. */
+        const control = event.target.closest("[data-favorite], [data-quick-view]");
+        const item = control && itemFor(control);
+        if (!item) return;
+        event.preventDefault();
+        window.location.assign(passportHref(item));
+        return;
+      }
       if (isPublic) {
         /* Everything on a coin that needs an account asks for one, and remembers what
            was asked for so signing up lands on it. */

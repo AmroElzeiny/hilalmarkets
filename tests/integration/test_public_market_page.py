@@ -7,6 +7,9 @@ What is asserted, as rules across the whole family:
 * the page keeps the dashboard's list and drops only what a visitor cannot use: no
   search, no sorting, no dashboard top bar; hearts, Favorites and Passports ask for an
   account and bring the visitor back to what they asked for;
+* a signed-in member who opens the page stays on it and sees every coin, with nothing
+  locked and no sign-up prompt — the "Markets" link must not drop them in the dashboard;
+* the page answers at ``/markets``; the first address, ``/market``, forwards there;
 * every public page carries "Markets" in its header and footer, and none does while the
   launch stage hides the page;
 * the assistant asks a visitor to sign in before it says anything about a coin the page
@@ -26,7 +29,7 @@ from sqlalchemy import select
 
 from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.core.site_content import PUBLIC_PAGES
-from ai_market_monitor.db.models import User
+from ai_market_monitor.db.models import ApprovedWatchlist, ApprovedWatchlistAsset, User
 from ai_market_monitor.db.models.enums import ShariaAssetStatus, ShariaMethodologyStatus
 from ai_market_monitor.schemas.public_chat import PublicChatAnswerRequest
 from ai_market_monitor.schemas.sharia import (
@@ -225,7 +228,7 @@ async def test_the_page_keeps_the_list_and_drops_what_a_visitor_cannot_use(test_
     methodology_id = await _screen_every_coin(test_context)
     test_context["app"].dependency_overrides[get_market_data_provider] = VolumeProvider
 
-    page = await test_context["client"].get("/market")
+    page = await test_context["client"].get("/markets")
     assert page.status_code == 200
     html = page.text
 
@@ -255,14 +258,126 @@ async def test_the_page_keeps_the_list_and_drops_what_a_visitor_cannot_use(test_
     assert "data-public-chat-open" in html
 
 
-async def test_a_signed_in_member_is_sent_to_the_full_list(test_context):
+async def test_a_signed_in_member_stays_on_the_public_page_with_nothing_locked(test_context):
     await _screen_every_coin(test_context)
     test_context["app"].dependency_overrides[get_market_data_provider] = VolumeProvider
-    await _signup(test_context, "member-redirect@example.com")
+    await _signup(test_context, "member-public-page@example.com")
 
-    response = await test_context["client"].get("/market?exchange=bybit", follow_redirects=False)
-    assert response.status_code == 303
-    assert response.headers["location"] == "/dashboard/market?exchange=bybit"
+    response = await test_context["client"].get(
+        "/markets?exchange=bybit", follow_redirects=False
+    )
+    assert response.status_code == 200
+    html = response.text
+    # The public page, in the public chrome — not the dashboard.
+    assert 'data-audience="public"' in html
+    assert 'data-unlocked="true"' in html
+    assert "<h1>Market</h1>" in html
+    assert 'id="hm-site-footer"' in html
+    assert "hm-top" not in html
+    assert "dashboard-sidebar" not in html
+    # Same public design: no search, headings that do not sort.
+    assert "data-search" not in html
+    headings = re.findall(r"<button[^>]*data-sort=\"[a-z0-9]+\"[^>]*>", html)
+    assert headings and all("disabled" in heading for heading in headings)
+    # Nothing is locked and nothing asks a member to open an account.
+    assert "data-locked" not in html
+    assert "data-account-gate" not in html
+    assert "data-account-dialog" not in html
+    assert "/signup?" not in html
+    # Favorites open in the dashboard, where following a coin happens.
+    assert 'href="/dashboard/market?saved_assets=1"' in html
+
+
+async def test_the_feed_sends_a_signed_in_member_every_coin(test_context):
+    methodology_id = await _screen_every_coin(test_context)
+    test_context["app"].dependency_overrides[get_market_data_provider] = VolumeProvider
+    client = test_context["client"]
+
+    visitor = await client.get(
+        "/api/v1/public-market/quotes", params={"methodology_id": methodology_id}
+    )
+    assert len(visitor.json()["items"]) == PUBLIC_MARKET_VISIBLE_COUNT
+
+    await _signup(test_context, "member-full-feed@example.com")
+    for exchange in MARKET_EXCHANGES:
+        member = await client.get(
+            "/api/v1/public-market/quotes",
+            params={"methodology_id": methodology_id, "exchange": exchange},
+        )
+        assert member.status_code == 200, member.text
+        payload = member.json()
+        full = await client.get(
+            "/api/v1/sharia/market-quotes",
+            params={"methodology_id": methodology_id, "exchange": exchange, "quote_asset": "USDT"},
+        )
+        # The whole list, in the dashboard's own order, and nothing behind the line.
+        assert [item["canonical_asset"] for item in payload["items"]] == [
+            item["canonical_asset"] for item in full.json()["items"]
+        ]
+        assert payload["total"] == len(COINS)
+        assert payload["hidden_count"] == 0
+        assert payload["visible_limit"] == len(COINS)
+        # One reader's answer must never be kept for the next one.
+        assert member.headers["cache-control"] == "private, no-store"
+        assert "Cookie" in member.headers["vary"].split(", ")
+
+    # The cached list is shared; a member's read must not unlock the next visitor's.
+    client.cookies.clear()
+    after = await client.get(
+        "/api/v1/public-market/quotes", params={"methodology_id": methodology_id}
+    )
+    assert len(after.json()["items"]) == PUBLIC_MARKET_VISIBLE_COUNT
+    assert after.json()["hidden_count"] == len(COINS) - PUBLIC_MARKET_VISIBLE_COUNT
+
+
+async def test_both_pages_mark_the_same_followed_coins(test_context):
+    """The public page and the dashboard read "which coins do I follow" from one place.
+
+    Two default lists — which the schema allows — is the case where two readers could
+    pick different ones; the first by name is the one both must show.
+    """
+
+    await _screen_every_coin(test_context)
+    test_context["app"].dependency_overrides[get_market_data_provider] = VolumeProvider
+    await _signup(test_context, "member-follows@example.com")
+    now = datetime.now(UTC)
+    async with test_context["session_factory"]() as session:
+        member = await session.scalar(select(User).where(User.display_name == "Market member"))
+        first = ApprovedWatchlist(user_id=member.id, name="A favorites", is_default=True)
+        second = ApprovedWatchlist(user_id=member.id, name="B favorites", is_default=True)
+        session.add_all([first, second])
+        await session.flush()
+        session.add_all(
+            [
+                ApprovedWatchlistAsset(watchlist_id=listed.id, canonical_asset=coin, added_at=now)
+                for listed, coin in ((first, COINS[3]), (first, COINS[1]), (second, COINS[5]))
+            ]
+        )
+        await session.commit()
+        first_id = str(first.id)
+
+    expected = json.dumps(sorted([COINS[1], COINS[3]]))
+    client = test_context["client"]
+    for path in ("/markets", "/dashboard/market"):
+        html = (await client.get(path)).text
+        assert f"data-favorite-assets='{expected}'" in html, path
+        assert f'data-favorite-watchlist-id="{first_id}"' in html, path
+        assert re.search(r'data-count="following">\s*2\s*<', html), path
+
+
+@pytest.mark.parametrize("query", ["", "?exchange=bybit", "?exchange=bybit&methodology_id=x"])
+async def test_the_first_address_forwards_to_the_page_with_its_query(test_context, query):
+    response = await test_context["client"].get(f"/market{query}", follow_redirects=False)
+    assert response.status_code == 308
+    assert response.headers["location"] == f"/markets{query}"
+
+
+async def test_the_page_is_never_kept_by_a_shared_cache(test_context):
+    await _screen_every_coin(test_context)
+    test_context["app"].dependency_overrides[get_market_data_provider] = VolumeProvider
+    page = await test_context["client"].get("/markets")
+    assert page.headers["cache-control"] == "private, no-store"
+    assert "Cookie" in page.headers["vary"].split(", ")
 
 
 def _public_paths() -> list[str]:
@@ -280,16 +395,16 @@ async def test_every_public_page_offers_markets_in_its_header_and_footer(test_co
         config = json.loads(
             re.search(r"window\.HilalMarketsRuntimeConfig = (\{.*?\});\n", html, re.S).group(1)
         )
-        assert config["chrome"]["marketHref"] == "/market"
+        assert config["chrome"]["marketHref"] == "/markets"
         footer = [item for group in config["chrome"]["footerGroups"] for item in group["items"]]
-        assert {"label": "Markets", "href": "/market"} in footer
+        assert {"label": "Markets", "href": "/markets"} in footer
     else:
         # The Jinja pages write the address through `url_for`, which may be absolute.
         assert re.search(
-            r'<nav class="public-nav".*?href="[^"]*/market"[^>]*>Markets</a>', html, re.S
+            r'<nav class="public-nav".*?href="[^"]*/markets"[^>]*>Markets</a>', html, re.S
         )
         assert re.search(
-            r'<footer class="site-footer.*?<a href="[^"]*/market">Markets</a>', html, re.S
+            r'<footer class="site-footer.*?<a href="[^"]*/markets">Markets</a>', html, re.S
         )
 
 
@@ -297,12 +412,12 @@ async def test_before_launch_the_page_its_feed_and_its_links_are_closed(waitlist
     client = waitlist_context["client"]
     waitlist_context["app"].dependency_overrides[get_market_data_provider] = VolumeProvider
 
-    page = await client.get("/market", follow_redirects=False)
+    page = await client.get("/markets", follow_redirects=False)
     assert page.status_code == 303
     feed = await client.get("/api/v1/public-market/quotes")
     assert feed.status_code == 404
     help_page = await client.get("/help")
-    assert 'href="/market"' not in help_page.text
+    assert 'href="/markets"' not in help_page.text
     landing = await client.get("/")
     assert '"marketHref": null' in landing.text
 
@@ -367,7 +482,7 @@ async def _ask(test_context, question: str, fake: _FakeAI | None = None, *, user
                 question=question,
                 session_id=f"public_market_gate_{slug}_0001",
                 client_message_id=f"public-market-gate-{slug}-1",
-                source_page="/market",
+                source_page="/markets",
             ),
             user_id=user_id,
         )

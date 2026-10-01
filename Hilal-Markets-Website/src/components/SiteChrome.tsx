@@ -54,7 +54,7 @@ export function signInHref(): string {
 export function marketHref(): string | null {
   const chrome = window.HilalMarketsRuntimeConfig?.chrome
   if (chrome && 'marketHref' in chrome) return chrome.marketHref ?? null
-  return '/market'
+  return '/markets'
 }
 
 /** Only for a page rendered without the server shell. The server list is the real one.
@@ -67,7 +67,7 @@ const FALLBACK_FOOTER_GROUPS = [
     items: [
       { label: 'Features', href: '/features' },
       { label: 'How it works', href: '/how-it-works' },
-      { label: 'Markets', href: '/market' },
+      { label: 'Markets', href: '/markets' },
       { label: 'Hilal Methodology', href: '/hilal-methodology' },
     ],
   },

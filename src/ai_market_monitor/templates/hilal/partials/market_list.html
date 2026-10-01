@@ -16,11 +16,18 @@
     * the hearts and Favorites open a sign-up prompt instead of following a coin, and
       so do the two Passport buttons, because a Passport is part of an account.
 
+    Somebody already signed in who opens the public page (`market_unlocked`) keeps the
+    public page's look — no search, no sorting — but nothing is locked: every coin is
+    sent, the coins they follow are marked, and the hearts, Favorites and Passports open
+    in their dashboard, where following a coin really happens.
+
     The coins themselves are never in this markup for a visitor. They arrive from
     `/api/v1/public-market/quotes`, which sends the visible ones and only a count of the
     rest.
 -#}
 {%- set is_public = market_audience == 'public' -%}
+{%- set is_unlocked = is_public and (market_unlocked | default(false)) -%}
+{%- set is_gated = is_public and not is_unlocked -%}
 <div
   class="hm-t"
   data-market-root
@@ -30,7 +37,11 @@
   data-methodology-id="{{ selected_methodology_id or '' }}"
   data-exchange="{{ selected_exchange }}"
   data-quote="{{ selected_quote_asset }}"
-  {% if is_public %}
+  {% if is_unlocked %}
+  data-unlocked="true"
+  data-favorite-assets='{{ favorite_assets | tojson }}'
+  data-favorite-watchlist-id="{{ favorite_watchlist_id or '' }}"
+  {% elif is_public %}
   data-visible-limit="{{ market_visible_limit }}"
   data-signup-href="{{ market_account_links.signup }}"
   data-signin-href="{{ market_account_links.signin }}"
@@ -110,10 +121,10 @@
       <span class="t-tile-note">Passed, but read the condition first</span>
       <span class="t-tile-bar" aria-hidden="true"></span>
     </button>
-    <button class="t-tile" type="button" data-filter="following" aria-pressed="false"{% if is_public %} data-account-gate="follow"{% endif %}>
+    <button class="t-tile" type="button" data-filter="following" aria-pressed="false"{% if is_gated %} data-account-gate="follow"{% endif %}>
       <span class="t-tile-top"><span data-icon="heart" data-icon-class="icon-sm"></span>You follow</span>
-      <span class="t-tile-value t-figure" data-count="following">{{ 0 if is_public else favorite_assets|length }}</span>
-      <span class="t-tile-note">{{ 'Sign up free to follow coins' if is_public else 'You get told when the status changes' }}</span>
+      <span class="t-tile-value t-figure" data-count="following">{{ 0 if is_gated else favorite_assets|length }}</span>
+      <span class="t-tile-note">{{ 'Sign up free to follow coins' if is_gated else 'You get told when the status changes' }}</span>
       <span class="t-tile-bar" aria-hidden="true"></span>
     </button>
   </div>
@@ -166,11 +177,21 @@
       </button>
     </div>
 
+    {% if is_unlocked %}
+    {#- A link, not the popup: the Favorites popup and what it changes live in the
+        dashboard, and `saved_assets=1` opens it there. -#}
+    <a class="t-action" href="{{ market_dashboard_href }}?saved_assets=1" style="flex: 0 0 auto;" data-favorites-in-dashboard>
+      <span data-icon="heart" data-icon-class="icon-sm"></span>
+      Favorites
+      <span class="t-pill" data-tone="neutral" data-favorite-count {{ 'hidden' if not favorite_assets else '' }}>{{ favorite_assets|length }}</span>
+    </a>
+    {% else %}
     <button class="t-action" type="button" data-open-favorites style="flex: 0 0 auto;" data-hm-guide-target="market-saved-assets"{% if is_public %} data-account-gate="favorites"{% endif %}>
       <span data-icon="heart" data-icon-class="icon-sm"></span>
       Favorites
       {% if not is_public %}<span class="t-pill" data-tone="neutral" data-favorite-count {{ 'hidden' if not favorite_assets else '' }}>{{ favorite_assets|length }}</span>{% endif %}
     </button>
+    {% endif %}
 
     <p class="t-control-note" data-result-note aria-live="polite" data-hm-guide-target="market-live-status">Loading the list...</p>
 
@@ -226,7 +247,7 @@
     </table>
   </div>
 
-  {% if is_public %}
+  {% if is_gated %}
   {#- The coins after the first `market_visible_limit`, locked.
 
       The rows under the banner are placeholders, drawn by the page script in the shape
@@ -318,7 +339,7 @@
   </noscript>
 </div>
 
-{% if is_public %}
+{% if is_gated %}
 {#- The one prompt every account-only control on the public page opens. The script sets
     the heading, the sentence and where the two buttons return to, from what was
     pressed: a heart, Favorites, or a Passport. -#}

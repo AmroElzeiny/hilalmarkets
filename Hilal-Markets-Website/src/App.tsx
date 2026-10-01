@@ -446,9 +446,11 @@ export default function App() {
   if (path === '/features') return <FeaturesPage />
   if (path === '/how-it-works') return <HowItWorksPage />
   if (path === '/hilal-methodology') return <MethodologyPage />
-  // The Market page's list is drawn by the server, between this header and the footer
-  // `main.tsx` puts into `#hm-site-footer`. Only the chrome is React here.
-  if (path === '/market') {
+  // A server-drawn page that borrows the site's chrome — the Market page — leaves
+  // `#hm-site-footer` for `main.tsx` to fill, and its own content sits between the two.
+  // Read from that slot, not from the address: a second copy of the address here is
+  // would draw the whole landing page over the Market page the day its address changed.
+  if (document.getElementById('hm-site-footer')) {
     return (
       <>
         <SiteNav />

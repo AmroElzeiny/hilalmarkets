@@ -2,7 +2,6 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -82,6 +81,7 @@ from ai_market_monitor.services.public_market import (
     market_account_links,
 )
 from ai_market_monitor.services.public_site import PublicSiteReadService
+from ai_market_monitor.services.screened_market import followed_coins
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
 PACKAGE_DIR = Path(__file__).resolve().parents[2]
@@ -641,7 +641,21 @@ async def hilal_methodology(
     )
 
 
-@router.get("/market", response_class=HTMLResponse, include_in_schema=False, name="public_market")
+@router.get("/market", include_in_schema=False, name="public_market_old_address")
+async def market_old_address(request: Request) -> RedirectResponse:
+    """The address the page opened at first, kept so links already shared still work.
+
+    Permanent, and the query is carried over, so a shared link to one exchange or one
+    standard lands on that same view.
+    """
+
+    target = request.url_for("public_market").path
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+    return RedirectResponse(target, status_code=308)
+
+
+@router.get("/markets", response_class=HTMLResponse, include_in_schema=False, name="public_market")
 async def market(
     request: Request,
     methodology_id: str | None = Query(default=None, max_length=64),
@@ -650,12 +664,16 @@ async def market(
     settings: Settings = Depends(get_settings),
     provider: MarketDataProvider = Depends(get_market_data_provider),
 ) -> Response:
-    """The screened market, for visitors without an account.
+    """The screened market, open to everyone.
 
     The dashboard's Halal Assets list, the same coins in the same order, cut after the
-    first :data:`PUBLIC_MARKET_VISIBLE_COUNT`. Somebody who is already signed in has
-    nothing to unlock, so they are sent to the full list instead of being shown a page
-    that asks them to sign up.
+    first :data:`PUBLIC_MARKET_VISIBLE_COUNT`.
+
+    Somebody who is already signed in sees this same page, with nothing behind the
+    line: the "Markets" link in the site's header is a promise of this page, and sending
+    a member to the dashboard instead broke it for exactly the people most likely to
+    press it. What needs an account — following a coin, Favorites, a Passport — opens
+    in their dashboard.
     """
 
     if "market" in settings.stage_exposure.hidden_pages:
@@ -668,14 +686,9 @@ async def market(
         requested = UUID(methodology_id) if methodology_id else None
     except ValueError:
         requested = None
-    if user is not None:
-        carried = {"exchange": exchange}
-        if requested is not None:
-            carried["methodology_id"] = str(requested)
-        return RedirectResponse(
-            app_link(settings, f"{MARKET_PATH}?{urlencode(carried)}"), status_code=303
-        )
-
+    favorite_watchlist_id, favorites = (
+        await followed_coins(session, user.id) if user is not None else (None, [])
+    )
     service = PublicMarketService(session, settings, provider)
     methodologies = await service.methodologies()
     chosen = await service.choose(methodologies, requested)
@@ -693,9 +706,18 @@ async def market(
         selected_quote_asset=PUBLIC_MARKET_QUOTE,
         market_visible_limit=PUBLIC_MARKET_VISIBLE_COUNT,
         market_account_links=market_account_links(settings),
-        market_passport_path=MARKET_PATH,
+        market_unlocked=user is not None,
+        # A member's Passports open in their dashboard, on the product's own hostname.
+        market_passport_path=app_link(settings, MARKET_PATH) if user else MARKET_PATH,
+        market_dashboard_href=app_link(settings, MARKET_PATH),
+        favorite_assets=favorites,
+        favorite_watchlist_id=favorite_watchlist_id,
     )
-    return templates.TemplateResponse(request=request, name=metadata.template, context=context)
+    page = templates.TemplateResponse(request=request, name=metadata.template, context=context)
+    # Who is reading decides what the page says, so no shared cache may keep it.
+    page.headers["Cache-Control"] = "private, no-store"
+    page.headers["Vary"] = "Cookie"
+    return page
 
 
 @router.get(
