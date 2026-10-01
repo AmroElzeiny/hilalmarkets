@@ -191,6 +191,36 @@ def _activities(symbol: str, raw: Any) -> frozenset[Activity]:
     return frozenset(activities)
 
 
+def blocking_terms(facts: AssetFacts) -> tuple[list[Activity], list[str]]:
+    """Which of these facts break an approved condition, and the words for each.
+
+    The one place that answers "is there a term against the methodology here". It asks
+    nothing about missing facts: a coin can be blocked by what *is* known even while
+    another question stays open, and :func:`screen` decides separately whether the
+    missing facts stop it from answering at all. The AI reviewer of new coins asks this
+    question too, and it asks it here rather than keeping its own copy of the rule.
+    """
+
+    # What the protocol does counts against its token. A governance token cannot be
+    # cleaner than the business it governs.
+    considered = facts.activities | facts.governed_activities
+    # Read at call time, not captured at import. The set of things that refuse a coin is
+    # the owner's approved conditions, and a snapshot taken when the module loaded would
+    # be a second copy of that decision — stale the moment an approval changed.
+    refusing = blocking_activities()
+    blocking = [
+        activity
+        for activity in Activity
+        if activity in refusing and activity in considered
+    ]
+    reasons = [refusing[a] for a in blocking]
+
+    if facts.holder_return is HolderReturn.FROM_LENDING_OR_PROMISE:
+        blocking.append(Activity.INTEREST_BEARING_HOLDING)
+        reasons.append(INTEREST_RETURN_REASON)
+    return blocking, reasons
+
+
 def screen(facts: AssetFacts) -> ScreenResult:
     """Apply the rule. Fail closed: an unanswered question is never a pass.
 
@@ -222,24 +252,7 @@ def screen(facts: AssetFacts) -> ScreenResult:
             missing_facts=tuple(dict.fromkeys(missing)),
         )
 
-    # What the protocol does counts against its token. A governance token cannot be
-    # cleaner than the business it governs.
-    considered = facts.activities | facts.governed_activities
-    # Read at call time, not captured at import. The set of things that refuse a coin is
-    # the owner's approved conditions, and a snapshot taken when the module loaded would
-    # be a second copy of that decision — stale the moment an approval changed.
-    refusing = blocking_activities()
-    blocking = [
-        activity
-        for activity in Activity
-        if activity in refusing and activity in considered
-    ]
-    reasons = [refusing[a] for a in blocking]
-
-    if facts.holder_return is HolderReturn.FROM_LENDING_OR_PROMISE:
-        blocking.append(Activity.INTEREST_BEARING_HOLDING)
-        reasons.append(INTEREST_RETURN_REASON)
-
+    blocking, reasons = blocking_terms(facts)
     if blocking:
         return ScreenResult(
             canonical_symbol=facts.canonical_symbol,

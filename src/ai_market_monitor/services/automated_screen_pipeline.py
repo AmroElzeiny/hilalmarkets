@@ -26,9 +26,10 @@ data* and it stays there until somebody finds it a source. Silence never becomes
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -42,10 +43,18 @@ from ai_market_monitor.db.models import (
     CanonicalAsset,
     CoinEvidenceDocument,
     ProviderCoinProfile,
+    ReviewCase,
 )
+from ai_market_monitor.db.models.enums import ReviewCaseType
 from ai_market_monitor.services.coin_evidence_crawler import (
     CoinEvidenceCrawler,
     EvidenceFolder,
+)
+from ai_market_monitor.services.coin_terms_ai_review import (
+    AIReview,
+    CoinReport,
+    CoinTermsAIReviewer,
+    build_report,
 )
 from ai_market_monitor.services.coinmarketcap import (
     CoinLinks,
@@ -62,6 +71,7 @@ from ai_market_monitor.services.sharia_evidence_screen import (
     EvidenceVerdict,
     decide,
 )
+from ai_market_monitor.services.unscreened_coin_research import apply_provider_record
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +87,13 @@ class PipelineResult:
     provider_silent: list[str] = field(default_factory=list)
     failed: dict[str, str] = field(default_factory=dict)
     credits_spent: int = 0
+    #: Coins a term against the methodology was found for. Not a status: each one is
+    #: in the reviewers' task list waiting for a person.
+    held_back: int = 0
+    #: Coins the AI reviewer read and whose answer passed the grounding check.
+    ai_reviewed: int = 0
+    #: Coins left for the next sweep because this one ran out of time.
+    deferred: list[str] = field(default_factory=list)
 
     @property
     def decided(self) -> int:
@@ -92,6 +109,9 @@ class PipelineResult:
             "provider_silent": list(self.provider_silent),
             "failed": dict(self.failed),
             "credits_spent": self.credits_spent,
+            "held_back": self.held_back,
+            "ai_reviewed": self.ai_reviewed,
+            "deferred": list(self.deferred),
         }
 
 
@@ -151,20 +171,29 @@ class AutomatedScreenPipeline:
         *,
         coinmarketcap: CoinMarketCapClient | None = None,
         crawler: CoinEvidenceCrawler | None = None,
+        ai_reviewer: CoinTermsAIReviewer | None = None,
     ) -> None:
         self.session = session
         self.settings = settings
         self.coinmarketcap = coinmarketcap or CoinMarketCapClient(settings)
         self.crawler = crawler or CoinEvidenceCrawler(settings)
+        self.ai_reviewer = ai_reviewer or CoinTermsAIReviewer(settings)
 
     async def run(
         self,
         symbols: Sequence[str],
         *,
         limit: int | None = None,
+        time_budget_seconds: float | None = None,
     ) -> PipelineResult:
-        """Screen each symbol. One provider call covers up to a hundred of them."""
+        """Screen each symbol. One provider call covers up to a hundred of them.
 
+        ``time_budget_seconds`` stops the sweep *starting* another coin once it has run
+        that long. The coins left over are simply not screened yet, so the next sweep
+        takes them; nothing is half-written.
+        """
+
+        started = time.monotonic()
         result = PipelineResult()
         wanted = [s.strip().upper() for s in symbols if s and s.strip()]
         if limit is not None:
@@ -181,10 +210,22 @@ class AutomatedScreenPipeline:
         result.credits_spent = self.coinmarketcap.usage.credits
         result.provider_silent = sorted(set(wanted) - set(records))
 
-        for symbol in wanted:
+        for index, symbol in enumerate(wanted):
+            if (
+                time_budget_seconds is not None
+                and time.monotonic() - started >= time_budget_seconds
+            ):
+                result.deferred = wanted[index:]
+                break
             record = records.get(symbol)
             try:
                 decision, folder = await self.screen_one(symbol, record)
+                review = await self.ai_reviewer.review(
+                    symbol=decision.symbol,
+                    name=decision.name,
+                    folder=folder,
+                    record=record,
+                )
             except Exception as exc:  # noqa: BLE001 - one coin must not end the sweep
                 logger.warning(
                     "automated_screen_failed",
@@ -201,7 +242,12 @@ class AutomatedScreenPipeline:
             else:
                 result.not_enough_data += 1
 
-            await self.store(decision, record, folder)
+            report = build_report(decision, review, folder, record)
+            if report.held_back:
+                result.held_back += 1
+            if review.completed:
+                result.ai_reviewed += 1
+            await self.store(decision, record, folder, review=review, report=report)
 
         await self.session.flush()
         await self.crawler.aclose()
@@ -228,6 +274,9 @@ class AutomatedScreenPipeline:
         decision: EvidenceDecision,
         record: CoinLinks | None,
         folder: EvidenceFolder,
+        *,
+        review: AIReview,
+        report: CoinReport,
     ) -> None:
         run = await self.session.scalar(
             select(AutomatedScreenRun).where(AutomatedScreenRun.symbol == decision.symbol)
@@ -249,12 +298,94 @@ class AutomatedScreenPipeline:
         run.documents_read = decision.documents_read
         run.primary_documents_read = decision.primary_documents_read
         run.decided_at = datetime.now(UTC)
+        run.review_report = report.body
+        run.hold_state = report.hold_state
+        run.ai_review_state = review.state
+        if review.state in {"completed", "failed"}:
+            run.ai_review_attempts = (run.ai_review_attempts or 0) + 1
         # `published` is deliberately never assigned here. Only the application's own
         # approval route may set it, and only after a person has decided.
         await self.session.flush()
 
         await self._store_documents(run, decision.symbol, folder)
         await self._store_passport(decision, record, folder)
+        await self._file_review_task(run, decision, report)
+        self._record_ai_usage(review)
+
+    async def _file_review_task(
+        self,
+        run: AutomatedScreenRun,
+        decision: EvidenceDecision,
+        report: CoinReport,
+    ) -> None:
+        """Put the report in the reviewers' task list. One task per coin.
+
+        A task a person has already decided is left alone: a later reading adds to the
+        run it describes, and never reopens a decision behind the reviewer's back. An
+        open task is brought up to date, so a reviewer never reads a report older than
+        the one on the run.
+
+        The task carries no verdict and cannot publish one. Its approval path is the
+        governed one, which refuses a case with no authority assessment behind it, and
+        the review screen offers only "keep it out", "release" and "ask for evidence".
+        """
+
+        case = (
+            await self.session.get(ReviewCase, run.review_case_id)
+            if run.review_case_id is not None
+            else None
+        )
+        key = f"automated-coin-review:{decision.symbol}"
+        if case is None:
+            case = await self.session.scalar(
+                select(ReviewCase).where(ReviewCase.idempotency_key == key)
+            )
+        if case is not None and case.done_at is not None:
+            run.review_case_id = case.id
+            return
+
+        held = report.held_back
+        body = report.body
+        now = datetime.now(UTC)
+        name = (decision.name or decision.symbol)[:180]
+        if case is None:
+            asset = await self.session.scalar(
+                select(CanonicalAsset).where(CanonicalAsset.symbol == decision.symbol)
+            )
+            case = ReviewCase(
+                case_reference=f"NEW-{decision.symbol}"[:40],
+                case_type=ReviewCaseType.AUTOMATED_COIN_REVIEW,
+                state="ready_for_review",
+                publication_state="unpublished",
+                canonical_asset_id=asset.id if asset is not None else None,
+                idempotency_key=key[:128],
+                title=f"New coin check: {name} ({decision.symbol})"[:300],
+                human_review_reason="",
+                requested_evidence=[],
+                due_at=now
+                + timedelta(hours=self.settings.sharia_review_sla_hours),
+                next_reminder_at=now,
+            )
+            self.session.add(case)
+        case.priority = (
+            "high" if held else "low" if report.hold_state == "not_enough_data" else "normal"
+        )
+        case.risk_severity = "high" if held else "none"
+        case.human_review_reason = report.summary
+        case.requested_evidence = list(body.get("doubts") or [])
+        await self.session.flush()
+        run.review_case_id = case.id
+
+    def _record_ai_usage(self, review: AIReview) -> None:
+        """One row in the AI spending ledger for each answer the model gave.
+
+        The row is built by the reviewer, which owns the model call; this pipeline only
+        stores it, so it never needs to know which provider answered.
+        """
+
+        event = self.ai_reviewer.usage_event(review)
+        if event is not None:
+            self.session.add(event)
 
     async def _store_documents(
         self,
@@ -309,25 +440,16 @@ class AutomatedScreenPipeline:
                 provider="coinmarketcap", symbol=decision.symbol
             )
             self.session.add(profile)
+        now = datetime.now(UTC)
         if record is not None:
-            profile.provider_id = record.cmc_id or None
-            profile.name = (record.name or profile.name)[:180]
-            profile.slug = (record.slug or profile.slug)[:180]
-            profile.official_website = record.website[0] if record.website else None
-            profile.whitepaper_url = record.whitepaper[0] if record.whitepaper else None
-            profile.source_code_url = record.source_code[0] if record.source_code else None
-            profile.logo_url = record.logo
-            profile.category = record.category
-            profile.tags = list(record.tags)
-            profile.platform = record.platform
-            profile.description = record.description
-            profile.date_added = record.date_added
+            # The researcher's writer, not a copy of it: two copies had already drifted.
+            apply_provider_record(profile, record, now)
         profile.links = {
             **(profile.links or {}),
             "passport": passport_payload(decision, record, folder),
         }
         profile.research_state = "researched"
-        profile.refreshed_at = datetime.now(UTC)
+        profile.refreshed_at = now
 
         await self._attach_logo(decision.symbol, record)
 

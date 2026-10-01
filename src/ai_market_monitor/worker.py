@@ -18,6 +18,11 @@ if TYPE_CHECKING:
 #: When this process last wrote its measurements down. Throttles the per-task flush.
 _LAST_METRIC_FLUSH: float = 0.0
 
+#: How long one automated-screen sweep may keep starting coins. Under the broker's
+#: one-hour redelivery window by more than one slow coin's worth of time, so a sweep is
+#: never handed to a second worker while the first is still running it.
+SCREEN_SWEEP_BUDGET_SECONDS = 45 * 60
+
 settings = get_settings()
 validate_runtime_configuration(settings)
 configure_logging(settings.log_level)
@@ -1643,6 +1648,10 @@ async def _screen_researched_coins() -> dict:
     from ai_market_monitor.services.automated_screen_pipeline import (
         AutomatedScreenPipeline,
     )
+    from ai_market_monitor.services.coin_terms_ai_review import (
+        MAX_AI_ATTEMPTS,
+        RETRY_AI_STATES,
+    )
 
     if not settings.unscreened_research_enabled:
         return {"status": "disabled"}
@@ -1653,8 +1662,20 @@ async def _screen_researched_coins() -> dict:
         try:
             # Coins the researcher has gathered links for, that this has not read yet.
             # Worked in market order, so the effort lands where users actually are.
+            # A coin whose AI reading has not happened yet — the provider was down, or it
+            # was screened before the AI reviewer existed — is read again, up to a fixed
+            # number of attempts. Everything else already has its report.
             already = set(
-                (await session.scalars(select(AutomatedScreenRun.symbol))).all()
+                (
+                    await session.scalars(
+                        select(AutomatedScreenRun.symbol).where(
+                            ~(
+                                AutomatedScreenRun.ai_review_state.in_(RETRY_AI_STATES)
+                                & (AutomatedScreenRun.ai_review_attempts < MAX_AI_ATTEMPTS)
+                            )
+                        )
+                    )
+                ).all()
             )
             candidates = (
                 await session.scalars(
@@ -1671,8 +1692,15 @@ async def _screen_researched_coins() -> dict:
                 return {"status": "nothing_to_screen"}
 
             pipeline = AutomatedScreenPipeline(session, settings)
+            # Each coin now waits for a high-effort model answer, so a full batch can
+            # take longer than an hour. The broker hands a task it has not heard back
+            # from in an hour to another worker (Redis' default visibility timeout, and
+            # this app acknowledges late), which would run the same sweep twice and pay
+            # for every answer twice. The sweep stops starting coins well before that.
             result = await pipeline.run(
-                wanted, limit=settings.automated_screen_batch_limit
+                wanted,
+                limit=settings.automated_screen_batch_limit,
+                time_budget_seconds=SCREEN_SWEEP_BUDGET_SECONDS,
             )
             await session.commit()
         except Exception:

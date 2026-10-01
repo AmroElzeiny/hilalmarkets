@@ -114,6 +114,41 @@ def _normalized(text: str) -> str:
     return " ".join((text or "").split()).casefold()
 
 
+#: Typographic characters a page and a model often spell differently. A model that copies
+#: ``it’s`` as ``it's`` has quoted the page; treating that as a hallucination would
+#: throw away real evidence for a keyboard difference.
+_QUOTE_FOLDS = str.maketrans(
+    {
+        "‘": "'",
+        "’": "'",
+        "“": '"',
+        "”": '"',
+        "–": "-",
+        "—": "-",
+        " ": " ",
+    }
+)
+
+#: The shortest quotation that can carry a claim. One or two words — ``lending``,
+#: ``yield`` — occur on almost every crypto page, so a model "quoting" them grounds
+#: nothing. Four words is the smallest span that says something about *this* project.
+MIN_QUOTE_WORDS = 4
+
+
+def quote_is_grounded(quote: str, source: str) -> bool:
+    """True when ``quote`` is a real passage of ``source``, word for word.
+
+    Case, spacing and typographic quote marks are ignored; nothing else is. A
+    paraphrase is not a quotation, and a claim that rests on a paraphrase rests on the
+    model's reading rather than on the page.
+    """
+
+    wanted = _normalized((quote or "").translate(_QUOTE_FOLDS)).strip(" .\"'")
+    if len(wanted.split()) < MIN_QUOTE_WORDS:
+        return False
+    return wanted in _normalized((source or "").translate(_QUOTE_FOLDS))
+
+
 def number_is_grounded(value: float, source: str) -> bool:
     """True when ``value`` appears in ``source`` as a number the trader wrote.
 

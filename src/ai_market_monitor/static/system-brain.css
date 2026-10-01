@@ -281,6 +281,9 @@ tbody tr:hover { background: var(--hm-apple-soft); }
 .brain-findings, .brain-plain-list { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
 .brain-findings li { display: flex; gap: 9px; padding: 10px; border: 1px solid var(--hm-warning-bg); border-radius: 11px; background: var(--hm-warning-bg); color: var(--hm-warning); }
 .brain-findings li .icon { flex: 0 0 auto; width: 16px; }
+/* The flex item is the <i> the icon is drawn into, not the svg inside it. Without this
+   a long sentence squeezed the <i>, and the icon shrank beside every long finding. */
+.brain-findings li > i[data-icon] { flex: 0 0 auto; display: inline-flex; }
 .brain-findings li.clear { border-color: var(--hm-apple-pale); background: var(--hm-apple-pale); color: var(--hm-success); }
 .brain-plain-list li { position: relative; padding-left: 15px; color: var(--hm-copy); }
 .brain-plain-list li::before { position: absolute; left: 0; content: "•"; color: var(--hm-apple-deep); }
@@ -317,6 +320,9 @@ tbody tr:hover { background: var(--hm-apple-soft); }
 .brain-decision-panel label, .brain-assignment-panel label { color: var(--hm-copy); font-size: 11px; font-weight: 620; }
 .brain-decision-panel label small { display: block; color: var(--hm-muted); font-weight: 400; }
 .brain-decision-panel textarea { min-height: 100px; padding: 11px; resize: vertical; }
+/* A field written inside its label ("Why<textarea>") sat on the label's line at its
+   default width. It takes the panel's width, under its label, like every other field. */
+.brain-decision-panel label > textarea { display: block; width: 100%; margin-top: 6px; }
 .brain-criterion-list { display: grid; gap: 9px; margin: 12px 0; }
 .brain-criterion-list fieldset { display: grid; gap: 7px; min-width: 0; margin: 0; padding: 11px; border: 1px solid var(--hm-hairline); border-radius: 12px; background: var(--hm-surface-soft); }
 .brain-criterion-list legend { padding: 0 5px; color: var(--hm-apple-deep); font-size: 11px; font-weight: 650; }

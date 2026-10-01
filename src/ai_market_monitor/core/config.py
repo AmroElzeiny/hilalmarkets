@@ -515,6 +515,22 @@ class Settings(BaseSettings):
     #: to ask of other people's servers in one run.
     automated_screen_batch_limit: int = Field(default=25, ge=1, le=500)
     automated_screen_interval_hours: int = Field(default=24, ge=1, le=720)
+    #: A second reader for each new coin: a model reads the same pages the rule read,
+    #: names what the project does as typed facts, and checks the official and news
+    #: links. Every fact must quote the page it came from, or it is thrown away.
+    #:
+    #: It decides nothing. What refuses a coin is still ``sharia_conditions``, and what
+    #: it writes is a report in the reviewers' task list — never a Shariah status.
+    coin_terms_ai_enabled: bool = True
+    coin_terms_ai_model: str = "muse-spark-1.3-contributor"
+    coin_terms_ai_reasoning_effort: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh"
+    ] = "high"
+    #: High effort spends most of its output thinking, and one coin can carry a dozen
+    #: pages, so both bounds are generous. A slow answer costs one coin one sweep; the
+    #: sweep keeps going and the coin is tried again next time.
+    coin_terms_ai_timeout_seconds: float = Field(default=300, ge=30, le=1800)
+    coin_terms_ai_max_output_tokens: int = Field(default=16000, ge=1000, le=64000)
     #: How often size, rank and long-range movement are re-read for screened coins.
     #: Daily: a ninety-day price change does not move meaningfully in an hour.
     market_numbers_interval_hours: int = Field(default=24, ge=1, le=720)

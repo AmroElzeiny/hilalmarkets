@@ -95,6 +95,11 @@ class ReviewCaseType(StrEnum):
     #: used to rely on has gone. A missing community page is deliberately **not** this:
     #: plenty of projects run no forum, and a page that does not exist cannot be found.
     OFFICIAL_SOURCE_GAP = "official_source_gap"
+    #: A new coin nobody has ruled on was read by the automated screen and the AI
+    #: reviewer. The case carries their report. It never carries a verdict: a coin the
+    #: report found a blocked term in is *held back*, which only means it stays out of
+    #: every halal list until a person confirms or releases it.
+    AUTOMATED_COIN_REVIEW = "automated_coin_review"
 
 
 class ShariaAssetStatus(StrEnum):

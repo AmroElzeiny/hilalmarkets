@@ -291,7 +291,7 @@ class UnscreenedCoinResearchService:
                 result.profiles_created += 1
             else:
                 result.profiles_updated += 1
-            _apply(row, record, now)
+            apply_provider_record(row, record, now)
             if row.whitepaper_url:
                 result.with_whitepaper += 1
             if row.official_website:
@@ -313,10 +313,24 @@ class UnscreenedCoinResearchService:
         return result
 
 
-def _apply(row: ProviderCoinProfile, record: CoinLinks, now: datetime) -> None:
+#: The width of the profile's text columns. PostgreSQL refuses a longer value outright,
+#: and SQLite does not, so only a deployment would ever find an overlong name.
+_TEXT_WIDTH = 180
+
+
+def apply_provider_record(row: ProviderCoinProfile, record: CoinLinks, now: datetime) -> None:
+    """Copy one provider record onto its profile row. The one writer of these fields.
+
+    Both the researcher and the automated screen write a profile from the same record.
+    Each used to carry its own copy of this, and the copies had drifted: one truncated
+    names and one did not, and neither survived a record with no name on a row that had
+    never been saved — the column default only arrives at insert, so ``row.name`` is
+    still ``None`` there, and ``"" or None`` is ``None``.
+    """
+
     row.provider_id = record.cmc_id or None
-    row.name = record.name or row.name
-    row.slug = record.slug or row.slug
+    row.name = (record.name or row.name or "")[:_TEXT_WIDTH]
+    row.slug = (record.slug or row.slug or "")[:_TEXT_WIDTH]
     row.official_website = record.website[0] if record.website else None
     row.whitepaper_url = record.whitepaper[0] if record.whitepaper else None
     row.source_code_url = record.source_code[0] if record.source_code else None
@@ -345,6 +359,7 @@ def _apply(row: ProviderCoinProfile, record: CoinLinks, now: datetime) -> None:
 
 
 __all__ = [
+    "apply_provider_record",
     "ResearchPlan",
     "ResearchResult",
     "UnscreenedCoinResearchService",

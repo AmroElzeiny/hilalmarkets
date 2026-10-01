@@ -10,6 +10,7 @@ from ai_market_monitor.db.models import (
     AIAnalysisSnapshot,
     AssetResearchDossier,
     AuditEvent,
+    AutomatedScreenRun,
     CanonicalAsset,
     ExternalAssessment,
     MonitorShariaAssetState,
@@ -955,7 +956,18 @@ class ShariaAdminDashboardService:
                 for item in (methodology_rules.use_cases if methodology_rules else [])
             ]
         )
+        # A new-coin report lives on the automated run it describes, not on a dossier.
+        coin_report = (
+            await self.session.scalar(
+                select(AutomatedScreenRun.review_report).where(
+                    AutomatedScreenRun.review_case_id == case.id
+                )
+            )
+            if case.case_type == ReviewCaseType.AUTOMATED_COIN_REVIEW
+            else None
+        )
         return {
+            "coin_report": coin_report or None,
             "case": case,
             "asset": asset,
             "external": external,

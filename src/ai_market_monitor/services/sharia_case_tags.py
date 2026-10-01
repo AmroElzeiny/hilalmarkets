@@ -51,6 +51,8 @@ from ai_market_monitor.services.sharia_source_catalog import (
 #: one that fits, so a case that is several things at once is filed under the one that
 #: actually stops it.
 SOURCES_MISSING = "sources_missing"
+HELD_BACK = "held_back"
+NEW_COIN_REPORT = "new_coin_report"
 ACTIVITY_TO_CHECK = "activity_to_check"
 IDENTITY_UNCLEAR = "identity_unclear"
 READER_REPORT = "reader_report"
@@ -83,6 +85,25 @@ TAG_DEFINITIONS: dict[str, CaseTagDefinition] = {
         meaning=(
             "The system has no working official news page for this coin yet. It keeps "
             "looking on every sweep."
+        ),
+    ),
+    HELD_BACK: CaseTagDefinition(
+        key=HELD_BACK,
+        label="Held back",
+        tone="attention",
+        meaning=(
+            "The automatic check of a new coin found a term against our methodology on "
+            "the project's own pages. The coin has no status and stays out of every "
+            "screened list until you confirm or release it."
+        ),
+    ),
+    NEW_COIN_REPORT: CaseTagDefinition(
+        key=NEW_COIN_REPORT,
+        label="New coin report",
+        tone="watch",
+        meaning=(
+            "The automatic check of a new coin found no term against our methodology. "
+            "That is not an approval: read the report and decide."
         ),
     ),
     ACTIVITY_TO_CHECK: CaseTagDefinition(
@@ -293,6 +314,21 @@ def classify(
 
     if case_type == ReviewCaseType.OFFICIAL_SOURCE_GAP:
         return CaseSignal(SOURCES_MISSING, _source_gap_reason(name, coverage))
+
+    # The pipeline writes ``high`` onto a new-coin report exactly when it held the coin
+    # back, so this reads the pipeline's own structured result, never the report's text.
+    if case_type == ReviewCaseType.AUTOMATED_COIN_REVIEW:
+        if risk_severity in _SEVERITIES_WORTH_READING:
+            return CaseSignal(
+                HELD_BACK,
+                f"A term against our methodology was found on {name}'s own pages. "
+                "Confirm it or release the coin.",
+            )
+        return CaseSignal(
+            NEW_COIN_REPORT,
+            f"The automatic check found nothing against our methodology for {name}. "
+            "Read the report and decide.",
+        )
 
     if case_type == ReviewCaseType.SOURCE_IDENTITY_CONFLICT:
         return CaseSignal(

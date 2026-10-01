@@ -90,6 +90,27 @@ class AutomatedScreenRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: ``tests/unit/test_invariant_automated_screen_never_publishes.py`` fails if it does.
     published: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    #: The report a reviewer reads: the rule's reading, the AI reviewer's reading, the
+    #: link checks, the doubts and the trust points. Built by
+    #: ``services.coin_terms_ai_review.build_report`` and nowhere else.
+    review_report: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    #: Whether the AI reviewer's reading is in the report yet. ``failed`` and
+    #: ``pending`` are tried again on a later sweep, up to a fixed number of attempts.
+    ai_review_state: Mapped[str] = mapped_column(
+        String(32), default="pending", nullable=False
+    )
+    ai_review_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: What the machine did with the coin while it waits for a person. ``held_back``
+    #: means a term against the methodology was found on the project's own pages. It
+    #: is not a status: the coin simply has none, and a person decides.
+    hold_state: Mapped[str | None] = mapped_column(String(32))
+    #: The reviewers' task that carries this report.
+    review_case_id: Mapped[Any | None] = mapped_column(
+        ForeignKey("sharia_review_cases.id", ondelete="SET NULL")
+    )
+
 
 class CoinEvidenceDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """One page that was read for one coin. The receipt, not the page."""

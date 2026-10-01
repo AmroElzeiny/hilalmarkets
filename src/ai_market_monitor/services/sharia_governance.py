@@ -33,6 +33,7 @@ from ai_market_monitor.db.models import (
 )
 from ai_market_monitor.db.models.enums import (
     IdentityProvider,
+    ReviewCaseType,
     ShariaAssetStatus,
     ShariaMethodologyStatus,
     UserRole,
@@ -58,6 +59,16 @@ SC_METHODOLOGY_CODE = "SC_MALAYSIA_SAC_REFERENCE"
 FASSET_METHODOLOGY_CODE = "FASSET_SHARIAH_REPORTS"
 SRB_METHODOLOGY_CODE = "SHARIAH_REVIEW_BUREAU"
 TERMINAL_CASE_STATES = {"published", "rejected", "stored", "superseded"}
+#: Case types a reviewer may close as "nothing here". For a new-coin report this is the
+#: release: the reviewer read the report and found no term against the methodology.
+#: It publishes nothing — the coin simply goes back to having no status at all.
+DISMISSABLE_CASE_TYPES = frozenset(
+    {
+        ReviewCaseType.MATERIAL_SOURCE_CHANGE,
+        ReviewCaseType.USER_FACTUAL_REPORT,
+        ReviewCaseType.AUTOMATED_COIN_REVIEW,
+    }
+)
 #: Terminal states kept out of the review queue's default view.
 #:
 #: A superseded case has been replaced by a newer version of itself. It is a signpost,
@@ -1236,10 +1247,11 @@ class ShariaGovernanceService:
     ) -> ReviewCase:
         admin = await self._require_permission(admin_user_id, "REVIEWER")
         case = await self._open_case(case_id)
-        if case.case_type not in {"material_source_change", "user_factual_report"}:
+        if case.case_type not in DISMISSABLE_CASE_TYPES:
             raise ShariaGovernanceError(
                 "dismissal_not_available",
-                "Only a change or factual-report review can be dismissed as unsupported.",
+                "Only a change, a factual report or a new-coin report can be dismissed "
+                "as unsupported.",
             )
         if case.state not in {"ready_for_review", "needs_evidence"}:
             raise ShariaGovernanceError(
@@ -1253,7 +1265,10 @@ class ShariaGovernanceService:
         previous = case.state
         now = datetime.now(UTC)
         case.state = "superseded"
-        case.publication_state = "published_unchanged"
+        # A new-coin report was never published, so releasing it leaves nothing
+        # published. Saying "published unchanged" there would claim a Passport exists.
+        if case.case_type != ReviewCaseType.AUTOMATED_COIN_REVIEW:
+            case.publication_state = "published_unchanged"
         case.done_at = now
         case.due_at = None
         case.next_reminder_at = None

@@ -38,6 +38,9 @@ CRAWLER = ROOT / "src" / "ai_market_monitor" / "services" / "coin_evidence_crawl
 VOCABULARY = (
     ROOT / "src" / "ai_market_monitor" / "services" / "sharia_evidence_vocabulary.py"
 )
+#: The AI reader of new coins. It fills typed facts and writes a report; like the rest
+#: of the automated path, it must never touch a governed status.
+AI_REVIEW = ROOT / "src" / "ai_market_monitor" / "services" / "coin_terms_ai_review.py"
 
 #: Names that only appear where a real Shariah status is being written.
 FORBIDDEN_NAMES = (
@@ -76,7 +79,7 @@ def _code_names(path: Path) -> set[str]:
 
 @pytest.mark.parametrize("name", FORBIDDEN_NAMES)
 @pytest.mark.parametrize(
-    "path", [PIPELINE, SCREEN, CRAWLER, VOCABULARY], ids=lambda p: p.name
+    "path", [PIPELINE, SCREEN, CRAWLER, VOCABULARY, AI_REVIEW], ids=lambda p: p.name
 )
 def test_the_automated_path_never_touches_an_authoritys_tables(name, path):
     """It may read a project's website. It may not write anybody's verdict."""

@@ -92,6 +92,63 @@
       </dl>
     </article>
 
+    {# A new coin nobody has ruled on. The report comes from the fixed rules and the AI
+       reader together; it is research for this reviewer, never a ruling. Only the
+       "Keep it out", "Release" and "Ask for evidence" actions are offered for it. #}
+    {% if case.case_type == 'automated_coin_review' %}
+    {% set report = detail.coin_report or {} %}
+    {% set ai = report.ai or {} %}
+    {% set ai_labels = {'completed': 'Done', 'failed': 'Did not finish', 'not_configured': 'Not set up', 'disabled': 'Switched off', 'skipped_no_pages': 'Nothing to read'} %}
+    {% set hold_labels = {'held_back': 'Held back', 'for_review': 'Nothing found', 'not_enough_data': 'Not enough to read'} %}
+    <article class="brain-panel" data-testid="coin-report">
+      <div class="brain-panel-title"><i data-icon="spark"></i><div><h3>New coin report</h3><p>{{ report.summary or 'The report is not ready yet.' }}</p></div></div>
+      <div class="brain-warning-card"><i data-icon="info"></i><p>Made by the automatic check and an AI reader. No person has reviewed it, and it is not a Shariah ruling.</p></div>
+      <dl class="brain-facts brain-facts-four">
+        <div><dt>Result</dt><dd>{{ hold_labels.get(report.hold_state, 'Not ready') }}</dd></div>
+        <div><dt>Pages read</dt><dd>{{ report.own_pages_read or 0 }} own · {{ report.pages_read or 0 }} in all</dd></div>
+        <div><dt>AI check</dt><dd>{{ ai_labels.get(ai.state, 'Not run') }}</dd></div>
+        <div><dt>Model</dt><dd>{{ ai.model or 'None' }}{% if ai.reasoning_effort %} · {{ ai.reasoning_effort }}{% endif %}</dd></div>
+      </dl>
+      {% if ai.what_it_does %}<p>{{ ai.what_it_does }}</p>{% endif %}
+
+      <h4>Terms against our methodology</h4>
+      <ul class="brain-findings" data-testid="coin-report-terms">
+        {% for term in report.terms_found or [] %}
+        <li><i data-icon="alert"></i><span>{{ term.reason }} <strong>{{ 'Fixed rules' if term.source == 'rule' else 'AI reader' }}</strong>{% if term.quote %} “{{ term.quote }}”{% endif %}{% if term.url %} <a href="{{ term.url }}" target="_blank" rel="noopener">Open page</a>{% endif %}</span></li>
+        {% else %}<li class="clear"><i data-icon="check"></i><span>None found on the project's own pages.</span></li>{% endfor %}
+      </ul>
+
+      <div class="brain-detail-grid">
+        <section><h4>Doubts</h4><ul class="brain-findings" data-testid="coin-report-doubts">{% for item in report.doubts or [] %}<li><i data-icon="alert"></i><span>{{ item }}</span></li>{% else %}<li class="clear"><i data-icon="check"></i><span>No doubts listed.</span></li>{% endfor %}</ul></section>
+        <section><h4>Trust points</h4><ul class="brain-findings" data-testid="coin-report-trust">{% for item in report.trust_points or [] %}<li class="clear"><i data-icon="check"></i><span>{{ item }}</span></li>{% else %}<li><i data-icon="alert"></i><span>No trust points listed.</span></li>{% endfor %}</ul></section>
+      </div>
+
+      {% if ai.activities %}
+      <details class="brain-inline-details"><summary>What the AI read on the pages ({{ ai.activities|length }})</summary>
+        <div class="brain-source-list">{% for claim in ai.activities %}<section><div><span class="brain-status {{ 'success' if claim.own_description else 'neutral' }}">{{ 'Own page' if claim.own_description else 'Other page' }}</span><strong>{{ claim.meaning }}</strong></div><p>“{{ claim.quote }}”</p><div class="brain-source-actions"><a href="{{ claim.url }}" target="_blank" rel="noopener">Open page</a></div></section>{% endfor %}</div>
+      </details>
+      {% endif %}
+
+      {% if report.link_checks %}
+      <details class="brain-inline-details" data-testid="coin-report-links"><summary>Official and news links checked ({{ report.link_checks|length }})</summary>
+        <div class="brain-source-list">{% for link in report.link_checks %}<section><div><span class="brain-status {{ {'official': 'success', 'not_official': 'failed', 'unclear': 'warning'}.get(link.judgement, 'neutral') }}">{{ {'official': 'Official', 'not_official': 'Not official', 'unclear': 'Unclear'}.get(link.judgement, 'Not checked') }}</span><strong>{{ link.listed_as.replace('_',' ').title() }}</strong></div><p>{{ link.reason }}</p><div class="brain-source-actions"><a href="{{ link.url }}" target="_blank" rel="noopener">Open link</a>{% if link.on_project_site is not none %}<span>{{ 'On the project site' if link.on_project_site else 'Not on the project site' }}</span>{% endif %}</div></section>{% endfor %}</div>
+      </details>
+      {% endif %}
+
+      {% if report.news %}
+      <details class="brain-inline-details"><summary>News pages read ({{ report.news|length }})</summary>
+        <div class="brain-source-list">{% for note in report.news %}<section><div><span class="brain-status {{ 'warning' if note.touches_methodology else 'neutral' }}">{{ 'Check this' if note.touches_methodology else 'Nothing to check' }}</span></div><p>{{ note.what_it_says }}</p><small>“{{ note.quote }}”</small><div class="brain-source-actions"><a href="{{ note.url }}" target="_blank" rel="noopener">Open page</a></div></section>{% endfor %}</div>
+      </details>
+      {% endif %}
+
+      {% if report.pages_not_read %}
+      <details class="brain-inline-details"><summary>Pages that could not be read ({{ report.pages_not_read|length }})</summary>
+        <ul class="brain-findings">{% for page in report.pages_not_read %}<li><i data-icon="alert"></i><span>{{ page.url }} <strong>{{ page.why.replace('_',' ') }}</strong></span></li>{% endfor %}</ul>
+      </details>
+      {% endif %}
+    </article>
+    {% endif %}
+
     <article class="brain-panel">
       <div class="brain-section-head compact">
         <div class="brain-panel-title"><i data-icon="passport"></i><div><h3>Evidence</h3></div></div>
@@ -235,7 +292,11 @@
   <aside class="brain-decision-panel" aria-label="Review decision" data-testid="human-decision-panel">
     <div class="brain-decision-state">
       <h3>{{ case.state.replace('_',' ').title() }}</h3>
+      {% if case.case_type == 'automated_coin_review' %}
+      <p>Nothing here publishes a status. "Keep it out" confirms the coin stays out of every screened list. "Release" closes the report; the coin still has no status.</p>
+      {% else %}
       <p>Approving publishes this Passport. Rejecting keeps the evidence and shows nothing.</p>
+      {% endif %}
     </div>
     <details class="brain-impact-preview">
       <summary>What will change?</summary>
@@ -263,6 +324,18 @@
     {% else %}
     <button class="brain-action-button brain-publish-launch brain-terminal-action" type="button" data-open-publication><i data-icon="passport"></i>Publish…</button>
     {% endif %}
+
+    {% elif case.case_type == 'automated_coin_review' and not case.done_at and case.state in ['ready_for_review','needs_evidence'] %}
+    <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form data-testid="coin-report-decision">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label class="brain-decision-reason">Your reason<textarea name="reason" minlength="10" maxlength="5000" required placeholder="Say what you read in the report and why you decided this."></textarea></label>
+      <details class="brain-decision-extras"><summary>Evidence requests</summary><textarea name="requested_evidence" placeholder="One evidence request per line"></textarea></details>
+      <div class="brain-decision-actions brain-terminal-action">
+        <button name="action" value="reject_and_store" data-confirm="Keep this coin out and store the report?" class="danger">Keep it out</button>
+        <button name="action" value="dismiss_false_positive" data-confirm="Release this coin? It still has no Shariah status." class="secondary">Release</button>
+        <button name="action" value="request_more_evidence" class="secondary">Ask for evidence</button>
+      </div>
+    </form>
 
     {% elif case.state == 'ready_for_review' %}
     <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form data-review-decision-form>
