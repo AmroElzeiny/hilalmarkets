@@ -60,6 +60,7 @@ from math import ceil
 from typing import Any
 
 from ai_market_monitor.services.coin_evidence_crawler import EvidenceFolder
+from ai_market_monitor.services.meme_coins import MEME_CONDITION, meme_finding
 from ai_market_monitor.services.sharia_automated_screen import (
     AUTOMATED_DISCLOSURE,
     GOVERNANCE_ACTIVITIES,
@@ -188,6 +189,9 @@ def decide(
     folder: EvidenceFolder,
     *,
     also_known_as: Sequence[str] = (),
+    provider_tags: Sequence[str] = (),
+    provider_category: str | None = None,
+    provider_slug: str | None = None,
 ) -> EvidenceDecision:
     """Read one coin's folder and answer for it.
 
@@ -198,6 +202,12 @@ def decide(
     other names, "Aave Labs operates the lending protocol" on GHO's own page reads as a
     sentence about somebody else, and the refusal is dropped — the direction of error
     that matters most.
+
+    ``provider_tags``, ``provider_category`` and ``provider_slug`` are what the coin data
+    provider files the coin under. They are read for one thing only: whether it calls
+    the coin a meme coin. A meme coin is refused before anything else is weighed — the
+    Hilal Markets Methodology does not cover meme coins — and that holds even when none
+    of its pages could be read, because the rule does not rest on its pages.
     """
 
     # The reader is told whose pages these are. Without it, a sentence crediting another
@@ -215,6 +225,27 @@ def decide(
         primary_documents_read=len(folder.primary_documents),
         findings=list(read.findings),
     )
+
+    meme = meme_finding(
+        symbol, tags=provider_tags, category=provider_category, provider_slug=provider_slug
+    )
+    if meme is not None:
+        # The owner's rule, settled by a list or a label rather than by the pages. What
+        # the pages say is still recorded beside it, so a reader can see both.
+        activities, matched, previewed = (
+            _activities_from(read, len(folder.primary_documents))
+            if not folder.is_empty
+            else (set(), set(), set())
+        )
+        decision.verdict = EvidenceVerdict.NOT_ELIGIBLE
+        decision.activities = sorted(
+            activities | {Activity.NO_UNDERLYING_UTILITY}, key=lambda item: item.value
+        )
+        decision.blocking_activities = [Activity.NO_UNDERLYING_UTILITY]
+        decision.matched_conditions = sorted(set(matched) | {MEME_CONDITION})
+        decision.proposed_matches = sorted(previewed)
+        decision.reasons = [GroundedReason(meme.reason, url=meme.source_url)]
+        return decision
 
     if folder.is_empty:
         decision.reasons = [GroundedReason(NO_EVIDENCE_REASONS["no_pages_read"])]

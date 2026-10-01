@@ -68,6 +68,7 @@ from ai_market_monitor.core.return_path import (
     sign_in_url,
 )
 from ai_market_monitor.core.site_content import (
+    ACCOUNT_MENU,
     DASHBOARD_NAVIGATION,
     WAITLIST_ANCHOR,
     dashboard_page_identity,
@@ -1000,6 +1001,7 @@ async def _context(
         "telegram_url": telegram_url,
         "plans": PLAN_DEFINITIONS,
         "dashboard_navigation": DASHBOARD_NAVIGATION,
+        "account_menu": ACCOUNT_MENU,
         # Which menu entry this page belongs to, so the topbar can say where a person is.
         # Read from the navigation data rather than written per page: a second list would
         # start disagreeing with the menu the first time an entry was renamed.

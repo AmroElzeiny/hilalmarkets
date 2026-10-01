@@ -1,0 +1,55 @@
+{
+  "_what_this_is": "Coins the Hilal Markets Methodology treats as meme coins. A meme coin is never covered by this standard: it is marked not suitable, under approved condition WG-01. Read by services/meme_coins.py. A coin is also treated as a meme coin, without being listed here, when CoinMarketCap tags it as one or when the project calls itself one on its own pages.",
+  "_how_to_add": "Add a row with the symbol, the name, the date you decided, one plain sentence saying why, and a page a reader can open that shows it. Then run the tests: a coin listed here may not be admitted in hilal_methodology_admissions.json.",
+  "coins": [
+    {
+      "symbol": "DOGE",
+      "name": "Dogecoin",
+      "decided_on": "2026-10-01",
+      "why": "it began as a joke based on an internet meme, and CoinMarketCap files it under Memes.",
+      "source_url": "https://coinmarketcap.com/currencies/dogecoin/"
+    },
+    {
+      "symbol": "SHIB",
+      "name": "Shiba Inu",
+      "decided_on": "2026-10-01",
+      "why": "CoinMarketCap files it under Memes and Animal Memes.",
+      "source_url": "https://coinmarketcap.com/currencies/shiba-inu/"
+    },
+    {
+      "symbol": "PEPE",
+      "name": "Pepe",
+      "decided_on": "2026-10-01",
+      "why": "CoinMarketCap files it under Memes.",
+      "source_url": "https://coinmarketcap.com/currencies/pepe/"
+    },
+    {
+      "symbol": "BONK",
+      "name": "Bonk",
+      "decided_on": "2026-10-01",
+      "why": "CoinMarketCap files it under Memes and Animal Memes.",
+      "source_url": "https://coinmarketcap.com/currencies/bonk1/"
+    },
+    {
+      "symbol": "WIF",
+      "name": "dogwifhat",
+      "decided_on": "2026-10-01",
+      "why": "CoinMarketCap files it under Memes and Animal Memes.",
+      "source_url": "https://coinmarketcap.com/currencies/dogwifhat/"
+    },
+    {
+      "symbol": "FLOKI",
+      "name": "FLOKI",
+      "decided_on": "2026-10-01",
+      "why": "CoinMarketCap files it under Memes and Animal Memes.",
+      "source_url": "https://coinmarketcap.com/currencies/floki-inu/"
+    },
+    {
+      "symbol": "TRUMP",
+      "name": "Official Trump",
+      "decided_on": "2026-10-01",
+      "why": "CoinMarketCap files it under Memes, Political Memes and Celebrity Memes.",
+      "source_url": "https://coinmarketcap.com/currencies/official-trump/"
+    }
+  ]
+}

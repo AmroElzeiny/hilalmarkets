@@ -179,11 +179,11 @@ _alert_channels = alert_channel_choices
 #: The topbar no longer carries a create button of its own. Each page declares what
 #: belongs up there through `topbar_actions`, so there is nothing to hide from the pages
 #: that do not want one — which is what `hide_new_watchlist_cta` used to be for.
-#: `hilal_chat` puts the dashboard assistant on every one of these pages and on no
-#: other. Decided here rather than by the browser reading the URL: which assistant a
-#: page carries is a server decision, exactly like the Passport popup above it, and a
-#: page that guessed from its own address would put Hilal on `/dashboard` the first
-#: time a route moved.
+#: `hilal_chat`: the dashboard shell now carries the assistant on every dashboard page
+#: (`base_dashboard.html`), so this flag no longer decides where Hilal appears. It is
+#: kept because the shared "Ask AI" macro also reads it — that macro is used by the
+#: public Market list too, where it must open the public assistant instead — and these
+#: are the pages that draw "Ask AI" buttons. Decided on the server, never from the URL.
 _PATH_CHROME = {
     "passport_quick_view_variant": "test",
     "hilal_chat": True,

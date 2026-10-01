@@ -173,6 +173,18 @@ _RELIGIOUS_RULING_PATTERNS = (
     re.compile(r"\bis\s+[a-z0-9._-]+\s+(halal|haram)\b", re.IGNORECASE),
     re.compile(r"\b(give|issue|make)\s+(me\s+)?(a\s+)?fatwa\b", re.IGNORECASE),
 )
+
+#: Words that ask for a coin's Shariah status: "is BTC halal", "is SOL Shariah
+#: compliant", "is it permissible to hold ETH". Read only together with a coin the
+#: listings recognise — see :meth:`PublicChatService._coin_shariah_question`. Without a
+#: coin, the question stays a request for a ruling and gets the boundary answer.
+_SHARIAH_STATUS_WORDS = re.compile(
+    r"\b(halal|haram|permissible|impermissible|shari'?a?h?[\s-]+compliant)\b",
+    re.IGNORECASE,
+)
+
+#: The intent recorded for "is this coin halal?", answered with where to check it.
+COIN_SHARIAH_QUESTION = "coin_shariah_question"
 _PRIVATE_ACCOUNT_PATTERNS = (
     re.compile(r"\b(my|our)\s+(account|watchlist|passport|subscription|payment)\b", re.I),
     re.compile(r"\blook\s+up\s+(my|this)\s+(account|email)\b", re.I),
@@ -284,8 +296,9 @@ class PublicKnowledgeService:
         if any(pattern.search(cleaned) for pattern in _RELIGIOUS_RULING_PATTERNS):
             return (
                 "refused",
-                "Hilal Markets does not issue religious rulings. It shows the status, scope, "
-                "methodology, evidence, and qualified human decision recorded for each asset.",
+                "I can't tell you myself whether something is halal. What I can show you "
+                "is how a coin was reviewed under different Shariah screening standards. "
+                "Tell me which coin, and I will point you to where you can check it.",
                 1.0,
                 ["boundary:no-religious-rulings"],
                 ["help"],
@@ -874,6 +887,51 @@ class PublicChatService:
             "the evidence behind it."
         )
 
+    async def _coin_shariah_question(self, question: str) -> list[str]:
+        """The listed coins a "is this coin halal?" question is about, or nothing.
+
+        Both halves are needed: a Shariah-status word, and a coin the listings know. The
+        listings are only read once the word is there, so an ordinary question costs no
+        lookup.
+        """
+
+        if not _SHARIAH_STATUS_WORDS.search(question):
+            return []
+        index = await CoinListingIndex.load(self.session)
+        return index.asked_about(question)[:3]
+
+    def _coin_shariah_message(self, symbols: list[str], *, signed_in: bool) -> str:
+        """What a person is told when they ask whether a coin is halal.
+
+        Never a refusal and never a ruling: Hilal Markets does not say a coin is halal,
+        and it does show how each screening standard reviewed it. Signed in, that is the
+        coin's Passport; before signing in, the public Market page.
+        """
+
+        subject = " and ".join(item.upper() for item in symbols) or "a coin"
+        opening = (
+            f"I can't tell you myself that {subject} is halal. What you can do is check "
+            f"how {subject} was reviewed under different Shariah screening standards."
+        )
+        if not symbols:
+            return opening
+        if signed_in:
+            target = "Its Passport" if len(symbols) == 1 else "Each coin's Passport"
+            return (
+                f"{opening} {target}, linked below, shows each standard's result, the "
+                "reasons behind it and the sources it rests on."
+            )
+        closing = (
+            f"{opening} The Market page, linked below, shows the result each standard "
+            "recorded."
+        )
+        if self.settings.stage_exposure.assistant_may_offer_account:
+            closing += (
+                " With a free account you can open the full Passport, with the reasons "
+                "and the sources."
+            )
+        return closing
+
     def _account_prompt(self) -> PublicChatAccountPrompt | None:
         exposure = self.settings.stage_exposure
         if not exposure.assistant_may_offer_account:
@@ -940,6 +998,15 @@ class PublicChatService:
             payload.question,
             authenticated=user_id is not None,
         )
+        # "Is BTC halal?" names a coin, so it is not a request for a ruling to refuse:
+        # it is answered with where that coin's reviews can be checked. Advice and the
+        # other boundaries still win — only the ruling boundary gives way to it.
+        shariah_coins: list[str] = []
+        if boundary is None or boundary[5] == "religious_ruling":
+            shariah_coins = await self._coin_shariah_question(payload.question)
+            if shariah_coins:
+                boundary = None
+        coin_cards: list[tuple[str, str | None]] = []
         ai_calls: list[PublicSupportAICall] = []
         tool_results = []
         #: Set when the answer must be "sign in first": the coins it was about, or an
@@ -980,6 +1047,29 @@ class PublicChatService:
             )
             stage, mode, intent = "ANSWER", "PRODUCT_CONVERSATION", ACCOUNT_NEEDED
             clarification, answer_complete, follow_ups = None, True, []
+        elif shariah_coins:
+            # A fixed answer, with no model call: what it may say is fully decided, and
+            # a model could only add a ruling to it. A visitor may hear only about coins
+            # the public Market page shows; anything else becomes "sign in first" below.
+            shown = (
+                shariah_coins
+                if user_id is not None
+                else [
+                    symbol
+                    for symbol in shariah_coins
+                    if symbol.upper() in await self._public_coins()
+                ]
+            )
+            status, score, source_ids, route_ids, gap = "answered", 1.0, [], [], None
+            stage, mode, intent = "ANSWER", "PRODUCT_FACT", COIN_SHARIAH_QUESTION
+            clarification, answer_complete, follow_ups = None, True, []
+            message = self._coin_shariah_message(shown, signed_in=user_id is not None)
+            if not shown:
+                account_needed = list(shariah_coins)
+            elif user_id is not None:
+                coin_cards = [("passport", symbol) for symbol in shown]
+            else:
+                coin_cards = [("market", None)]
         elif not self.settings.public_chat_ai_enabled:
             if is_greeting:
                 status = "answered"
@@ -1229,9 +1319,17 @@ class PublicChatService:
             support_handoff_reason = None
             authenticated_context_used = False
             account_prompt = self._account_prompt()
+        # A page the launch stage hides is never a card, here as everywhere else.
+        coin_cards = [
+            (key, asset)
+            for key, asset in coin_cards
+            if key != "market" or "market" in offerable_route_ids(self.settings)
+        ]
         sources = (
             []
             if account_needed is not None
+            else source_previews(coin_cards, self.settings)
+            if coin_cards
             else self._source_cards(
                 status=status,
                 source_ids=source_ids,

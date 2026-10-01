@@ -107,7 +107,9 @@ def hilal_source_cards(
       page of their own, so they have no card);
     * a plan or the person's own plan — Plan and billing;
     * the person's monitors — Monitors;
-    * counts of the market, its exchanges or categories — Halal Assets.
+    * counts of the market, its exchanges or categories — Halal Assets;
+    * a page of the product — that page (its id *is* its card key);
+    * a Help Center answer — the Help Center.
 
     The meaning of a product word is Hilal's own glossary, not a page, so it has no card.
     """
@@ -117,7 +119,11 @@ def hilal_source_cards(
         if row not in known:
             continue
         kind, _, rest = row.partition(":")
-        if kind == "asset" and rest:
+        if kind == "page" and rest:
+            wanted.append((rest, None))
+        elif kind == "help":
+            wanted.append(("help", None))
+        elif kind == "asset" and rest:
             wanted.append(("passport", rest))
         elif kind == "passport" and rest:
             wanted.append(("passport", rest.partition(":")[0]))
@@ -399,8 +405,16 @@ class HilalChatService:
 
         # What the answer rests on, as cards. Worked out before anything is written, so
         # the transcript stores exactly what the person is shown.
+        #
+        # A coin this message names, and that has a published review, always ends with
+        # its Passport card, first — whether or not the model listed it. Somebody asking
+        # "is BTC halal?" is told that Hilal cannot say so itself and that the Passport
+        # shows how each standard reviewed it; that promise needs the Passport in front
+        # of them, and a model that forgot one id must not be able to break it.
         sources = hilal_source_cards(
-            call.reply.grounded_in, known=evidence.ids, settings=self.settings
+            [*evidence.reviewed_passports_named_now, *call.reply.grounded_in],
+            known=evidence.ids,
+            settings=self.settings,
         )
 
         # 4. What it really cost.

@@ -267,7 +267,18 @@ class AutomatedScreenPipeline:
             provider_links=_link_fields(record),
         )
         name = record.name if record else symbol
-        return decide(symbol, name, folder, also_known_as=_other_names(record)), folder
+        decision = decide(
+            symbol,
+            name,
+            folder,
+            also_known_as=_other_names(record),
+            # Read only for whether the provider calls it a meme coin — the one thing
+            # its labels may decide. See `services/meme_coins.py`.
+            provider_tags=record.tags if record else (),
+            provider_category=record.category if record else None,
+            provider_slug=record.slug if record else None,
+        )
+        return decision, folder
 
     async def store(
         self,

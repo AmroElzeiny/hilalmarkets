@@ -1573,6 +1573,37 @@ CONDITIONS: tuple[Condition, ...] = (
         phrases=("vote buying", "bribe market for votes", "sell your voting power"),
     ),
     Condition(
+        # The half of WG-01 that *can* be read from a page. WG-01 names a meme coin as
+        # what a token with nothing behind it looks like, and no project ever writes "we
+        # have no product" — but a meme coin very often says that it is one. Same
+        # activity, same evidence, so a coin refused here is reported under the same
+        # reason; `services/meme_coins.py` holds the other two ways a coin is known to be
+        # a meme (the owner's list and the provider's tag).
+        code="WG-07",
+        family=Family.WRONGFUL_GAIN,
+        activity=Activity.NO_UNDERLYING_UTILITY,
+        title_ar="المشروع يصف عملته بأنها عملة ميم",
+        meaning_ar=(
+            "أن يقول المشروع عن عملته إنها عملة ميم، أي أن قيمتها من الدعاية وإقبال الناس، "
+            "لا من منتج أو خدمة."
+        ),
+        looks_like_ar="موقع يقول: نحن عملة ميم يقودها المجتمع.",
+        reason_en=(
+            "The project calls its own token a meme coin, and the Hilal Markets "
+            "Methodology does not cover meme coins."
+        ),
+        evidence=(_BATIL_VERSE, _TIJARA_VERSE),
+        agreement=Agreement.DISPUTED,
+        detection=Detection.TEXT,
+        # Singular on purpose. "memecoins" is how a launchpad or an exchange talks about
+        # other people's coins; a coin talking about itself says "a meme coin".
+        phrases=("meme coin", "memecoin", "meme token", "meme-coin"),
+        note_ar=(
+            "قرار المالك في 1 أكتوبر 2026: منهجية هلال ماركتس لا تشمل عملات الميم، "
+            "فكل عملة ميم غير مناسبة."
+        ),
+    ),
+    Condition(
         code="GH-10",
         family=Family.GHARAR,
         activity=Activity.SELLING_WHAT_IS_NOT_OWNED,

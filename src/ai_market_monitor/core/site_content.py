@@ -2,6 +2,19 @@ from dataclasses import dataclass
 from typing import TypedDict
 from urllib.parse import urlsplit, urlunsplit
 
+from ai_market_monitor.core.dashboard_paths import (
+    AFFILIATE_PATH,
+    CONNECTIONS_PATH,
+    HOME_PATH,
+    MARKET_PATH,
+    MONITOR_PATH,
+    MONITORS_PATH,
+    OPPORTUNITIES_PATH,
+    RESEARCH_PATH,
+    SETTINGS_PATH,
+    SUBSCRIPTION_PATH,
+    SUPPORT_PATH,
+)
 from ai_market_monitor.core.launch_stage import STAGE_EXPOSURE, LaunchStage
 
 
@@ -17,6 +30,13 @@ class NavigationItem:
     #: template could never be unique. Declaring it here keeps one marker per name,
     #: which is the property the guide's exact targeting depends on.
     guide_target: str | None = None
+    #: The address the entry opens, for anything that must name it without a request in
+    #: hand — the dashboard assistant telling somebody where a page is. Written from
+    #: ``core/dashboard_paths.py``; a test checks it against the route ``endpoint`` names.
+    path: str = ""
+    #: What the page is for, in one plain sentence. The assistant reads this to answer
+    #: "where do I find …"; it is the page's own description, never the assistant's.
+    about: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +74,10 @@ class PublicPageMetadata:
     description: str
     template: str
     legal_review_required: bool = False
+    #: Other names people use for this page. The Help Center *is* the site's FAQ — the
+    #: old `/faq` address redirects there — and an assistant asked "where is the FAQ"
+    #: has to know that, or it says the FAQ does not exist.
+    also_called: tuple[str, ...] = ()
 
 
 class PurchaseFaq(TypedDict):
@@ -381,7 +405,17 @@ DASHBOARD_NAVIGATION = (
             #: it is written into sent email, into Telegram buttons and into the
             #: `target_path` column of two tables, and none of those can be corrected
             #: after the fact. See `core/dashboard_paths.py`.
-            NavigationItem("Home", "main_dashboard_page", "main", "gauge"),
+            NavigationItem(
+                "Home",
+                "main_dashboard_page",
+                "main",
+                "gauge",
+                path=HOME_PATH,
+                about=(
+                    "Where things stand today: the coin closest to what you asked for, "
+                    "coins you can watch, your monitors, and the messages we sent you."
+                ),
+            ),
             NavigationItem(
                 "Halal Assets",
                 "screened_market_page",
@@ -389,6 +423,12 @@ DASHBOARD_NAVIGATION = (
                 "market",
                 ("asset_passport",),
                 guide_target="nav-halal-assets",
+                path=MARKET_PATH,
+                about=(
+                    "Every coin a published Shariah standard reviewed, with live prices. "
+                    "Open a coin to see its Passport: the review under each standard, "
+                    "the reasons and the sources."
+                ),
             ),
             #: Coins no authority has ruled on, and what a machine read about them.
             #:
@@ -401,6 +441,11 @@ DASHBOARD_NAVIGATION = (
                 "automated_research_page",
                 "research",
                 "search",
+                path=RESEARCH_PATH,
+                about=(
+                    "Coins no authority has ruled on yet, and what a machine read on each "
+                    "project's own website. No scholar reviewed these results."
+                ),
             ),
         ),
     ),
@@ -421,6 +466,11 @@ DASHBOARD_NAVIGATION = (
                     "strategy_verify",
                     "strategy_versions",
                 ),
+                path=MONITORS_PATH,
+                about=(
+                    "Your monitors: what each one watches, whether it is running, paused "
+                    "or a draft, and what it found."
+                ),
             ),
             #: The visual canvas, named for what a person does on it rather than for
             #: what the page is called internally. It sits directly after Monitors
@@ -431,6 +481,11 @@ DASHBOARD_NAVIGATION = (
                 "monitor_canvas",
                 "circle_plus",
                 guide_target="nav-create-monitor",
+                path=MONITOR_PATH,
+                about=(
+                    "The canvas where you draw a new monitor, card by card, and switch it "
+                    "on when it is ready."
+                ),
             ),
             NavigationItem(
                 "Opportunities",
@@ -439,6 +494,11 @@ DASHBOARD_NAVIGATION = (
                 "activity",
                 ("lifecycles", "alert_proof"),
                 guide_target="nav-opportunities",
+                path=OPPORTUNITIES_PATH,
+                about=(
+                    "How close each coin is to everything your monitors asked for, and "
+                    "the alerts they sent, with the proof behind each one."
+                ),
             ),
         ),
     ),
@@ -450,21 +510,70 @@ DASHBOARD_NAVIGATION = (
                 "connections_page",
                 "integrations",
                 "bell",
+                path=CONNECTIONS_PATH,
+                about=(
+                    "Connect Telegram, email or WhatsApp, and choose what you will be "
+                    "told about."
+                ),
             ),
             NavigationItem(
                 "Plan and billing",
                 "subscription_page",
                 "billing",
                 "billing",
+                path=SUBSCRIPTION_PATH,
+                about="Your plan, what it includes, how you pay, and how to change it.",
             ),
             #: The affiliate programme. It answers at `/dashboard/affiliate`, and it was
             #: reachable from nowhere at all: the page existed as "Referrals" and had no
             #: menu entry, so the only way to it was typing the address.
-            NavigationItem("Affiliate", "affiliate_page", "affiliate", "gift"),
-            NavigationItem("Settings", "settings_page", "settings", "settings"),
-            NavigationItem("Support", "support_page", "support", "support"),
+            NavigationItem(
+                "Affiliate",
+                "affiliate_page",
+                "affiliate",
+                "gift",
+                path=AFFILIATE_PATH,
+                about=(
+                    "Share Hilal Markets and get paid: apply, see who joined through "
+                    "you, and ask for a payout."
+                ),
+            ),
+            NavigationItem(
+                "Settings",
+                "settings_page",
+                "settings",
+                "settings",
+                path=SETTINGS_PATH,
+                about=(
+                    "Where and when we tell you things, how much we send, Shariah status "
+                    "updates, which exchanges we watch, and your data."
+                ),
+            ),
+            NavigationItem(
+                "Support",
+                "support_page",
+                "support",
+                "support",
+                path=SUPPORT_PATH,
+                about=(
+                    "Get help: things you can change yourself, a form to tell us what "
+                    "happened, and the questions you already asked us. A person answers "
+                    "by email."
+                ),
+            ),
         ),
     ),
+)
+
+
+#: The account menu that opens from the person's name at the foot of the side menu.
+#: Two entries that are also in the side menu, under the names this menu gives them.
+#: One list for the sidebar that draws it and for the assistant that tells a person
+#: where things are; "Get help" and "Support" are the same page, and the assistant has
+#: to know both names.
+ACCOUNT_MENU: tuple[NavigationItem, ...] = (
+    NavigationItem("Settings", "settings_page", "settings", "settings", path=SETTINGS_PATH),
+    NavigationItem("Get help", "support_page", "support", "support", path=SUPPORT_PATH),
 )
 
 
@@ -572,6 +681,7 @@ PUBLIC_PAGES = (
             "and account safety."
         ),
         "hilal/public/help.html",
+        also_called=("FAQ", "Frequently asked questions", "Help articles"),
     ),
     PublicPageMetadata(
         "contact",

@@ -591,12 +591,18 @@
     "symbol": "PEPE",
     "name": "Pepe",
     "admission": "automated_screen",
-    "outcome": "not_enough_data",
-    "decided_on": "2026-08-31",
+    "outcome": "refused",
+    "decided_on": "2026-10-01",
     "reasons": [
-      "We read the project's pages, but none of them says what the project actually does, so there is nothing to judge yet."
+      "The Hilal Markets Methodology does not cover meme coins, so every meme coin is marked not suitable under it. Hilal Markets lists Pepe as a meme coin: CoinMarketCap files it under Memes."
     ],
     "sources": [
+      {
+        "url": "https://coinmarketcap.com/currencies/pepe/",
+        "title": "Pepe on CoinMarketCap, filed under Memes",
+        "category": "provider_label",
+        "retrieved_at": "2026-10-01"
+      },
       {
         "url": "https://pepe.vip/",
         "title": "PEPE",
@@ -606,8 +612,10 @@
     ],
     "pages_read": 1,
     "primary_pages_read": 1,
-    "matched_conditions": [],
-    "note": ""
+    "matched_conditions": [
+      "WG-01"
+    ],
+    "note": "Was 'not enough data' on 2026-08-31. Refused on 2026-10-01 when the owner excluded meme coins from this standard."
   },
   {
     "symbol": "ZKC",

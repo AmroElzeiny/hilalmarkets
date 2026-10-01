@@ -950,6 +950,8 @@ export default function MethodologyPage() {
                     'It is never chosen for you. You have to pick it deliberately, and every result carries this warning.',
                     'It never guesses at a question it cannot answer. It records the question as skipped.',
                     'It never gives buy or sell advice, and Hilal Markets never places a trade.',
+                    // Worded on the server, so the page and the published record agree.
+                    ...(data.memeRule ? [data.memeRule.text] : []),
                   ].map((line) => (
                     <li key={line}>
                       <Icon name="check" className="size-[16px] shrink-0" />

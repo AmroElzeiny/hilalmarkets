@@ -460,7 +460,7 @@
       "status": "approved",
       "decided_by": "Hilal Markets",
       "decided_on": "2026-08-30",
-      "note": "Already live, and only a person can ever establish it. No phrase can find it."
+      "note": "Already live. No phrase can find a token with nothing behind it. From 2026-10-01 it is also established for every meme coin: one on hilal_methodology_meme_coins.json, one CoinMarketCap tags as a meme, or one that calls itself a meme coin (WG-07). The Hilal Markets Methodology does not cover meme coins."
     },
     {
       "code": "WG-03",
@@ -482,6 +482,13 @@
       "decided_by": "Hilal Markets",
       "decided_on": "2026-08-30",
       "note": ""
+    },
+    {
+      "code": "WG-07",
+      "status": "approved",
+      "decided_by": "Hilal Markets",
+      "decided_on": "2026-10-01",
+      "note": "The owner's decision: the Hilal Markets Methodology does not cover meme coins, so a project that calls itself a meme coin is not suitable."
     }
   ]
 }

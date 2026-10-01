@@ -64,6 +64,12 @@ from ai_market_monitor.db.models.enums import (
     ShariaAssetStatus,
     ShariaMethodologyStatus,
 )
+from ai_market_monitor.services.meme_coins import (
+    MEME_CONDITION,
+    MEME_RULE_SENTENCE,
+    meme_finding,
+    owner_list,
+)
 from ai_market_monitor.services.sharia_automated_screen import (
     AUTOMATED_DISCLOSURE,
     METHODOLOGY_DISPLAY_NAME,
@@ -88,7 +94,10 @@ ADMISSIONS_FILE = "hilal_methodology_admissions.json"
 #: The version this standard publishes under. It changes when the *rule* changes — an
 #: approval in the register, or a change to the crawl's reach — never when a coin is
 #: added, because adding a coin does not change what the standard means.
-METHODOLOGY_VERSION = "2026.08-hm.1"
+#:
+#: ``hm.2`` (1 October 2026): meme coins are no longer covered. Every meme coin is not
+#: suitable — see :data:`MEME_RULE` and `services/meme_coins.py`.
+METHODOLOGY_VERSION = "2026.10-hm.2"
 
 #: Where a reader can see the whole thing. One owner: the route, the notice beside every
 #: result, and the methodology record itself all read this.
@@ -100,6 +109,19 @@ UNDER_DEVELOPMENT_NOTICE = (
     "This standard is still under development. It is applied by machine and no Shariah "
     "advisor stands behind it. It is not a fatwa and it is not the decision of a "
     "Shariah board."
+)
+
+#: The category of a source that is the coin data provider's own label for a coin — the
+#: page where CoinMarketCap files it under a meme tag. Neither the project's page nor
+#: the regulator's, so it is named separately wherever a source is described.
+PROVIDER_LABEL_CATEGORY = "provider_label"
+
+#: The meme-coin rule, as the published record states it. One sentence for the page, the
+#: methodology record and the description, so they cannot say three different things.
+MEME_RULE = (
+    f"{MEME_RULE_SENTENCE} A coin is a meme coin here when Hilal Markets lists it as "
+    "one, when CoinMarketCap files it under a meme tag, or when the project calls itself "
+    "a meme coin on its own pages."
 )
 
 #: The regulator whose published list this standard treats as a floor.
@@ -215,10 +237,34 @@ class AdmittedAsset:
                 "regulator_floor_must_admit",
                 f"{self.symbol}: the regulator floor admits; it never refuses.",
             )
+        listed = meme_finding(self.symbol)
+        if listed is not None and not (
+            self.is_meme_refusal
+            and MEME_CONDITION in self.matched_conditions
+            and self.reasons[0] == listed.reason
+        ):
+            # Fail closed. A coin the owner named as a meme coin cannot be published as
+            # admitted, or as merely unread: this standard does not cover meme coins, and
+            # a list that said otherwise would be the standard contradicting itself.
+            raise AdmissionError(
+                "meme_coin_not_refused",
+                f"{self.symbol} is on the meme list, so this standard must record it as "
+                f"refused under {MEME_CONDITION}, with the meme rule as its first reason.",
+            )
 
     @property
     def is_admitted(self) -> bool:
         return self.outcome is Outcome.ADMITTED
+
+    @property
+    def is_meme_refusal(self) -> bool:
+        """Refused because it is a meme coin, rather than for what its pages said."""
+
+        return (
+            self.outcome is Outcome.REFUSED
+            and bool(self.reasons)
+            and self.reasons[0].startswith(MEME_RULE_SENTENCE)
+        )
 
     @property
     def status(self) -> ShariaAssetStatus:
@@ -268,6 +314,8 @@ class AdmittedAsset:
                 f"{self.pages_read} pages, {self.primary_pages_read} of them written by "
                 "the project about itself, and none of the approved conditions refused it."
             )
+        elif self.is_meme_refusal:
+            lead = f"{self.name} ({self.symbol}) is a meme coin. {MEME_RULE_SENTENCE}"
         elif self.outcome is Outcome.REFUSED:
             lead = (
                 f"{self.name} ({self.symbol}) was read by machine from "
@@ -520,7 +568,8 @@ def methodology_description() -> str:
         f"project's own website, and {counts['out_of_reach']} cannot and are skipped "
         "rather than guessed. It admits a coin by one of two routes: the Malaysian "
         "regulator publishes it as Shariah-compliant, or the automatic reading found "
-        f"nothing that refuses it. {UNDER_DEVELOPMENT_NOTICE} {AUTOMATED_DISCLOSURE}"
+        f"nothing that refuses it. {MEME_RULE} {UNDER_DEVELOPMENT_NOTICE} "
+        f"{AUTOMATED_DISCLOSURE}"
     )
 
 
@@ -557,6 +606,20 @@ def methodology_rules() -> dict[str, Any]:
             "blocking_outcomes": ["fail", "needs_evidence"],
         },
         {
+            "key": "meme_coin_exclusion",
+            "label": "Meme coins are not covered",
+            "description": MEME_RULE,
+            "required": True,
+            "allowed_outcomes": outcomes,
+            "evidence_categories": [
+                "meme_list",
+                PROVIDER_LABEL_CATEGORY,
+                "project_own_pages",
+            ],
+            "qualification_rules": {"written_reason_required": True},
+            "blocking_outcomes": ["fail"],
+        },
+        {
             "key": "regulator_floor",
             "label": "The regulator floor",
             "description": (
@@ -590,6 +653,11 @@ def methodology_rules() -> dict[str, Any]:
         "skipped_conditions": [item.code for item in skipped_criteria()],
         "admission_routes": [item.value for item in Admission],
         "regulator_floor_code": REGULATOR_CODE,
+        # The owner's rule from 1 October 2026, named in the record and not only in code.
+        "meme_coins_covered": False,
+        "meme_rule": MEME_RULE,
+        "meme_condition": MEME_CONDITION,
+        "meme_list": sorted(owner_list()),
         # Deliberately not in any aggregate. Named here so the exclusion is visible in
         # the published record and not only in code.
         "excluded_from_aggregate": True,
@@ -611,7 +679,11 @@ def methodology_rules() -> dict[str, Any]:
                     "under_review",
                     "excluded",
                 ],
-                "criterion_keys": ["project_own_description", "approved_condition_screen"],
+                "criterion_keys": [
+                    "project_own_description",
+                    "approved_condition_screen",
+                    "meme_coin_exclusion",
+                ],
                 "evidence_categories": ["project_own_pages"],
                 "default_scope": "Spot purchase and holding only.",
                 "execution_blocking_decisions": ["not_covered", "excluded", "under_review"],
@@ -627,6 +699,9 @@ def evidence_requirements() -> dict[str, Any]:
             "project_own_pages",
             "approved_conditions",
             "official_external_reference",
+            # Where a meme coin is known from: the owner's list, or the provider's tag.
+            "meme_list",
+            PROVIDER_LABEL_CATEGORY,
         ],
         "minimum_evidence_completeness": 1.0,
         "maximum_source_age_days": 365,
@@ -688,6 +763,14 @@ def page_payload() -> dict[str, Any]:
             "name": REGULATOR_NAME,
             "url": REGULATOR_URL,
         },
+        "memeRule": {
+            "condition": MEME_CONDITION,
+            "text": MEME_RULE,
+            "listed": [
+                {"symbol": item.symbol, "name": item.name, "source": item.source_url}
+                for item in owner_list().values()
+            ],
+        },
         "families": [
             {
                 "key": family.value,
@@ -715,7 +798,11 @@ def page_payload() -> dict[str, Any]:
                 "titleAr": item.title_ar,
                 "reason": item.reason_en,
                 "why": (
-                    "needs a person"
+                    # Applied to every meme coin; any other token with nothing behind
+                    # it still needs a person, so it stays in this list as well.
+                    "needs a person, except for meme coins, which are always refused"
+                    if item.code == MEME_CONDITION
+                    else "needs a person"
                     if item.detection is Detection.MANUAL
                     else "needs figures nobody publishes"
                 ),
@@ -957,22 +1044,30 @@ async def publish(session: AsyncSession) -> PublishResult:
         await session.flush()
         result.assessments_written += 1
         for source in asset.sources:
+            # Three kinds of page, and each is named for what it is: the project's own
+            # page, the regulator's list, or the coin data provider's label.
+            provider_label = source.category == PROVIDER_LABEL_CATEGORY
+            own_page = asset.admission is Admission.AUTOMATED_SCREEN and not provider_label
             session.add(
                 ShariaEvidenceSource(
                     assessment_id=assessment.id,
-                    source_type="project_page"
-                    if asset.admission is Admission.AUTOMATED_SCREEN
-                    else "official_external_reference",
+                    source_type="project_page" if own_page else "official_external_reference",
                     title=source.title[:300],
-                    publisher=asset.name[:200]
-                    if asset.admission is Admission.AUTOMATED_SCREEN
-                    else REGULATOR_NAME[:200],
+                    publisher=(
+                        asset.name[:200]
+                        if own_page
+                        else "CoinMarketCap"
+                        if provider_label
+                        else REGULATOR_NAME[:200]
+                    ),
                     source_url=source.url[:1000],
                     published_at=None,
                     retrieved_at=datetime.combine(source.retrieved_at, datetime.min.time(), UTC),
                     evidence_category=(
                         "project_own_pages"
-                        if asset.admission is Admission.AUTOMATED_SCREEN
+                        if own_page
+                        else PROVIDER_LABEL_CATEGORY
+                        if provider_label
                         else "official_external_reference"
                     ),
                     evidence_summary=_source_summary(asset, source),
@@ -987,6 +1082,11 @@ async def publish(session: AsyncSession) -> PublishResult:
 
 
 def _source_summary(asset: AdmittedAsset, source: Source) -> str:
+    if source.category == PROVIDER_LABEL_CATEGORY:
+        return (
+            f"CoinMarketCap's page for {asset.name}, read on "
+            f"{source.retrieved_at.isoformat()}. It files {asset.symbol} under a meme tag."
+        )
     if asset.admission is Admission.REGULATOR_FLOOR:
         return (
             f"{REGULATOR_NAME} publishes {asset.symbol} as Shariah-compliant on this "

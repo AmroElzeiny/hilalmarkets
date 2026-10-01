@@ -112,12 +112,13 @@
         <span data-icon="shield_check" data-icon-class="icon-sm"></span>{{ nav_plan_name }}
       </p>
       {% endif %}
-      <a class="hm-nav-account-row" role="menuitem" href="{{ url_for('settings_page') }}">
-        <span data-icon="settings" data-icon-class="icon-sm"></span>Settings
+      {#- From `ACCOUNT_MENU` in core/site_content.py — the list the assistant also reads
+          when it tells somebody where Settings or Get help is. -#}
+      {% for item in account_menu %}
+      <a class="hm-nav-account-row" role="menuitem" href="{{ url_for(item.endpoint) }}">
+        <span data-icon="{{ item.icon }}" data-icon-class="icon-sm"></span>{{ item.label }}
       </a>
-      <a class="hm-nav-account-row" role="menuitem" href="{{ url_for('support_page') }}">
-        <span data-icon="support" data-icon-class="icon-sm"></span>Get help
-      </a>
+      {% endfor %}
       {% if user %}
       <form method="post" action="/logout">
         <button class="hm-nav-account-row is-leave" type="submit" role="menuitem">

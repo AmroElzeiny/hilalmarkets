@@ -20,6 +20,11 @@ import pytest
 from sqlalchemy import select
 
 from ai_market_monitor.core.dashboard_paths import MONITOR_PATH
+from ai_market_monitor.core.site_content import (
+    ACCOUNT_MENU,
+    DASHBOARD_NAVIGATION,
+    PUBLIC_PAGES,
+)
 from ai_market_monitor.db.models import (
     AIBudgetCounter,
     HilalChatConversation,
@@ -97,24 +102,49 @@ async def test_hilal_is_on_every_dashboard_test_page(test_context):
     assert seen >= 2, "no design-path page was actually checked"
 
 
-async def test_hilal_is_on_no_other_dashboard_page(test_context):
-    """It belongs to the redesigned pages, and to nothing else (rule A2).
+#: Pages the dashboard shell still serves in the older design. Not in the side menu, but
+#: reached from messages and buttons, and Hilal is on them too (rule A2, 1 October 2026).
+OLDER_DASHBOARD_PATHS = ("/dashboard", "/dashboard/strategies", "/dashboard/billing")
 
-    The pages named here are the ones that were *not* redesigned: the builder, the
-    checkout side of billing, and Evidence and Activity. They are still served, they
-    still use the older design, and the assistant is not on any of them.
 
-    Looked for by the widget's own class and script rather than by "data-hilal", which
-    is a prefix the shared sidebar already uses for something else entirely.
+async def test_hilal_is_on_every_dashboard_page(test_context):
+    """Rule A2: every page the dashboard shell draws carries Hilal — the side menu's
+    pages, the account menu's, and the older pages a link can still open.
+
+    The whole family is read from the menus themselves, so a page added to the menu is
+    checked without anybody remembering to add it here. Looked for by the widget's own
+    class and script rather than by "data-hilal", which is a prefix the shared sidebar
+    already uses for something else entirely.
     """
-    await _signed_in(test_context, email="hilal-nowhere@example.com")
+    await _signed_in(test_context, email="hilal-everywhere@example.com")
     client = test_context["client"]
-    for path in ("/dashboard", "/dashboard/strategies", "/dashboard/billing"):
+    menu = [item.path for group in DASHBOARD_NAVIGATION for item in group.items]
+    paths = dict.fromkeys([*menu, *(item.path for item in ACCOUNT_MENU), *OLDER_DASHBOARD_PATHS])
+    checked = 0
+    for path in paths:
         page = await client.get(path, follow_redirects=True)
+        if page.status_code != 200 or 'data-testid="dashboard-root"' not in page.text:
+            assert path in OLDER_DASHBOARD_PATHS, f"{path} answered {page.status_code}"
+            continue
+        assert 'class="hm-hilal"' in page.text, f"Hilal is missing from {path}"
+        assert "hm-hilal-chat.js" in page.text, f"Hilal's script is missing from {path}"
+        # Its dialogs are styled by the design-path sheet; an older page that carried
+        # Hilal without it would show the report box unstyled.
+        assert "hm-dashboard-test.css" in page.text, f"{path} lacks Hilal's dialog styles"
+        checked += 1
+    assert checked >= len(menu), "not every menu page was actually checked"
+
+
+async def test_hilal_is_never_on_the_public_site(test_context):
+    """A3: the public site has its own assistant, and Hilal never appears beside it."""
+    await _signed_in(test_context, email="hilal-public@example.com")
+    client = test_context["client"]
+    for page_meta in PUBLIC_PAGES:
+        page = await client.get(page_meta.path, follow_redirects=True)
         if page.status_code != 200:
             continue
-        assert 'class="hm-hilal"' not in page.text, f"Hilal leaked onto {path}"
-        assert "hm-hilal-chat.js" not in page.text, f"Hilal's script leaked onto {path}"
+        assert 'class="hm-hilal"' not in page.text, f"Hilal leaked onto {page_meta.path}"
+        assert "hm-hilal-chat.js" not in page.text, f"Hilal leaked onto {page_meta.path}"
 
 
 async def test_the_canvas_still_carries_no_assistant_inside_it(test_context):

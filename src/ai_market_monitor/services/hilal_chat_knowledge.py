@@ -42,6 +42,14 @@ from ai_market_monitor.core.plans import (
     running_offer_code,
     running_offer_percent,
 )
+from ai_market_monitor.core.site_content import (
+    ACCOUNT_MENU,
+    DASHBOARD_NAVIGATION,
+    PUBLIC_PAGES,
+    footer_navigation,
+    public_help_categories,
+    public_navigation,
+)
 from ai_market_monitor.db.models import (
     AssetShariaAssessment,
     AssetShariaStatusHistory,
@@ -81,11 +89,15 @@ from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningError,
     canonical_asset,
 )
+from ai_market_monitor.services.source_previews import source_key_for_path
 
 #: The spelling rules live in `services/coin_mentions.py`, shared with the public
 #: assistant. `spelling_keys` is re-exported here because this is where callers have
 #: always found it.
 __all__ = ["spelling_keys"]
+
+#: The side-menu entries that also sit in the account menu under the person's name.
+_ACCOUNT_MENU_NAMES: dict[str, str] = {item.endpoint: item.label for item in ACCOUNT_MENU}
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +169,14 @@ class Evidence:
     trimmed_for_size: bool = False
     #: What this product's own words mean. See `services/hilal_product_words.py`.
     words: list[dict[str, Any]] = field(default_factory=list)
+    #: Every page of the product — the dashboard's side menu and the public site — with
+    #: where it is and what it is for. See :meth:`HilalChatKnowledge._pages`.
+    pages: list[dict[str, Any]] = field(default_factory=list)
+    #: The Help Center's own questions and answers, word for word.
+    help_answers: list[dict[str, Any]] = field(default_factory=list)
+    #: The listed coins *this* message names, as symbols — not the ones carried over
+    #: from earlier turns. Their Passports are offered under the answer.
+    named_now: list[str] = field(default_factory=list)
 
     def to_payload(self) -> dict[str, Any]:
         payload = {
@@ -172,6 +192,8 @@ class Evidence:
             "plans_and_prices": self.plans,
             "their_own_account": self.account,
             "words_this_product_uses": self.words,
+            "pages_in_this_product": self.pages,
+            "help_center_answers": self.help_answers,
             "what_they_can_see": self.on_screen,
         }
         if self.trimmed_for_size:
@@ -182,12 +204,24 @@ class Evidence:
         return payload
 
     @property
+    def reviewed_passports_named_now(self) -> list[str]:
+        """Evidence ids of the coins this message names that have a published review.
+
+        A coin with no review yet has no Passport to open, so it has no card.
+        """
+
+        reviewed = {item.symbol for item in self.asked_about if item.status_words}
+        return [f"asset:{symbol}" for symbol in self.named_now if symbol in reviewed]
+
+    @property
     def ids(self) -> set[str]:
         found = {f"asset:{item.symbol}" for item in self.asked_about}
         found |= {str(item["id"]) for item in self.methodologies if "id" in item}
         found |= {str(item["id"]) for item in self.passports if "id" in item}
         found |= {str(item["id"]) for item in self.plans if "id" in item}
         found |= {str(item["id"]) for item in self.words if "id" in item}
+        found |= {str(item["id"]) for item in self.pages if "id" in item}
+        found |= {str(item["id"]) for item in self.help_answers if "id" in item}
         if self.market_shape:
             found.add("market:shape")
         if self.exchanges:
@@ -246,6 +280,10 @@ class HilalChatKnowledge:
         evidence.categories = await self._categories()
         evidence.plans = self._plans()
         evidence.on_screen = self._on_screen(view)
+        # Every page, on every turn, wherever they are. "Where is the FAQ" was answered
+        # with "there is no FAQ" because Hilal only ever saw the page it was opened on.
+        evidence.pages = self._pages(view)
+        evidence.help_answers = self._help_answers()
 
         subject = (view.subject if view else None) or ""
         # Order is relevance, and it decides which coins survive the cap: what they
@@ -257,11 +295,19 @@ class HilalChatKnowledge:
         carried: list[str] = []
         for said in reversed(earlier or []):
             carried.extend(self._names_in(said))
+        index = await self._listing_index()
         found, missing = await self._resolve(
-            wanted, carried=carried, asked_now=self._tickers_in(message)
+            wanted, carried=carried, asked_now=self._tickers_in(message), index=index
         )
         evidence.asked_about = found
         evidence.looked_for_but_not_listed = missing
+        named = {
+            symbol
+            for item in self._names_in(message)
+            for key in spelling_keys(item)
+            if (symbol := index.get(key))
+        }
+        evidence.named_now = [item.symbol for item in found if item.symbol in named]
         evidence.passports = await self._passports(
             [item.symbol for item in found], subject=subject.strip() or None
         )
@@ -290,6 +336,7 @@ class HilalChatKnowledge:
         *,
         carried: list[str] | None = None,
         asked_now: list[str] | None = None,
+        index: CoinListingIndex | None = None,
     ) -> tuple[list[AssetFacts], list[str]]:
         """Match what a person typed against the listings, and say what was not found.
 
@@ -301,7 +348,7 @@ class HilalChatKnowledge:
         mentioned since the first turn should not keep being announced as missing.
         """
 
-        index = await self._listing_index()
+        index = index or await self._listing_index()
         symbols: list[str] = []
         for item in [*wanted, *(carried or [])]:
             for key in spelling_keys(item):
@@ -656,7 +703,8 @@ class HilalChatKnowledge:
     def _fit_to_size(self, evidence: Evidence) -> None:
         """Keep one turn under the payload cap. Drops whole rows, last first —
         Passport rows, then on-screen card rows, then the page's own checklist,
-        then this person's monitor rows — never refuses the turn, and never
+        then this person's monitor rows, then the Help Center's answers — never
+        refuses the turn, and never
         merges what is left into a single invented answer."""
 
         cap = self.settings.hilal_chat_evidence_max_chars
@@ -702,6 +750,14 @@ class HilalChatKnowledge:
             and len(json.dumps(evidence.to_payload(), default=str)) > cap
         ):
             monitors.pop()
+            trimmed = True
+        # The Help Center's answers last: the page list still says where they live, so
+        # a person who needs one can still be sent to it.
+        while (
+            evidence.help_answers
+            and len(json.dumps(evidence.to_payload(), default=str)) > cap
+        ):
+            evidence.help_answers.pop()
             trimmed = True
         if trimmed:
             evidence.trimmed_for_size = True
@@ -797,6 +853,92 @@ class HilalChatKnowledge:
                 )
             rows.append(row)
         return rows[:8]
+
+    def _pages(self, view: HilalChatView | None) -> list[dict[str, Any]]:
+        """Every page somebody can be sent to, where it is, and what it is for.
+
+        Read from the menus themselves — the dashboard's side menu and the public site's
+        header and footer — so Hilal names a page exactly as the menu does and never
+        sends anybody to one the launch stage has hidden. Each row's id is the page's
+        card in `services/source_previews.py`, so an answer that rests on it ends with a
+        card that opens it. No address travels: Hilal may not write a link, and the card
+        is the link.
+        """
+
+        current = (view.page if view else None) or ""
+        rows: list[dict[str, Any]] = []
+        for group in DASHBOARD_NAVIGATION:
+            for item in group.items:
+                key = source_key_for_path(item.path)
+                if key is None:
+                    continue
+                where = f"In the dashboard's side menu, under {group.label}."
+                also = _ACCOUNT_MENU_NAMES.get(item.endpoint)
+                if also is not None:
+                    where += (
+                        " Also in the account menu that opens from your name at the "
+                        "bottom of the side menu"
+                        + (f", where it is called {also}." if also != item.label else ".")
+                    )
+                rows.append(
+                    {
+                        "id": f"page:{key}",
+                        "kind": "dashboard_page",
+                        "name": item.label,
+                        "where": where,
+                        "what_it_is_for": item.about,
+                        "they_are_on_it_now": bool(
+                            current and (current == item.page or current in item.active_pages)
+                        ),
+                    }
+                )
+
+        hidden = self.settings.stage_exposure.hidden_pages
+        header = {item.page for item in public_navigation(hidden_pages=hidden)}
+        footer = {
+            item.page
+            for group in footer_navigation(hidden_pages=hidden)
+            for item in group.items
+        }
+        for page in PUBLIC_PAGES:
+            key = source_key_for_path(page.path)
+            if key is None or page.page in hidden:
+                # No card means the page is deliberately linked from nowhere; a page the
+                # launch stage hides is not one to send anybody to.
+                continue
+            if page.page in header:
+                where = "On the public website, in the menu at the top of every page."
+            elif page.page in footer:
+                where = "On the public website, in the links at the bottom of every page."
+            else:
+                where = "On the public website. It is not in a menu, so open it from here."
+            row: dict[str, Any] = {
+                "id": f"page:{key}",
+                "kind": "public_page",
+                "name": page.title,
+                "where": where,
+                "what_it_is_for": page.description,
+            }
+            if page.also_called:
+                row["also_called"] = list(page.also_called)
+            rows.append(row)
+        return rows
+
+    def _help_answers(self) -> list[dict[str, Any]]:
+        """The Help Center's questions and answers, as the Help Center prints them."""
+
+        return [
+            {
+                "id": f"help:{category['slug']}:{number}",
+                "kind": "help_center_answer",
+                "on_page": "Help Center",
+                "topic": category["title"],
+                "question": article["question"],
+                "answer": article["answer"],
+            }
+            for category in public_help_categories(waitlist_mode=self.settings.waitlist_mode)
+            for number, article in enumerate(category["articles"], start=1)
+        ]
 
     @staticmethod
     def _on_screen(view: HilalChatView | None) -> dict[str, Any]:

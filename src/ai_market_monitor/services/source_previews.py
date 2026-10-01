@@ -35,7 +35,12 @@ from ai_market_monitor.core.dashboard_paths import (
     MONITORS_PATH,
     SUBSCRIPTION_PATH,
 )
-from ai_market_monitor.core.site_content import PUBLIC_PAGE_BY_PAGE, SITE_DESCRIPTION, SITE_NAME
+from ai_market_monitor.core.site_content import (
+    DASHBOARD_NAVIGATION,
+    PUBLIC_PAGE_BY_PAGE,
+    SITE_DESCRIPTION,
+    SITE_NAME,
+)
 from ai_market_monitor.schemas.source_preview import SourcePreview
 
 STATIC_DIR: Final[Path] = Path(__file__).resolve().parents[1] / "static"
@@ -135,6 +140,24 @@ SOURCE_PAGES: Final[dict[str, SourcePage]] = {
         account_only=True,
     ),
 }
+
+# Every other page in the dashboard's side menu, named and described by the menu itself
+# — the same entry the sidebar draws — so "where is Support" can end with a card that
+# opens Support. A menu page already in the catalog above keeps its entry there.
+SOURCE_PAGES.update(
+    {
+        item.page: SourcePage(item.page, item.label, item.about, item.path, account_only=True)
+        for group in DASHBOARD_NAVIGATION
+        for item in group.items
+        if item.path not in {page.path for page in SOURCE_PAGES.values()}
+    }
+)
+
+
+def source_key_for_path(path: str) -> str | None:
+    """The catalog key of the page at this address, or ``None`` when it has no card."""
+
+    return next((key for key, page in SOURCE_PAGES.items() if page.path == path), None)
 
 
 def screenshot_path(key: str) -> Path:

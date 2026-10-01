@@ -144,6 +144,13 @@ export type MethodologyRuntimeConfig = {
     evidence: number
   }
   regulator: { code: string; name: string; url: string }
+  /** The owner's meme-coin rule, worded on the server. Optional so an older payload
+   *  still renders. */
+  memeRule?: {
+    condition: string
+    text: string
+    listed: Array<{ symbol: string; name: string; source: string }>
+  }
   families: Array<{
     key: string
     titleAr: string

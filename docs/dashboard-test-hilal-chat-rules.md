@@ -10,7 +10,8 @@ governs the canvas, and every rule in both still applies here.
 | # | Rule |
 |---|---|
 | A1 | One agent, named **Hilal**, reachable from a circular button fixed to the **bottom right** of the screen. |
-| A2 | It appears on **every the redesigned dashboard pages page** and on **no other page**. Not on `/dashboard`, not on the public site. |
+| A2 | It appears on **every dashboard page** — every page drawn by the dashboard shell, the older ones included (changed on 1 October 2026 at the owner's request; it used to be the redesigned pages only). Never on the public site. |
+| A2a | Wherever it is opened, it knows **every page of the product**: the side menu, the account menu and the public site's pages, with where each one is and what it is for, plus the Help Center's questions and answers. "Where is the FAQ" is answered with the Help Center and a card that opens it. |
 | A3 | It is **not** the landing-page support assistant. Separate agent, separate knowledge, separate storage, separate limits. |
 | A4 | It is decided **server-side**, from the path's own chrome settings — never by reading the URL in the browser. |
 | A5 | The canvas page keeps its rule A3/A4: no assistant *inside* the canvas. The floating button is the shell, not the canvas. |
@@ -57,6 +58,7 @@ level" is still somebody asking Hilal to choose their number, and is still refus
 | B11 | Every guidance answer carries a short, plain reminder that this help is **new and can be wrong**. The window also says "Beta" in its header, permanently, so the caveat does not depend on the model remembering it. |
 | B5 | It is an expert on **Hilal Markets only**. No general internet knowledge, no news, no outside price source. |
 | B6 | It **never invents**. Every fact comes from server-owned evidence supplied to the turn. Nothing found is reported as not found. |
+| B7 | Asked whether a coin is halal, it does **not refuse**. It says it cannot say so itself, says the person can check how the coin was reviewed under different standards, repeats what each standard recorded, and the coin's **Passport card** appears under the answer. The card is attached by the server for every reviewed coin the message names, so a model that forgets cannot drop it. (1 October 2026.) |
 | B7 | Shariah status is only ever **reported** as the recorded result under a named methodology and version. It is never assigned, inferred, judged or predicted. (CLAUDE.md, non-negotiable.) |
 | B8 | It never claims an action happened — no monitor started, no plan changed, no ticket opened. |
 

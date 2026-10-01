@@ -511,8 +511,8 @@ async def test_a_marked_hidden_coin_is_answered_with_sign_in_and_no_model_call(
 ):
     hidden, _shown = await _hidden_and_shown(test_context)
     fake = _FakeAI([])
-    # Asked for the record, not for a ruling: "is X halal?" is answered by the
-    # assistant's no-religious-rulings rule before anything else, which is right.
+    # Asked for the record. "Is X halal?" about a hidden coin reaches the same "sign in
+    # first" answer — see the halal-question tests below.
     result = await _ask(
         test_context, f"What does the review of {spelling.format(coin=hidden)} say?", fake
     )
@@ -596,3 +596,71 @@ async def test_a_question_that_names_no_coin_is_never_gated(test_context, questi
     await _hidden_and_shown(test_context)
     result = await _ask(test_context, question, None)
     assert result.intent != "account_needed"
+
+
+# --------------------------------------------------------------------------------
+# "Is this coin halal?" — never a flat refusal, always where to check it.
+# --------------------------------------------------------------------------------
+
+#: Every way the question is asked. Each one used to be refused, or reach the model.
+HALAL_QUESTIONS = [
+    "is {coin} halal?",
+    "Is {coin} haram",
+    "is ${coin} halal",
+    "is {coin} shariah compliant?",
+    "Is {coin} Sharia-compliant",
+    "is it permissible to hold {coin}?",
+]
+
+
+@pytest.mark.parametrize("question", HALAL_QUESTIONS)
+async def test_a_visitor_asking_if_a_shown_coin_is_halal_is_sent_to_the_market_page(
+    test_context, question
+):
+    _hidden, shown = await _hidden_and_shown(test_context)
+    fake = _FakeAI([])
+    result = await _ask(test_context, question.format(coin=shown), fake)
+
+    assert fake.payloads == [], "a fixed answer needs no model call"
+    assert result.status == "answered"
+    assert result.intent == "coin_shariah_question"
+    assert result.mode != "SAFETY_REFUSAL"
+    assert result.message.startswith(f"I can't tell you myself that {shown} is halal.")
+    assert "different Shariah screening standards" in result.message
+    assert [card.key for card in result.sources] == ["market"]
+
+
+@pytest.mark.parametrize("question", HALAL_QUESTIONS)
+async def test_a_member_asking_if_a_coin_is_halal_gets_its_passport(test_context, question):
+    hidden, _shown = await _hidden_and_shown(test_context)
+    async with test_context["session_factory"]() as session:
+        member = await session.scalar(select(User))
+    result = await _ask(test_context, question.format(coin=hidden), None, user_id=member.id)
+
+    assert result.intent == "coin_shariah_question"
+    assert result.message.startswith(f"I can't tell you myself that {hidden} is halal.")
+    assert [card.key for card in result.sources] == ["passport"]
+    assert result.sources[0].url.endswith(f"/dashboard/market/{hidden.lower()}")
+
+
+@pytest.mark.parametrize("question", HALAL_QUESTIONS)
+async def test_a_visitor_asking_about_a_hidden_coin_is_asked_to_sign_in(test_context, question):
+    hidden, _shown = await _hidden_and_shown(test_context)
+    result = await _ask(test_context, question.format(coin=hidden), _FakeAI([]))
+    assert result.intent == "account_needed"
+    assert result.sources == []
+
+
+async def test_advice_still_wins_over_the_halal_question(test_context):
+    _hidden, shown = await _hidden_and_shown(test_context)
+    result = await _ask(test_context, f"Should I buy {shown}, is it halal?", _FakeAI([]))
+    assert result.status == "refused"
+    assert result.intent == "investment_advice"
+
+
+async def test_a_halal_question_with_no_coin_offers_to_look_one_up(test_context):
+    await _hidden_and_shown(test_context)
+    result = await _ask(test_context, "is crypto halal?", _FakeAI([]))
+    assert result.intent == "religious_ruling"
+    assert "does not issue religious rulings" not in result.message
+    assert "Tell me which coin" in result.message

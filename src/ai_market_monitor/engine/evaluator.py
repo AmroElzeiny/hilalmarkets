@@ -65,6 +65,7 @@ from ai_market_monitor.schemas.strategy import (
 )
 from ai_market_monitor.schemas.strategy_draft_v2 import measurement_for
 from ai_market_monitor.services.interfaces import Candle
+from ai_market_monitor.services.meme_coins import is_meme_label
 
 #: Price-action readings this module answers itself, before handing the rest to
 #: ``price_action.evaluate_price_action``.
@@ -274,11 +275,9 @@ class StrategyRuleEngine:
         if market.spread_bps is not None:
             market_context["spread_filter"] = market.spread_bps
         if category:
-            market_context["meme_coin_exclusion"] = category not in {
-                "meme",
-                "meme coin",
-                "memecoin",
-            }
+            # One reader of "meme coin" for the whole product: the methodology's rule
+            # and this card must never disagree about which coin is a meme.
+            market_context["meme_coin_exclusion"] = not is_meme_label(category)
         merged_context = {
             **(condition_context or {}),
             "evaluation_time": evaluation_time,
