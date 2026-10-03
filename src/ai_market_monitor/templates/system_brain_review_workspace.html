@@ -14,7 +14,8 @@
     <a class="brain-back" href="/dashboard/system-brain/cases"><i data-icon="arrow"></i> Cases</a>
 
     <article class="brain-review-hero">
-      <div class="brain-asset-mark">{{ (asset.symbol if asset else '?')[:3] }}</div>
+      {% set coin = detail.coin %}
+      <div class="brain-asset-mark">{{ (asset.symbol if asset else coin.symbol if coin else '?')[:3] }}</div>
       <div class="brain-review-identity">
         <div class="brain-chip-row">
           <span class="brain-status {{ case.state }}">{{ case.state.replace('_',' ') }}</span>
@@ -22,7 +23,7 @@
           {% if detail.overdue %}<span class="brain-status overdue">Overdue</span>{% endif %}
           {% if case.state == 'safety_hold' %}<span class="brain-status failed">Safety hold</span>{% endif %}
         </div>
-        <h2>{{ asset.name if asset else case.title }}{% if asset %} <small>{{ asset.symbol }}</small>{% endif %}</h2>
+        <h2>{{ asset.name if asset else coin.name if coin else case.title }}{% if asset %} <small>{{ asset.symbol }}</small>{% elif coin %} <small>{{ coin.symbol }}</small>{% endif %}</h2>
         <div class="brain-review-meta">
           {#- The assistant in the corner reads this to know which case is open. -#}
           <span data-case-reference="{{ case.case_reference }}">{{ case.case_reference }}</span>
@@ -131,7 +132,7 @@
 
       {% if report.link_checks %}
       <details class="brain-inline-details" data-testid="coin-report-links"><summary>Official and news links checked ({{ report.link_checks|length }})</summary>
-        <div class="brain-source-list">{% for link in report.link_checks %}<section><div><span class="brain-status {{ {'official': 'success', 'not_official': 'failed', 'unclear': 'warning'}.get(link.judgement, 'neutral') }}">{{ {'official': 'Official', 'not_official': 'Not official', 'unclear': 'Unclear'}.get(link.judgement, 'Not checked') }}</span><strong>{{ link.listed_as.replace('_',' ').title() }}</strong></div><p>{{ link.reason }}</p><div class="brain-source-actions"><a href="{{ link.url }}" target="_blank" rel="noopener">Open link</a>{% if link.on_project_site is not none %}<span>{{ 'On the project site' if link.on_project_site else 'Not on the project site' }}</span>{% endif %}</div></section>{% endfor %}</div>
+        <div class="brain-source-list">{% for link in report.link_checks %}<section><div><span class="brain-status {{ {'official': 'success', 'not_official': 'failed', 'unclear': 'warning'}.get(link.judgement, 'neutral') }}">{{ {'official': 'Official', 'not_official': 'Not official', 'unclear': 'Unclear'}.get(link.judgement, 'Not checked') }}</span><strong>{{ link.listed_as.replace('_',' ').title() }}</strong></div><p>{{ link.reason }}</p><div class="brain-source-actions"><a href="{{ link.url }}" target="_blank" rel="noopener">Open link</a>{% if link.on_project_site is not none %}<span>{{ 'On the project site' if link.on_project_site else 'Not on the project site' }}</span>{% endif %}{% if link.shows_contract is not none %}<span>{{ "Shows this coin's contract" if link.shows_contract else "Does not show this coin's contract" }}</span>{% endif %}</div></section>{% endfor %}</div>
       </details>
       {% endif %}
 
@@ -143,12 +144,36 @@
 
       {% if report.pages_not_read %}
       <details class="brain-inline-details"><summary>Pages that could not be read ({{ report.pages_not_read|length }})</summary>
-        <ul class="brain-findings">{% for page in report.pages_not_read %}<li><i data-icon="alert"></i><span>{{ page.url }} <strong>{{ page.why.replace('_',' ') }}</strong></span></li>{% endfor %}</ul>
+        <ul class="brain-findings">{% for page in report.pages_not_read %}<li><i data-icon="alert"></i><span>{{ page.url }} <strong>{{ (page.why | fetch_failure) | capitalize }}</strong></span></li>{% endfor %}</ul>
       </details>
       {% endif %}
     </article>
     {% endif %}
 
+    {% if coin %}
+    {#- A new coin's evidence is the pages its own reading went through, not a research
+        file — it never has one, and showing that empty file read as "nothing was
+        checked" beside a report full of findings. -#}
+    <article class="brain-panel" data-testid="coin-report-pages">
+      <div class="brain-section-head compact">
+        <div class="brain-panel-title"><i data-icon="passport"></i><div><h3>Pages read</h3><p>{{ coin.evidence_note }}{% if coin.decided_at %} · {{ coin.decided_at.strftime('%d %b %Y, %H:%M UTC') }}{% endif %}</p></div></div>
+        <span class="brain-status {{ coin.evidence_state }}">{{ coin.pages|length }} kept</span>
+      </div>
+      <div class="brain-source-list">
+        {% for page in coin.pages[:5] %}
+        <section>
+          <div><span class="brain-status {{ 'success' if page.own else 'neutral' }}">{{ 'Own page' if page.own else 'Other page' }}</span><strong>{{ page.title }}</strong><small>{{ page.category | source_category }}{% if page.characters %} · {{ '{:,}'.format(page.characters) }} characters{% endif %}</small></div>
+          <div class="brain-source-actions"><a href="{{ page.url }}" target="_blank" rel="noopener">Open page</a></div>
+        </section>
+        {% else %}<p class="brain-empty">Not one page could be read. The report above says why for each address.</p>{% endfor %}
+      </div>
+      {% if coin.pages|length > 5 %}
+      <details class="brain-inline-details"><summary>{{ coin.pages|length - 5 }} more</summary>
+        <div class="brain-source-list">{% for page in coin.pages[5:] %}<section><div><span class="brain-status {{ 'success' if page.own else 'neutral' }}">{{ 'Own page' if page.own else 'Other page' }}</span><strong>{{ page.title }}</strong></div><div class="brain-source-actions"><a href="{{ page.url }}" target="_blank" rel="noopener">Open page</a></div></section>{% endfor %}</div>
+      </details>
+      {% endif %}
+    </article>
+    {% else %}
     <article class="brain-panel">
       <div class="brain-section-head compact">
         <div class="brain-panel-title"><i data-icon="passport"></i><div><h3>Evidence</h3></div></div>
@@ -187,6 +212,7 @@
       </details>
       {% endif %}
     </article>
+    {% endif %}
 
     {% if detail.evidence_changes %}
     <article class="brain-panel">
@@ -204,6 +230,10 @@
     </article>
     {% endif %}
 
+    {#- The panels below read a research file: its open questions, its per-field AI
+        suggestions and its AI summary. A new coin has none of them — its doubts and its
+        AI reading are in the report above — so they are not drawn as empty boxes. -#}
+    {% if not coin %}
     {% if detail.missing_evidence or detail.contradictions %}
     <article class="brain-panel">
       <div class="brain-panel-title"><i data-icon="warning"></i><div><h3>Still open</h3></div></div>
@@ -282,6 +312,7 @@
       </div>
       {% else %}<p class="brain-empty">No AI summary yet.</p>{% endif %}
     </article>
+    {% endif %}
 
     <details class="brain-panel brain-progressive">
       <summary><span><i data-icon="history"></i> History</span><small>{{ detail.timeline|length }} events</small></summary>

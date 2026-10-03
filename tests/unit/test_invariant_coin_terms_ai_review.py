@@ -330,6 +330,56 @@ def test_a_link_the_ai_doubts_becomes_a_doubt(judgement, doubted):
     assert any(url in doubt for doubt in review.doubts) is doubted
 
 
+CONTRACT = "0x32353a6c91143bfd6c7d363b546e62a9a2489a20"
+
+
+@pytest.mark.parametrize("judgement", ["official", "not_official", "unclear"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"https://etherscan.io/token/{CONTRACT}",
+        f"https://ethplorer.io/address/{CONTRACT.upper()}",
+        f"https://bscscan.com/address/{CONTRACT}#code",
+    ],
+)
+def test_an_explorer_page_showing_the_coins_contract_is_not_a_doubt(url, judgement):
+    """Every explorer is somebody else's website; "not the project's own" said nothing.
+
+    Three of eight doubts on one 2 October 2026 report were exactly that, and the list
+    is capped, so noise pushed real doubts out. The system checks the contract itself.
+    """
+
+    folder = _folder()
+    pages, texts = _pages(folder)
+    review = ground(
+        _answer(link_checks=[{"url": url, "judgement": judgement, "reason": "Explorer."}]),
+        pages=pages,
+        texts=texts,
+        links=provider_links(_record(explorer=(url,))),
+        official_website=SITE,
+        contract_addresses=(CONTRACT,),
+    )
+    assert review.link_checks[0]["shows_contract"] is True
+    assert review.link_checks[0]["judgement"] == judgement
+    assert not any(url in doubt for doubt in review.doubts)
+
+
+def test_an_explorer_page_for_another_contract_is_still_doubted():
+    url = "https://etherscan.io/token/0x1111111111111111111111111111111111111111"
+    folder = _folder()
+    pages, texts = _pages(folder)
+    review = ground(
+        _answer(link_checks=[{"url": url, "judgement": "not_official", "reason": "Other."}]),
+        pages=pages,
+        texts=texts,
+        links=provider_links(_record(explorer=(url,))),
+        official_website=SITE,
+        contract_addresses=(CONTRACT,),
+    )
+    assert review.link_checks[0]["shows_contract"] is False
+    assert any(url in doubt for doubt in review.doubts)
+
+
 def test_a_link_the_ai_invented_is_not_in_the_report():
     review = _grounded(
         _answer(

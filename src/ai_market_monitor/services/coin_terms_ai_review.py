@@ -39,7 +39,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 import httpx
@@ -84,7 +84,7 @@ logger = logging.getLogger(__name__)
 
 #: The version of the question asked. Stored on every report so a reviewer reading an
 #: old one knows it was asked differently.
-PROMPT_VERSION = "coin-terms-v1"
+PROMPT_VERSION = "coin-terms-v2"
 
 #: How much of each page, and of all pages together, the model is given. A dozen pages
 #: of documentation is far more than one answer needs, and the grounding check reads the
@@ -123,12 +123,26 @@ SITE_LINK_FIELDS: frozenset[str] = frozenset({"website", "whitepaper", "announce
 HoldState = Literal["held_back", "for_review", "not_enough_data"]
 AIState = Literal["completed", "failed", "not_configured", "disabled", "skipped_no_pages"]
 
-#: States the next sweep tries again, bounded by :data:`MAX_AI_ATTEMPTS`.
+#: States the next sweep tries again, bounded by :data:`MAX_AI_ATTEMPTS`. Every one of
+#: them counts an attempt when it is written (see :data:`COUNTED_AI_STATES`).
+#:
+#: ``skipped_no_pages`` is here because "nothing could be read" is usually *our* bad day
+#: or the site's, not a fact about the coin: a site that timed out, a robots file that
+#: did not answer, an address we spelled wrong. Leaving it out filed ten coins with an
+#: empty report on 2 October 2026 and never looked at them again.
 #:
 #: ``not_configured`` and ``disabled`` are deliberately absent. The sweep works in market
 #: order, so a state that is retried without counting an attempt would re-read the same
 #: top coins every day and no new coin would ever reach the front of the queue.
-RETRY_AI_STATES: frozenset[str] = frozenset({"pending", "failed"})
+RETRY_AI_STATES: frozenset[str] = frozenset({"pending", "failed", "skipped_no_pages"})
+
+#: States that spend one of a coin's :data:`MAX_AI_ATTEMPTS` when they are written.
+COUNTED_AI_STATES: frozenset[str] = frozenset({"completed", "failed", "skipped_no_pages"})
+
+#: How long a coin waits before it is tried again. A retry minutes later meets the same
+#: timeout or the same outage, and spends an attempt learning nothing; the next day is a
+#: different day for the site and for us.
+RETRY_AFTER = timedelta(hours=20)
 
 
 class _Strict(BaseModel):
@@ -190,7 +204,11 @@ _INSTRUCTIONS = (
     "empty quote and an empty page_url when the pages do not say.\n"
     "4. link_checks: one entry for EVERY supplied link. official means it clearly "
     "belongs to this project; not_official means it clearly belongs to somebody else or "
-    "is a fake or unrelated site; unclear otherwise. Give a short reason.\n"
+    "is a fake or unrelated site; unclear otherwise. Give a short reason. A link listed "
+    "as explorer is always a page on somebody else's block explorer website: judge "
+    "whether that page is about THIS coin's own token or chain, never who runs the "
+    "explorer. Social and chat links are judged the same way: is the account this "
+    "project's own.\n"
     "5. news: one entry for every supplied page whose kind is official_news or "
     "official_community. Say in one sentence what it says, whether it touches any "
     "activity in the supplied list, and copy one exact sentence from it.\n"
@@ -513,6 +531,7 @@ class CoinTermsAIReviewer:
             texts=texts,
             links=links,
             official_website=record.website[0] if record and record.website else None,
+            contract_addresses=record.contract_address if record else (),
         )
         review.model = model
         review.reasoning_effort = effort
@@ -527,6 +546,7 @@ def ground(
     texts: Mapping[str, str],
     links: Sequence[tuple[str, str]],
     official_website: str | None,
+    contract_addresses: Sequence[str] = (),
 ) -> AIReview:
     """Keep what the pages support; turn everything else into a named doubt.
 
@@ -585,11 +605,21 @@ def ground(
             )
 
     judged = {_url_key(check.url): check for check in answer.link_checks}
+    contracts = [c.strip().casefold() for c in contract_addresses if len(c.strip()) >= 20]
     for kind, url in links:
         check = judged.get(_url_key(url))
         on_site = (
             is_same_project_site(url, official_website)
             if kind in SITE_LINK_FIELDS and official_website and kind != "website"
+            else None
+        )
+        # A fact the system checks itself, beside the model's opinion. An explorer page
+        # is always on somebody else's website — that is what an explorer is — so "not
+        # the project's own" is true of every one of them and said nothing. Whether the
+        # page shows the contract the provider lists for this coin is the real question.
+        shows_contract = (
+            any(contract in url.casefold() for contract in contracts)
+            if kind == "explorer" and contracts
             else None
         )
         review.link_checks.append(
@@ -599,8 +629,11 @@ def ground(
                 "judgement": check.judgement if check else "not_checked",
                 "reason": _sentence(check.reason) if check else "The AI did not check it.",
                 "on_project_site": on_site,
+                "shows_contract": shows_contract,
             }
         )
+        if shows_contract:
+            continue
         if check is None:
             review.doubts.append(_sentence(f"The AI did not check the {kind} link {url}."))
         elif check.judgement == "not_official":
@@ -784,12 +817,17 @@ _AI_NOT_RUN: dict[str, str] = {
         "The AI check is not set up on this server, so only the fixed rules were applied."
     ),
     "disabled": "The AI check is switched off, so only the fixed rules were applied.",
-    "skipped_no_pages": "No page could be read, so the AI had nothing to check.",
+    "skipped_no_pages": (
+        "No page could be read, so the AI had nothing to check. "
+        f"It is tried again on the next days, {MAX_AI_ATTEMPTS} times in all."
+    ),
 }
 
 
 __all__ = [
+    "COUNTED_AI_STATES",
     "MAX_AI_ATTEMPTS",
+    "RETRY_AFTER",
     "PROMPT_VERSION",
     "RETRY_AI_STATES",
     "AIReview",

@@ -98,13 +98,10 @@
             </td>
             <td>
               {% if document.failure_code %}
-                {#- Said plainly. "Could not read" and "the site does not allow us" are
-                    different jobs for whoever looks next. -#}
-                <span class="t-pill" data-tone="neutral">
-                  {% if document.failure_code == 'robots_disallowed' %}The site does not allow us to read it
-                  {% elif document.failure_code == 'too_short' %}Almost no words on the page
-                  {% else %}We could not read it{% endif %}
-                </span>
+                {#- Said plainly, from the fetcher's one list of words. "Could not read"
+                    and "the site does not allow us" are different jobs for whoever
+                    looks next. -#}
+                <span class="t-pill" data-tone="neutral">{{ (document.failure_code | fetch_failure) | capitalize }}</span>
               {% else %}
                 {{ document.category|replace('official_', '')|replace('_', ' ')|capitalize }}
               {% endif %}

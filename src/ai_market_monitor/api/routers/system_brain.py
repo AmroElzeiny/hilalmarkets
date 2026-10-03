@@ -421,6 +421,10 @@ async def system_brain_reviews(
             # worked. Rendered from the one owner so the menu can never offer a filter
             # nothing produces, or miss one added later.
             "case_tags": list(TAG_DEFINITIONS.values()),
+            # Every kind of case, from the enum the filter is checked against. The page
+            # used to type its own list, which offered two kinds nothing ever creates
+            # and could not filter for new-coin reports or missing pages.
+            "case_kinds": [item.value for item in ReviewCaseType],
             "cases": cases,
             # The ceiling comes from the service that enforces it, never from a number
             # typed into the page. The browser stops the reviewer at the same count the
@@ -1927,6 +1931,7 @@ async def system_brain_section(
         context.update(
             {
                 "review_kind": "",
+                "case_kinds": [item.value for item in ReviewCaseType],
                 "review_state": "rejected",
                 "review_priority": None,
                 "review_assignee": None,

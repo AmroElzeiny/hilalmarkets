@@ -1,5 +1,6 @@
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -12,6 +13,7 @@ from ai_market_monitor.db.models import (
     AuditEvent,
     AutomatedScreenRun,
     CanonicalAsset,
+    CoinEvidenceDocument,
     ExternalAssessment,
     MonitorShariaAssetState,
     OfficialSource,
@@ -478,6 +480,7 @@ class ShariaAdminDashboardService:
             )
         rows = list((await self.session.scalars(query.limit(limit))).all())
         asset_ids = {row.canonical_asset_id for row in rows if row.canonical_asset_id}
+        coin_runs = await _coin_runs(self.session, rows)
         assets = {
             row.id: row
             for row in (
@@ -575,9 +578,13 @@ class ShariaAdminDashboardService:
                 case_type=row.case_type,
                 state=row.state,
                 risk_severity=row.risk_severity,
+                # The coin's own name for a new coin, never the task title: the
+                # sentence reads "found on {name}'s own pages".
                 asset_name=(
                     assets[row.canonical_asset_id].name
                     if row.canonical_asset_id in assets
+                    else coin_runs[row.id].asset_name or coin_runs[row.id].symbol
+                    if row.id in coin_runs
                     else row.title
                 ),
                 done=row.done_at is not None,
@@ -611,9 +618,13 @@ class ShariaAdminDashboardService:
                 "publication_state": row.publication_state,
                 "asset_name": assets[row.canonical_asset_id].name
                 if row.canonical_asset_id in assets
+                else coin_runs[row.id].asset_name or row.title
+                if row.id in coin_runs
                 else row.title,
                 "symbol": assets[row.canonical_asset_id].symbol
                 if row.canonical_asset_id in assets
+                else coin_runs[row.id].symbol
+                if row.id in coin_runs
                 else "Unresolved",
                 "title": row.title,
                 "priority": row.priority,
@@ -646,11 +657,18 @@ class ShariaAdminDashboardService:
                 ),
                 "due_at": row.due_at,
                 "source_freshness_deadline": row.source_freshness_deadline,
-                "evidence_state": _evidence_state(
+                # A new coin has no research file; its evidence is the pages its own
+                # automated reading went through, so that is what this column reports.
+                "evidence_state": _coin_evidence_state(coin_runs[row.id])
+                if row.id in coin_runs
+                else _evidence_state(
                     row=row,
                     dossier=dossiers.get(row.dossier_id) if row.dossier_id else None,
                     now=now,
                 ),
+                "evidence_note": _coin_evidence_note(coin_runs[row.id])
+                if row.id in coin_runs
+                else None,
                 "evidence_completeness": round(
                     float(dossiers[row.dossier_id].evidence_completeness) * 100
                     if row.dossier_id in dossiers
@@ -956,18 +974,60 @@ class ShariaAdminDashboardService:
                 for item in (methodology_rules.use_cases if methodology_rules else [])
             ]
         )
-        # A new-coin report lives on the automated run it describes, not on a dossier.
-        coin_report = (
+        # A new-coin report lives on the automated run it describes, not on a dossier —
+        # and so does its evidence: the pages that reading went through. Without these
+        # the page showed only the dossier panels, which a new coin never has, and every
+        # new-coin task read "No evidence is attached" beside a report full of findings.
+        coin_run = (
             await self.session.scalar(
-                select(AutomatedScreenRun.review_report).where(
+                select(AutomatedScreenRun).where(
                     AutomatedScreenRun.review_case_id == case.id
                 )
             )
             if case.case_type == ReviewCaseType.AUTOMATED_COIN_REVIEW
             else None
         )
+        coin_pages = (
+            list(
+                (
+                    await self.session.scalars(
+                        select(CoinEvidenceDocument)
+                        .where(
+                            CoinEvidenceDocument.run_id == coin_run.id,
+                            CoinEvidenceDocument.failure_code.is_(None),
+                        )
+                        .order_by(
+                            CoinEvidenceDocument.is_primary.desc(),
+                            CoinEvidenceDocument.url,
+                        )
+                    )
+                ).all()
+            )
+            if coin_run is not None
+            else []
+        )
         return {
-            "coin_report": coin_report or None,
+            "coin_report": (coin_run.review_report or None) if coin_run else None,
+            "coin": {
+                "symbol": coin_run.symbol,
+                "name": coin_run.asset_name or coin_run.symbol,
+                "decided_at": coin_run.decided_at,
+                "evidence_state": _coin_evidence_state(coin_run),
+                "evidence_note": _coin_evidence_note(coin_run),
+                "pages": [
+                    {
+                        "url": page.url,
+                        "title": page.title or page.url,
+                        "category": page.category,
+                        "own": page.is_primary,
+                        "characters": page.characters,
+                        "read_at": page.fetched_at,
+                    }
+                    for page in coin_pages
+                ],
+            }
+            if coin_run is not None
+            else None,
             "case": case,
             "asset": asset,
             "external": external,
@@ -988,7 +1048,12 @@ class ShariaAdminDashboardService:
             ),
             # The same tag the queue shows, worked out by the same owner. Two screens
             # describing one case differently is how a reviewer stops trusting either.
-            "tag": _case_signal(case, dossier, asset),
+            "tag": _case_signal(
+                case,
+                dossier,
+                asset,
+                coin_name=(coin_run.asset_name or coin_run.symbol) if coin_run else None,
+            ),
             "why_case": {
                 "trigger": case.human_review_reason,
                 "assessment_area": (
@@ -1082,7 +1147,9 @@ class ShariaAdminDashboardService:
                 1,
             ),
             "latest_evidence_at": (
-                max((_aware(item.retrieved_at) for item in snapshots), default=None)
+                _aware(coin_run.decided_at)
+                if coin_run is not None and coin_run.decided_at
+                else max((_aware(item.retrieved_at) for item in snapshots), default=None)
             ),
             "current_published_status": (
                 str(
@@ -1329,6 +1396,7 @@ def _case_signal(
     case: ReviewCase,
     dossier: AssetResearchDossier | None,
     asset: CanonicalAsset | None,
+    coin_name: str | None = None,
 ):
     """One case's tag and reason, for the single-case page.
 
@@ -1342,7 +1410,7 @@ def _case_signal(
         case_type=case.case_type,
         state=case.state,
         risk_severity=case.risk_severity,
-        asset_name=asset.name if asset is not None else case.title,
+        asset_name=asset.name if asset is not None else coin_name or case.title,
         done=case.done_at is not None,
         dossier_present=dossier is not None,
         evidence_completeness=float(dossier.evidence_completeness) if dossier else 0.0,
@@ -1350,6 +1418,50 @@ def _case_signal(
         contradiction_count=int(dossier.contradiction_count) if dossier else 0,
         fallback_reason=case.human_review_reason,
     )
+
+
+async def _coin_runs(session: AsyncSession, rows: list[ReviewCase]) -> dict[UUID, Any]:
+    """The automated reading behind each new-coin task on the page, by task id.
+
+    Only the small columns: a page of fifty tasks must not load fifty reports.
+    """
+
+    ids = [row.id for row in rows if row.case_type == ReviewCaseType.AUTOMATED_COIN_REVIEW]
+    if not ids:
+        return {}
+    found = await session.execute(
+        select(
+            AutomatedScreenRun.review_case_id,
+            AutomatedScreenRun.symbol,
+            AutomatedScreenRun.asset_name,
+            AutomatedScreenRun.documents_read,
+            AutomatedScreenRun.primary_documents_read,
+            AutomatedScreenRun.ai_review_state,
+        ).where(AutomatedScreenRun.review_case_id.in_(ids))
+    )
+    return {row.review_case_id: row for row in found.all()}
+
+
+def _coin_evidence_state(run: Any) -> str:
+    """How complete a new coin's evidence is, from its own reading.
+
+    ``unavailable`` when not one page could be read; ``incomplete`` when none of the
+    pages was the project's own description, or the AI reading did not finish;
+    ``current`` otherwise. The same three words the research-file cases use, so the
+    column means one thing for every row.
+    """
+
+    if not run.documents_read:
+        return "unavailable"
+    if not run.primary_documents_read or run.ai_review_state != "completed":
+        return "incomplete"
+    return "current"
+
+
+def _coin_evidence_note(run: Any) -> str:
+    own = int(run.primary_documents_read or 0)
+    total = int(run.documents_read or 0)
+    return f"{own} own {'page' if own == 1 else 'pages'} read, {total} in all"
 
 
 def _evidence_state(

@@ -253,6 +253,25 @@ def _normalise(url: str) -> str:
     return urlunsplit((parts.scheme, host, path, parts.query, ""))
 
 
+def _address(url: str) -> str:
+    """The address to actually fetch: what was given, minus the fragment.
+
+    **Never** :func:`_normalise`. That is a page's *identity* — the key that says two
+    spellings are one page — and it drops ``www.`` because the two spellings usually serve
+    the same words. Usually is not always: ``bstocks.finance`` has no DNS record at all,
+    while ``www.bstocks.finance`` is the live site CoinMarketCap lists. Fetching the
+    identity instead of the address meant every one of the ten coins that site issues was
+    filed as "nothing could be read" on 2 October 2026, with an empty report each.
+
+    The fragment goes because the server never sees it. Nothing else changes.
+    """
+
+    parts = urlsplit(url.strip())
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        return ""
+    return urlunsplit((parts.scheme, parts.netloc, parts.path or "/", parts.query, ""))
+
+
 def _is_readable(url: str) -> bool:
     parts = urlsplit(url)
     lowered = parts.path.casefold()
@@ -360,6 +379,7 @@ class CoinEvidenceCrawler:
         ordered: list[tuple[str, str | None]] = []
         seen: set[str] = set()
         for value, category in raw:
+            # Compared by identity, fetched by address. See :func:`_address`.
             normalised = _normalise(str(value or ""))
             if not normalised or normalised in seen or not _is_readable(normalised):
                 continue
@@ -367,7 +387,7 @@ class CoinEvidenceCrawler:
                 # A market-data site's page about the project is not the project.
                 continue
             seen.add(normalised)
-            ordered.append((normalised, category))
+            ordered.append((_address(str(value)), category))
         return ordered
 
     async def _read(
@@ -385,10 +405,13 @@ class CoinEvidenceCrawler:
         for url, declared_category in addresses:
             if len(folder.documents) >= self.page_budget:
                 break
-            if url in seen:
+            # `seen` holds identities, so a page reached under its other spelling is
+            # still read once; the fetch below uses the address as it was given.
+            identity = _normalise(url)
+            if not identity or identity in seen:
                 continue
-            seen.add(url)
-            host = urlsplit(url).netloc.casefold()
+            seen.add(identity)
+            host = urlsplit(identity).netloc
             if per_host.get(host, 0) >= self.per_host_budget:
                 continue
             try:
@@ -500,7 +523,9 @@ class CoinEvidenceCrawler:
         other links are navigation.
         """
 
-        ranked: dict[str, tuple[int, str]] = {}
+        # Keyed by identity, so two spellings of one link are one candidate; each keeps
+        # the address the page actually linked to, because that is the one that works.
+        ranked: dict[str, tuple[int, str, str]] = {}
         for source_url, body in bodies:
             for link in extract_links(body, source_url):
                 normalised = _normalise(link)
@@ -512,12 +537,12 @@ class CoinEvidenceCrawler:
                     continue
                 category = page_category(normalised)
                 if category == DOCUMENTATION:
-                    ranked[normalised] = (0, category)
+                    ranked[normalised] = (0, category, _address(link))
                 elif category == NEWS:
-                    ranked[normalised] = (1, category)
+                    ranked[normalised] = (1, category, _address(link))
         return [
-            (url, ranked[url][1])
-            for url in sorted(ranked, key=lambda item: (ranked[item][0], len(item)))
+            (ranked[key][2], ranked[key][1])
+            for key in sorted(ranked, key=lambda item: (ranked[item][0], len(item)))
         ]
 
 

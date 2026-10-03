@@ -1459,20 +1459,17 @@ RECHECK_LOCK_KEY = "hilalmarkets:lock:recheck-official-sources"
 
 
 @asynccontextmanager
-async def _only_one_recheck() -> AsyncIterator[bool]:
-    """Hold a lock shared by every worker, so one press means one sweep.
+async def _single_run(key: str, seconds: int) -> AsyncIterator[bool]:
+    """Hold a lock shared by every worker, so a job runs once at a time.
 
-    A button a person can press twice is pressed twice. Two sweeps at once would send two
-    requests to the same third-party site at the same moment — which is exactly what
-    ``SHARIA_SCRAPER_CONCURRENCY``, fixed at 1, and the wait between fetches exist to
-    prevent — and would start a second Chromium on a 3.9 GB server. The Celery worker runs
-    one process per CPU, so "the task is already running" is a real state, not a
-    theoretical one.
+    Yields True when this run may go ahead and False when another one holds the lock.
+    The lock expires by itself after ``seconds``, so a worker killed mid-run blocks
+    nothing for long and there is no key for a person to clear.
 
-    **No Redis means the sweep still runs.** A missing lock is a missing *guard*, not a
+    **No Redis means the job still runs.** A missing lock is a missing *guard*, not a
     reason to refuse work: this yields True and the run goes ahead, exactly as it did
     before there was a lock. Failing closed here would let a Redis outage silently turn
-    the button off with no way for anybody to tell.
+    the job off with no way for anybody to tell.
     """
 
     client: Any = None
@@ -1481,27 +1478,39 @@ async def _only_one_recheck() -> AsyncIterator[bool]:
             from redis.asyncio import Redis
 
             client = Redis.from_url(settings.redis_url)
-            taken = await client.set(
-                RECHECK_LOCK_KEY, "1", nx=True, ex=RECHECK_LOCK_SECONDS
-            )
+            taken = await client.set(key, "1", nx=True, ex=seconds)
         except Exception:  # noqa: BLE001 - a guard that cannot run is not a failure
-            logger.warning("Could not take the recheck lock; running without one.")
+            logger.warning("Could not take the lock %s; running without one.", key)
             client, taken = None, True
     else:
         taken = True
     try:
         yield bool(taken)
     finally:
-        # Released whatever happened, so a second press does not wait out the expiry. The
+        # Released whatever happened, so the next run does not wait out the expiry. The
         # expiry is the backstop for a worker killed before it reaches this line. Only the
         # run that took the lock may release it — a run that was refused must never delete
         # the key the running one is holding.
         if client is not None:
             if taken:
                 with contextlib.suppress(Exception):
-                    await client.delete(RECHECK_LOCK_KEY)
+                    await client.delete(key)
             with contextlib.suppress(Exception):
                 await client.aclose()
+
+
+def _only_one_recheck() -> contextlib.AbstractAsyncContextManager[bool]:
+    """One press means one sweep.
+
+    A button a person can press twice is pressed twice. Two sweeps at once would send two
+    requests to the same third-party site at the same moment — which is exactly what
+    ``SHARIA_SCRAPER_CONCURRENCY``, fixed at 1, and the wait between fetches exist to
+    prevent — and would start a second Chromium on a 3.9 GB server. The Celery worker runs
+    one process per CPU, so "the task is already running" is a real state, not a
+    theoretical one.
+    """
+
+    return _single_run(RECHECK_LOCK_KEY, RECHECK_LOCK_SECONDS)
 
 
 async def _recheck_official_sources_for_open_cases(
@@ -1625,6 +1634,23 @@ async def _research_unscreened_coins() -> dict:
             await close()
 
 
+#: How long one screening sweep may hold its lock. Longer than a sweep can run — the
+#: sweep stops starting coins at :data:`SCREEN_SWEEP_BUDGET_SECONDS`, and the slowest coin
+#: after that is one model timeout plus one crawl — so the lock is never lost mid-sweep.
+SCREEN_LOCK_SECONDS = 2 * 60 * 60
+
+SCREEN_LOCK_KEY = "hilalmarkets:lock:screen-researched-coins"
+
+#: The pause between one sweep ending and the next one starting while coins still wait.
+SCREEN_CHAIN_DELAY_SECONDS = 60
+
+
+def _queue_next_screen_sweep() -> None:
+    """Start another sweep shortly. Its own function so a test can watch it happen."""
+
+    screen_researched_coins.apply_async(countdown=SCREEN_CHAIN_DELAY_SECONDS)
+
+
 async def _screen_researched_coins() -> dict:
     """Read the pages of researched coins and record what the automated screen makes of them.
 
@@ -1632,6 +1658,16 @@ async def _screen_researched_coins() -> dict:
     anybody asking. It reads a project's own website, documentation and whitepaper, and
     writes an :class:`AutomatedScreenRun` saying what it found, with the sentence behind
     every reason.
+
+    **It keeps going until every waiting coin is read.** One sweep takes up to
+    ``AUTOMATED_SCREEN_BATCH_LIMIT`` coins within its time budget; when coins are still
+    waiting, it queues the next sweep before it returns. It used to stop after one batch
+    a day: twenty-five coins against more than two hundred new ones a day, so the queue
+    could only grow and most new coins were never read at all. Two sweeps never run at
+    once — the lock refuses the second, so no coin is read or paid for twice.
+
+    A sweep that finished no coin at all does not queue another, so a provider outage or
+    a coin that fails every time cannot spin the worker. The daily beat tries again.
 
     **It publishes nothing.** No ``AssetShariaAssessment`` is created, no authority's
     data is touched, and ``published`` stays false on every row it writes. What it
@@ -1641,16 +1677,10 @@ async def _screen_researched_coins() -> dict:
     queue for the next run.
     """
 
-    from sqlalchemy import select
-
     from ai_market_monitor.core.database import SessionFactory
-    from ai_market_monitor.db.models import AutomatedScreenRun, ProviderCoinProfile
     from ai_market_monitor.services.automated_screen_pipeline import (
         AutomatedScreenPipeline,
-    )
-    from ai_market_monitor.services.coin_terms_ai_review import (
-        MAX_AI_ATTEMPTS,
-        RETRY_AI_STATES,
+        coins_to_screen,
     )
 
     if not settings.unscreened_research_enabled:
@@ -1658,70 +1688,59 @@ async def _screen_researched_coins() -> dict:
     if not settings.coinmarketcap_enabled:
         return {"status": "provider_disabled"}
 
-    async with SessionFactory() as session:
-        try:
-            # Coins the researcher has gathered links for, that this has not read yet.
-            # Worked in market order, so the effort lands where users actually are.
-            # A coin whose AI reading has not happened yet — the provider was down, or it
-            # was screened before the AI reviewer existed — is read again, up to a fixed
-            # number of attempts. Everything else already has its report.
-            already = set(
-                (
-                    await session.scalars(
-                        select(AutomatedScreenRun.symbol).where(
-                            ~(
-                                AutomatedScreenRun.ai_review_state.in_(RETRY_AI_STATES)
-                                & (AutomatedScreenRun.ai_review_attempts < MAX_AI_ATTEMPTS)
-                            )
-                        )
-                    )
-                ).all()
-            )
-            candidates = (
-                await session.scalars(
-                    select(ProviderCoinProfile.symbol)
-                    .where(
-                        ProviderCoinProfile.provider == "coinmarketcap",
-                        ProviderCoinProfile.research_state == "researched",
-                    )
-                    .order_by(ProviderCoinProfile.market_cap_usd.desc().nullslast())
+    async with _single_run(SCREEN_LOCK_KEY, SCREEN_LOCK_SECONDS) as may_run:
+        if not may_run:
+            logger.info("A screening sweep is already running; this one stops.")
+            return {"status": "already_running"}
+        async with SessionFactory() as session:
+            try:
+                wanted = await coins_to_screen(session)
+                if not wanted:
+                    return {"status": "nothing_to_screen"}
+                pipeline = AutomatedScreenPipeline(session, settings)
+                # Each coin waits for a high-effort model answer, so a full batch can
+                # take longer than an hour. The broker hands a task it has not heard
+                # back from in an hour to another worker (Redis' default visibility
+                # timeout, and this app acknowledges late), which would run the same
+                # sweep twice and pay for every answer twice. The sweep stops starting
+                # coins well before that.
+                result = await pipeline.run(
+                    wanted,
+                    limit=settings.automated_screen_batch_limit,
+                    time_budget_seconds=SCREEN_SWEEP_BUDGET_SECONDS,
                 )
-            ).all()
-            wanted = [symbol for symbol in candidates if symbol not in already]
-            if not wanted:
-                return {"status": "nothing_to_screen"}
-
-            pipeline = AutomatedScreenPipeline(session, settings)
-            # Each coin now waits for a high-effort model answer, so a full batch can
-            # take longer than an hour. The broker hands a task it has not heard back
-            # from in an hour to another worker (Redis' default visibility timeout, and
-            # this app acknowledges late), which would run the same sweep twice and pay
-            # for every answer twice. The sweep stops starting coins well before that.
-            result = await pipeline.run(
-                wanted,
-                limit=settings.automated_screen_batch_limit,
-                time_budget_seconds=SCREEN_SWEEP_BUDGET_SECONDS,
-            )
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            logger.exception("Automated screen sweep failed")
-            return {"status": "failed"}
-    return result.as_dict()
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                logger.exception("Automated screen sweep failed")
+                return {"status": "failed"}
+    payload = result.as_dict()
+    waiting = len(wanted) - result.stored - len(result.failed)
+    payload["still_waiting"] = max(0, waiting)
+    if result.stored and waiting > 0:
+        _queue_next_screen_sweep()
+        payload["next_sweep"] = "queued"
+    return payload
 
 
 async def _refresh_market_numbers() -> dict:
-    """Read size, rank and long-range movement for every screened coin.
+    """Read size, rank and long-range movement for every screened and every waiting coin.
 
-    Once a day, two provider calls for the whole list. These are the numbers an exchange
+    Once a day, one provider call per hundred coins. These are the numbers an exchange
     ticker cannot answer, and none of them changes fast enough to be worth fetching
     while somebody is loading a page.
+
+    **The coins waiting for their automated reading are included.** The screening sweep
+    takes the biggest coins first, by the market size stored here — and until 3 October
+    2026 it was stored only for coins that already had a status, so every waiting coin's
+    size was empty and "biggest first" was in practice whatever order the database
+    returned.
     """
 
     from sqlalchemy import select
 
     from ai_market_monitor.core.database import SessionFactory
-    from ai_market_monitor.db.models import AssetShariaAssessment
+    from ai_market_monitor.db.models import AssetShariaAssessment, ProviderCoinProfile
     from ai_market_monitor.services.market_numbers import MarketNumbersService
 
     if not settings.coinmarketcap_enabled:
@@ -1729,11 +1748,20 @@ async def _refresh_market_numbers() -> dict:
 
     async with SessionFactory() as session:
         try:
-            symbols = (
+            screened = (
                 await session.scalars(
                     select(AssetShariaAssessment.canonical_asset).distinct()
                 )
             ).all()
+            waiting = (
+                await session.scalars(
+                    select(ProviderCoinProfile.symbol).where(
+                        ProviderCoinProfile.provider == "coinmarketcap",
+                        ProviderCoinProfile.research_state == "researched",
+                    )
+                )
+            ).all()
+            symbols = sorted({*screened, *waiting})
             result = await MarketNumbersService(session, settings).refresh(symbols)
             await session.commit()
         except Exception:

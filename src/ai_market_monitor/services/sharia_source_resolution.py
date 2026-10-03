@@ -86,6 +86,9 @@ from ai_market_monitor.services.sharia_page_render import (
 # two-parsers-that-disagree problem starts: this module would decide a page was
 # unreadable while the research pipeline read it fine, or the reverse.
 from ai_market_monitor.services.sharia_research import (
+    FETCH_FAILURE_WORDS as _FAILURE_WORDS,
+)
+from ai_market_monitor.services.sharia_research import (
     OfficialEvidenceFetcher,
     ShariaResearchError,
     extract_dates,
@@ -1560,22 +1563,6 @@ class SourceResolutionService:
             return
         case.state = "resolved"
         case.done_at = self._clock()
-
-
-#: Why a fetched page did not become a usable source, in words a non-engineer can act on.
-#: Keyed by the error code the fetcher and the document reader produce. One owner, so the
-#: case a reviewer reads and the row a report prints cannot describe the same failure two
-#: different ways.
-_FAILURE_WORDS: dict[str, str] = {
-    "robots_disallowed": "the site's own rules say we may not read it",
-    "robots_unavailable": "the site would not say what it allows, so nothing on it was read",
-    # Ours, not the site's. Worded so nobody reads it as a fact about the project.
-    "robots_not_asked": "our own checker was paused, so this address was never tried",
-    "too_short": "the page loaded but showed no readable text",
-    "unreadable_document": "the page could not be read as text",
-    "official_source_unavailable": "nothing answered at that address",
-    "official_source_fetch_failed": "the address could not be reached",
-}
 
 
 def _why_not_usable(proof: SourceProof) -> str:

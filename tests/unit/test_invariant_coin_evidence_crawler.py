@@ -236,3 +236,120 @@ def test_a_folder_with_one_page_is_not_empty():
 def test_a_folder_with_only_failures_is_empty():
     folder = EvidenceFolder(symbol="ANY", failures={"https://a.example/": "too_short"})
     assert folder.is_empty is True
+
+
+# --------------------------------------------------------------------------------
+# A page is fetched at the address it was given, never at its identity.
+# --------------------------------------------------------------------------------
+
+_LONG_TEXT = (
+    "This project runs its own network where validators secure every block and are "
+    "paid for that work. "
+) * 8
+
+
+def _html(*links: str) -> str:
+    anchors = "".join(f'<a href="{link}">More</a>' for link in links)
+    return (
+        "<html><head><title>About the project</title></head>"
+        f"<body><main><p>{_LONG_TEXT}</p>{anchors}</main></body></html>"
+    )
+
+
+class _OnlyExactAddresses:
+    """A web where only the exact addresses listed answer — like ``bstocks.finance``,
+    which has no DNS record while ``www.bstocks.finance`` is the live site."""
+
+    def __init__(self, live: dict[str, str]) -> None:
+        self.live = live
+        self.asked: list[str] = []
+
+    async def fetch(self, target):
+        from ai_market_monitor.services.sharia_research import ShariaResearchError
+
+        self.asked.append(target.source_url)
+        if target.source_url not in self.live:
+            raise ShariaResearchError(
+                "official_source_unavailable", "nothing answered", retryable=True
+            )
+        return self.live[target.source_url], {"content-type": "text/html"}, 200
+
+
+class _NoBrowser:
+    async def render(self, url):
+        raise RuntimeError("no browser in this test")
+
+    async def aclose(self):
+        return None
+
+
+def _crawler(web: _OnlyExactAddresses):
+    from ai_market_monitor.core.config import Settings
+    from ai_market_monitor.services.coin_evidence_crawler import CoinEvidenceCrawler
+
+    return CoinEvidenceCrawler(Settings(), fetcher=web, renderer=_NoBrowser())
+
+
+_SPELLINGS = [
+    # (as the provider lists it, the address that must be fetched)
+    ("https://www.project.example/", "https://www.project.example/"),
+    ("https://www.project.example", "https://www.project.example/"),
+    ("https://WWW.Project.example/about", "https://WWW.Project.example/about"),
+    ("https://www.project.example/about#team", "https://www.project.example/about"),
+    ("https://project.example/about", "https://project.example/about"),
+    ("https://docs.project.example/intro", "https://docs.project.example/intro"),
+]
+
+
+@pytest.mark.parametrize(
+    "field", ["website", "whitepaper", "technical_doc", "source_code", "announcement"]
+)
+@pytest.mark.parametrize(("listed", "fetched"), _SPELLINGS)
+async def test_every_listed_address_is_fetched_as_it_was_given(field, listed, fetched):
+    """The ``www.``-free spelling is a page's identity, not where it lives.
+
+    On 2 October 2026 ten coins issued by ``www.bstocks.finance`` were filed with an
+    empty report each, because the crawler fetched ``bstocks.finance`` — which does not
+    exist. Every provider field, every spelling: the address fetched is the one listed.
+    """
+
+    web = _OnlyExactAddresses({fetched: _html()})
+    folder = await _crawler(web).gather("ANY", provider_links={field: [listed]})
+
+    assert web.asked[0] == fetched
+    assert [document.url for document in folder.documents] == [fetched]
+    assert not folder.failures
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        "/docs/start",
+        "https://www.project.example/docs/start",
+        "https://www.project.example/docs/start#install",
+    ],
+)
+async def test_a_followed_link_is_fetched_as_the_page_wrote_it(link):
+    """The same rule for the second pass: a link is read where the page pointed."""
+
+    home = "https://www.project.example/"
+    docs = "https://www.project.example/docs/start"
+    web = _OnlyExactAddresses({home: _html(link), docs: _html()})
+    folder = await _crawler(web).gather("ANY", website=home)
+
+    assert docs in web.asked
+    assert {document.url for document in folder.documents} == {home, docs}
+
+
+async def test_two_spellings_of_one_page_are_still_fetched_once():
+    """Keeping the address must not bring back the double count the identity prevents."""
+
+    web = _OnlyExactAddresses({"https://www.project.example/docs": _html()})
+    folder = await _crawler(web).gather(
+        "ANY",
+        website="https://www.project.example/docs",
+        provider_links={"whitepaper": ["https://project.example/docs/"]},
+    )
+
+    assert web.asked == ["https://www.project.example/docs"]
+    assert len(folder.documents) == 1

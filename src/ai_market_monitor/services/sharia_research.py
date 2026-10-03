@@ -189,6 +189,31 @@ class FetchTarget:
     source_url: str
 
 
+#: Why a fetched page did not become usable, in words a non-engineer can act on. Keyed by
+#: the error code the fetcher, the document reader and the evidence crawler produce. One
+#: owner, kept beside the fetcher that makes the codes, so the source task a reviewer
+#: reads and the new-coin report cannot describe the same failure two different ways.
+FETCH_FAILURE_WORDS: dict[str, str] = {
+    "robots_disallowed": "the site's own rules say we may not read it",
+    "robots_unavailable": "the site would not say what it allows, so nothing on it was read",
+    # Ours, not the site's. Worded so nobody reads it as a fact about the project.
+    "robots_not_asked": "our own checker was paused, so this address was never tried",
+    "too_short": "the page loaded but showed no readable text",
+    "unreadable_document": "the page could not be read as text",
+    "unreadable": "the page could not be read as text",
+    "official_source_text_insufficient": "the page had too little text to read",
+    "official_pdf_parse_failed": "the PDF could not be read as text",
+    "official_source_unavailable": "nothing answered at that address",
+    "official_source_fetch_failed": "the address could not be reached",
+}
+
+
+def fetch_failure_in_plain_words(code: str | None) -> str:
+    """One short phrase for a failure code. Never raises, never shows the raw code."""
+
+    return FETCH_FAILURE_WORDS.get(code or "", "the page could not be read")
+
+
 class OfficialEvidenceFetcher:
     def __init__(
         self,

@@ -51,6 +51,10 @@ from ai_market_monitor.services.coin_evidence_crawler import (
     EvidenceFolder,
 )
 from ai_market_monitor.services.coin_terms_ai_review import (
+    COUNTED_AI_STATES,
+    MAX_AI_ATTEMPTS,
+    RETRY_AFTER,
+    RETRY_AI_STATES,
     AIReview,
     CoinReport,
     CoinTermsAIReviewer,
@@ -99,12 +103,19 @@ class PipelineResult:
     def decided(self) -> int:
         return self.eligible + self.not_eligible
 
+    @property
+    def stored(self) -> int:
+        """Coins this sweep finished and filed a report for, whatever the report says."""
+
+        return self.eligible + self.not_eligible + self.not_enough_data
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "eligible": self.eligible,
             "not_eligible": self.not_eligible,
             "not_enough_data": self.not_enough_data,
             "decided": self.decided,
+            "stored": self.stored,
             "pages_read": self.pages_read,
             "provider_silent": list(self.provider_silent),
             "failed": dict(self.failed),
@@ -159,6 +170,72 @@ def passport_payload(
         "evidence_read": folder.as_dict(),
         "automated_result": decision.as_dict(),
     }
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+async def coins_to_screen(
+    session: AsyncSession,
+    *,
+    now: datetime | None = None,
+) -> list[str]:
+    """Every researched coin still owed a reading, in the order the sweep takes them.
+
+    Two groups, and the first always goes first:
+
+    1. **Never read.** Every coin the researcher gathered links for that has no report.
+       Biggest first, by the market size the daily numbers refresh stores, so the effort
+       lands where users actually are; then by symbol, so the order is the same on every
+       run instead of whatever the database happens to return.
+    2. **Owed another try.** A report whose reading did not happen — the AI failed, or
+       nothing could be read — is tried again, up to :data:`MAX_AI_ATTEMPTS` times and
+       no sooner than :data:`RETRY_AFTER` after the last try. Retries go last so a site
+       that is down for good can never hold a new coin back.
+
+    Everything else already has its report and is not read again.
+    """
+
+    now = now or datetime.now(UTC)
+    runs = {
+        row.symbol: row
+        for row in (
+            await session.execute(
+                select(
+                    AutomatedScreenRun.symbol,
+                    AutomatedScreenRun.ai_review_state,
+                    AutomatedScreenRun.ai_review_attempts,
+                    AutomatedScreenRun.decided_at,
+                )
+            )
+        ).all()
+    }
+    candidates = (
+        await session.scalars(
+            select(ProviderCoinProfile.symbol)
+            .where(
+                ProviderCoinProfile.provider == "coinmarketcap",
+                ProviderCoinProfile.research_state == "researched",
+            )
+            .order_by(
+                ProviderCoinProfile.market_cap_usd.desc().nullslast(),
+                ProviderCoinProfile.symbol,
+            )
+        )
+    ).all()
+
+    def owed_retry(symbol: str) -> bool:
+        run = runs[symbol]
+        return (
+            run.ai_review_state in RETRY_AI_STATES
+            and (run.ai_review_attempts or 0) < MAX_AI_ATTEMPTS
+            and (run.decided_at is None or _aware(run.decided_at) <= now - RETRY_AFTER)
+        )
+
+    fresh = [symbol for symbol in candidates if symbol not in runs]
+    retry = [symbol for symbol in candidates if symbol in runs and owed_retry(symbol)]
+    return list(dict.fromkeys([*fresh, *retry]))
 
 
 class AutomatedScreenPipeline:
@@ -312,7 +389,7 @@ class AutomatedScreenPipeline:
         run.review_report = report.body
         run.hold_state = report.hold_state
         run.ai_review_state = review.state
-        if review.state in {"completed", "failed"}:
+        if review.state in COUNTED_AI_STATES:
             run.ai_review_attempts = (run.ai_review_attempts or 0) + 1
         # `published` is deliberately never assigned here. Only the application's own
         # approval route may set it, and only after a person has decided.
@@ -526,4 +603,9 @@ def _link_fields(record: CoinLinks | None) -> Mapping[str, Sequence[str]]:
     }
 
 
-__all__ = ["AutomatedScreenPipeline", "PipelineResult", "passport_payload"]
+__all__ = [
+    "AutomatedScreenPipeline",
+    "PipelineResult",
+    "coins_to_screen",
+    "passport_payload",
+]

@@ -55,6 +55,7 @@ from ai_market_monitor.services.sharia_automated_screen import (
 from ai_market_monitor.services.sharia_automated_screen import (
     METHODOLOGY_SYSTEM_CODE as AUTOMATED_METHODOLOGY_CODE,
 )
+from ai_market_monitor.services.sharia_research import fetch_failure_in_plain_words
 from ai_market_monitor.services.sharia_source_catalog import category_label, state_label
 
 
@@ -190,6 +191,9 @@ def register(templates: Jinja2Templates) -> Jinja2Templates:
     # the stored value at a reviewer: "candidate", "unreachable", "not_permitted".
     templates.env.filters["source_state"] = state_label
     templates.env.filters["source_category"] = category_label
+    # Why a page could not be read, from the fetcher's one list of plain words. The
+    # new-coin report printed the raw code at a reviewer: "robots unavailable".
+    templates.env.filters["fetch_failure"] = fetch_failure_in_plain_words
     # The one owner of "which pictures exist for this coin", reachable from a template.
     # Six templates used to answer it themselves, each knowing a different subset; the
     # catalogue address was typed into two of them by hand.

@@ -69,7 +69,9 @@
         </td>
         <td>
           <span class="brain-status {{ item.evidence_state }}">{{ item.evidence_state }}</span>
-          <small>{{ item.evidence_completeness }}% complete</small>
+          {#- A new coin has no research file, so a percentage of one would always read
+              0%. Its evidence is the pages its own reading went through. -#}
+          <small>{{ item.evidence_note if item.evidence_note else item.evidence_completeness ~ '% complete' }}</small>
         </td>
         <td>
           <strong>{{ item.age_hours }}h</strong>
