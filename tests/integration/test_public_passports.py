@@ -18,6 +18,7 @@ What the move promised, each checked through the real app:
 from __future__ import annotations
 
 import re
+import xml.etree.ElementTree as ET
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -32,6 +33,7 @@ from ai_market_monitor.db.models import (
     ShariaMethodology,
 )
 from ai_market_monitor.db.models.enums import ShariaAssetStatus, ShariaMethodologyStatus
+from ai_market_monitor.services import public_passports
 from ai_market_monitor.services.sharia_automated_screen import METHODOLOGY_SYSTEM_CODE
 from tests.factories import methodology_evidence_requirements, methodology_rules
 from tests.integration.test_dashboard_web import _signup_and_verify
@@ -52,9 +54,14 @@ PUBLISHER_ID = uuid4()
 
 
 async def _seed(
-    test_context, count: int = 2, *, codes: tuple[str, ...] = ()
+    test_context,
+    count: int = 2,
+    *,
+    codes: tuple[str, ...] = (),
+    symbol: str = "BTC",
+    name: str = "Bitcoin",
 ) -> list[ShariaMethodology]:
-    """BTC reviewed under `count` standards, each published and in force.
+    """`symbol` reviewed under `count` standards, each published and in force.
 
     `codes` names the standards' codes in order, where a test needs a particular one.
     """
@@ -63,8 +70,8 @@ async def _seed(
     created: list[ShariaMethodology] = []
     async with test_context["session_factory"]() as session:
         coin = CanonicalAsset(
-            symbol="BTC",
-            name="Bitcoin",
+            symbol=symbol,
+            name=name,
             asset_type="native",
             native_chain="Bitcoin",
             contract_addresses={},
@@ -92,8 +99,8 @@ async def _seed(
             session.add(methodology)
             await session.flush()
             assessment = AssetShariaAssessment(
-                canonical_asset="BTC",
-                asset_name="Bitcoin",
+                canonical_asset=symbol,
+                asset_name=name,
                 methodology_id=methodology.id,
                 status=status,
                 summary=f"A qualified reviewer recorded this under {name}.",
@@ -127,7 +134,7 @@ async def _seed(
                         source_hash=uuid4().hex + uuid4().hex,
                     ),
                     AssetShariaStatusHistory(
-                        canonical_asset="BTC",
+                        canonical_asset=symbol,
                         methodology_id=methodology.id,
                         previous_status=None,
                         new_status=status,
@@ -151,7 +158,7 @@ async def _seed(
                     version=index + 1,
                     publication_state="published",
                     passport_snapshot={},
-                    integrity_hash=f"hash-{index:04d}",
+                    integrity_hash=f"hash-{symbol}-{index:04d}",
                     is_active=True,
                     published_by_user_id=PUBLISHER_ID,
                     published_at=now - timedelta(hours=12),
@@ -376,3 +383,94 @@ async def test_the_machine_standard_is_never_chosen_for_somebody(test_context):
     assert chosen.status_code == 200
     assert "(automated, no Shariah advisor)" in chosen.text
     assert "data-automated-methodology-notice" in chosen.text
+
+
+# -- the sitemap ------------------------------------------------------------------------
+
+_SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+
+
+async def _sitemap(context) -> list[str]:
+    """Every address in the sitemap, after checking it is a valid sitemap at all."""
+
+    response = await context["client"].get("/sitemap.xml", follow_redirects=False)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/xml")
+    root = ET.fromstring(response.content)
+    assert root.tag == "{http://www.sitemaps.org/schemas/sitemap/0.9}urlset"
+    return [loc.text or "" for loc in root.findall("sm:url/sm:loc", _SITEMAP_NS)]
+
+
+async def test_the_sitemap_lists_a_passport_exactly_when_its_page_opens(test_context):
+    """The sitemap and the page share one rule, so they can never disagree.
+
+    Three coins, three outcomes: BTC is published under a Shariah standard, ETH has only
+    the machine standard (which never opens on its own), DOGE was never reviewed. Every
+    coin is checked both ways — listed means the page opens, unlisted means it does not.
+    """
+
+    await _seed(test_context, count=1)
+    await _seed(
+        test_context, count=1, codes=(METHODOLOGY_SYSTEM_CODE,), symbol="ETH", name="Ethereum"
+    )
+    await _newer_default_without_btc(test_context)
+    base = str(test_context["settings"].public_base_url).rstrip("/")
+    listed = set(await _sitemap(test_context))
+
+    outcomes = {}
+    for coin in ("btc", "eth", "doge"):
+        page = await test_context["client"].get(f"/passports/{coin}", follow_redirects=False)
+        outcomes[coin] = page.status_code
+        assert (f"{base}/passports/{coin}" in listed) == (page.status_code == 200), (
+            coin,
+            page.status_code,
+        )
+    # Both sides of the rule were exercised, not only one.
+    assert outcomes == {"btc": 200, "eth": 404, "doge": 404}
+
+
+async def test_the_sitemap_lists_only_clean_canonical_addresses(test_context):
+    await _seed(test_context, count=2)
+    base = str(test_context["settings"].public_base_url).rstrip("/")
+    locations = await _sitemap(test_context)
+
+    assert len(locations) == len(set(locations))
+    assert f"{base}/" in locations
+    assert f"{base}/markets" in locations
+    assert f"{base}/passports/btc" in locations
+    for location in locations:
+        assert location.startswith(f"{base}/"), location
+        path = location.removeprefix(base)
+        # A standard in the address, the printable report, account pages and the
+        # dashboard are never pages to index.
+        assert "?" not in path, location
+        assert not path.endswith("/report"), location
+        for private in ("/signin", "/signup", "/reset-password", "/dashboard", "/api/"):
+            assert not path.startswith(private), location
+        # Every listed address answers itself, never a redirect.
+        response = await test_context["client"].get(path, follow_redirects=False)
+        assert response.status_code == 200, (location, response.status_code)
+
+
+async def test_a_newly_published_coin_reaches_the_sitemap_by_itself(test_context, monkeypatch):
+    """Nobody edits the sitemap: a coin published is listed once the short cache ends."""
+
+    clock = [1000.0]
+    monkeypatch.setattr(public_passports, "monotonic", lambda: clock[0])
+    await _seed(test_context, count=1)
+    base = str(test_context["settings"].public_base_url).rstrip("/")
+    assert f"{base}/passports/eth" not in await _sitemap(test_context)
+
+    await _seed(test_context, count=1, symbol="ETH", name="Ethereum")
+    # Within the cache time the list is reused, so a busy crawler costs nothing.
+    assert f"{base}/passports/eth" not in await _sitemap(test_context)
+    clock[0] += public_passports._PUBLIC_PASSPORTS_SECONDS + 1
+    assert f"{base}/passports/eth" in await _sitemap(test_context)
+
+
+async def test_before_launch_the_sitemap_lists_no_passport(waitlist_context):
+    """The Passports are hidden with the Market page, so the sitemap leaves them out."""
+
+    await _seed(waitlist_context, count=1)
+    locations = await _sitemap(waitlist_context)
+    assert not any("/passports/" in location for location in locations)

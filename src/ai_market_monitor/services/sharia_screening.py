@@ -495,6 +495,20 @@ class ShariaScreeningService:
             if row.status in DEFAULT_ALLOWED_STATUSES and asset not in holds
         }
 
+    async def assessed_assets(
+        self,
+        methodology_id: UUID,
+        *,
+        as_of: datetime | None = None,
+    ) -> set[str]:
+        """Canonical assets with a governing assessment under one methodology, any status.
+
+        The same winners `effective_assessment` reads one at a time, as short strings.
+        """
+        as_of = as_of or datetime.now(UTC)
+        methodology = await self.methodology(methodology_id, require_active=True, as_of=as_of)
+        return set(await self._winning_assessments(methodology, as_of=as_of))
+
     async def effective_assessment(
         self,
         methodology_id: UUID,

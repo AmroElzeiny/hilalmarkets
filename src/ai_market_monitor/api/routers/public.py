@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 from uuid import UUID
+from xml.sax.saxutils import escape as xml_escape
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
@@ -66,10 +67,6 @@ from ai_market_monitor.core.site_content import (
 from ai_market_monitor.core.site_content import (
     social_image_url as build_social_image_url,
 )
-from ai_market_monitor.schemas.sharia import (
-    AssetPassportResponse,
-    MethodologyComparisonResponse,
-)
 from ai_market_monitor.services.ai_provider import (
     AIProviderConfigError,
     is_configured,
@@ -99,13 +96,12 @@ from ai_market_monitor.services.public_market import (
     PublicMarketService,
     market_account_links,
 )
+from ai_market_monitor.services.public_passports import open_passport, public_passport_assets
 from ai_market_monitor.services.public_site import PublicSiteReadService
 from ai_market_monitor.services.screened_market import followed_coins
-from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_screening import (
     STATUS_LABELS,
     ShariaScreeningError,
-    ShariaScreeningService,
 )
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
@@ -746,53 +742,6 @@ def _standard_label(name: str, version: str, status_label: str, *, automated: bo
     return f"{name} v{version}{kind} \u00b7 {status_label}"
 
 
-async def _coin_passport(
-    session: AsyncSession,
-    settings: Settings,
-    asset: str,
-    methodology_id: UUID | None,
-) -> tuple[AssetPassportResponse, MethodologyComparisonResponse]:
-    """The coin's Passport under the standard asked for — or, asked for none, its own.
-
-    **One Passport per coin**, so a coin some standard reviewed always has a page. With
-    no standard named it opens on the product's default standard; when that standard
-    never reviewed this coin, on the first standard that did. The machine-made standard
-    is never chosen this way: it is a standard a person picks on purpose, never one put
-    in front of somebody who did not (`services/sharia_screening.py`). A standard named
-    in the address is honoured exactly, or refused — never swapped for another.
-    """
-
-    reader = ShariaPassportReadService(session, settings)
-    comparison = await ShariaScreeningService(session, settings).methodology_comparison(asset)
-    try:
-        return await reader.current(asset, methodology_id=methodology_id), comparison
-    except ShariaScreeningError as refused:
-        if methodology_id is not None:
-            raise
-        for item in comparison.results:
-            if item.status is None or is_automated(item.methodology.code):
-                continue
-            try:
-                passport = await reader.current(asset, methodology_id=item.methodology.id)
-            except ShariaScreeningError:
-                continue
-            return passport, comparison
-        # Last, and only when no other standard covers the coin: a result under the
-        # Hilal Markets Methodology that a Hilal Markets reviewer decided. That is a
-        # person's decision, not the machine's, so it may open on its own — the rule
-        # above keeps out only what nobody reviewed.
-        for item in comparison.results:
-            if item.status is None or not is_automated(item.methodology.code):
-                continue
-            try:
-                passport = await reader.current(asset, methodology_id=item.methodology.id)
-            except ShariaScreeningError:
-                continue
-            if passport.decision_record is not None:
-                return passport, comparison
-        raise refused from None
-
-
 async def _passport_page(
     *,
     request: Request,
@@ -832,11 +781,11 @@ async def _passport_page(
             passport_path(asset_slug, methodology_id=requested, report=report), status_code=308
         )
     try:
-        passport, comparison = await _coin_passport(session, settings, asset_slug, requested)
+        passport, comparison = await open_passport(session, settings, asset_slug, requested)
     except ShariaScreeningError as exc:
         if requested is not None:
             try:
-                await _coin_passport(session, settings, asset_slug, None)
+                await open_passport(session, settings, asset_slug, None)
             except ShariaScreeningError:
                 pass
             else:
@@ -1160,14 +1109,29 @@ async def legacy_risk() -> RedirectResponse:
 
 
 @router.get("/sitemap.xml", include_in_schema=False, name="public_sitemap")
-async def sitemap(settings: Settings = Depends(get_settings)) -> Response:
+async def sitemap(
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """Every public page a search engine should index, by its one canonical address.
+
+    The website's pages, then one Passport per coin. A Passport is listed exactly when
+    its page opens (`services/public_passports.py`), under its clean address: never a
+    standard written into the address, never the printable report — both are the same
+    Passport, and their pages name this address as the canonical one.
+    """
+
     # A page that redirects is not a page to index. The same hidden-page set that empties
     # the menus keeps those addresses out of the sitemap, so the header, the footer and
     # search engines are told the same thing.
     hidden = settings.stage_exposure.hidden_pages
     paths = ["/", *(item.path for item in PUBLIC_PAGES if item.page not in hidden)]
+    if "market" not in hidden:
+        # Passports are hidden with the Market page, and shown with it.
+        coins = await public_passport_assets(session, settings)
+        paths.extend(passport_path(asset) for asset in coins)
     locations = "".join(
-        f"<url><loc>{_absolute_url(settings, path)}</loc></url>" for path in paths
+        f"<url><loc>{xml_escape(_absolute_url(settings, path))}</loc></url>" for path in paths
     )
     payload = (
         '<?xml version="1.0" encoding="UTF-8"?>'
