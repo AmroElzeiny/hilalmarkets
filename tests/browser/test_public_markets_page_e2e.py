@@ -73,8 +73,30 @@ def test_a_signed_in_member_stays_on_the_public_market_page(
     # Favorites opens in the dashboard, where following a coin happens.
     favorites = page.locator("[data-favorites-in-dashboard]")
     expect(favorites).to_have_attribute("href", re.compile(r"/dashboard/market\?saved_assets=1$"))
-    # "See the evidence" opens the coin's Passport, a public page on the website.
+    _see_the_evidence_in_the_popup(page)
+
+
+def _see_the_evidence_in_the_popup(page: Page) -> None:
+    """"See the evidence" opens the dashboard's Passport popup on this same page, and
+    its "Open the full Passport" goes to the coin's public Passport."""
+
+    address = page.url
     page.locator(".t-asset [data-quick-view]").first.click()
+    dialog = page.locator("[data-passport-dialog]")
+    expect(dialog).to_be_visible(timeout=10_000)
+    expect(dialog.locator("[data-pq-content]")).to_be_visible(timeout=20_000)
+    expect(dialog.locator("[data-pq-error]")).to_be_hidden()
+    expect(dialog.locator("[data-pq-name]")).not_to_have_text("Loading")
+    assert page.url == address, "the popup must not leave the page"
+    _keep(page, "markets-evidence-popup")
+    expect(dialog.locator("[data-pq-full]")).to_have_attribute(
+        "href", re.compile(r"/passports/[a-z0-9]+")
+    )
+    page.keyboard.press("Escape")
+    expect(dialog).to_be_hidden(timeout=5_000)
+    page.locator(".t-asset [data-quick-view]").first.click()
+    expect(dialog.locator("[data-pq-content]")).to_be_visible(timeout=20_000)
+    dialog.locator("[data-pq-full]").click()
     page.wait_for_url(re.compile(r"/passports/[a-z0-9]+"), timeout=20_000)
 
 
@@ -85,6 +107,35 @@ def test_a_visitor_lands_on_the_public_market_page(page: Page, base_url: str) ->
     root = page.locator("[data-market-root]")
     expect(root).to_have_attribute("data-audience", "public")
     assert root.get_attribute("data-unlocked") is None
+
+
+def test_a_visitor_sees_the_evidence_in_the_popup(
+    page: Page, base_url: str, browser_app
+) -> None:
+    """A visitor without an account gets the same popup a member does."""
+
+    page.set_viewport_size({"width": 1440, "height": 950})
+    # The seed needs an account to own the followed coin; the visitor is signed out.
+    email = signup(page, base_url)
+    seed_sharia_screened_market(browser_app.database_url, email)
+    page.context.clear_cookies()
+    page.goto(f"{base_url}/markets", wait_until="domcontentloaded")
+    assert page.locator("[data-market-root]").get_attribute("data-unlocked") is None
+    _show_the_seeded_standard(page)
+    _see_the_evidence_in_the_popup(page)
+
+    # On a phone the popup fits the screen and its main button can be reached.
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(f"{base_url}/markets", wait_until="domcontentloaded")
+    _show_the_seeded_standard(page)
+    page.locator(".t-asset [data-quick-view]").first.click()
+    dialog = page.locator("[data-passport-dialog]")
+    expect(dialog.locator("[data-pq-content]")).to_be_visible(timeout=20_000)
+    box = dialog.bounding_box()
+    assert box and box["x"] >= 0 and box["x"] + box["width"] <= 390, box
+    expect(dialog.locator("[data-pq-full]")).to_be_in_viewport()
+    if SCREENSHOT_DIR:
+        page.screenshot(path=str(Path(SCREENSHOT_DIR) / "markets-evidence-popup-390.png"))
 
 
 def test_the_member_view_holds_at_every_width(page: Page, base_url: str, browser_app) -> None:

@@ -160,6 +160,14 @@ def hilal_chat_gate(chrome_flag: object, settings: object) -> bool:
     return bool(chrome_flag) and bool(getattr(settings, "hilal_chat_enabled", False))
 
 
+def consent_cookie_domain() -> str | None:
+    """Where the cookie choice is saved, for every page shell that writes it."""
+
+    from ai_market_monitor.core.config import get_settings
+
+    return get_settings().consent_cookie_domain
+
+
 def register(templates: Jinja2Templates) -> Jinja2Templates:
     """Give one template environment everything the product's templates expect."""
 
@@ -226,6 +234,7 @@ def register(templates: Jinja2Templates) -> Jinja2Templates:
     # Whether Hilal assistant chrome should render. Computed once here so the base
     # template, the assistant partial, and the Ask AI macro never hold their own copy.
     templates.env.globals["hilal_chat_gate"] = hilal_chat_gate
+    templates.env.globals["consent_cookie_domain"] = consent_cookie_domain
     # What a discount code may look like, handed to the page so the browser refuses the
     # same shapes the server refuses. The Apply button used to carry its own copy of this
     # rule, written out by hand — a browser rule that is merely *similar* either sends

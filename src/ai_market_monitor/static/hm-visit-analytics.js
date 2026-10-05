@@ -41,6 +41,11 @@
   }
 
   var key = sessionKey();
+  // Where this page was opened from. The browser's own referrer describes how the whole
+  // tab arrived, so it stays "google.com" for every page somebody then clicks through on
+  // the React site — each of those pages was being counted as another arrival from a
+  // search engine. After the first page it is the page before, on this site.
+  var openedFrom = null;
   var activeSince = document.visibilityState === "visible" ? Date.now() : null;
   var activeMs = 0;
   var closed = false;
@@ -59,7 +64,8 @@
       active_ms: measuredMs()
     };
     if (event === "open") {
-      body.referrer = document.referrer ? String(document.referrer).slice(0, 500) : null;
+      var from = openedFrom !== null ? openedFrom : document.referrer;
+      body.referrer = from ? String(from).slice(0, 500) : null;
       body.campaign = campaign();
     }
     if (extra) {
@@ -136,6 +142,16 @@
   // measuring the site must never be a reason the site is worse to use. `pagehide` fires
   // for a normal close and for a page going into that cache, so nothing is missed.
   window.addEventListener("pagehide", finish);
+  // A page brought back by the Back button comes from the browser's memory without
+  // loading again. `pagehide` closed its visit on the way out, and nothing opened a new
+  // one, so every return by Back was invisible.
+  window.addEventListener("pageshow", function (event) {
+    if (!event.persisted || !closed) return;
+    // Back is a move inside this site, not a new arrival from wherever the tab began.
+    openedFrom = window.location.origin + lastPath;
+    key = sessionKey();
+    beginVisit();
+  });
 
   // Opening the assistant is the one thing a person can do here that is not a new page,
   // so it is the one action the page has to report itself.
@@ -154,6 +170,7 @@
   function routed() {
     var path = window.location.pathname || "/";
     if (path === lastPath) return;
+    openedFrom = window.location.origin + lastPath;
     lastPath = path;
     finish();
     key = sessionKey();

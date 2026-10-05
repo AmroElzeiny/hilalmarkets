@@ -3,6 +3,9 @@
   <head>
     <script>
       window.dataLayer = window.dataLayer || [];
+      // No custom-code tag in the Tag Manager container may run. The X pixel was one, and it
+      // fired on analytics consent alone; this site loads it itself, on marketing consent.
+      window.dataLayer.push({ "gtm.blocklist": ["html", "customScripts"] });
       window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
       window.gtag("consent", "default", {
         ad_storage: "denied",

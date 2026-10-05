@@ -5,8 +5,10 @@ What is asserted, as rules across the whole family:
 * the feed sends exactly the first 20 coins, in the dashboard's own order, on both
   exchanges — and nothing about the rest except counts;
 * the page keeps the dashboard's list and drops only what a visitor cannot use: no
-  search, no sorting, no dashboard top bar; hearts, Favorites and Passports ask for an
-  account and bring the visitor back to what they asked for;
+  search, no sorting, no dashboard top bar; hearts and Favorites ask for an account and
+  bring the visitor back to what they asked for;
+* "See the evidence" opens the dashboard's own Passport popup for everybody, read from
+  an open feed that answers for every screened coin exactly as the dashboard does;
 * a signed-in member who opens the page stays on it and sees every coin, with nothing
   locked and no sign-up prompt — the "Markets" link must not drop them in the dashboard;
 * the page answers at ``/markets``; the first address, ``/market``, forwards there;
@@ -288,6 +290,68 @@ async def test_a_signed_in_member_stays_on_the_public_page_with_nothing_locked(t
     assert 'href="/dashboard/market?saved_assets=1"' in html
 
 
+#: The address the public page's Passport popup reads from.
+POPUP_FEED = "/api/v1/public-market/passports/{asset}/quick-view"
+
+
+@pytest.mark.parametrize("signed_in", [False, True], ids=["visitor", "member"])
+async def test_see_the_evidence_opens_the_dashboards_popup_on_the_public_page(
+    test_context, signed_in
+):
+    """The dashboard's own Passport popup is on the page, reading the open feed."""
+
+    await _screen_every_coin(test_context)
+    test_context["app"].dependency_overrides[get_market_data_provider] = VolumeProvider
+    if signed_in:
+        await _signup(test_context, "member-popup@example.com")
+
+    html = (await test_context["client"].get("/markets")).text
+    dialog = re.search(r"<dialog[^>]*data-passport-dialog[^>]*>", html, re.S)
+    assert dialog, "the Passport popup is missing from the public page"
+    assert f'data-endpoint="{POPUP_FEED}"' in dialog.group(0)
+    assert "/hm-dialogs-test.js" in html
+    # The popup's script runs before the list's, so the list finds it ready.
+    assert html.index("/hm-dialogs-test.js") < html.index("/hm-market-test.js")
+
+
+async def test_the_popup_feed_shows_every_coin_exactly_as_the_dashboard_does(test_context):
+    """Every screened coin — shown or behind the line — opens for a visitor, and the
+    popup a visitor reads is the one a member reads in the dashboard, word for word.
+
+    A Passport is public (`/passports/<coin>`), so its short version is too.
+    """
+
+    methodology_id = await _screen_every_coin(test_context)
+    client = test_context["client"]
+    visitor: dict[str, dict] = {}
+    for coin in COINS:
+        response = await client.get(
+            POPUP_FEED.format(asset=coin), params={"methodology": methodology_id}
+        )
+        assert response.status_code == 200, (coin, response.text)
+        visitor[coin] = response.json()
+        assert visitor[coin]["assessment"]["canonical_asset"] == coin
+        assert visitor[coin]["full_passport_url"].startswith(f"/passports/{coin.lower()}")
+
+    await _signup(test_context, "member-popup-compare@example.com")
+    for coin in COINS:
+        member = await client.get(
+            f"/api/v1/sharia/assets/{coin}/passport/quick-view",
+            params={"methodology": methodology_id},
+        )
+        assert member.status_code == 200, (coin, member.text)
+        assert member.json() == visitor[coin], coin
+
+
+async def test_the_popup_feed_refuses_a_coin_with_no_passport_and_invents_nothing(test_context):
+    await _screen_every_coin(test_context)
+    response = await test_context["client"].get(POPUP_FEED.format(asset="NOPASSPORTX"))
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert detail["code"] and detail["message"]
+    assert "assessment" not in response.json()
+
+
 async def test_the_feed_sends_a_signed_in_member_every_coin(test_context):
     methodology_id = await _screen_every_coin(test_context)
     test_context["app"].dependency_overrides[get_market_data_provider] = VolumeProvider
@@ -416,6 +480,8 @@ async def test_before_launch_the_page_its_feed_and_its_links_are_closed(waitlist
     assert page.status_code == 303
     feed = await client.get("/api/v1/public-market/quotes")
     assert feed.status_code == 404
+    popup = await client.get(POPUP_FEED.format(asset="BTC"))
+    assert popup.status_code == 404
     help_page = await client.get("/help")
     assert 'href="/markets"' not in help_page.text
     landing = await client.get("/")

@@ -13,7 +13,7 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Final, Literal, cast
+from typing import Any, Final, Literal
 
 from pydantic_core import PydanticUndefined
 
@@ -278,7 +278,7 @@ def reconcile_requirement_state(
             UnresolvedFieldV2(
                 unresolved_id=active_clarification.question_id,
                 source_fragment=active_clarification.question,
-                target_type=cast(UnresolvedTargetType, active_clarification.target_type),
+                target_type=active_clarification.target_type,
                 target_field=active_clarification.target_field,
                 target_condition_id=active_clarification.target_condition_id,
                 expected_answer_schema=expected_schema,

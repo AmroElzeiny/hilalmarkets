@@ -75,6 +75,13 @@ __all__ = [
 #: sends, so a site's own logs show one visitor rather than two.
 USER_AGENT = "HilalMarketsEvidenceBot/1.0 (+compliance research)"
 
+#: The longest closing a page, a browser or the driver may take. Closing is best effort;
+#: a browser whose page process died can leave a close waiting for ever.
+_CLOSE_SECONDS = 10.0
+
+#: The longest starting the driver or the browser may take.
+_LAUNCH_SECONDS = 60.0
+
 #: Reasons the plain HTTP fetch failed that a real browser might get past. Anything else
 #: — a settled 404, a robots refusal — is an answer, and asking again with a browser
 #: would only be a second way of hearing the same "no".
@@ -208,11 +215,34 @@ class BrowserPageRenderer:
         browser = await self._ensure_browser()
         if browser is None:
             return RenderedPage(unavailable_reason=self._start_failed)
-        context = None
         # Counted before the attempt, not after a success. A page that times out has
         # already cost the browser its time and its memory, and a run where every page
         # fails must still stop at the budget rather than retrying for ever.
         self._rendered += 1
+        try:
+            return await asyncio.wait_for(
+                self._draw(browser, url), timeout=self._page_deadline_seconds()
+            )
+        except TimeoutError:
+            # Playwright's own timeouts cover loading a page, not the browser itself. On
+            # 5 October 2026 the page process died and the next call waited for ever —
+            # inside the worker's only child, so every task in the product waited with it
+            # for fourteen hours. This deadline covers the whole visit, and a browser that
+            # missed it is thrown away: the next page starts a fresh one.
+            logger.info("Browser render of %s stopped answering; restarting the browser", url)
+            await self._discard_browser()
+            return RenderedPage(
+                unavailable_reason="The browser stopped answering while reading the page."
+            )
+
+    def _page_deadline_seconds(self) -> float:
+        """The longest one page may take, end to end: load, settle, read and close."""
+
+        timeout = float(self.settings.sharia_source_browser_render_timeout_seconds)
+        return timeout * 1.5 + _CLOSE_SECONDS * 2
+
+    async def _draw(self, browser: Any, url: str) -> RenderedPage:
+        context = None
         try:
             context = await browser.new_context(
                 user_agent=USER_AGENT,
@@ -241,10 +271,17 @@ class BrowserPageRenderer:
             )
         finally:
             if context is not None:
-                with contextlib.suppress(Exception):  # closing is best effort
-                    await context.close()
+                # closing is best effort, and never allowed to wait for ever
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(context.close(), timeout=_CLOSE_SECONDS)
         cap = self.settings.sharia_source_browser_render_max_characters
         return RenderedPage(html=html[:cap], engine="playwright")
+
+    async def _discard_browser(self) -> None:
+        """Forget a browser that stopped answering, so the next page starts a new one."""
+
+        async with self._lock:
+            await self.aclose()
 
     async def _ensure_browser(self) -> Any:
         async with self._lock:
@@ -255,10 +292,15 @@ class BrowserPageRenderer:
             try:
                 from playwright.async_api import async_playwright
 
-                self._playwright = await async_playwright().start()
-                self._browser = await self._playwright.chromium.launch(
-                    headless=True,
-                    args=list(LAUNCH_ARGUMENTS),
+                self._playwright = await asyncio.wait_for(
+                    async_playwright().start(), timeout=_LAUNCH_SECONDS
+                )
+                self._browser = await asyncio.wait_for(
+                    self._playwright.chromium.launch(
+                        headless=True,
+                        args=list(LAUNCH_ARGUMENTS),
+                    ),
+                    timeout=_LAUNCH_SECONDS,
                 )
             except Exception as exc:  # noqa: BLE001 - an absent browser is an answer
                 logger.info("Could not start a browser: %s", type(exc).__name__)
@@ -276,7 +318,7 @@ class BrowserPageRenderer:
                 driver, self._playwright = self._playwright, None
                 if driver is not None:
                     with contextlib.suppress(Exception):  # shutting down is best effort
-                        await driver.stop()
+                        await asyncio.wait_for(driver.stop(), timeout=_CLOSE_SECONDS)
                 return None
             return self._browser
 
@@ -292,4 +334,4 @@ class BrowserPageRenderer:
             if closer is None:
                 continue
             with contextlib.suppress(Exception):  # shutting down is best effort
-                await closer()
+                await asyncio.wait_for(closer(), timeout=_CLOSE_SECONDS)

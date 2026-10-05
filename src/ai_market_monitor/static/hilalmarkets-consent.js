@@ -44,12 +44,29 @@
     }
   }
 
+  /* The cookie is read first. It is the copy the website and the product share (see
+   * `cookieDomain` below); the browser's local storage belongs to one name only, so a
+   * choice changed on the product would otherwise be overruled on the website by an older
+   * copy still sitting there. */
   function read() {
+    const shared = readCookie();
+    if (shared) return shared;
     try {
-      return parse(window.localStorage.getItem(storageKey)) || readCookie();
+      return parse(window.localStorage.getItem(storageKey));
     } catch {
-      return readCookie();
+      return null;
     }
+  }
+
+  /* The parent name both of the product's addresses sit under — `hilalmarkets.com` for
+   * `hilalmarkets.com` and `app.hilalmarkets.com` — or "" when this page is not on it.
+   * Without it the choice was saved for one name only, and everybody who accepted on the
+   * website was asked again on sign-in and on the dashboard. Measured on 5 October 2026. */
+  function cookieDomain() {
+    const domain = String(config.cookieDomain || "").trim().toLowerCase();
+    const host = window.location.hostname.toLowerCase();
+    if (!domain) return "";
+    return host === domain || host.endsWith(`.${domain}`) ? domain : "";
   }
 
   function loadGoogle() {
@@ -173,7 +190,13 @@
       // The first-party cookie remains the persistence fallback.
     }
     const secure = window.location.protocol === "https:" ? "; Secure" : "";
-    document.cookie = `${cookieName}=${encodeURIComponent(serialized)}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+    const domain = cookieDomain();
+    if (domain) {
+      // An earlier choice saved for this name alone would be read before the shared one.
+      document.cookie = `${cookieName}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+    }
+    const scope = domain ? `; Domain=${domain}` : "";
+    document.cookie = `${cookieName}=${encodeURIComponent(serialized)}; Path=/${scope}; Max-Age=31536000; SameSite=Lax${secure}`;
     apply(value);
   }
 

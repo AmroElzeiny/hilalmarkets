@@ -6,8 +6,12 @@
     ask without holding a copy of the code. A literal string in the JavaScript would be a
     second owner of a governed identifier, and the two would agree only until one of them
     changed. -#}
+{#- `passport_quick_view_endpoint`, when set, is where the popup reads the evidence:
+    the public Market page sets the open one, so a visitor without an account sees the
+    same popup a member does. Unset, the dashboard's signed-in route is used. -#}
 <dialog class="t-dialog t-passport-dialog" data-passport-dialog aria-labelledby="t-pq-title"
-        data-automated-code="{{ automated_methodology_code }}">
+        data-automated-code="{{ automated_methodology_code }}"
+        {%- if passport_quick_view_endpoint is defined and passport_quick_view_endpoint %} data-endpoint="{{ passport_quick_view_endpoint }}"{% endif %}>
   <div class="t-dialog-shell">
     <header class="t-dialog-head">
       <div class="t-pq-hero">

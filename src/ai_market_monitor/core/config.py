@@ -1880,6 +1880,30 @@ class Settings(BaseSettings):
         return (self.vite_gtm_id or self.google_tag_manager_container_id or "").strip() or None
 
     @property
+    def consent_cookie_domain(self) -> str | None:
+        """The parent name the cookie choice is shared on, or None for one name only.
+
+        The site is ``hilalmarkets.com`` and the product is ``app.hilalmarkets.com``. A
+        choice saved on one name was invisible on the other, so everybody who accepted
+        analytics on the website was asked again on sign-in and on the dashboard — and
+        Google Analytics saw nothing there until they answered twice. When one name sits
+        under the other, the choice is written for the parent and both read it.
+        """
+
+        hosts = {
+            (urlsplit(str(base)).hostname or "").lower()
+            for base in (self.app_base_url, self.public_base_url)
+            if base is not None
+        }
+        hosts.discard("")
+        if len(hosts) != 2:
+            return None
+        first, second = sorted(hosts, key=len)
+        if second.endswith(f".{first}") and "." in first and first != "localhost":
+            return first
+        return None
+
+    @property
     def public_site_url(self) -> str:
         return str(self.vite_site_url or self.public_base_url).rstrip("/")
 

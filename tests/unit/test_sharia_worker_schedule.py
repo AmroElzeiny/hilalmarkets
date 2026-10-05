@@ -11,22 +11,32 @@ def test_sharia_governance_worker_tasks_and_cadences_are_registered():
     assert schedule["process-sharia-authority-imports"] == {
         "task": "ai_market_monitor.process_sharia_authority_imports",
         "schedule": 24 * 60 * 60,
+        # A late copy is dropped; the next send does the work. See `_expire_repeats`.
+        "options": {"expires": float(24 * 60 * 60)},
     }
     assert schedule["send-sharia-review-reminders-hourly"] == {
         "task": "ai_market_monitor.send_sharia_review_reminders",
         "schedule": 60 * 60,
+        # A late copy is dropped; the next send does the work. See `_expire_repeats`.
+        "options": {"expires": float(60 * 60)},
     }
     assert schedule["retry-sharia-admin-telegram-every-minute"] == {
         "task": "ai_market_monitor.retry_sharia_admin_telegram",
         "schedule": 60,
+        # A late copy is dropped; the next send does the work. See `_expire_repeats`.
+        "options": {"expires": float(60)},
     }
     assert schedule["retry-account-emails-every-minute"] == {
         "task": "ai_market_monitor.retry_account_emails",
         "schedule": 60,
+        # A late copy is dropped; the next send does the work. See `_expire_repeats`.
+        "options": {"expires": float(60)},
     }
     assert schedule["monitor-published-sharia-sources"] == {
         "task": "ai_market_monitor.monitor_published_sharia_sources",
         "schedule": 24 * 60 * 60,
+        # A late copy is dropped; the next send does the work. See `_expire_repeats`.
+        "options": {"expires": float(24 * 60 * 60)},
     }
 
 

@@ -97,8 +97,10 @@ HAND_WRITTEN = re.compile(
 )
 
 #: Following a coin and reporting a problem are actions, not the page, and keep their
-#: own addresses.
-ACTION_SUFFIXES = ("/watchlist", "/problem-reports")
+#: own addresses. So is `/quick-view`: the data the Passport popup on the public Market
+#: page reads (`/api/v1/public-market/passports/{asset}/quick-view`), not a page anyone
+#: opens.
+ACTION_SUFFIXES = ("/watchlist", "/problem-reports", "/quick-view")
 
 
 def _hand_written_addresses() -> list[str]:

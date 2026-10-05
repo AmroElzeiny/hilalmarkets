@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from collections.abc import Callable, Sequence
+import re
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
@@ -65,6 +66,38 @@ _SOCIAL_HOSTS = (
 )
 
 
+#: A browser that is a program, not a person: search-engine crawlers, link previews,
+#: uptime checks and the headless browsers this product itself runs (the page-preview
+#: capture, the browser tests). They run the page's script like anybody else, so without
+#: this every one of them was a "visitor" on the Stats page.
+_AUTOMATED_AGENT = re.compile(
+    # `bot/` and a standalone `bot` catch Googlebot/2.1, bingbot/2.0, AhrefsBot/7.0 —
+    # and not a phone named "Cubot Note", whose `bot` is part of a word.
+    r"\bbot\b|bot/|crawl|spider|slurp|headless|lighthouse|playwright|puppeteer|"
+    r"phantomjs|selenium|python-requests|python-httpx|aiohttp|curl/|wget/|"
+    r"go-http-client|facebookexternalhit|bingpreview|google-inspectiontool|googleother|"
+    r"pingdom|uptimerobot|statuscake",
+    re.IGNORECASE,
+)
+
+
+def is_automated(user_agent: str) -> bool:
+    """Whether this browser name is a program rather than a person. Empty counts as one."""
+
+    agent = (user_agent or "").strip()
+    return not agent or bool(_AUTOMATED_AGENT.search(agent))
+
+
+def own_hosts(settings: Settings) -> frozenset[str]:
+    """Every name this product answers on, with and without ``www.``."""
+
+    names = {
+        (urlsplit(base).hostname or "").lower() for base in settings.site_base_urls
+    }
+    names.discard("")
+    return frozenset({*names, *(f"www.{name}" for name in names)})
+
+
 @dataclass(frozen=True, slots=True)
 class TagDefinition:
     """One chip on the Stats page: what it says, and exactly what it selects."""
@@ -92,6 +125,8 @@ def _tag_definitions() -> tuple[TagDefinition, ...]:
                       lambda: SiteVisit.source == "referral"),
         TagDefinition("source:campaign", "Campaign link", "Came from",
                       lambda: SiteVisit.source == "campaign"),
+        TagDefinition("source:internal", "Another of our pages", "Came from",
+                      lambda: SiteVisit.source == "internal"),
         TagDefinition("did:signup", "Went to sign up", "Did next",
                       lambda: SiteVisit.next_action == "signup"),
         TagDefinition("did:chat", "Opened the chat", "Did next",
@@ -129,12 +164,18 @@ def visitor_key(
     return hmac.new(secret, material, hashlib.sha256).hexdigest()
 
 
-def classify_source(referrer: str | None, campaign: str | None) -> str:
+def classify_source(
+    referrer: str | None, campaign: str | None, own: Iterable[str] = ()
+) -> str:
     if campaign:
         return "campaign"
     host = referrer_host(referrer)
     if not host:
         return "direct"
+    # A click from one of our own pages to another is not a visitor arriving from
+    # another website. It used to be filed as "referral" — 68 of the last 30 days' visits.
+    if host in set(own):
+        return "internal"
     if any(marker in host for marker in _SEARCH_HOSTS):
         return "search"
     if any(marker in host for marker in _SOCIAL_HOSTS):
@@ -239,6 +280,8 @@ class SiteAnalyticsService:
         same seconds twice.
         """
 
+        if is_automated(user_agent):
+            return None
         now = datetime.now(UTC)
         key = visitor_key(
             self.settings,
@@ -261,7 +304,7 @@ class SiteAnalyticsService:
                 path=normalized_path,
                 is_landing=normalized_path == LANDING_PATH,
                 referrer_host=referrer_host(referrer),
-                source=classify_source(referrer, campaign),
+                source=classify_source(referrer, campaign, own_hosts(self.settings)),
                 campaign=str(campaign)[:120] if campaign else None,
                 device=classify_device(user_agent),
                 started_at=now,

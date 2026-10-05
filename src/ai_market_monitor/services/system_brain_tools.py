@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -19,9 +20,11 @@ from ai_market_monitor.db.models import (
     AlertDelivery,
     AttributionTouch,
     AuditEvent,
+    AutomatedScreenRun,
     BillingCheckoutAttempt,
     BillingEvent,
     CanonicalAsset,
+    CoinEvidenceDocument,
     IntegrationHealth,
     MonitorHealthSummary,
     Plan,
@@ -30,6 +33,7 @@ from ai_market_monitor.db.models import (
     ReferralRelationship,
     RepositoryEvidenceIndex,
     ReviewCase,
+    ReviewDecision,
     SetupChatOperationalIssue,
     SetupChatTurn,
     ShariaMonitoringRun,
@@ -52,9 +56,11 @@ from ai_market_monitor.schemas.system_brain import (
     EvidenceEnvelope,
     InternalArtifactRequest,
     SystemBrainToolArguments,
+    json_safe,
 )
 from ai_market_monitor.services.agent_tools import strict_json_schema
 from ai_market_monitor.services.sharia_admin_dashboard import ShariaAdminDashboardService
+from ai_market_monitor.services.sharia_research import fetch_failure_in_plain_words
 from ai_market_monitor.services.system_brain_actions import SystemBrainActionService
 from ai_market_monitor.services.system_brain_conversations import AdminConversationExplorer
 from ai_market_monitor.services.system_brain_privacy import redact_customer_text
@@ -107,6 +113,9 @@ REVENUE_TOOLS = (
 GOVERNANCE_OPERATIONS_TOOLS = (
     "review_queue_summary",
     "inspect_review_case",
+    "list_review_cases",
+    "list_coin_screenings",
+    "inspect_coin_screening",
     "source_health",
     "screening_health",
     "delivery_failures",
@@ -162,6 +171,38 @@ TOOL_DESCRIPTIONS.update(
             "never contact customers or alter domain state."
         )
         for name in SAFE_ACTION_TOOLS
+    }
+)
+# The governance readers say what they hold. A generic description told the model that
+# `inspect_review_case` returns "evidence" and nothing about the AI reading or the pages
+# behind it, so questions like "what did the AI do with this coin's pages?" were answered
+# from the queue summary, which has neither.
+TOOL_DESCRIPTIONS.update(
+    {
+        "inspect_review_case": (
+            "One review case by its reference (as printed on the Cases page) or id: its "
+            "state, the human decisions recorded on it, and for a new-coin case the AI's "
+            "coin report and the pages that reading went through."
+        ),
+        "list_review_cases": (
+            "Review cases, newest activity first, including finished ones. `lifecycle` is "
+            "a case state, or 'finished' for every case a person has closed, or 'open'. "
+            "`query` matches the case reference, title or coin symbol. `date_from`/"
+            "`date_to` bound the last update. Each row carries the latest human decision."
+        ),
+        "list_coin_screenings": (
+            "What the automated new-coin reading did, one row per coin: the machine's "
+            "proposal (never a published Shariah status), whether the AI reading finished, "
+            "how many pages it read and how many were the project's own, and the linked "
+            "review case. `lifecycle` filters by verdict, hold state or AI state; `query` "
+            "by coin symbol or name; dates bound when the reading was decided."
+        ),
+        "inspect_coin_screening": (
+            "Everything the automated reading did for one coin (`target_id` or `query`: "
+            "the coin symbol or its review case reference): every page it tried, which "
+            "were read and why the others could not be, the AI's report, reasons, open "
+            "questions, and the human decisions on its review case."
+        ),
     }
 )
 TOOL_DESCRIPTIONS["propose_action"] = (
@@ -1062,6 +1103,16 @@ class SystemBrainToolRegistry:
             return _envelope(
                 data, [f"db:review_cases:{case_id}"], coverage="one exact persisted review case"
             )
+        if name == "list_review_cases":
+            return await _list_review_cases(session, args)
+        if name == "list_coin_screenings":
+            return await _list_coin_screenings(session, args)
+        if name == "inspect_coin_screening":
+            return await _inspect_coin_screening(
+                session,
+                args,
+                budget=self.settings.system_brain_agent_max_tool_payload_characters,
+            )
         if name == "source_health":
             rows = await _group_count(
                 session, SourceSnapshot.fetch_status, SourceSnapshot.retrieved_at, args
@@ -1382,6 +1433,311 @@ def _envelope(
         coverage=coverage,
         limitations=limitations or [],
     )
+
+
+#: What "finished" means for a review case: somebody closed it. Kept with the reader that
+#: answers "which cases were reviewed", so the filter and the answer cannot disagree.
+_FINISHED_CASE = "finished"
+_OPEN_CASE = "open"
+
+#: Said beside every automated verdict this module returns. The reading is a machine's
+#: proposal shown only to the operator; it is never a Shariah status, and an answer built
+#: on it has to be able to say so without guessing.
+_MACHINE_PROPOSAL_NOTE = (
+    "Automated reading: a machine proposal for a human reviewer, never a published "
+    "Shariah status."
+)
+
+
+def _decision_row(row: ReviewDecision) -> dict[str, Any]:
+    return {
+        "decision": row.decision,
+        "reason": row.reason,
+        "by_role": row.actor_role,
+        "version": row.decision_version,
+        "at": row.created_at,
+    }
+
+
+async def _decisions_by_case(
+    session: AsyncSession, case_ids: list[UUID]
+) -> dict[UUID, list[ReviewDecision]]:
+    if not case_ids:
+        return {}
+    rows = (
+        await session.scalars(
+            select(ReviewDecision)
+            .where(ReviewDecision.review_case_id.in_(case_ids))
+            .order_by(ReviewDecision.review_case_id, ReviewDecision.decision_version)
+        )
+    ).all()
+    out: dict[UUID, list[ReviewDecision]] = {}
+    for row in rows:
+        out.setdefault(row.review_case_id, []).append(row)
+    return out
+
+
+async def _list_review_cases(
+    session: AsyncSession, args: SystemBrainToolArguments
+) -> EvidenceEnvelope:
+    statement = select(ReviewCase).order_by(ReviewCase.updated_at.desc()).limit(args.limit)
+    statement = _apply_range(statement, ReviewCase.updated_at, args)
+    lifecycle = (args.lifecycle or "").strip().casefold()
+    if lifecycle == _FINISHED_CASE:
+        statement = statement.where(ReviewCase.done_at.is_not(None))
+    elif lifecycle == _OPEN_CASE:
+        statement = statement.where(ReviewCase.done_at.is_(None))
+    elif lifecycle:
+        statement = statement.where(func.lower(ReviewCase.state) == lifecycle)
+    wanted = (args.query or "").strip()
+    if wanted:
+        like = f"%{wanted}%"
+        coin_case_ids = select(AutomatedScreenRun.review_case_id).where(
+            func.upper(AutomatedScreenRun.symbol) == wanted.upper()
+        )
+        asset_ids = select(CanonicalAsset.id).where(
+            func.upper(CanonicalAsset.symbol) == wanted.upper()
+        )
+        statement = statement.where(
+            or_(
+                ReviewCase.case_reference.ilike(like),
+                ReviewCase.title.ilike(like),
+                ReviewCase.case_type.ilike(like),
+                ReviewCase.id.in_(coin_case_ids),
+                ReviewCase.canonical_asset_id.in_(asset_ids),
+            )
+        )
+    cases = list((await session.scalars(statement)).all())
+    decisions = await _decisions_by_case(session, [row.id for row in cases])
+    data = [
+        {
+            "reference": row.case_reference,
+            "case_type": row.case_type,
+            "title": row.title,
+            "state": row.state,
+            "publication_state": row.publication_state,
+            "finished": row.done_at is not None,
+            "done_at": row.done_at,
+            "updated_at": row.updated_at,
+            "decisions": len(decisions.get(row.id, [])),
+            "latest_decision": (
+                _decision_row(decisions[row.id][-1]) if decisions.get(row.id) else None
+            ),
+        }
+        for row in cases
+    ]
+    return _envelope(
+        data,
+        [f"db:review_cases:{row.id}" for row in cases],
+        coverage=f"{len(cases)} review case(s), newest activity first, {_range_label(args)}",
+    )
+
+
+async def _list_coin_screenings(
+    session: AsyncSession, args: SystemBrainToolArguments
+) -> EvidenceEnvelope:
+    statement = (
+        select(AutomatedScreenRun)
+        .order_by(AutomatedScreenRun.decided_at.desc().nullslast())
+        .limit(args.limit)
+    )
+    statement = _apply_range(statement, AutomatedScreenRun.decided_at, args)
+    lifecycle = (args.lifecycle or "").strip().casefold()
+    if lifecycle:
+        statement = statement.where(
+            or_(
+                func.lower(AutomatedScreenRun.verdict) == lifecycle,
+                func.lower(AutomatedScreenRun.hold_state) == lifecycle,
+                func.lower(AutomatedScreenRun.ai_review_state) == lifecycle,
+            )
+        )
+    wanted = (args.query or "").strip()
+    if wanted:
+        statement = statement.where(
+            or_(
+                func.upper(AutomatedScreenRun.symbol) == wanted.upper(),
+                AutomatedScreenRun.asset_name.ilike(f"%{wanted}%"),
+            )
+        )
+    runs = list((await session.scalars(statement)).all())
+    case_ids = [run.review_case_id for run in runs if run.review_case_id]
+    references: dict[Any, str] = (
+        {
+            row[0]: row[1]
+            for row in (
+                await session.execute(
+                    select(ReviewCase.id, ReviewCase.case_reference).where(
+                        ReviewCase.id.in_(case_ids)
+                    )
+                )
+            ).all()
+        }
+        if case_ids
+        else {}
+    )
+    totals: dict[str, int] = {
+        row[0]: int(row[1])
+        for row in (
+            await session.execute(
+                select(AutomatedScreenRun.verdict, func.count(AutomatedScreenRun.id)).group_by(
+                    AutomatedScreenRun.verdict
+                )
+            )
+        ).all()
+    }
+    data = {
+        "note": _MACHINE_PROPOSAL_NOTE,
+        "all_coins_by_machine_verdict": totals,
+        "coins": [
+            {
+                "symbol": run.symbol,
+                "name": run.asset_name or run.symbol,
+                "machine_verdict": run.verdict,
+                "hold_state": run.hold_state,
+                "ai_reading": run.ai_review_state,
+                "ai_attempts": run.ai_review_attempts,
+                "pages_read": run.documents_read,
+                "own_pages_read": run.primary_documents_read,
+                "decided_at": run.decided_at,
+                "review_case": references.get(run.review_case_id),
+            }
+            for run in runs
+        ],
+    }
+    return _envelope(
+        data,
+        [f"db:automated_screen_runs:{run.id}" for run in runs],
+        coverage=f"{len(runs)} automated coin reading(s), newest first, {_range_label(args)}",
+    )
+
+
+async def _inspect_coin_screening(
+    session: AsyncSession, args: SystemBrainToolArguments, *, budget: int
+) -> EvidenceEnvelope:
+    wanted = (args.target_id or args.query or "").strip()
+    if not wanted:
+        return _missing("target_id is required: a coin symbol or its review case reference")
+    run = await session.scalar(
+        select(AutomatedScreenRun).where(func.upper(AutomatedScreenRun.symbol) == wanted.upper())
+    )
+    if run is None:
+        case_id = await _case_id_for(session, wanted)
+        if case_id is not None:
+            run = await session.scalar(
+                select(AutomatedScreenRun).where(AutomatedScreenRun.review_case_id == case_id)
+            )
+    if run is None:
+        return _missing(f"no automated coin reading is recorded for {wanted[:60]}")
+    pages = list(
+        (
+            await session.scalars(
+                select(CoinEvidenceDocument)
+                .where(CoinEvidenceDocument.symbol == run.symbol)
+                .order_by(CoinEvidenceDocument.is_primary.desc(), CoinEvidenceDocument.url)
+                .limit(100)
+            )
+        ).all()
+    )
+    case = await session.get(ReviewCase, run.review_case_id) if run.review_case_id else None
+    decisions = (await _decisions_by_case(session, [case.id])).get(case.id, []) if case else []
+    data: dict[str, Any] = {
+        "note": _MACHINE_PROPOSAL_NOTE,
+        "coin": {"symbol": run.symbol, "name": run.asset_name or run.symbol},
+        "machine_verdict": run.verdict,
+        "hold_state": run.hold_state,
+        "ai_reading": run.ai_review_state,
+        "ai_attempts": run.ai_review_attempts,
+        "decided_at": run.decided_at,
+        "reasons": run.reasons,
+        "activities": run.activities,
+        "blocking_activities": run.blocking_activities,
+        "holder_return": run.holder_return,
+        "holder_return_basis": run.holder_return_basis,
+        "open_questions": run.open_questions,
+        "matched_conditions": run.matched_conditions,
+        "ai_report": run.review_report or None,
+        "pages_read": run.documents_read,
+        "own_pages_read": run.primary_documents_read,
+        "pages": [
+            {
+                "url": page.url,
+                "title": page.title or page.url,
+                "category": page.category,
+                "own_page": page.is_primary,
+                "read": page.failure_code is None and page.fetched_at is not None,
+                "characters_read": page.characters,
+                "read_at": page.fetched_at,
+                "why_not_read": (
+                    fetch_failure_in_plain_words(page.failure_code)
+                    if page.failure_code
+                    else None
+                ),
+            }
+            for page in pages
+        ],
+        "review_case": (
+            {
+                "reference": case.case_reference,
+                "state": case.state,
+                "finished": case.done_at is not None,
+                "done_at": case.done_at,
+                "decisions": [_decision_row(row) for row in decisions],
+            }
+            if case is not None
+            else None
+        ),
+    }
+    limitations = _fit_coin_reading(data, budget)
+    shown = {page["url"] for page in data["pages"]}
+    refs = [f"db:automated_screen_runs:{run.id}"]
+    if case is not None:
+        refs.append(f"db:review_cases:{case.id}")
+    refs += [f"db:coin_evidence_documents:{page.id}" for page in pages if page.url in shown]
+    return _envelope(
+        data,
+        refs,
+        coverage=f"one coin's automated reading and {len(shown)} of its {len(pages)} page(s)",
+        limitations=limitations,
+    )
+
+
+#: Room left for the envelope around ``data``: refs, freshness, coverage, limitations.
+_ENVELOPE_ALLOWANCE = 6_000
+
+
+def _fit_coin_reading(data: dict[str, Any], budget: int) -> list[str]:
+    """Shrink one coin's reading until it fits the agent's payload boundary.
+
+    Above the boundary the agent replaces the whole answer with "use a narrower query",
+    and there is no narrower query for one coin — so a coin with a long report and many
+    pages could never be explained at all. Pages the reading could not use go first, then
+    the other pages from the end, and only then is the report itself cut. What was left
+    out is said, never hidden.
+    """
+
+    room = max(2_000, budget - _ENVELOPE_ALLOWANCE)
+
+    def size() -> int:
+        return len(json.dumps(json_safe(data), ensure_ascii=False))
+
+    limitations: list[str] = []
+    pages: list[dict[str, Any]] = data["pages"]
+    total = len(pages)
+    while size() > room and pages:
+        unread = [index for index, page in enumerate(pages) if not page["read"]]
+        pages.pop(unread[-1] if unread else -1)
+    if len(pages) < total:
+        limitations.append(
+            f"{total - len(pages)} of {total} page(s) are left out to fit the answer; "
+            "pages that were read are kept first."
+        )
+    if size() > room and data.get("ai_report"):
+        report = json.dumps(json_safe(data["ai_report"]), ensure_ascii=False)
+        data["ai_report"] = None
+        spare = max(0, room - size() - 200)
+        data["ai_report_excerpt"] = report[:spare]
+        limitations.append("The AI report was cut short to fit the answer.")
+    return limitations
 
 
 async def _case_id_for(session: AsyncSession, wanted: str) -> UUID | None:

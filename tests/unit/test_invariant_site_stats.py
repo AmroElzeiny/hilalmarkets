@@ -188,7 +188,11 @@ async def test_every_tag_selects_only_the_visits_it_describes(test_context, tag)
     async with test_context["session_factory"]() as session:
         index = 0
         for device in ("phone", "tablet", "desktop"):
-            for source in ("direct", "search", "social", "referral", "campaign"):
+            # Every source the tag vocabulary knows, read from it rather than listed
+            # again here: a list written twice is the list that missed "internal".
+            for source in (
+                key.split(":", 1)[1] for key in TAGS_BY_KEY if key.startswith("source:")
+            ):
                 for action in ("signup", "chat", "pricing", "page", None):
                     index += 1
                     session.add(

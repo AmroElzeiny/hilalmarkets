@@ -6,8 +6,9 @@
  *
  * One script for both audiences, told apart by `data-audience` on the root. The public
  * page is the same list cut after the first coins; what a visitor cannot do there —
- * follow a coin, open a Passport, sort or search a list they only partly see — opens a
- * prompt to sign up instead. See `templates/hilal/partials/market_list.html`.
+ * follow a coin, sort or search a list they only partly see — opens a prompt to sign up
+ * instead. A coin's evidence is open to everybody: "See the evidence" opens the same
+ * Passport popup on both pages. See `templates/hilal/partials/market_list.html`.
  */
 
 import { manageDialog, paintIcons as paintDialogIcons } from "./hm-dialog.js";
@@ -733,13 +734,25 @@ function start(root) {
   [cards, tableBody].forEach((scope) => {
     scope.addEventListener("click", (event) => {
       if (isPublic) {
-        /* "See the evidence" opens the coin's Passport, which anybody may read.
-           "Full Passport" is already a link to it. */
+        /* "See the evidence" opens the same Passport popup the dashboard shows — a
+           Passport is public, so its short version is too. "Full Passport" is the link
+           to the whole page. Should the popup be missing, the full page is the fallback,
+           never nothing. */
         const quickView = event.target.closest("[data-quick-view]");
         const quickItem = quickView && itemFor(quickView);
         if (quickItem) {
           event.preventDefault();
-          window.location.assign(passportHref(quickItem));
+          if (window.HilalPassportQuickView) {
+            window.HilalPassportQuickView.open(
+              {
+                asset: quickItem.canonical_asset,
+                methodologyId: quickItem.methodology_id || methodologyId,
+              },
+              quickView,
+            );
+          } else {
+            window.location.assign(passportHref(quickItem));
+          }
           return;
         }
         /* Following a coin needs an account. A signed-in reader follows it in their

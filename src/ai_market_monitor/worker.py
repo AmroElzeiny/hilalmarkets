@@ -3,6 +3,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from celery import Celery
@@ -22,6 +23,20 @@ _LAST_METRIC_FLUSH: float = 0.0
 #: one-hour redelivery window by more than one slow coin's worth of time, so a sweep is
 #: never handed to a second worker while the first is still running it.
 SCREEN_SWEEP_BUDGET_SECONDS = 45 * 60
+
+#: How long the broker waits before handing an unacknowledged task to a worker again
+#: (Redis' default ``visibility_timeout``; this app acknowledges late).
+BROKER_REDELIVERY_SECONDS = 60 * 60
+
+#: The longest any task may run before its process is stopped and replaced.
+#:
+#: This worker runs **one** child. On 5 October 2026 a single task — the daily authority
+#: import — waited for ever on a browser page that had stopped answering, and every other
+#: task queued behind it from 00:30 until 14:36: alerts, Telegram, scans, the new-coin
+#: reading. 33,381 messages piled up. Nothing had a time limit, so nothing could end it.
+#: A task still running at the redelivery window is already broken (the broker would hand
+#: it out a second time), so the limit sits just under that window.
+TASK_HARD_TIME_LIMIT_SECONDS = BROKER_REDELIVERY_SECONDS - 60
 
 settings = get_settings()
 validate_runtime_configuration(settings)
@@ -53,6 +68,7 @@ app.conf.update(
     # way to quieten a busy scanner — would have hidden nothing at all. INFO here lets the
     # severity the application chose survive the trip.
     worker_redirect_stdouts_level="INFO",
+    task_time_limit=TASK_HARD_TIME_LIMIT_SECONDS,
     beat_schedule={
         "evaluate-due-trial-cycles-every-hour": {
             "task": "ai_market_monitor.evaluate_due_trial_cycles",
@@ -283,6 +299,32 @@ app.conf.update(
         },
     },
 )
+
+
+def _expire_repeats(schedule: dict[str, dict]) -> None:
+    """A repeating task that has waited longer than its own interval is dropped.
+
+    Beat keeps sending while the worker is busy. Without an expiry every send waits in
+    the queue, and once the worker is free it works through hours of five-second Telegram
+    polls and one-minute retries that the next send already covers — the queue held
+    33,381 of them on 5 October 2026. With the interval as the expiry, a late copy is
+    thrown away and the next fresh one does the work.
+    """
+
+    for entry in schedule.values():
+        interval = entry.get("schedule")
+        seconds = (
+            interval.total_seconds()
+            if isinstance(interval, timedelta)
+            else float(interval)
+            if isinstance(interval, int | float)
+            else None
+        )
+        if seconds:
+            entry.setdefault("options", {}).setdefault("expires", seconds)
+
+
+_expire_repeats(app.conf.beat_schedule)
 
 
 def _flush_metrics_now() -> dict:

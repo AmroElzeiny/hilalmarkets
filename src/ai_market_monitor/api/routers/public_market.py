@@ -22,7 +22,7 @@ from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.api.route_security import public_api
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.database import get_db_session
-from ai_market_monitor.schemas.sharia import PublicMarketResponse
+from ai_market_monitor.schemas.sharia import PassportQuickViewResponse, PublicMarketResponse
 from ai_market_monitor.services.interfaces import MarketDataProvider
 from ai_market_monitor.services.public_market import (
     MARKET_EXCHANGE_PATTERN,
@@ -30,6 +30,7 @@ from ai_market_monitor.services.public_market import (
     PublicMarketService,
     PublicMarketUnavailable,
 )
+from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_screening import ShariaScreeningError
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
@@ -96,4 +97,37 @@ async def public_market_quotes(
                 "code": "live_market_unavailable",
                 "message": "Live spot quotes are unavailable; no prices were invented.",
             },
+        ) from exc
+
+
+@router.get("/passports/{asset}/quick-view", response_model=PassportQuickViewResponse)
+@public_api(
+    "The short Passport popup behind \"See the evidence\" on the public Market page; "
+    "the same published record the public Passport page shows to everyone."
+)
+async def public_passport_quick_view(
+    asset: str,
+    methodology: UUID | None = None,
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> PassportQuickViewResponse:
+    """A coin's Passport, short, for the popup on the public Market page.
+
+    The Passport page itself (`/passports/<coin>`) is open to everybody, so its summary
+    is too. Read with no account, exactly as that page reads it: the current published
+    record only. The dashboard's own popup can also open the version used for one alert;
+    that needs the alert, so it stays on the signed-in route
+    (`/api/v1/sharia/assets/<coin>/passport/quick-view`).
+    """
+
+    if PUBLIC_MARKET_PAGE in settings.stage_exposure.hidden_pages:
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        return await ShariaPassportReadService(session, settings).quick_view(
+            asset, methodology_id=methodology
+        )
+    except ShariaScreeningError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": exc.code, "message": str(exc)},
         ) from exc

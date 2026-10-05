@@ -28,6 +28,7 @@ refused locally, with a message that says what to upgrade.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -351,7 +352,7 @@ class CoinMarketCapClient:
         coins costs single-figure credits rather than five hundred.
         """
 
-        wanted = [s.strip().upper() for s in symbols if s and s.strip()]
+        wanted = cmc_symbols(symbols)
         if not wanted:
             return {}
         size = max(1, int(self.settings.coinmarketcap_batch_size))
@@ -386,7 +387,7 @@ class CoinMarketCapClient:
         ]
 
     async def quotes(self, symbols: Sequence[str], *, convert: str = "USD") -> dict[str, MarketRow]:
-        wanted = [s.strip().upper() for s in symbols if s and s.strip()]
+        wanted = cmc_symbols(symbols)
         if not wanted:
             return {}
         size = max(1, int(self.settings.coinmarketcap_batch_size))
@@ -441,6 +442,28 @@ class CoinMarketCapClient:
             "credits_left_this_month": month.get("credits_left"),
             "resets_in": plan.get("credit_limit_monthly_reset"),
         }
+
+
+# -- symbols -------------------------------------------------------------------
+
+#: What CoinMarketCap accepts in a ``symbol`` list: letters, digits and the hyphen.
+#: Measured against the live API on 5 October 2026 — ``A-B`` and an unknown ``ZZZZQQ``
+#: are fine (``skip_invalid`` drops unknown ones), but one ``BASE_NETWORK`` or ``A.B``
+#: makes CoinMarketCap refuse the **whole call** with a 400. The daily market-numbers
+#: refresh sent ``BASE_NETWORK`` (a name this product gives Base, not a ticker) in its
+#: first batch, so every refresh failed and no waiting coin ever had a market size.
+_CMC_SYMBOL = re.compile(r"^[A-Z0-9-]{1,32}$")
+
+
+def cmc_symbols(symbols: Iterable[str]) -> list[str]:
+    """The symbols CoinMarketCap can be asked about, upper-cased, once each, in order.
+
+    The one place a symbol list is prepared for a CoinMarketCap call. A symbol it drops
+    is simply not found, which every caller already treats as "unknown".
+    """
+
+    wanted = (str(item).strip().upper() for item in symbols if item and str(item).strip())
+    return list(dict.fromkeys(item for item in wanted if _CMC_SYMBOL.match(item)))
 
 
 # -- shaping -------------------------------------------------------------------

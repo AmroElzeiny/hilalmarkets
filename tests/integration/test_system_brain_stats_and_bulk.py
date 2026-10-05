@@ -61,18 +61,28 @@ def _csrf(text: str) -> str:
 # The public collector.
 # --------------------------------------------------------------------------------
 
+BROWSER = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/140.0.0.0 Safari/537.36"
+)
+
 
 async def test_a_visitor_who_is_not_signed_in_can_report_a_visit(test_context):
     """The collector is public by design — the whole point is measuring strangers."""
 
     key = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+    # A person's browser. The test client's own name (`python-httpx`) is a program, and
+    # programs are not counted as visitors — see `site_analytics.is_automated`.
+    browser = {"User-Agent": BROWSER}
     opened = await test_context["client"].post(
         "/api/v1/site-analytics/collect",
         json={"event": "open", "session_key": key, "path": "/", "referrer": ""},
+        headers=browser,
     )
     closed = await test_context["client"].post(
         "/api/v1/site-analytics/collect",
         json={"event": "close", "session_key": key, "path": "/", "active_ms": 42_000},
+        headers=browser,
     )
 
     assert opened.status_code == 204
@@ -101,7 +111,7 @@ async def test_a_badly_shaped_session_key_is_accepted_and_discarded(test_context
     """
 
     response = await test_context["client"].post(
-        "/api/v1/site-analytics/collect", json=body
+        "/api/v1/site-analytics/collect", json=body, headers={"User-Agent": BROWSER}
     )
     assert response.status_code == 204
     async with test_context["session_factory"]() as session:
@@ -117,6 +127,7 @@ async def test_the_collector_writes_nothing_while_measurement_is_switched_off(
         response = await test_context["client"].post(
             "/api/v1/site-analytics/collect",
             json={"event": "open", "session_key": "b" * 32, "path": "/"},
+            headers={"User-Agent": BROWSER},
         )
         assert response.status_code == 204
         async with test_context["session_factory"]() as session:

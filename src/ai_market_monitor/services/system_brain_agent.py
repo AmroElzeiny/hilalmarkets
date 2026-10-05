@@ -71,6 +71,57 @@ class SystemBrainAgentUnavailable(RuntimeError):
 _CASE_REFERENCE_RE = re.compile(r"\b[A-Z]{2,10}-[A-Z0-9]{2,}(?:-[A-Z0-9]+)*\b")
 
 
+#: The words that make a tool group relevant, English and the Egyptian Arabic the owner
+#: actually writes in. One table, read by ``offered_tools`` and by nothing else.
+_REVENUE_WORDS = (
+    "revenue", "conversion", "trial", "churn", "retention", "plan", "billing", "growth",
+    "cohort", "referral", "waitlist", "attribution",
+    "ايراد", "إيراد", "فلوس", "اشتراك", "تجربة", "باقة", "دفع",
+)
+_CUSTOMER_WORDS = (
+    "chat", "conversation", "customer", "user", "support", "monitor", "alert", "funnel",
+    "feature",
+    "عميل", "عملاء", "مستخدم", "محادثة", "شات", "دعم", "تنبيه",
+)
+_QUALITY_WORDS = (
+    "quality", "failure", "latency", "cost", "clarification", "feedback", "knowledge gap",
+    "release",
+    "جودة", "تكلفة", "بطء",
+)
+_GOVERNANCE_WORDS = (
+    "governance", "review", "screening", "screen", "source", "worker", "delivery", "audit",
+    "sharia", "shariah",
+    # A case, said in every way a person or a page says it.
+    "case", "approve", "reject", "evidence", "coin", "asset", "passport", "methodology",
+    "/system-brain/cases",
+    # What the automated reading did: the pages it read and what it made of them.
+    "page", "website", "whitepaper", "verdict", "decided", "decision", "held back",
+    "not enough data", "eligible", "token", "ai read", "ai did", "the ai",
+    "مراجعة", "راجع", "حالة", "حالات", "قضية", "عملة", "عملات", "كوين", "توكن", "صفحة",
+    "صفحات", "موقع", "الذكاء", "قرار", "دليل", "مصدر", "مصادر", "شرعي", "شريعة", "جواز",
+)
+_ENGINEERING_WORDS = (
+    "repository", "code", "file", "function", "configuration", "engineering", "commit",
+    "كود", "ملف",
+)
+_SAFE_ACTION_WORDS = (
+    "save", "draft", "export", "task", "insight", "report", "note", "experiment",
+    "احفظ", "تقرير", "مهمة", "ملاحظة",
+)
+_CONSEQUENTIAL_WORDS = (
+    "send", "ban", "delete", "grant", "reduce access", "activate", "approve", "publish",
+    "reject", "change production",
+)
+_TOOL_GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (_REVENUE_WORDS, REVENUE_TOOLS),
+    (_CUSTOMER_WORDS, CUSTOMER_PRODUCT_TOOLS),
+    (_QUALITY_WORDS, QUALITY_TOOLS),
+    (_GOVERNANCE_WORDS, GOVERNANCE_OPERATIONS_TOOLS),
+    (_ENGINEERING_WORDS, ENGINEERING_TOOLS),
+    (_SAFE_ACTION_WORDS, SAFE_ACTION_TOOLS),
+)
+
+
 @dataclass(frozen=True, slots=True)
 class SystemBrainAgentPolicy:
     """Server-owned tool access, risk and budget classification."""
@@ -90,121 +141,22 @@ class SystemBrainAgentPolicy:
 
         raw = f"{question}\n{page}"
         text = raw.casefold()
+        # Each group is offered when one of its words appears, and the groups are then
+        # ordered by **how many** of their words appeared, the strongest first. The cap
+        # below used to cut whatever was listed last: governance came after revenue,
+        # customers and quality, so "which coin reviews failed?" (customer + quality +
+        # governance words) was offered one governance tool out of ten.
+        hits: list[tuple[int, int, tuple[str, ...]]] = []
+        for order, (vocabulary, tools) in enumerate(_TOOL_GROUPS):
+            count = sum(1 for term in vocabulary if term in text)
+            if tools is GOVERNANCE_OPERATIONS_TOOLS and _CASE_REFERENCE_RE.search(raw):
+                count += 2
+            if count:
+                hits.append((-count, order, tools))
         groups: list[str] = []
-        if any(
-            term in text
-            for term in (
-                "revenue",
-                "conversion",
-                "trial",
-                "churn",
-                "retention",
-                "plan",
-                "billing",
-                "growth",
-                "cohort",
-                "referral",
-                "waitlist",
-                "attribution",
-            )
-        ):
-            groups.extend(REVENUE_TOOLS)
-        if any(
-            term in text
-            for term in (
-                "chat",
-                "conversation",
-                "customer",
-                "user",
-                "support",
-                "monitor",
-                "alert",
-                "funnel",
-                "feature",
-            )
-        ):
-            groups.extend(CUSTOMER_PRODUCT_TOOLS)
-        if any(
-            term in text
-            for term in (
-                "quality",
-                "failure",
-                "latency",
-                "cost",
-                "clarification",
-                "feedback",
-                "knowledge gap",
-                "release",
-            )
-        ):
-            groups.extend(QUALITY_TOOLS)
-        if any(
-            term in text
-            for term in (
-                "governance",
-                "review",
-                "screening",
-                "source",
-                "worker",
-                "delivery",
-                "audit",
-                "sharia",
-                "shariah",
-                # A case, said in every way a person or a page says it.
-                "case",
-                "approve",
-                "reject",
-                "evidence",
-                "coin",
-                "asset",
-                "passport",
-                "methodology",
-                "/system-brain/cases",
-            )
-        ) or _CASE_REFERENCE_RE.search(raw):
-            groups.extend(GOVERNANCE_OPERATIONS_TOOLS)
-        if any(
-            term in text
-            for term in (
-                "repository",
-                "code",
-                "file",
-                "function",
-                "configuration",
-                "engineering",
-                "commit",
-            )
-        ):
-            groups.extend(ENGINEERING_TOOLS)
-        if any(
-            term in text
-            for term in (
-                "save",
-                "draft",
-                "export",
-                "task",
-                "insight",
-                "report",
-                "note",
-                "experiment",
-            )
-        ):
-            groups.extend(SAFE_ACTION_TOOLS)
-        if any(
-            term in text
-            for term in (
-                "send",
-                "ban",
-                "delete",
-                "grant",
-                "reduce access",
-                "activate",
-                "approve",
-                "publish",
-                "reject",
-                "change production",
-            )
-        ):
+        for _, _, tools in sorted(hits):
+            groups.extend(tools)
+        if any(term in text for term in _CONSEQUENTIAL_WORDS):
             groups.append("propose_action")
         if not groups:
             groups.extend(
@@ -1124,6 +1076,14 @@ def _instructions() -> str:
         "that page — use `inspect_review_case` with the reference to read the actual "
         "case before answering. Never answer a question about a specific case from the "
         "page context alone; the context says which case, the tool says what is in it. "
+        "\n\n"
+        "PAST REVIEWS AND THE AUTOMATED COIN READING. `list_review_cases` lists cases "
+        "including finished ones (lifecycle 'finished') with the human decision on each. "
+        "`list_coin_screenings` lists what the automated new-coin reading did coin by "
+        "coin, and `inspect_coin_screening` shows one coin's reading: every page it tried, "
+        "which were read, why the others were not, the AI's report and the human decisions "
+        "on its case. An automated verdict is a machine proposal for a reviewer — say so, "
+        "and never present it as the coin's Shariah status. "
         "\n\n"
         "Start with the compact request and persisted conversation only. Use an offered "
         "tool before making any factual claim about customers, product quality, revenue, "

@@ -158,9 +158,13 @@ function setUpQuickView() {
     controller = new AbortController();
     const params = new URLSearchParams();
     if (request.methodologyId) params.set("methodology", request.methodologyId);
+    /* The page says where the evidence is read from: the dashboard reads it with the
+       member's session, the public Market page from the open feed. `{asset}` is
+       replaced by the coin. */
+    const endpoint = dialog.dataset.endpoint || "/api/v1/sharia/assets/{asset}/passport/quick-view";
     try {
       const response = await fetch(
-        `/api/v1/sharia/assets/${encodeURIComponent(request.asset)}/passport/quick-view?${params}`,
+        `${endpoint.replace("{asset}", encodeURIComponent(request.asset))}?${params}`,
         {
           credentials: "same-origin",
           headers: { Accept: "application/json" },
@@ -314,13 +318,26 @@ function setUpQuickView() {
   find("[data-passport-close]")?.addEventListener("click", () => close());
   find("[data-pq-retry]")?.addEventListener("click", () => load());
   find("[data-pq-copy]")?.addEventListener("click", async (event) => {
-    const reference = event.currentTarget.dataset.reference;
+    const button = event.currentTarget;
+    const reference = button.dataset.reference;
     if (!reference) return;
+    /* The dashboard has a toast. The public Market page has none, so there the button
+       says it in its own words for a moment. */
+    const say = (message, failed = false) => {
+      if (window.showDashToast) {
+        window.showDashToast(message, failed);
+        return;
+      }
+      const original = button.dataset.originalLabel || button.innerHTML;
+      button.dataset.originalLabel = original;
+      button.textContent = message;
+      window.setTimeout(() => { button.innerHTML = original; }, 2000);
+    };
     try {
       await navigator.clipboard.writeText(reference);
-      window.showDashToast?.("Evidence reference copied.");
+      say("Evidence reference copied.");
     } catch {
-      window.showDashToast?.("This browser did not allow copying.", true);
+      say("This browser did not allow copying.", true);
     }
   });
 
