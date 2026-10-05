@@ -465,7 +465,9 @@ function start(scope) {
 
   /* The bar at the top marks which group is really on screen, not which link was last
      pressed. Shared with the plan page, which has the same bar. */
-  followSections(scope.querySelectorAll("[data-g-jump-link]"), scope);
+  followSections(scope.querySelectorAll("[data-g-jump-link]"), scope, {
+    bar: scope.querySelector("[data-g-sticky]"),
+  });
 
   settleIn(scope.querySelectorAll("[data-g-group]"), { from: 10, delayStep: 0.024 });
 }

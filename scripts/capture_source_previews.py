@@ -55,6 +55,8 @@ HIDE = """
 #: page's own quiet surface colour, so the picture shows the page, not one coin.
 PASSPORT_MASK = [
     ".t-passport-identity",
+    # The standard picker names the standard and that standard's result for the coin.
+    ".t-standard",
     ".t-pq-answer",
     ".t-facts",
     ".t-passport-hero .t-banner",
@@ -120,6 +122,15 @@ def main() -> int:
                 path = source.path.format(asset=args.passport_asset.lower())
                 page.goto(f"{base_url}{path}", wait_until="domcontentloaded")
                 _settle(page)
+                if "#" in path:
+                    # A section of a page (the home page's Pricing). The React page draws
+                    # it after load, so the browser's own jump to the anchor finds
+                    # nothing; scroll to it now that it exists.
+                    page.evaluate(
+                        "id => document.getElementById(id)?.scrollIntoView({block: 'start'})",
+                        path.split("#", 1)[1],
+                    )
+                    page.wait_for_timeout(600)
                 mask = (
                     [page.locator(selector) for selector in PASSPORT_MASK]
                     if source.per_asset

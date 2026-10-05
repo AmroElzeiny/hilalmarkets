@@ -70,9 +70,11 @@ def _pixels(css: str, rule: str, property_: str) -> int:
 #: The six addresses taken out of the footer. Every one of them, not the one reported.
 #:
 #: Each page is still served and still in the sitemap — this is about what the footer
-#: leads to, never about deleting a page. `test_a_removed_footer_link_is_gone_from_both`
-#: is the whole family in one place, so putting any one of them back in one renderer
-#: fails here rather than in review.
+#: leads to, never about deleting a page. (Pricing is the exception: the page itself was
+#: taken down on 4 October 2026 and `/pricing` now forwards to the home page's section.
+#: It is kept here because it must stay out of the footer either way.)
+#: `test_a_removed_footer_link_is_gone_from_both` is the whole family in one place, so
+#: putting any one of them back in one renderer fails here rather than in review.
 REMOVED_FROM_FOOTER = (
     ("Pricing", "/pricing"),
     ("Halal Assets", "/dashboard/market"),

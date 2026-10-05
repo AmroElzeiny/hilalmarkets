@@ -199,7 +199,7 @@ class EmailLink:
     """A value in a fact table that is somewhere to go rather than something to read.
 
     A raw address printed in a table is two problems at once: it is unreadable — nobody
-    parses `https://…/dashboard/market/sol` to learn it is the Passport — and it is one
+    parses `https://…/passports/sol` to learn it is the Passport — and it is one
     long unbreakable word, which is what pushed these emails sideways on a phone.
     """
 

@@ -41,12 +41,12 @@ from ai_market_monitor.api.routers.dashboard import (
     _permanent_redirect,
     _require_user,
     _timezone_options,
-    asset_passport_context,
     screened_market_context,
     templates,
 )
 from ai_market_monitor.api.template_env import day_only as _day_only
 from ai_market_monitor.api.template_env import short_datetime as _short_datetime
+from ai_market_monitor.core.app_links import passport_link
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.csrf import csrf_token_matches
@@ -392,66 +392,52 @@ async def monitor_canvas_page(
 
 @router.get(
     MARKET_BASE_PATH + "/{asset_slug}",
-    response_class=HTMLResponse,
     include_in_schema=False,
 )
-async def asset_passport_page(
+async def asset_passport_old_address(
     request: Request,
     asset_slug: str,
-    methodology_id: UUID | None = Query(default=None),
-    user: User = Depends(_require_user),
-    session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    context = await asset_passport_context(
-        request=request,
-        asset_slug=asset_slug,
-        methodology_id=methodology_id,
-        user=user,
-        session=session,
-        settings=settings,
-        market_base_path=MARKET_BASE_PATH,
-    )
-    context.update(_PATH_CHROME)
-    return templates.TemplateResponse(request, "hilal/dashboard_test/passport.html", context)
+) -> RedirectResponse:
+    """Where a coin's Passport used to be. It is on the public website now.
+
+    Kept as a permanent forward rather than deleted: this address is written into alert
+    email, Telegram and WhatsApp messages and dashboard notices that have already been
+    sent, and none of those can be corrected. The standard in the query comes along, so
+    an old link still opens on the standard it named. No sign-in is asked for — the
+    Passport is public, and somebody following a link from an email may not be signed in.
+    """
+
+    return RedirectResponse(_passport_forward(request, settings, asset_slug), status_code=308)
 
 
 @router.get(
     MARKET_BASE_PATH + "/{asset_slug}/report",
-    response_class=HTMLResponse,
     include_in_schema=False,
 )
-async def asset_passport_report(
+async def asset_passport_report_old_address(
     request: Request,
     asset_slug: str,
-    methodology_id: UUID | None = Query(default=None),
-    user: User = Depends(_require_user),
-    session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    """The Passport as one printable evidence record.
+) -> RedirectResponse:
+    """Where a Passport's printable report used to be. Forwards, like the Passport."""
 
-    Same read model as the Passport page. It is laid out for printing and for handing
-    to someone else, so nothing is behind a disclosure and nothing is summarised away.
-    """
-
-    context = await asset_passport_context(
-        request=request,
-        asset_slug=asset_slug,
-        methodology_id=methodology_id,
-        user=user,
-        session=session,
-        settings=settings,
-        market_base_path=MARKET_BASE_PATH,
+    return RedirectResponse(
+        _passport_forward(request, settings, asset_slug, report=True), status_code=308
     )
-    passport = context.get("passport")
-    if passport is None:  # pragma: no cover - the context builder raises first
-        raise HTTPException(status_code=404, detail="Passport not found")
-    context["title"] = f"{passport.assessment.canonical_asset} Evidence report"
-    # A printable record needs no popup at all.
-    context["passport_quick_view_variant"] = "none"
-    context["hide_new_watchlist_cta"] = True
-    return templates.TemplateResponse(request, "hilal/dashboard_test/report.html", context)
+
+
+def _passport_forward(
+    request: Request, settings: Settings, asset_slug: str, *, report: bool = False
+) -> str:
+    """The Passport's address for an old link, keeping the standard the link named."""
+
+    return passport_link(
+        settings,
+        asset_slug,
+        methodology_id=request.query_params.get("methodology_id"),
+        report=report,
+    )
 
 
 # ── Watchlists ───────────────────────────────────────────────────────────────

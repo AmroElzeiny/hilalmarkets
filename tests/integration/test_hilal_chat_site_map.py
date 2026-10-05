@@ -228,7 +228,7 @@ async def test_a_reviewed_coin_always_ends_with_its_passport(test_context, quest
     sources = await _ask(test_context, question, email=f"p{uuid4().hex[:8]}@example.com")
     assert sources, "no Passport card under the answer"
     assert sources[0]["key"] == "passport"
-    assert sources[0]["url"].endswith("/dashboard/market/ltc")
+    assert sources[0]["url"].endswith("/passports/ltc")
 
 
 async def test_a_coin_with_no_review_gets_no_passport_card(test_context):

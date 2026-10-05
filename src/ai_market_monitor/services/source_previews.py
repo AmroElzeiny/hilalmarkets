@@ -28,11 +28,13 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import urlsplit
 
-from ai_market_monitor.core.app_links import app_link
+from ai_market_monitor.core.app_links import app_link, site_link
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.dashboard_paths import (
     MARKET_PATH,
     MONITORS_PATH,
+    PASSPORTS_PATH,
+    PRICING_PATH,
     SUBSCRIPTION_PATH,
 )
 from ai_market_monitor.core.site_content import (
@@ -88,7 +90,6 @@ SOURCE_PAGES: Final[dict[str, SourcePage]] = {
             "how_it_works",
             "market",
             "hilal_methodology",
-            "pricing",
             "help",
             "contact",
             "about",
@@ -99,6 +100,14 @@ SOURCE_PAGES: Final[dict[str, SourcePage]] = {
             "cookies",
         )
     },
+    # The Pricing section of the home page. There is no Pricing page any more: it went
+    # stale and was taken down on 4 October 2026, and its old address only forwards here.
+    "pricing": SourcePage(
+        "pricing",
+        "Pricing",
+        "Every Hilal Markets plan, what it includes, and what it costs today.",
+        PRICING_PATH,
+    ),
     "dashboard_entry": SourcePage(
         "dashboard_entry",
         "Your Hilal Markets dashboard",
@@ -122,8 +131,9 @@ SOURCE_PAGES: Final[dict[str, SourcePage]] = {
         "{asset} Evidence Passport",
         "The full review of {asset}: the standard used, the reasons, the sources and the "
         "date it was reviewed.",
-        f"{MARKET_PATH}/{{asset}}",
-        account_only=True,
+        # Public, on the website: `/passports/<coin>`. It used to sit in the dashboard
+        # and need an account.
+        f"{PASSPORTS_PATH}/{{asset}}",
     ),
     "monitors": SourcePage(
         "monitors",
@@ -194,20 +204,27 @@ def source_preview(
     if page.per_asset and not symbol:
         return None
     path = page.path.format(asset=symbol.lower())
-    url = app_link(settings, path) if page.account_only else path
+    # A public page goes on the website's own hostname. Hilal answers inside the
+    # dashboard, on the product's hostname, where `/` is the dashboard itself — so a plain
+    # path there opened the dashboard instead of the home page, and a public page such as
+    # a Passport stayed inside the dashboard instead of on the website.
+    url = app_link(settings, path) if page.account_only else site_link(settings, path)
     version = _image_version(key)
     image_url = f"/static/{PREVIEW_DIR}/{key}.jpg?v={version}" if version else None
     use_app_host = page.account_only and settings.app_base_url is not None
     base = str(settings.app_base_url if use_app_host else settings.public_base_url)
     parts = urlsplit(url if "//" in url else f"{base.rstrip('/')}{url}")
     address = f"{parts.netloc}{parts.path}".removeprefix("www.")
+    address = address.rstrip("/") or address
+    if parts.fragment:
+        address = f"{address}/#{parts.fragment}"
     return SourcePreview(
         key=key,
         title=page.title.format(asset=symbol),
         description=page.description.format(asset=symbol),
         url=url,
         image_url=image_url,
-        address=address.rstrip("/") or address,
+        address=address,
     )
 
 

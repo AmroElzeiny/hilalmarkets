@@ -6,7 +6,7 @@
     </a>
     <div class="public-links" id="public-navigation">
       {% for item in public_navigation %}
-      <a class="public-nav-link {{ 'is-active' if page == item.page else '' }}" href="{{ url_for(item.endpoint) }}" {% if page == item.page %}aria-current="page"{% endif %}>{{ item.label }}</a>
+      <a class="public-nav-link {{ 'is-active' if page == item.page else '' }}" href="{{ site_link(settings, item.home_section) if item.home_section else url_for(item.endpoint) }}" {% if page == item.page %}aria-current="page"{% endif %}>{{ item.label }}</a>
       {% endfor %}
       {# Hilal Markets is invite-only while the private beta runs. In that state the
          header offers the waitlist and nothing else: an account cannot be opened from

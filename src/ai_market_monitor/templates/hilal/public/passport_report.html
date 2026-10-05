@@ -1,10 +1,23 @@
-{% extends "hilal/base_dashboard.html" %}
+{% extends "hilal/public/react_site.html" %}
+{#- One coin's Passport as a printable record: `/passports/<coin>/report`.
+
+    Public, like the Passport itself, and on the same standard the Passport was showing
+    (`?methodology_id=` is carried over). The website's header and footer are on screen
+    and left off the paper. -#}
 {% import "hilal/dashboard_test/macros/tone.html" as tone %}
 {% import "hilal/dashboard_test/macros/coin.html" as coin %}
 {% set status_tone = tone.asset_tone(passport.assessment.status.value) %}
 {% set asset_symbol = passport.identity.symbol if passport.identity else passport.assessment.canonical_asset %}
-{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261001-home-link">{% endblock %}
-{% block content %}
+{% set tz = passport_timezone %}
+{% block body_class %} hilal-dashboard hm-public-market hm-public-passport{% endblock %}
+{% block page_styles %}
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261005-passports">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261005-passports">
+{% endblock %}
+{% block body %}
+<a class="figma-bypass-link" href="#top">Skip to content</a>
+<div id="root"></div>
+<main id="top" class="hm-public-market-body" tabindex="-1">
 
 {#- The Passport as one complete record, for printing or for handing to someone else.
     Nothing here is behind a disclosure: a printed page cannot be expanded. It is the
@@ -12,7 +25,7 @@
 <div class="hm-t t-report" data-report-page>
 
   <div class="t-asset-actions t-no-print" style="border-top:0;padding-top:0;">
-    <a class="t-action" href="{{ market_base_path }}/{{ passport.assessment.canonical_asset|lower }}"><span data-icon="chevron_left" data-icon-class="icon-sm"></span>Back to the Passport</a>
+    <a class="t-action" href="{{ passport_live_href }}"><span data-icon="chevron_left" data-icon-class="icon-sm"></span>Back to the Passport</a>
     <button class="t-action is-primary" type="button" data-print style="flex:0 0 auto;"><span data-icon="printer" data-icon-class="icon-sm"></span>Print or save as PDF</button>
     <button class="t-action" type="button" data-copy-link style="flex:0 0 auto;"><span data-icon="link" data-icon-class="icon-sm"></span>Copy the link</button>
   </div>
@@ -25,14 +38,14 @@
     </div>
     <div class="t-head-copy" style="align-items:flex-start;">
       {{ tone.chip(status_tone, passport.assessment.status_label) }}
-      <p class="t-foot-note">Printed from Hilal Markets. Evidence last checked {{ passport.last_verified_at|short_dt(user.timezone) if passport.last_verified_at else passport.assessment.reviewed_at|short_dt(user.timezone) }}.</p>
+      <p class="t-foot-note">Printed from Hilal Markets. Evidence last checked {{ passport.last_verified_at|short_dt(tz) if passport.last_verified_at else passport.assessment.reviewed_at|short_dt(tz) }}.</p>
     </div>
   </header>
 
   {% if passport.historical.is_historical %}
   <div class="t-banner" data-tone="info">
     <span data-icon="history" data-icon-class="icon"></span>
-    <div class="t-banner-body"><strong>This is an older version</strong><p>Kept exactly as it stood{% if passport.historical.event_time %} on {{ passport.historical.event_time|short_dt(user.timezone) }}{% endif %}. Today's result is {{ passport.historical.current_status.value|replace('_', ' ') if passport.historical.current_status else 'not published' }}.</p></div>
+    <div class="t-banner-body"><strong>This is an older version</strong><p>Kept exactly as it stood{% if passport.historical.event_time %} on {{ passport.historical.event_time|short_dt(tz) }}{% endif %}. Today's result is {{ passport.historical.current_status.value|replace('_', ' ') if passport.historical.current_status else 'not published' }}.</p></div>
   </div>
   {% endif %}
 
@@ -43,11 +56,11 @@
       <tbody>
         <tr><th scope="row">Result</th><td>{{ passport.assessment.status_label }}</td></tr>
         <tr><th scope="row">Standard used</th><td>{{ passport.assessment.methodology_name }} v{{ passport.assessment.methodology_version }}</td></tr>
-        <tr><th scope="row">Decision made</th><td>{{ passport.decision_date|short_dt(user.timezone) if passport.decision_date else 'Not recorded' }}</td></tr>
-        <tr><th scope="row">Published</th><td>{{ passport.publication_date|short_dt(user.timezone) if passport.publication_date else 'Not recorded' }}</td></tr>
-        <tr><th scope="row">Evidence last checked</th><td>{{ passport.last_verified_at|short_dt(user.timezone) if passport.last_verified_at else passport.assessment.reviewed_at|short_dt(user.timezone) }}</td></tr>
-        <tr><th scope="row">Evidence expires</th><td>{{ passport.evidence_expires_at|short_dt(user.timezone) if passport.evidence_expires_at else 'Not recorded' }}</td></tr>
-        <tr><th scope="row">Next source check</th><td>{{ passport.next_source_scan_at|short_dt(user.timezone) if passport.next_source_scan_at else 'Not scheduled' }}</td></tr>
+        <tr><th scope="row">Decision made</th><td>{{ passport.decision_date|short_dt(tz) if passport.decision_date else 'Not recorded' }}</td></tr>
+        <tr><th scope="row">Published</th><td>{{ passport.publication_date|short_dt(tz) if passport.publication_date else 'Not recorded' }}</td></tr>
+        <tr><th scope="row">Evidence last checked</th><td>{{ passport.last_verified_at|short_dt(tz) if passport.last_verified_at else passport.assessment.reviewed_at|short_dt(tz) }}</td></tr>
+        <tr><th scope="row">Evidence expires</th><td>{{ passport.evidence_expires_at|short_dt(tz) if passport.evidence_expires_at else 'Not recorded' }}</td></tr>
+        <tr><th scope="row">Next source check</th><td>{{ passport.next_source_scan_at|short_dt(tz) if passport.next_source_scan_at else 'Not scheduled' }}</td></tr>
       </tbody>
     </table>
     {% if passport.main_qualification %}<p><strong>Condition that applies:</strong> {{ passport.main_qualification }}</p>{% endif %}
@@ -75,7 +88,7 @@
           <td>{{ use.label }}</td>
           <td>{{ tone.humanize(use.status) }}</td>
           <td>{{ use.reason }}{% if use.scope %}<br><em>Scope: {{ use.scope }}</em>{% endif %}{% if use.supporting_reference %}<br><em>{{ use.supporting_reference }}</em>{% endif %}</td>
-          <td>{{ use.last_verified_at|short_dt(user.timezone) if use.last_verified_at else 'Not recorded' }}</td>
+          <td>{{ use.last_verified_at|short_dt(tz) if use.last_verified_at else 'Not recorded' }}</td>
         </tr>
         {% else %}
         <tr><td colspan="4">No separate use decisions were kept for this record.</td></tr>
@@ -94,7 +107,7 @@
         <tr><th scope="row">Network</th><td>{{ passport.identity.network or 'Not recorded' }}</td></tr>
         <tr><th scope="row">Type</th><td>{% if passport.identity.native_asset %}Native coin{% elif passport.identity.native_asset == false %}Token{% else %}{{ tone.humanize(passport.identity.asset_type) }}{% endif %}</td></tr>
         <tr><th scope="row">Identity state</th><td>{{ tone.humanize(passport.identity.identity_state) }}</td></tr>
-        <tr><th scope="row">Identity checked</th><td>{{ passport.identity.identity_verified_at|short_dt(user.timezone) if passport.identity.identity_verified_at else 'Date not kept' }}</td></tr>
+        <tr><th scope="row">Identity checked</th><td>{{ passport.identity.identity_verified_at|short_dt(tz) if passport.identity.identity_verified_at else 'Date not kept' }}</td></tr>
         {% for network, address in (passport.identity.contract_addresses or {}).items() %}
         <tr><th scope="row">Contract on {{ network }}</th><td class="t-code">{{ address }}</td></tr>
         {% endfor %}
@@ -151,7 +164,7 @@
           <td>{{ source.title }}{% if source.source_url %}<br><span class="t-code">{{ source.source_url }}</span>{% endif %}<br>{{ source.evidence_summary }}</td>
           <td>{{ source.publisher }}</td>
           <td>{{ tone.humanize(source.availability) }}</td>
-          <td>{{ source.retrieved_at|short_dt(user.timezone) }}{% if source.published_at %}<br><em>published {{ source.published_at|short_dt(user.timezone) }}</em>{% endif %}</td>
+          <td>{{ source.retrieved_at|short_dt(tz) }}{% if source.published_at %}<br><em>published {{ source.published_at|short_dt(tz) }}</em>{% endif %}</td>
           <td><span class="t-code">{{ source.snapshot_id or 'Older record' }}</span><br><span class="t-code">{{ source.content_hash or 'Fingerprint not kept' }}</span></td>
         </tr>
         {% else %}
@@ -169,8 +182,8 @@
       <tbody>
         <tr><th scope="row">Decision</th><td>{{ tone.humanize(passport.decision_record.decision) }}</td></tr>
         <tr><th scope="row">Who decided</th><td>{{ tone.humanize(passport.decision_record.actor_role) }}</td></tr>
-        <tr><th scope="row">When</th><td>{{ passport.decision_record.decided_at|short_dt(user.timezone) if passport.decision_record.decided_at else 'Not recorded' }}</td></tr>
-        <tr><th scope="row">Published</th><td>{{ passport.decision_record.published_at|short_dt(user.timezone) if passport.decision_record.published_at else 'Not published' }}</td></tr>
+        <tr><th scope="row">When</th><td>{{ passport.decision_record.decided_at|short_dt(tz) if passport.decision_record.decided_at else 'Not recorded' }}</td></tr>
+        <tr><th scope="row">Published</th><td>{{ passport.decision_record.published_at|short_dt(tz) if passport.decision_record.published_at else 'Not published' }}</td></tr>
         <tr><th scope="row">Reason</th><td>{{ passport.decision_record.reason }}</td></tr>
         {% if passport.decision_record.qualifications %}<tr><th scope="row">Conditions</th><td>{{ passport.decision_record.qualifications|join(' · ') }}</td></tr>{% endif %}
         <tr><th scope="row">Integrity fingerprint</th><td class="t-code">{{ passport.decision_record.integrity_hash or 'Not kept for this older version' }}</td></tr>
@@ -186,7 +199,7 @@
       <tbody>
         {% for event in passport.timeline %}
         <tr>
-          <td>{{ event.occurred_at|short_dt(user.timezone) }}</td>
+          <td>{{ event.occurred_at|short_dt(tz) }}</td>
           <td>{{ tone.humanize(event.action) }}<br>{{ event.reason }}</td>
           <td>{{ event.actor }}</td>
           <td>{% if event.previous_state or event.new_state %}{{ event.previous_state or 'start' }} &rarr; {{ event.new_state or 'no change' }}{% else %}Not recorded{% endif %}</td>
@@ -205,7 +218,7 @@
       <thead><tr><th scope="col">Standard</th><th scope="col">Result</th><th scope="col">Reviewed</th></tr></thead>
       <tbody>
         {% for reference in passport.methodology_references %}
-        <tr><td>{{ reference.methodology_name }}</td><td>{{ reference.status_label }}</td><td>{{ reference.review_date|short_dt(user.timezone) if reference.review_date else 'Not recorded' }}</td></tr>
+        <tr><td>{{ reference.methodology_name }}</td><td>{{ reference.status_label }}</td><td>{{ reference.review_date|short_dt(tz) if reference.review_date else 'Not recorded' }}</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -213,9 +226,14 @@
   {% endif %}
 
   <footer class="t-report-block">
-    <p class="t-foot-note">Hilal Markets does not execute trades and does not give buy or sell advice. A screening result can change when new evidence is published. Check the live Passport at {{ market_base_path }}/{{ passport.assessment.canonical_asset|lower }} for the current result.</p>
+    <p class="t-foot-note">Hilal Markets does not execute trades and does not give buy or sell advice. A screening result can change when new evidence is published. Check the live Passport at {{ passport_absolute_url }} for the current result.</p>
   </footer>
 </div>
+</main>
+<div id="hm-site-footer"></div>
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20261001-home-link"></script>{% endblock %}
+{% block page_scripts %}
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261005-passports"></script>
+  <script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20261005-passports"></script>
+{% endblock %}

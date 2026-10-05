@@ -1,8 +1,8 @@
 {% extends "hilal/base_dashboard.html" %}
 {% from "hilal/macros/ask_ai.html" import ask_ai with context %}
 {% block page_styles_late %}
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261001-home-link">
-<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20261001-home-link">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261005-passports">
+<link rel="stylesheet" href="{{ url_for('static', path='/hm-account-test.css') }}?v=20261005-passports">
 {% endblock %}
 {% block content %}
 
@@ -25,6 +25,11 @@
       <span data-icon="integrations" data-icon-class="icon-sm"></span>Set up Telegram and email
     </a>
   </header>
+
+  {#- The two bars that stay on screen while the page scrolls — "did that save?" and the
+      jump links — held together under the topbar. Each used to stick on its own at the
+      very top of the window, so they slid under the topbar and on top of each other. -#}
+  <div class="g-sticky" data-g-sticky>
 
   {#- With no Save button, "did that work?" has to be answered every single time. -#}
   <div class="g-saved" data-state="idle" data-g-saved>
@@ -87,6 +92,8 @@
     <a href="#{{ _gid }}" data-g-jump-link><span data-icon="{{ _icon }}" data-icon-class="icon-sm"></span>{{ link_text }}</a>
     {%- endfor %}
   </nav>
+
+  </div>
 
   <div class="g-groups">
 
@@ -551,5 +558,5 @@
 </dialog>
 {% endblock %}
 {% block page_scripts %}
-<script type="module" src="{{ url_for('static', path='/hm-settings-test.js') }}?v=20261001-home-link"></script>
+<script type="module" src="{{ url_for('static', path='/hm-settings-test.js') }}?v=20261005-passports"></script>
 {% endblock %}

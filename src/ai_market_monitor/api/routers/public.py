@@ -2,9 +2,10 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from redis.asyncio import Redis
@@ -13,20 +14,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.api.dependencies import get_market_data_provider
 from ai_market_monitor.api.template_env import register as register_template_helpers
-from ai_market_monitor.core.app_links import app_host, app_link, site_link
+from ai_market_monitor.core.app_links import (
+    absolute_passport_link,
+    app_host,
+    app_link,
+    site_link,
+)
 from ai_market_monitor.core.config import Settings, get_settings
-from ai_market_monitor.core.dashboard_paths import HOME_PATH, MARKET_PATH
+from ai_market_monitor.core.csrf import csrf_token
+from ai_market_monitor.core.dashboard_paths import (
+    HOME_PATH,
+    MARKET_PATH,
+    PASSPORTS_PATH,
+    PRICING_PATH,
+    RETIRED_PRICING_PAGE_PATH,
+    passport_path,
+)
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PUBLIC_PLAN_PRESENTATIONS,
     PURCHASABLE_PLAN_CODES,
     money_back_headline,
-    plan_offer,
     promotion_ends_at,
     promotion_is_active,
     visible_plan_comparison,
-    visible_plan_comparison_headers,
     visible_public_plan_codes,
 )
 from ai_market_monitor.core.site_content import (
@@ -54,6 +66,10 @@ from ai_market_monitor.core.site_content import (
 from ai_market_monitor.core.site_content import (
     social_image_url as build_social_image_url,
 )
+from ai_market_monitor.schemas.sharia import (
+    AssetPassportResponse,
+    MethodologyComparisonResponse,
+)
 from ai_market_monitor.services.ai_provider import (
     AIProviderConfigError,
     is_configured,
@@ -69,6 +85,9 @@ from ai_market_monitor.services.billing import (
     plan_sale_payload,
 )
 from ai_market_monitor.services.hilal_methodology import (
+    is_automated,
+)
+from ai_market_monitor.services.hilal_methodology import (
     page_payload as hilal_page_payload,
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider
@@ -82,6 +101,12 @@ from ai_market_monitor.services.public_market import (
 )
 from ai_market_monitor.services.public_site import PublicSiteReadService
 from ai_market_monitor.services.screened_market import followed_coins
+from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
+from ai_market_monitor.services.sharia_screening import (
+    STATUS_LABELS,
+    ShariaScreeningError,
+    ShariaScreeningService,
+)
 from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
 PACKAGE_DIR = Path(__file__).resolve().parents[2]
@@ -214,7 +239,7 @@ def _public_context(
                 ]
             )
         )
-    if page in {"landing", "features", "pricing"}:
+    if page in {"landing", "features"}:
         application: dict[str, Any] = {
             "@context": "https://schema.org",
             "@type": "SoftwareApplication",
@@ -393,23 +418,10 @@ def _public_context(
             if telegram_username
             else None
         ),
-        "plans": {code: PLAN_DEFINITIONS[code] for code in plan_codes},
-        "plan_presentations": PUBLIC_PLAN_PRESENTATIONS,
-        # What each plan costs today and whether it can be bought. Read by the Jinja
-        # pricing cards; the React landing page reads the same values out of
-        # `public_pricing_plans` below.
-        "plan_offers": {code: plan_offer(code) for code in plan_codes},
-        "plan_offer_values": {
-            code: plan_sale_payload(settings, code) for code in plan_codes
-        },
+        # What each plan costs today and whether it can be bought, for the Pricing
+        # section of the home page — the only place prices are shown on the public site.
         "promotion_ends_at": promotion_ends_at(),
         "promotion_active": promotion_is_active(),
-        "plan_comparison": visible_plan_comparison(
-            billing_enabled=settings.billing_enabled
-        ),
-        "plan_comparison_headers": visible_plan_comparison_headers(
-            billing_enabled=settings.billing_enabled
-        ),
         "public_pricing_plans": public_pricing_plans,
         "public_plan_comparison": (
             []
@@ -712,8 +724,6 @@ async def market(
         market_visible_limit=PUBLIC_MARKET_VISIBLE_COUNT,
         market_account_links=market_account_links(settings),
         market_unlocked=user is not None,
-        # A member's Passports open in their dashboard, on the product's own hostname.
-        market_passport_path=app_link(settings, MARKET_PATH) if user else MARKET_PATH,
         market_dashboard_href=app_link(settings, MARKET_PATH),
         favorite_assets=favorites,
         favorite_watchlist_id=favorite_watchlist_id,
@@ -725,28 +735,247 @@ async def market(
     return page
 
 
+def _standard_label(name: str, version: str, status_label: str, *, automated: bool) -> str:
+    """One line in the standard picker: which standard, and what it decided.
+
+    The machine-made standard says so in its own line, so nobody picks it believing a
+    Shariah board decided the result.
+    """
+
+    kind = " (automated, no Shariah advisor)" if automated else ""
+    return f"{name} v{version}{kind} \u00b7 {status_label}"
+
+
+async def _coin_passport(
+    session: AsyncSession,
+    settings: Settings,
+    asset: str,
+    methodology_id: UUID | None,
+) -> tuple[AssetPassportResponse, MethodologyComparisonResponse]:
+    """The coin's Passport under the standard asked for — or, asked for none, its own.
+
+    **One Passport per coin**, so a coin some standard reviewed always has a page. With
+    no standard named it opens on the product's default standard; when that standard
+    never reviewed this coin, on the first standard that did. The machine-made standard
+    is never chosen this way: it is a standard a person picks on purpose, never one put
+    in front of somebody who did not (`services/sharia_screening.py`). A standard named
+    in the address is honoured exactly, or refused — never swapped for another.
+    """
+
+    reader = ShariaPassportReadService(session, settings)
+    comparison = await ShariaScreeningService(session, settings).methodology_comparison(asset)
+    try:
+        return await reader.current(asset, methodology_id=methodology_id), comparison
+    except ShariaScreeningError as refused:
+        if methodology_id is not None:
+            raise
+        for item in comparison.results:
+            if item.status is None or is_automated(item.methodology.code):
+                continue
+            try:
+                passport = await reader.current(asset, methodology_id=item.methodology.id)
+            except ShariaScreeningError:
+                continue
+            return passport, comparison
+        raise refused from None
+
+
+async def _passport_page(
+    *,
+    request: Request,
+    asset_slug: str,
+    methodology_id: str | None,
+    session: AsyncSession,
+    settings: Settings,
+    report: bool,
+) -> Response:
+    """One coin's Passport — or its printable report — on the public website.
+
+    **One page per coin.** The standard is a choice on the page, not a second page: the
+    coin's published results under every standard fill the picker, and the one chosen is
+    the one in the address. A link that names a standard which no longer covers the coin,
+    or names it wrongly, still lands on the coin's Passport, on its default standard,
+    rather than on an error.
+
+    The same page for every reader. The published record is read without an account
+    (`user_id=None`), so a visitor and a member see the same evidence; the only thing a
+    signed-in reader adds is the form for reporting a problem.
+    """
+
+    if "market" in settings.stage_exposure.hidden_pages:
+        # Before launch the Market page is hidden, and its Passports with it.
+        return RedirectResponse(
+            site_link(settings, settings.stage_exposure.primary_cta_href), status_code=303
+        )
+    requested: UUID | None = None
+    if methodology_id:
+        try:
+            requested = UUID(methodology_id)
+        except ValueError:
+            return RedirectResponse(passport_path(asset_slug, report=report), status_code=303)
+    if asset_slug != asset_slug.lower():
+        # One address per coin: `/passports/BTC` and `/passports/btc` are the same page.
+        return RedirectResponse(
+            passport_path(asset_slug, methodology_id=requested, report=report), status_code=308
+        )
+    try:
+        passport, comparison = await _coin_passport(session, settings, asset_slug, requested)
+    except ShariaScreeningError as exc:
+        if requested is not None:
+            try:
+                await _coin_passport(session, settings, asset_slug, None)
+            except ShariaScreeningError:
+                pass
+            else:
+                # A standard that no longer covers this coin: the coin's own page.
+                return RedirectResponse(passport_path(asset_slug, report=report), status_code=303)
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    user = await WebAuthService(session, settings).current_user(
+        request.cookies.get(SESSION_COOKIE_NAME)
+    )
+    asset = passport.assessment.canonical_asset
+    chosen_id = passport.assessment.methodology_id
+    standards = [
+        {
+            "id": str(item.methodology.id),
+            "label": _standard_label(
+                item.methodology.name,
+                item.methodology.version,
+                STATUS_LABELS[item.status],
+                automated=is_automated(item.methodology.code),
+            ),
+            "href": passport_path(asset, methodology_id=item.methodology.id, report=report),
+            "selected": item.methodology.id == chosen_id,
+        }
+        for item in comparison.results
+        if item.status is not None
+    ]
+    if not any(item["selected"] for item in standards):
+        # The standard being shown is always in the picker, even when the list of
+        # published results leaves it out — a picker that cannot show what is on the page
+        # would claim the page is about some other standard.
+        standards.insert(
+            0,
+            {
+                "id": str(chosen_id),
+                "label": _standard_label(
+                    passport.assessment.methodology_name,
+                    passport.assessment.methodology_version,
+                    passport.assessment.status_label,
+                    automated=is_automated(passport.assessment.methodology_code),
+                ),
+                "href": passport_path(asset, methodology_id=chosen_id, report=report),
+                "selected": True,
+            },
+        )
+    name = (
+        passport.identity.name
+        if passport.identity
+        else passport.assessment.asset_name or asset
+    )
+    title = f"{name} ({asset}) Evidence {'report' if report else 'Passport'}"
+    description = (
+        f"How {name} ({asset}) was screened under a published Shariah standard: the result, "
+        "the reasons, the sources and the date it was reviewed."
+    )
+    page_path = passport_path(asset)
+    context = _public_context(
+        request,
+        settings,
+        page="passport",
+        title=title,
+        description=description,
+        path=page_path,
+        passport=passport,
+        passport_standards=standards,
+        passport_timezone=user.timezone if user and user.timezone else "UTC",
+        passport_page_href=passport_path(asset, report=report),
+        passport_live_href=passport_path(asset, methodology_id=chosen_id),
+        passport_report_href=passport_path(asset, methodology_id=chosen_id, report=True),
+        passport_absolute_url=absolute_passport_link(settings, asset),
+        passport_list_href=request.url_for("public_market").path,
+        passport_csrf_token=csrf_token(settings, user.id) if user else None,
+        passport_problem_signin_href=app_link(
+            settings, f"/signin?{urlencode({'next': f'{page_path}#report-problem'})}"
+        ),
+    )
+    page = templates.TemplateResponse(
+        request=request,
+        name="hilal/public/passport_report.html" if report else "hilal/public/passport.html",
+        context=context,
+    )
+    if user is not None:
+        # The problem form carries this reader's own token, so no shared cache may keep it.
+        page.headers["Cache-Control"] = "private, no-store"
+    page.headers["Vary"] = "Cookie"
+    return page
+
+
 @router.get(
-    "/pricing",
+    PASSPORTS_PATH + "/{asset_slug}",
     response_class=HTMLResponse,
     include_in_schema=False,
-    name="public_pricing",
+    name="public_passport",
 )
-async def pricing(
+async def passport_page(
     request: Request,
+    asset_slug: str,
+    methodology_id: str | None = Query(default=None, max_length=64),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    if settings.waitlist_mode:
-        # The plans and the comparison table are hidden together with every other way
-        # to buy. An old link, a bookmark or a search result lands on the waitlist
-        # instead of on prices nobody can pay yet.
-        return RedirectResponse(site_link(settings, WAITLIST_ANCHOR), status_code=303)
-    return await _render_public_page(
+    return await _passport_page(
         request=request,
+        asset_slug=asset_slug,
+        methodology_id=methodology_id,
         session=session,
         settings=settings,
-        page="pricing",
+        report=False,
     )
+
+
+@router.get(
+    PASSPORTS_PATH + "/{asset_slug}/report",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    name="public_passport_report",
+)
+async def passport_report_page(
+    request: Request,
+    asset_slug: str,
+    methodology_id: str | None = Query(default=None, max_length=64),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """The Passport as one printable record. Same read model, laid out flat."""
+
+    return await _passport_page(
+        request=request,
+        asset_slug=asset_slug,
+        methodology_id=methodology_id,
+        session=session,
+        settings=settings,
+        report=True,
+    )
+
+
+@router.get(RETIRED_PRICING_PAGE_PATH, include_in_schema=False, name="retired_pricing_page")
+async def retired_pricing_page(settings: Settings = Depends(get_settings)) -> RedirectResponse:
+    """The old Pricing page. Taken down on 4 October 2026: it had gone stale.
+
+    There is no page here any more, only a forward. Prices are shown in one place, the
+    Pricing section of the home page, so a second copy cannot fall out of date again.
+    The forward is permanent (301), which tells search engines to drop this address and
+    keep the home page instead. A bookmark or an old search result still lands somewhere
+    useful rather than on an error.
+    """
+
+    if settings.waitlist_mode:
+        # Before launch the home page has no prices either, so an old link lands on the
+        # waitlist. Temporary (303), because it changes back the day the site opens.
+        return RedirectResponse(site_link(settings, WAITLIST_ANCHOR), status_code=303)
+    return RedirectResponse(site_link(settings, PRICING_PATH), status_code=301)
 
 
 @router.get(

@@ -73,9 +73,9 @@ def test_a_signed_in_member_stays_on_the_public_market_page(
     # Favorites opens in the dashboard, where following a coin happens.
     favorites = page.locator("[data-favorites-in-dashboard]")
     expect(favorites).to_have_attribute("href", re.compile(r"/dashboard/market\?saved_assets=1$"))
-    # "See the evidence" opens the coin's Passport in the dashboard.
+    # "See the evidence" opens the coin's Passport, a public page on the website.
     page.locator(".t-asset [data-quick-view]").first.click()
-    page.wait_for_url(re.compile(r"/dashboard/market/[a-z0-9]+"), timeout=20_000)
+    page.wait_for_url(re.compile(r"/passports/[a-z0-9]+"), timeout=20_000)
 
 
 def test_a_visitor_lands_on_the_public_market_page(page: Page, base_url: str) -> None:

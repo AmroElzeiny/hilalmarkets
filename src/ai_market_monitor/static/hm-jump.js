@@ -7,7 +7,9 @@
  *
  * Written once because two pages on this path need it and a third will. It is the same
  * `IntersectionObserver` either way, and two copies is two places for the same
- * off-by-one margin to be tuned differently.
+ * off-by-one margin to be tuned differently. That had happened: the Passport page kept
+ * its own copy with an 88px margin while this one used 96px, and neither number was
+ * the real height of anything once the bar stopped under the topbar.
  */
 
 /**
@@ -17,13 +19,21 @@
  * skipped rather than throwing, so a section removed from a template cannot break the
  * whole bar.
  *
+ * `bar` is the sticky element the links sit in. When it is given, the band that counts
+ * as "here" starts under the bar's real bottom edge — where it is held plus how tall it
+ * is — and that same number is written to `--hm-jump-clear`, which the sections' own
+ * `scroll-margin-top` reads, so a pressed link lands its section just under the bar
+ * instead of underneath it. Both are measured again whenever the bar changes size or
+ * the place it is held moves.
+ *
  * Returns a function that stops watching.
  */
-export function followSections(links, scope = document) {
+export function followSections(links, scope = document, { bar = null } = {}) {
   const rows = [...links]
     .map((link) => ({ link, section: scope.querySelector(link.getAttribute("href") || "") }))
     .filter((row) => row.section);
   if (!rows.length || !("IntersectionObserver" in window)) return () => {};
+  const host = scope === document ? document.body : scope;
 
   /** Mark exactly one link, and no others. */
   function markOnly(section) {
@@ -45,16 +55,87 @@ export function followSections(links, scope = document) {
     : null;
   markOnly((landed || rows[0]).section);
 
-  const watcher = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) markOnly(entry.target);
-      }
-    },
-    // The top margin clears the sticky bar itself, so a section is "here" once it is
-    // below the bar rather than once it touches the top of the window.
-    { rootMargin: "-96px 0px -60% 0px", threshold: 0 },
-  );
-  rows.forEach((row) => watcher.observe(row.section));
-  return () => watcher.disconnect();
+  /** How far down the window the bar's bottom edge sits once it is held. */
+  function clearance() {
+    if (!bar) return 96;
+    const heldAt = Number.parseFloat(window.getComputedStyle(bar).top) || 0;
+    return Math.round(heldAt + bar.offsetHeight + 12);
+  }
+
+  let watcher = null;
+  function watch() {
+    watcher?.disconnect();
+    const clear = clearance();
+    if (bar) host.style.setProperty("--hm-jump-clear", `${clear}px`);
+    watcher = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) markOnly(entry.target);
+        }
+      },
+      // The top margin clears the sticky bar itself, so a section is "here" once it is
+      // below the bar rather than once it touches the top of the window.
+      { rootMargin: `-${clear}px 0px -60% 0px`, threshold: 0 },
+    );
+    rows.forEach((row) => watcher.observe(row.section));
+  }
+  watch();
+
+  let pending = 0;
+  const again = () => {
+    window.cancelAnimationFrame(pending);
+    pending = window.requestAnimationFrame(watch);
+  };
+  const resized = bar && "ResizeObserver" in window ? new ResizeObserver(again) : null;
+  resized?.observe(bar);
+  window.addEventListener("resize", again);
+  window.addEventListener(STICKY_TOP_MOVED, again);
+  return () => {
+    watcher?.disconnect();
+    resized?.disconnect();
+    window.removeEventListener("resize", again);
+    window.removeEventListener(STICKY_TOP_MOVED, again);
+  };
+}
+
+/** Sent when `holdBelowFixedHeader` moves the place sticky bars stop. */
+const STICKY_TOP_MOVED = "hm:sticky-top";
+
+/**
+ * On a public page, stop sticky bars just under the website's fixed header.
+ *
+ * The header is drawn by the landing bundle, which runs after the page's own scripts,
+ * and it changes height when the page scrolls (it tightens once you leave the top). So
+ * it is waited for, then measured, and measured again every time it changes size. The
+ * result goes to `--hm-sticky-top` on the body — the same value the dashboard's topbar
+ * sets in `hm-shell.css` — so a bar written once stops in the right place on both.
+ */
+export function holdBelowFixedHeader(selector = ".hm-header") {
+  const measure = (header) => {
+    const bottom = Math.round(header.getBoundingClientRect().bottom);
+    if (bottom <= 0) return;
+    document.body.style.setProperty("--hm-sticky-top", `${bottom + 8}px`);
+    window.dispatchEvent(new Event(STICKY_TOP_MOVED));
+  };
+  const follow = (header) => {
+    measure(header);
+    // The outer box: the header shrinks by its padding when the page scrolls, which
+    // leaves its inner box exactly the same size.
+    if ("ResizeObserver" in window) {
+      new ResizeObserver(() => measure(header)).observe(header, { box: "border-box" });
+    }
+  };
+  const existing = document.querySelector(selector);
+  if (existing) {
+    follow(existing);
+    return;
+  }
+  if (!("MutationObserver" in window)) return;
+  const waiting = new MutationObserver(() => {
+    const header = document.querySelector(selector);
+    if (!header) return;
+    waiting.disconnect();
+    follow(header);
+  });
+  waiting.observe(document.body, { childList: true, subtree: true });
 }

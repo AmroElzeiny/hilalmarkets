@@ -151,7 +151,6 @@ def customer_copy_sources(root: Path) -> tuple[Path, ...]:
 
     candidates = (
         root / "src" / "ai_market_monitor" / "templates" / "hilal",
-        root / "src" / "ai_market_monitor" / "templates" / "dashboard_public.html",
         root / "src" / "ai_market_monitor" / "templates" / "auth.html",
         root / "src" / "ai_market_monitor" / "core" / "site_content.py",
         root / "src" / "ai_market_monitor" / "core" / "plans.py",

@@ -187,7 +187,7 @@ async def test_development_methodology_is_never_selectable_over_approved_methodo
     assert [item["symbol"] for item in malaysia_payload["items"]] == ["SOL/USDT"]
     assert malaysia_payload["items"][0]["status_label"] == "Eligible"
     assert malaysia_payload["items"][0]["passport_url"] == (
-        f"/dashboard/market/SOL?methodology_id={malaysia.id}"
+        f"/passports/sol?methodology_id={malaysia.id}"
     )
     assert exact_pair_search.status_code == 200
     assert exact_pair_search.json()["total"] == 1

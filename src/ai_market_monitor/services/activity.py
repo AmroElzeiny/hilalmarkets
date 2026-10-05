@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from ai_market_monitor.core.app_links import passport_link
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.dashboard_paths import LIFECYCLES_PATH
 from ai_market_monitor.db.models import (
@@ -46,6 +47,7 @@ class ActivityReadService:
 
     def __init__(self, session: AsyncSession, settings: Settings):
         self.session = session
+        self.settings = settings
         self.screening = ShariaScreeningService(session, settings)
 
     async def list_items(
@@ -409,7 +411,7 @@ class ActivityReadService:
                     methodology_version=(drift.impact or {}).get("methodology_version"),
                     title=title,
                     summary=summary,
-                    evidence_reference=f"/dashboard/market/{drift.canonical_asset}",
+                    evidence_reference=passport_link(self.settings, drift.canonical_asset),
                     delivery_status="recorded",
                     requires_attention=drift.new_status
                     in {ShariaAssetStatus.UNDER_REVIEW, ShariaAssetStatus.EXCLUDED},

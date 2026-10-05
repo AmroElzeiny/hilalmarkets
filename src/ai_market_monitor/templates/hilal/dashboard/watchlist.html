@@ -47,7 +47,7 @@
           <td>
             <div class="row wrap">
               <button class="btn btn-secondary btn-sm" type="button" data-passport-quick-view data-passport-asset="{{ asset.canonical_asset }}">Quick View</button>
-              <a class="link-arrow" href="/dashboard/market/{{ asset.canonical_asset }}">Full Passport <span data-icon="arrow" data-icon-class="icon-sm"></span></a>
+              <a class="link-arrow" href="{{ passport_link(settings, asset.canonical_asset) }}">Full Passport <span data-icon="arrow" data-icon-class="icon-sm"></span></a>
               <button
                 class="btn btn-secondary btn-sm"
                 type="button"

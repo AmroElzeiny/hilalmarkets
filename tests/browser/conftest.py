@@ -829,8 +829,14 @@ def assert_no_raw_traceback(page: Page) -> None:
     assert not found, f"Raw server/runtime output visible in browser: {found}"
 
 
-def assert_hilal_brand_palette(page: Page) -> None:
-    """Fail when a visible product element escapes the approved brand palette."""
+def assert_hilal_brand_palette(page: Page, scope: str = "body") -> None:
+    """Fail when a visible product element escapes the approved brand palette.
+
+    `scope` limits the check to one part of the page. A product page on the public
+    website (the Passport) sits inside the landing page's own header and footer, which
+    are drawn from the landing page's palette — the site's visual source of truth — and
+    are checked with the landing page, not against this list.
+    """
 
     # Sample the settled design rather than an intermediate color during a
     # purposeful 220ms hover/state transition.
@@ -903,7 +909,7 @@ def assert_hilal_brand_palette(page: Page) -> None:
         "230,244,251",  # --hm-sky-soft
     }
     unexpected = page.evaluate(
-        """approvedValues => {
+        """([approvedValues, scope]) => {
             const approved = new Set(approvedValues);
             const colorProperties = ['color', 'backgroundColor'];
             const borderSides = ['Top', 'Right', 'Bottom', 'Left'];
@@ -917,7 +923,7 @@ def assert_hilal_brand_palette(page: Page) -> None:
                 return `${match[1]},${match[2]},${match[3]}`;
             };
             const found = new Map();
-            for (const element of document.querySelectorAll('body *')) {
+            for (const element of document.querySelectorAll(`${scope} *`)) {
                 const rect = element.getBoundingClientRect();
                 const style = getComputedStyle(element);
                 if (
@@ -951,7 +957,7 @@ def assert_hilal_brand_palette(page: Page) -> None:
             }
             return [...found].map(([value, element]) => ({value, element}));
         }""",
-        sorted(approved),
+        [sorted(approved), scope],
     )
     assert unexpected == [], f"Visible elements use non-brand colors: {unexpected}"
 

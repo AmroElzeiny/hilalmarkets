@@ -72,11 +72,11 @@ async def _csrf(test_context) -> str:
 #: `/dashboard/monitor` used to be here. It is the canvas's *older* address and has been
 #: a permanent redirect for a while, so this was asking a redirect whether it carried the
 #: assistant — which it never does, because it carries no page at all.
+#: The Passport and its report used to be here too. They are public pages on the
+#: website now (`/passports/<coin>`), where the website's own assistant answers instead.
 DESIGN_PATH = (
     "/dashboard/market",
     MONITOR_PATH,
-    "/dashboard/market/btc",
-    "/dashboard/market/btc/report",
 )
 
 

@@ -10,6 +10,7 @@ from ai_market_monitor.core.dashboard_paths import (
     MONITOR_PATH,
     MONITORS_PATH,
     OPPORTUNITIES_PATH,
+    PRICING_PATH,
     RESEARCH_PATH,
     SETTINGS_PATH,
     SUBSCRIPTION_PATH,
@@ -37,6 +38,10 @@ class NavigationItem:
     #: What the page is for, in one plain sentence. The assistant reads this to answer
     #: "where do I find …"; it is the page's own description, never the assistant's.
     about: str = ""
+    #: A section of the home page (``/#pricing``) rather than a page of its own. When set,
+    #: the public header links here through ``site_link`` instead of ``url_for(endpoint)``,
+    #: so the link reaches the home page on the marketing hostname from every page.
+    home_section: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,14 +158,16 @@ PUBLIC_NAVIGATION = (
     # rest ask for a free account — see `services/public_market.py`. Hidden with Pricing
     # before launch, because an invitation to sign up is all the page ends with.
     NavigationItem("Markets", "public_market", "market"),
-    NavigationItem("Pricing", "public_pricing", "pricing"),
+    # A section of the home page, not a page: the separate Pricing page went stale and
+    # was taken down on 4 October 2026. The React header links to the same section.
+    NavigationItem("Pricing", "public_home", "pricing", home_section=PRICING_PATH),
     NavigationItem("Help Center", "public_help", "help"),
 )
 
 
 #: The footer menu, in three groups: Product, Legal, Contact.
 #:
-#: **Not every served page is in it.** Pricing, Halal Assets, Risk Disclosure,
+#: **Not every served page is in it.** Halal Assets, Risk Disclosure,
 #: Trust & Safety, About and the Help Center were taken out of the footer deliberately;
 #: each one is still served, still in :data:`PUBLIC_PAGES` and still in the sitemap, so a
 #: bookmark or a search result keeps working. What changed is only that the footer no
@@ -338,7 +345,7 @@ _PLAN_ARTICLE_OPEN: HelpArticle = {
     "question": "Where do I manage my plan?",
     "answer": (
         "Open Plan & Billing in the dashboard. The limits there come from the "
-        "same catalog as the public Pricing page."
+        "same catalog as the Pricing section on the home page."
     ),
 }
 _PLAN_ARTICLE_WAITLIST: HelpArticle = {
@@ -662,14 +669,6 @@ PUBLIC_PAGES = (
             "of each one, and the standard that screened it."
         ),
         "hilal/public/market.html",
-    ),
-    PublicPageMetadata(
-        "pricing",
-        "public_pricing",
-        "/pricing",
-        "Pricing",
-        "Review current Hilal Markets access, limits, and billing availability.",
-        "hilal/public/pricing.html",
     ),
     PublicPageMetadata(
         "help",

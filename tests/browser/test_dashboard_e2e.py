@@ -786,9 +786,12 @@ def test_screened_market_passport_and_mobile_visual_qa(
     page.goto(
         f"{base_url}/dashboard/market?methodology_id={seeded['methodology_id']}"
     )
-    expect(page.get_by_role("form", name="Filter screened assets")).to_be_visible()
-    expect(page.locator("[data-hm-select-trigger]")).to_have_count(2)
-    expect(page.get_by_role("region", name="Live screened spot market quotes")).to_be_visible()
+    # The redesigned page's controls: the standard picker, the exchange choice and the
+    # cards-or-table choice. The older form, its two custom selects and the "Live
+    # screened spot market quotes" region went with the older page.
+    expect(page.locator("[data-standard-form]")).to_be_visible()
+    expect(page.get_by_role("radiogroup", name="Exchange")).to_be_visible()
+    expect(page.get_by_role("radiogroup", name="How to show the list")).to_be_visible()
     expect(page.get_by_text("All screened assets")).to_have_count(0)
     expect(page.get_by_text("Find opportunities inside a screened market.")).to_have_count(0)
     # This test was still written against the market page as it looked before the
@@ -855,7 +858,9 @@ def test_screened_market_passport_and_mobile_visual_qa(
 
     passport_button.click()
     passport_dialog.get_by_role("link", name="Open the full Passport").click()
-    expect(page.locator(".t-head h1")).to_be_visible()
+    # The full Passport is a public page on the website now, one address per coin.
+    page.wait_for_url(re.compile(r"/passports/sol\?methodology_id="), timeout=15_000)
+    expect(page.locator(".t-passport-hero h1")).to_be_visible()
     expect(page.get_by_role("link", name="Back to the list")).to_be_visible()
     # The status is stated and its evidence is reachable on the same page. The seeded
     # evidence source is named in the Evidence section, so a Passport that lost its
@@ -863,7 +868,8 @@ def test_screened_market_passport_and_mobile_visual_qa(
     expect(page.get_by_role("heading", name="Evidence")).to_be_visible()
     expect(page.get_by_text("Official browser-test disclosure")).to_be_visible()
     assert_no_horizontal_overflow(page)
-    assert_hilal_brand_palette(page)
+    # The Passport itself, not the website's header and footer around it.
+    assert_hilal_brand_palette(page, scope="[data-passport-page]")
     page.screenshot(
         path=str(visual_dir / "sharia-evidence-passport-desktop.png"),
         full_page=True,

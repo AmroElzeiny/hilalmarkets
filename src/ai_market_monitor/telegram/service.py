@@ -1322,14 +1322,15 @@ class TelegramBotService:
 
     def _pricing_text(self) -> str:
         if self.settings.waitlist_mode:
-            # The public pricing page is not published before launch, so a button here
+            # Prices are not published before launch, so a button here
             # would open the waitlist under a "Pricing" label. Say what is true instead.
             return (
                 "💸 Pricing\n\nHilal Markets is invite-only during its private beta, so "
                 "plans and prices are not published yet. Nothing is charged in the beta."
             )
         return (
-            "💸 Pricing\n\nSee every plan and its price on the public pricing page. "
+            "💸 Pricing\n\nSee every plan and its price in the Pricing section of our "
+            "website's home page. "
             "To choose or change your plan, open the Subscription page."
         )
 
@@ -1340,7 +1341,7 @@ class TelegramBotService:
             TelegramButton(
                 "Open Pricing",
                 "external:pricing",
-                url=self._dashboard_url(f"{PRICING_PATH}#pricing"),
+                url=self._dashboard_url(PRICING_PATH),
             ),
             self._dashboard_button("Subscription page", SUBSCRIPTION_PATH),
         ]

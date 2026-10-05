@@ -19,9 +19,10 @@ from ai_market_monitor.api.dependencies import (
     get_market_previewer,
 )
 from ai_market_monitor.api.request_guards import client_fingerprint
+from ai_market_monitor.core.app_links import site_link
 from ai_market_monitor.core.config import Settings, get_settings
 from ai_market_monitor.core.csrf import csrf_token_matches
-from ai_market_monitor.core.dashboard_paths import COMPLIANCE_CHANGES_PATH
+from ai_market_monitor.core.dashboard_paths import COMPLIANCE_CHANGES_PATH, PASSPORTS_PATH
 from ai_market_monitor.core.database import get_db_session
 from ai_market_monitor.db.models import (
     AISetupChatSession,
@@ -3929,11 +3930,29 @@ async def web_notifications(
     return {"items": items}
 
 
+def _notice_link(settings: Settings, stored: str | None) -> str | None:
+    """Where a stored notice may send somebody, or ``None``.
+
+    Only the product's own pages: an address inside the dashboard, or a coin's Passport.
+    A Passport is stored as a plain path and opened on the public website, where the
+    page lives — a notice saved before the Passport moved still names
+    ``/dashboard/market/<coin>``, which forwards there by itself.
+    """
+
+    value = str(stored or "")
+    if value.startswith("/dashboard"):
+        return value
+    if value.startswith(f"{PASSPORTS_PATH}/"):
+        return site_link(settings, value)
+    return None
+
+
 @router.get("/notifications/center")
 async def notification_center(
     limit: int = Query(default=15, ge=1, le=30),
     principal: UserPrincipal = Depends(get_dashboard_principal),
     session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     """Combine bounded, persisted user notifications without changing delivery state."""
     items: list[dict[str, Any]] = []
@@ -3964,11 +3983,7 @@ async def notification_center(
         ).all()
     )
     for dashboard_notice in dashboard_rows:
-        action_url = (
-            dashboard_notice.action_url
-            if str(dashboard_notice.action_url or "").startswith("/dashboard")
-            else None
-        )
+        action_url = _notice_link(settings, dashboard_notice.action_url)
         items.append(
             {
                 "id": f"dashboard:{dashboard_notice.id}",

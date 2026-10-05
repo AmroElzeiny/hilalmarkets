@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.dashboard_paths import PRICING_PATH
 from ai_market_monitor.core.person_name import greeting_name
 from ai_market_monitor.core.plans import PLAN_DEFINITIONS, PUBLIC_PLAN_CODES
 from ai_market_monitor.core.site_content import (
@@ -91,7 +92,9 @@ PUBLIC_ROUTE_PATHS: dict[str, tuple[str, str]] = {
     # the one surface that still sends visitors there. Screening questions go to the
     # Help Center. See UNLINKED_PAGES in core/site_content.py.
     "market": ("Market", "/markets"),
-    "pricing": ("Pricing", "/pricing"),
+    # The Pricing section of the home page. The separate /pricing page was taken down
+    # on 4 October 2026 because it had gone stale; its address only forwards here now.
+    "pricing": ("Pricing", PRICING_PATH),
     "help": ("Help Center", "/help"),
     "contact": ("Contact", "/contact"),
     "about": ("About", "/about"),
@@ -720,8 +723,8 @@ class PublicKnowledgeService:
                 for code in PUBLIC_PLAN_CODES
             )
             pricing_answer = (
-                f"Current public plan pricing is {plan_summary}. The Pricing page is the "
-                "authoritative catalog for limits and provider-accurate renewal terms."
+                f"Current public plan pricing is {plan_summary}. The Pricing section on the "
+                "home page shows every plan with its limits and renewal terms."
             )
         else:
             # Open, but checkout is switched off. That is a billing state, not a stage,
@@ -900,12 +903,13 @@ class PublicChatService:
         index = await CoinListingIndex.load(self.session)
         return index.asked_about(question)[:3]
 
-    def _coin_shariah_message(self, symbols: list[str], *, signed_in: bool) -> str:
+    def _coin_shariah_message(self, symbols: list[str]) -> str:
         """What a person is told when they ask whether a coin is halal.
 
         Never a refusal and never a ruling: Hilal Markets does not say a coin is halal,
-        and it does show how each screening standard reviewed it. Signed in, that is the
-        coin's Passport; before signing in, the public Market page.
+        and it does show how each screening standard reviewed it, in the coin's Passport.
+        The Passport is a public page, so a visitor is sent to it as well — it used to
+        need an account, and a visitor was sent to the Market page instead.
         """
 
         subject = " and ".join(item.upper() for item in symbols) or "a coin"
@@ -915,22 +919,11 @@ class PublicChatService:
         )
         if not symbols:
             return opening
-        if signed_in:
-            target = "Its Passport" if len(symbols) == 1 else "Each coin's Passport"
-            return (
-                f"{opening} {target}, linked below, shows each standard's result, the "
-                "reasons behind it and the sources it rests on."
-            )
-        closing = (
-            f"{opening} The Market page, linked below, shows the result each standard "
-            "recorded."
+        target = "Its Passport" if len(symbols) == 1 else "Each coin's Passport"
+        return (
+            f"{opening} {target}, linked below, shows each standard's result, the "
+            "reasons behind it and the sources it rests on."
         )
-        if self.settings.stage_exposure.assistant_may_offer_account:
-            closing += (
-                " With a free account you can open the full Passport, with the reasons "
-                "and the sources."
-            )
-        return closing
 
     def _account_prompt(self) -> PublicChatAccountPrompt | None:
         exposure = self.settings.stage_exposure
@@ -971,10 +964,10 @@ class PublicChatService:
             if item.status != "success":
                 continue
             if item.tool_name == "public_passport":
-                if user_id is not None:
+                # The Passport is public — for a visitor too, while the stage shows the
+                # Market page it belongs to.
+                if user_id is not None or "market" in offerable:
                     wanted.append(("passport", str(item.data.get("asset") or "") or None))
-                elif "market" in offerable:
-                    wanted.append(("market", None))
                 continue
             page = _TOOL_SOURCE_PAGES.get(item.tool_name)
             if page and user_id is not None:
@@ -1063,13 +1056,11 @@ class PublicChatService:
             status, score, source_ids, route_ids, gap = "answered", 1.0, [], [], None
             stage, mode, intent = "ANSWER", "PRODUCT_FACT", COIN_SHARIAH_QUESTION
             clarification, answer_complete, follow_ups = None, True, []
-            message = self._coin_shariah_message(shown, signed_in=user_id is not None)
+            message = self._coin_shariah_message(shown)
             if not shown:
                 account_needed = list(shariah_coins)
-            elif user_id is not None:
-                coin_cards = [("passport", symbol) for symbol in shown]
             else:
-                coin_cards = [("market", None)]
+                coin_cards = [("passport", symbol) for symbol in shown]
         elif not self.settings.public_chat_ai_enabled:
             if is_greeting:
                 status = "answered"

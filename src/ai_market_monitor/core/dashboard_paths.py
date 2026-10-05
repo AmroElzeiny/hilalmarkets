@@ -25,6 +25,7 @@ address the messages already used.
 from __future__ import annotations
 
 from typing import Final
+from urllib.parse import quote, urlencode
 
 #: The front page of the dashboard, and the place sign-in lands on.
 #:
@@ -47,8 +48,49 @@ HOME_PATH: Final[str] = "/home"
 #: already does.
 LEGACY_HOME_PATH: Final[str] = "/main"
 
-#: Coins that passed screening, and one coin's Evidence Passport beneath it.
+#: Coins that passed screening.
+#:
+#: One coin's Evidence Passport used to live beneath it, at ``/dashboard/market/<coin>``.
+#: It moved to :data:`PASSPORTS_PATH` on 5 October 2026; the old address only forwards.
 MARKET_PATH: Final[str] = "/dashboard/market"
+
+#: One coin's Evidence Passport, on the public website: ``/passports/<coin>``.
+#:
+#: **One Passport per coin.** A coin reviewed under several standards has one address,
+#: and the standard is a choice made on the page (``?methodology_id=``), not a second
+#: page. Open to everyone — Passports are free on every plan, and a visitor reads one
+#: before deciding whether to make an account.
+#:
+#: Every link to a Passport is built by :func:`passport_path` (or
+#: ``core.app_links.passport_link`` for a link that leaves the website). Twenty places
+#: wrote ``/dashboard/market/<coin>`` by hand before this, and moving the page meant
+#: finding every one of them.
+PASSPORTS_PATH: Final[str] = "/passports"
+
+
+def passport_path(
+    asset: str,
+    *,
+    methodology_id: object | None = None,
+    report: bool = False,
+) -> str:
+    """The address of one coin's Passport, or of its printable report.
+
+    ``asset`` is the coin's symbol in any case. A trading pair (``BTC/USDT``) is cut to
+    its coin, because a Passport is about the coin and never about a pair.
+    ``methodology_id`` opens the page on that standard; without it the page opens on the
+    default one.
+    """
+
+    symbol = quote(asset.strip().partition("/")[0].lower(), safe="")
+    if symbol.strip(".") == "":
+        # `.` and `..` are directions to a browser, not names: `/passports/..` would
+        # open the home page. Written out so they stay part of this address.
+        symbol = symbol.replace(".", "%2E")
+    path = f"{PASSPORTS_PATH}/{symbol}{'/report' if report else ''}"
+    if methodology_id:
+        path = f"{path}?{urlencode({'methodology_id': str(methodology_id)})}"
+    return path
 
 #: The visual canvas where a monitor is drawn.
 #:
@@ -178,7 +220,14 @@ COMPLIANCE_CHANGES_PATH: Final[str] = f"{LIFECYCLES_PATH}?tab=compliance_changes
 #: ``tests/integration/test_telegram_links_resolve.py`` opens every address the bot can
 #: send, these included, against the real app.
 PUBLIC_HOME_PATH: Final[str] = "/"
-PRICING_PATH: Final[str] = "/pricing"
+#: Prices live in one place: the Pricing section of the home page. The separate
+#: ``/pricing`` page was taken down on 4 October 2026 because it had gone stale; its old
+#: address now only forwards here (see ``routers/public.py``). A message must never send
+#: anyone to the old address, so this is the section, not the retired page.
+PRICING_PATH: Final[str] = "/#pricing"
+#: The retired page's address. Kept only so the route that forwards it, and the tests
+#: that prove it forwards, name the same string.
+RETIRED_PRICING_PAGE_PATH: Final[str] = "/pricing"
 HOW_IT_WORKS_PATH: Final[str] = "/how-it-works"
 ABOUT_PATH: Final[str] = "/about"
 

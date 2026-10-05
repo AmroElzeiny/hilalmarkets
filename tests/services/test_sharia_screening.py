@@ -732,7 +732,7 @@ async def test_approved_compliance_review_pauses_asset_and_deduplicates_alert(te
         )
         assert "Automatic Watchlist action: paused" in compliance_alert.body
         assert compliance_alert.proof_receipt["evidence_passport_path"] == (
-            "/dashboard/market/sol"
+            "/passports/sol"
         )
         assert compliance_alert.proof_receipt["ai_generated_ruling"] is False
         assert await session.scalar(select(func.count(DashboardNotification.id))) == 1
@@ -1146,7 +1146,7 @@ def test_alert_presentation_reads_nested_immutable_screening_evidence():
     assert presentation.sharia_status == "eligible_with_qualifications"
     assert presentation.sharia_methodology == "APPROVED_METHOD v2.1"
     assert presentation.sharia_passport_url == (
-        "https://app.trace-edge.com/dashboard/market/sol"
+        "https://app.trace-edge.com/passports/sol"
     )
     assert "Screening status at evaluation" in presentation.telegram_text()
     assert "Evidence Passport" in presentation.telegram_text()

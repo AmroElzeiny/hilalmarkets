@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from time import monotonic
 from typing import Any
 
+from ai_market_monitor.core.app_links import passport_link
 from ai_market_monitor.core.asset_logos import asset_logo_module_url
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.schemas.sharia import (
@@ -136,9 +137,10 @@ class LiveMarketQuoteService:
                         "status_label": assessment.status_label,
                         "reviewed_at": assessment.reviewed_at,
                         "logo_url": assessment.logo_url,
-                        "passport_url": (
-                            f"/dashboard/market/{assessment.canonical_asset}"
-                            f"?methodology_id={assessment.methodology_id}"
+                        "passport_url": passport_link(
+                            self.settings,
+                            assessment.canonical_asset,
+                            methodology_id=assessment.methodology_id,
                         ),
                         # Only the fields actually stored. A coin the provider has never
                         # heard of contributes nothing here and keeps the schema's

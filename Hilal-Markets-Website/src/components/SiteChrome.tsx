@@ -5,7 +5,7 @@
  *
  * **The menu is not written here.** It arrives from the server, out of
  * `core/site_content.py`, the same list the Jinja footer loops over. This site renders
- * its pages twice — Jinja for `/about`, `/help`, `/pricing`, React for the rest — and a
+ * its pages twice — Jinja for `/about`, `/help`, React for the rest — and a
  * menu typed out in both places is a menu that disagrees with itself the first time a
  * page is added to one of them. That already happened: the React footer offered three
  * links while the Jinja one offered twelve. The fallback below exists only for a page

@@ -38,7 +38,7 @@ SURFACES = [
     # public Market page; the partial carries the notice for both.
     ("hilal/partials/market_list.html", "the list of screened coins"),
     ("hilal/dashboard_test/monitor.html", "where a monitor is built"),
-    ("hilal/dashboard_test/passport.html", "one coin's full record"),
+    ("hilal/public/passport.html", "one coin's full record"),
     ("hilal/dashboard_test/partials/passport_quick_view.html", "the Passport popup"),
     ("hilal/dashboard_test/research.html", "the list of machine-researched coins"),
     ("hilal/dashboard_test/research_detail.html", "one machine-researched coin"),

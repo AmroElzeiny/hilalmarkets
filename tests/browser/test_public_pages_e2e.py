@@ -832,49 +832,21 @@ def test_the_footer_is_the_same_on_every_page(page: Page, base_url: str, path: s
 # ---------------------------------------------------------------------------
 
 
-def test_the_launch_price_and_its_timer_are_really_on_the_pricing_page(
+def test_the_old_pricing_address_opens_the_home_page_price_section(
     page: Page, base_url: str
 ) -> None:
-    """A countdown can be rendered and never move. Only a browser settles that.
+    """The separate /pricing page went stale and was taken down on 4 October 2026.
 
-    The price, the crossed-out price and the deadline all come from `core/plans.py`, so
-    this reads them from there rather than typing numbers that go stale the next time
-    the offer changes.
+    A bookmark or an old search result must land on the one place prices are shown now,
+    the home page's Pricing section, with that section really drawn on screen — never on
+    the old page and never on an error.
     """
-
-    from ai_market_monitor.core.plans import (
-        effective_monthly_price,
-        original_monthly_price,
-        promotion_is_active,
-    )
 
     page.goto(f"{base_url}/pricing", wait_until="domcontentloaded")
     assert_no_raw_traceback(page)
-
-    was = original_monthly_price("trader")
-    if not promotion_is_active():
-        # No offer running: no old price, no timer. The card is a plain price.
-        assert was is None
-        expect(page.locator(".offer-countdown")).to_have_count(0)
-        expect(page.locator(".price-original")).to_have_count(0)
-        return
-
-    assert was is not None
-    struck = page.locator(".price-original").first
-    expect(struck).to_have_text(f"${int(was)}")
-    assert f"${int(effective_monthly_price('trader'))}" in page.locator(
-        ".price-card.is-featured .price"
-    ).inner_text()
-
-    # The timer is built by the script, shown only once it holds a real count, and steps
-    # once a second. A stopped clock beside a price is worse than no clock.
-    countdown = page.locator(".offer-countdown[data-offer-live]").first
-    expect(countdown).to_be_visible(timeout=5_000)
-    expect(countdown).to_contain_text("Launch price ends in")
-    seconds = countdown.locator(".offer-countdown-part").last
-    first_reading = seconds.inner_text()
-    page.wait_for_timeout(1600)
-    assert seconds.inner_text() != first_reading, "the countdown is not counting"
+    assert page.url == f"{base_url}/#pricing", page.url
+    expect(page.locator("#pricing #pricing-title")).to_be_visible(timeout=10_000)
+    expect(page.locator("#pricing .pricing-card").first).to_be_visible()
 
 
 def test_the_landing_pricing_card_carries_the_live_countdown(
@@ -882,18 +854,33 @@ def test_the_landing_pricing_card_carries_the_live_countdown(
 ) -> None:
     """The same timer, on the card, on the page most visitors actually meet.
 
-    The landing page draws its own countdown in React while `/pricing` is drawn by the
-    server and stepped by a script. Two implementations is two chances for one of them
-    to sit still, so each is measured on its own page.
+    The home page's Pricing section is the only place a visitor sees prices (the old
+    /pricing page was taken down on 4 October 2026), so this is where the timer must
+    really count.
     """
 
-    from ai_market_monitor.core.plans import original_monthly_price, promotion_is_active
+    from ai_market_monitor.core.plans import (
+        original_monthly_price,
+        promotion_ends_at,
+        promotion_is_active,
+    )
 
     page.goto(f"{base_url}/", wait_until="domcontentloaded")
     page.locator("#pricing").scroll_into_view_if_needed()
 
     if not promotion_is_active():
         assert original_monthly_price("trader") is None
+        expect(page.locator("#pricing .offer-countdown")).to_have_count(0)
+        return
+
+    if promotion_ends_at() is None:
+        # An offer with no end date has nothing to count down to. The price is still
+        # crossed out, but no timer is drawn: a timer with no deadline would be a false
+        # promise of urgency. Same rule as the server side
+        # (`_assert_offer_named_and_timed` in tests/integration/test_launch_offer_pricing.py).
+        # Whether a paid card shows a price at all depends on checkout being configured,
+        # which this test server is not, so only the timer rule is asserted here.
+        expect(page.locator("#pricing .pricing-card").first).to_be_visible()
         expect(page.locator("#pricing .offer-countdown")).to_have_count(0)
         return
 

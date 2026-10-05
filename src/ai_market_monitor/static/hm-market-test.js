@@ -64,7 +64,9 @@ publish("watchlist", () => {
 
 function start(root) {
   const endpoint = root.dataset.endpoint;
-  const basePath = root.dataset.basePath || "/dashboard/market";
+  /* The Halal Assets list in the dashboard, for a signed-in reader of the public page:
+     following a coin happens there. */
+  const dashboardHref = root.dataset.dashboardHref || "/dashboard/market";
   const methodologyId = root.dataset.methodologyId || "";
   /* A visitor without an account. Decided by the server, which is the only side that
      knows whether anybody is signed in. */
@@ -136,10 +138,13 @@ function start(root) {
     });
   }
 
+  /* A coin's Passport, on the public website. The server writes the address into every
+     coin it sends (`passport_url`, from `core/app_links.py`), already on the coin's own
+     standard. This page never builds one: when the Passport moved from the dashboard to
+     `/passports/<coin>`, a copy of the address rule here would have gone on sending
+     people to the old one. */
   function passportHref(item) {
-    const methodology = item.methodology_id || methodologyId;
-    const query = methodology ? `?methodology_id=${encodeURIComponent(methodology)}` : "";
-    return `${basePath}/${encodeURIComponent(String(item.canonical_asset).toLowerCase())}${query}`;
+    return item.passport_url || "";
   }
 
   function buildCard(item) {
@@ -272,12 +277,9 @@ function start(root) {
     const favorite = node.querySelector("[data-favorite]");
     setFavoriteState(favorite, asset);
 
+    /* The Passport is a public page, so the link is the same for everybody. */
     const full = node.querySelector("[data-full-passport]");
-    /* For a visitor the Passport is behind an account, so the link is the way to one —
-       and it brings them back to this coin's Passport once they are in. The click is
-       caught below and opens the prompt first; the address is what is left without
-       scripting or in a new tab. */
-    full.setAttribute("href", accountGate ? accountGate.href("signup", passportHref(item)) : passportHref(item));
+    full.setAttribute("href", passportHref(item));
 
     /* "The provider says its data is good" and "there is a price to show" are two
        different facts. Keying the honesty note off the first let a card display `--`
@@ -730,27 +732,27 @@ function start(root) {
 
   [cards, tableBody].forEach((scope) => {
     scope.addEventListener("click", (event) => {
-      if (isUnlocked) {
-        /* Following a coin and reading its evidence happen in the dashboard. The
-           coin's Passport is where both are, so the heart and "See the evidence" open
-           it; "Full Passport" is already a link to it. */
-        const control = event.target.closest("[data-favorite], [data-quick-view]");
-        const item = control && itemFor(control);
-        if (!item) return;
-        event.preventDefault();
-        window.location.assign(passportHref(item));
-        return;
-      }
       if (isPublic) {
-        /* Everything on a coin that needs an account asks for one, and remembers what
-           was asked for so signing up lands on it. */
-        const control = event.target.closest("[data-favorite], [data-quick-view], [data-full-passport]");
-        const item = control && itemFor(control);
+        /* "See the evidence" opens the coin's Passport, which anybody may read.
+           "Full Passport" is already a link to it. */
+        const quickView = event.target.closest("[data-quick-view]");
+        const quickItem = quickView && itemFor(quickView);
+        if (quickItem) {
+          event.preventDefault();
+          window.location.assign(passportHref(quickItem));
+          return;
+        }
+        /* Following a coin needs an account. A signed-in reader follows it in their
+           dashboard; anybody else is asked to make a free account first. */
+        const favorite = event.target.closest("[data-favorite]");
+        const item = favorite && itemFor(favorite);
         if (!item) return;
         event.preventDefault();
-        const asset = String(item.canonical_asset || "").toUpperCase();
-        if (control.matches("[data-favorite]")) accountGate.open("follow", { asset, trigger: control });
-        else accountGate.open("passport", { asset, next: passportHref(item), trigger: control });
+        if (isUnlocked) window.location.assign(dashboardHref);
+        else {
+          const asset = String(item.canonical_asset || "").toUpperCase();
+          accountGate.open("follow", { asset, trigger: favorite });
+        }
         return;
       }
       const favorite = event.target.closest("[data-favorite]");
@@ -767,7 +769,6 @@ function start(root) {
         {
           asset: item.canonical_asset,
           methodologyId: item.methodology_id || methodologyId,
-          basePath,
         },
         quick,
       );
@@ -968,10 +969,6 @@ function setUpAccountGate(root) {
     favorites: () => ({
       title: "Keep the coins you care about in one list",
       text: "A free account keeps your favorite coins together and tells you when the Shariah status of any of them changes.",
-    }),
-    passport: (asset) => ({
-      title: asset ? `Read the evidence for ${asset}` : "Read the evidence for this coin",
-      text: "Every coin has an Evidence Passport: the standard that screened it, the reasons, the sources and the date it was reviewed. Open a free account to read it.",
     }),
   };
 

@@ -6,9 +6,11 @@ from uuid import UUID
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.app_links import passport_link
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.dashboard_paths import LIFECYCLES_PATH
+from ai_market_monitor.core.site_content import SITE_NAME
 from ai_market_monitor.db.models import (
     AIAnalysisSnapshot,
     Alert,
@@ -178,7 +180,9 @@ class ShariaPassportReadService:
             current_status=current.status if current else None,
             current_reviewed_at=current.reviewed_at if current else None,
             current_passport_url=(
-                f"/dashboard/market/{current.canonical_asset}"
+                passport_link(
+                    self.settings, current.canonical_asset, methodology_id=current.methodology_id
+                )
                 if current is not None and current_publication is not None
                 else None
             ),
@@ -252,9 +256,10 @@ class ShariaPassportReadService:
             if passport.historical.is_historical
             and passport.identity.canonical_asset_id
             and passport.passport_version_id
-            else (
-                f"/dashboard/market/{passport.assessment.canonical_asset}"
-                f"?methodology_id={passport.assessment.methodology_id}"
+            else passport_link(
+                self.settings,
+                passport.assessment.canonical_asset,
+                methodology_id=passport.assessment.methodology_id,
             )
         )
         return PassportQuickViewResponse(
@@ -1070,7 +1075,10 @@ class ShariaPassportReadService:
             rows.append(
                 PassportTimelineEntry(
                     action="published",
-                    actor=str(publication.published_by_user_id),
+                    # The platform published it. This used to print the publisher's
+                    # internal account number, which means nothing to a reader and is
+                    # not something a public page should show.
+                    actor=SITE_NAME,
                     occurred_at=publication.published_at,
                     reason="The reviewed decision was published as an immutable Passport version.",
                     new_state=publication.publication_state,

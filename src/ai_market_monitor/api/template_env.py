@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi.templating import Jinja2Templates
 
-from ai_market_monitor.core.app_links import site_link
+from ai_market_monitor.core.app_links import passport_link, site_link
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.dashboard_paths import MONITOR_PATH, monitor_edit_path
 from ai_market_monitor.core.money import display_usd, money_json_dumps, quantise_half_up
@@ -202,6 +202,10 @@ def register(templates: Jinja2Templates) -> Jinja2Templates:
     # public pages are also served on the product's own hostname, where `/` is the
     # dashboard — so a plain `href="/"` there sent a signed-out visitor back to sign-in.
     templates.env.globals["site_link"] = site_link
+    # One coin's Passport, on the public website. Twenty places used to write
+    # `/dashboard/market/<coin>` by hand; when the Passport moved to `/passports/<coin>`
+    # each had to be found again. A template asks for the address instead.
+    templates.env.globals["passport_link"] = passport_link
     # Where a monitor is made, and where one is changed. Reachable from every template
     # so no page writes the address itself. Seven templates used to type the older
     # assistant page's address by hand, and each had to be found again when it moved.

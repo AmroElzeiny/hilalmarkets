@@ -302,10 +302,10 @@ function setUpQuickView() {
     source.hidden = !data.official_source_url;
     if (data.official_source_url) source.href = data.official_source_url;
 
-    /* The full Passport link stays on whichever path opened this popup. */
-    const base = request.basePath || "/dashboard/market";
-    const query = assessment.methodology_id ? `?methodology_id=${encodeURIComponent(assessment.methodology_id)}` : "";
-    find("[data-pq-full]").href = `${base}/${encodeURIComponent(String(asset).toLowerCase())}${query}`;
+    /* The full Passport, on the public website and on this same standard. The server
+       writes the address (`full_passport_url`); a copy of the rule here is how this
+       popup kept sending people to the Passport's old address after it moved. */
+    find("[data-pq-full]").href = data.full_passport_url;
 
     find("[data-pq-copy]").dataset.reference = data.evidence_reference || "";
     paintIcons(dialog);

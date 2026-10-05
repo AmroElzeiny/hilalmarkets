@@ -156,57 +156,20 @@ async def test_the_landing_page_carries_the_offer_and_its_deadline(
 
 
 @pytest.mark.anyio
-async def test_the_public_pricing_page_shows_the_struck_price_and_the_timer(
-    test_context: dict,
-) -> None:
-    response = await test_context["client"].get("/pricing")
-    assert response.status_code == 200
-    body = response.text
-    for code in PURCHASABLE_PLAN_CODES:
-        # Today's price always stands on the card.
-        assert f"<strong>{display_usd(headline_price(code))}</strong>" in body, code
-    struck, countdown = _struck_price_marks(body)
-    was = original_monthly_price("trader")
-    if promotion_is_active():
-        # The old price is crossed out and the new one stands next to it.
-        assert struck and was is not None
-        for code in PURCHASABLE_PLAN_CODES:
-            assert display_usd(original_monthly_price(code)) in body, code
-        # The countdown is rendered with the server's own deadline.
-        _assert_offer_named_and_timed(body)
-    else:
-        # An offer that ended leaves no trace: no crossed-out price and no timer.
-        assert not struck and not countdown and was is None
-    # No withdrawn code may appear on a page, in either state. A code a customer types
-    # and the checkout refuses is worse than no code at all.
-    for retired in RETIRED_DISCOUNT_CODES:
-        assert retired not in body
+async def test_the_home_page_names_no_withdrawn_code(test_context: dict) -> None:
+    """Prices are shown only in the home page's Pricing section now.
 
-
-@pytest.mark.anyio
-async def test_every_plan_on_sale_shows_a_price_rather_than_soon(
-    test_context: dict,
-) -> None:
-    """A plan somebody can buy must show what it costs.
-
-    Pro carried "Soon" and no price for months after its product existed in Creem. The
-    rule is the general one: the word and the price are decided by the same offer.
+    The separate /pricing page went stale and was taken down on 4 October 2026. What its
+    tests checked — today's price, the crossed-out price, the deadline, no annual
+    checkout — is checked on the home page's own plan data above. This is the part that
+    is about the page's text: a code a customer types and the checkout refuses is worse
+    than no code at all.
     """
 
-    response = await test_context["client"].get("/pricing")
-    body = response.text
-    for code in PURCHASABLE_PLAN_CODES:
-        assert f"<strong>{display_usd(headline_price(code))}</strong>" in body, code
-        assert f"{PUBLIC_PLAN_PRESENTATIONS[code].cta_label}" in body, code
-    assert "is coming soon" not in body
-
-
-@pytest.mark.anyio
-async def test_the_pricing_page_offers_no_annual_checkout(test_context: dict) -> None:
-    response = await test_context["client"].get("/pricing")
-    body = response.text
+    body = (await test_context["client"].get("/")).text
+    for retired in RETIRED_DISCOUNT_CODES:
+        assert retired not in body
     assert "billing_interval=annual" not in body
-    assert "Annual billing: soon." in body
 
 
 async def _signup(test_context: dict, email: str) -> None:

@@ -9,6 +9,7 @@ plain path of its own.
 from __future__ import annotations
 
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.dashboard_paths import passport_path
 
 
 def app_host(settings: Settings) -> str | None:
@@ -67,4 +68,39 @@ def site_link(settings: Settings, path: str) -> str:
 
     if app_host(settings) is None:
         return path
+    return f"{str(settings.public_base_url).rstrip('/')}{path}"
+
+
+def passport_link(
+    settings: Settings,
+    asset: str,
+    *,
+    methodology_id: object | None = None,
+    report: bool = False,
+) -> str:
+    """A link to one coin's Passport, on the public website (`hilalmarkets.com`).
+
+    The Passport is a public page, so the dashboard's buttons send people out to the
+    website rather than keeping a second copy of it inside the dashboard. Plain path
+    when the product runs on one hostname.
+    """
+
+    return site_link(
+        settings, passport_path(asset, methodology_id=methodology_id, report=report)
+    )
+
+
+def absolute_passport_link(
+    settings: Settings,
+    asset: str,
+    *,
+    methodology_id: object | None = None,
+) -> str:
+    """The same link, always absolute — for an email or a chat message.
+
+    A message read outside the website cannot follow a plain path, so this one always
+    names the public hostname, even when the product runs on one name.
+    """
+
+    path = passport_path(asset, methodology_id=methodology_id)
     return f"{str(settings.public_base_url).rstrip('/')}{path}"

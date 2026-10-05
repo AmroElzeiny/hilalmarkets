@@ -666,7 +666,7 @@ async def test_a_link_followed_on_the_landing_page_is_remembered_at_signup(
     assert client.cookies.get("hm_affiliate_ref") == "LINKONE"
 
     # They look at other pages and leave. The link is still remembered.
-    await client.get("/pricing", follow_redirects=False)
+    await client.get("/features", follow_redirects=False)
     assert client.cookies.get("hm_affiliate_ref") == "LINKONE"
 
     # Days later they come back and sign up, with no `ref` on the address at all.

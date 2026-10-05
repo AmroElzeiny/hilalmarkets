@@ -13,13 +13,16 @@
     * there is no search box — searching a list you cannot see is a promise the page
       cannot keep;
     * the table's column headings do not sort, for the same reason;
-    * the hearts and Favorites open a sign-up prompt instead of following a coin, and
-      so do the two Passport buttons, because a Passport is part of an account.
+    * the hearts and Favorites open a sign-up prompt instead of following a coin.
+
+    A coin's Passport opens for everybody, on the public website (`/passports/<coin>`).
+    Each coin's address arrives with it, built on the server by `core.app_links`, so this
+    list never assembles one itself.
 
     Somebody already signed in who opens the public page (`market_unlocked`) keeps the
     public page's look — no search, no sorting — but nothing is locked: every coin is
-    sent, the coins they follow are marked, and the hearts, Favorites and Passports open
-    in their dashboard, where following a coin really happens.
+    sent, the coins they follow are marked, and the hearts and Favorites open in their
+    dashboard, where following a coin really happens.
 
     The coins themselves are never in this markup for a visitor. They arrive from
     `/api/v1/public-market/quotes`, which sends the visible ones and only a count of the
@@ -33,7 +36,7 @@
   data-market-root
   data-audience="{{ market_audience }}"
   data-endpoint="{{ '/api/v1/public-market/quotes' if is_public else '/api/v1/sharia/market-quotes' }}"
-  data-base-path="{{ market_passport_path if is_public else market_base_path }}"
+  data-dashboard-href="{{ market_dashboard_href | default('') }}"
   data-methodology-id="{{ selected_methodology_id or '' }}"
   data-exchange="{{ selected_exchange }}"
   data-quote="{{ selected_quote_asset }}"
@@ -329,7 +332,7 @@
             <td><strong>{{ item.canonical_asset }}</strong> {{ item.asset_name or '' }}</td>
             <td>{{ item.status_label }}</td>
             <td>{{ item.reviewed_at|short_dt(user.timezone) if item.reviewed_at else 'Not recorded' }}</td>
-            <td><a href="{{ market_base_path }}/{{ item.canonical_asset|lower }}">Open the Passport</a></td>
+            <td><a href="{{ passport_link(settings, item.canonical_asset, methodology_id=item.methodology_id) }}">Open the Passport</a></td>
           </tr>
           {% endfor %}
         </tbody>

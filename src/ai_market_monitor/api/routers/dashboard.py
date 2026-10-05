@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.api.dependencies import get_market_previewer
 from ai_market_monitor.api.template_env import register as register_template_helpers
 from ai_market_monitor.cockpit_service import StrategyCockpitService
-from ai_market_monitor.core.app_links import site_link
+from ai_market_monitor.core.app_links import passport_link, site_link
 from ai_market_monitor.core.auth_pages import (
     CODE_RESEND_SECONDS,
     PRODUCT_PROMISES,
@@ -37,6 +37,7 @@ from ai_market_monitor.core.dashboard_paths import (
     LEGACY_ASSISTANT_PATH,
     LEGACY_REFERRALS_PATH,
     LIFECYCLES_PATH,
+    MARKET_PATH,
     MONITOR_PATH,
     MONITORS_PATH,
     monitor_edit_path,
@@ -2400,60 +2401,11 @@ async def screened_market_context(
 #: redesigned page asks that function the same question and gets the same assets.
 
 
-async def asset_passport_context(
-    *,
-    request: Request,
-    asset_slug: str,
-    methodology_id: UUID | None,
-    user: User,
-    session: AsyncSession,
-    settings: Settings,
-    market_base_path: str = "/dashboard/market",
-) -> dict[str, Any]:
-    """Assemble the current Passport read model for any template.
-
-    Shared by `/dashboard/market/{asset}` and `/dashboard/market/{asset}` so the
-    two designs can never show different evidence for the same asset.
-    """
-
-    screening = ShariaScreeningService(session, settings)
-    try:
-        passport = await ShariaPassportReadService(session, settings).current(
-            asset_slug,
-            methodology_id=methodology_id,
-            user_id=user.id,
-        )
-    except ShariaScreeningError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    comparison = await screening.methodology_comparison(asset_slug)
-    watchlists = list(
-        (
-            await session.scalars(
-                select(ApprovedWatchlist)
-                .where(ApprovedWatchlist.user_id == user.id)
-                .order_by(ApprovedWatchlist.is_default.desc(), ApprovedWatchlist.name.asc())
-            )
-        ).all()
-    )
-    return await _context(
-        request=request,
-        session=session,
-        settings=settings,
-        user=user,
-        page="asset_passport",
-        title=f"{passport.assessment.canonical_asset} Evidence Passport",
-        passport=passport,
-        methodology_comparison=comparison,
-        watchlists=watchlists,
-        market_base_path=market_base_path,
-    )
-
-
-#: `/dashboard/market/{asset}` — one coin's Evidence Passport — is served by the
-#: redesigned page in `dashboard_test.py`, over `asset_passport_context` above.
+#: One coin's current Evidence Passport is a public page now, at `/passports/<coin>`,
+#: served by `routers/public.py`. `/dashboard/market/<coin>` only forwards there.
 #:
 #: The historical Passport below is *not* the same page. It reads a stored version of a
-#: record rather than the current one, and it is reached only from the version list.
+#: record rather than the current one, and it is reached only from an alert's proof.
 
 
 @router.get(
@@ -2543,7 +2495,9 @@ async def add_screened_asset_to_watchlist(
                     }
                 },
             )
-        return _redirect(f"/dashboard/market/{asset_slug}?error=approved_methodology_required")
+        # Back to the list, not the Passport: the Passport is a public page and has no
+        # place for an account message. The list is where the dashboard shows one.
+        return _redirect(f"{MARKET_PATH}?error=approved_methodology_required")
     assessment = await screening.effective_assessment(methodology.id, asset_slug)
     if assessment is None or assessment.status not in DEFAULT_ALLOWED_STATUSES:
         if response_format == "json":
@@ -2559,7 +2513,7 @@ async def add_screened_asset_to_watchlist(
                     }
                 },
             )
-        return _redirect(f"/dashboard/market/{asset_slug}?error=asset_not_eligible")
+        return _redirect(f"{MARKET_PATH}?error=asset_not_eligible")
     watchlist = await session.get(ApprovedWatchlist, watchlist_id) if watchlist_id else None
     if watchlist is not None and watchlist.user_id != user.id:
         raise HTTPException(status_code=404, detail="Approved watchlist not found")
@@ -2605,7 +2559,7 @@ async def add_screened_asset_to_watchlist(
                 "status_change_following": True,
             }
         )
-    return _redirect(f"/dashboard/market/{asset}?message=added_to_approved_watchlist")
+    return _redirect(f"{MARKET_PATH}?message=added_to_approved_watchlist")
 
 
 @router.get(
@@ -3368,9 +3322,7 @@ async def alert_proof_page(
         f"{passport_publication.id}?event_time="
         f"{(alert.candle_timestamp or alert.created_at).isoformat()}"
         if passport_publication is not None
-        else (
-            f"/dashboard/market/{sharia_passport_asset.lower()}" if sharia_passport_asset else None
-        )
+        else (passport_link(settings, sharia_passport_asset) if sharia_passport_asset else None)
     )
     await session.commit()
     return _no_store(

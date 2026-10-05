@@ -1,10 +1,10 @@
 import html
+import json
 import re
 from urllib.parse import urlsplit
 
 import pytest
 
-from ai_market_monitor.core.money import display_usd
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
     PUBLIC_PLAN_PRESENTATIONS,
@@ -403,9 +403,13 @@ async def test_launched_mode_restores_the_product_routes_the_waitlist_hides(test
 
     test_context["settings"].public_waitlist_mode = False
 
-    pricing = await test_context["client"].get("/pricing")
-    assert pricing.status_code == 200
-    assert "Pricing" in pricing.text
+    # The separate Pricing page was taken down on 4 October 2026. Opening the site gives
+    # back the home page's Pricing section, and the old address forwards to it.
+    pricing = await test_context["client"].get("/pricing", follow_redirects=False)
+    assert pricing.status_code == 301
+    assert pricing.headers["location"] == "/#pricing"
+    landing = await test_context["client"].get("/")
+    assert '"plans": []' not in landing.text
 
     screening = html.unescape((await test_context["client"].get("/how-we-screen")).text)
     assert ">Explore Halal Assets</a>" in screening
@@ -519,33 +523,24 @@ async def test_pricing_and_billing_share_the_public_plan_catalog(test_context):
             f"{PUBLIC_PLAN_PRESENTATIONS[code].annual_price:.2f}"
         ), code
 
-    pricing = await test_context["client"].get("/pricing")
-    assert pricing.status_code == 200
-    assert PLAN_DEFINITIONS["demo"].name in pricing.text
-    assert "$0" in pricing.text
-    # The launch offer, on every plan that is on sale. Both numbers come from
-    # `core.plans`, not from this file: a price changed there must show up here, and the
-    # assertion still holds on the day the offer ends, when there is no crossed-out
-    # price left to show.
+    # Prices are shown on the public site in one place: the home page's Pricing section,
+    # drawn from the plan data the page carries. (The separate /pricing page went stale
+    # and was taken down on 4 October 2026.) Every number comes from `core.plans`.
+    landing = await test_context["client"].get("/")
+    assert landing.status_code == 200
+    config = re.search(
+        r"window\.HilalMarketsRuntimeConfig = (\{.*?\});", landing.text, re.DOTALL
+    )
+    assert config, "the home page did not publish its plan data"
+    plans = {plan["code"]: plan for plan in json.loads(config.group(1))["commerce"]["plans"]}
+    assert PLAN_DEFINITIONS["demo"].name in {plan["name"] for plan in plans.values()}
     for code in PURCHASABLE_PLAN_CODES:
         offer = plan_offer_payload(code)
-        assert display_usd(offer["monthlyPrice"]) in pricing.text, code
-        assert PUBLIC_PLAN_PRESENTATIONS[code].cta_label in pricing.text, code
-        original = offer["originalMonthlyPrice"]
-        if original:
-            assert display_usd(original) in pricing.text, code
-            assert 'class="price-original"' in pricing.text
-            assert str(offer["offerCode"]) in pricing.text, code
-            # A countdown only for an offer that really ends.
-            assert ("data-offer-countdown" in pricing.text) is (
-                offer["promotionEndsAt"] is not None
-            )
-    # Every public plan is on sale, so nothing on the page says "coming soon".
-    assert "is coming soon" not in pricing.text
-    assert money_back_note("pro") in pricing.text
-    assert "Choose Core" not in pricing.text
+        assert plans[code]["monthlyPrice"] == offer["monthlyPrice"], code
+        assert plans[code]["button"] == PUBLIC_PLAN_PRESENTATIONS[code].cta_label, code
+        assert plans[code].get("originalMonthlyPrice") == offer["originalMonthlyPrice"], code
     for internal_code in ("creator", "community", "lifetime", "pro_trial"):
-        assert PLAN_DEFINITIONS[internal_code].name not in pricing.text
+        assert internal_code not in plans
 
     await _signup(test_context, "catalog-parity@example.com")
     billing = await test_context["client"].get("/dashboard/billing")

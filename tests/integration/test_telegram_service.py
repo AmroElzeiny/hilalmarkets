@@ -295,18 +295,27 @@ async def test_telegram_lifecycles_subscription_feedback_and_support(test_contex
         )
         assert "Pricing" in pricing.text
         # The reply follows the gate, and this test used to assert only one side of it.
-        # The product is launched, so the settings say so and the reply names the public
-        # pricing page — while the assertion still demanded the pre-launch sentence, and
-        # failed on every run. Both sides are checked here instead of one.
+        # The product is launched, so the settings say so and the reply names the
+        # Pricing section of the home page — while the assertion still demanded the
+        # pre-launch sentence, and failed on every run. Both sides are checked here instead of one.
         if test_context["settings"].waitlist_mode:
-            # Before launch there is no public pricing page to open, so the reply says
+            # Before launch there are no published prices to open, so the reply says
             # that rather than offering a button that lands on the waitlist under a
             # price label.
             assert "invite-only" in pricing.text
-            assert not any(button.url and "/pricing" in button.url for button in pricing.buttons)
+            assert not any(button.url and "pricing" in button.url for button in pricing.buttons)
         else:
-            assert "public pricing page" in pricing.text
-            assert any(button.url and "/pricing" in button.url for button in pricing.buttons)
+            assert "Pricing section" in pricing.text
+            # The home page's section, never the retired /pricing page.
+            assert any(
+                button.url == "http://testserver/#pricing"
+                or (button.url and button.url.endswith("/#pricing"))
+                for button in pricing.buttons
+            )
+            assert not any(
+                button.url and button.url.rstrip("/").endswith("/pricing")
+                for button in pricing.buttons
+            )
         await service.handle_callback(
             TelegramCallback(
                 callback_query_id="cb-feedback",

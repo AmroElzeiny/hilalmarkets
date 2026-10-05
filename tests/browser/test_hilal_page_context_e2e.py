@@ -25,15 +25,14 @@ from tests.browser.conftest import (
 )
 
 #: Every dashboard page showing Hilal, the name it publishes under, and where it
-#: lives. Passport needs a seeded coin, reached under its standard the way the
-#: market page links it. The printable report carries no chat window (its handler
-#: sets no chat chrome), so it is covered separately below: its publisher ships
-#: with the page's own script, and the server is shown to accept its words.
+#: lives. The Passport and its printable report are public pages on the website now
+#: (`/passports/<coin>`), where the website's own assistant answers instead, so they
+#: are not here. The report's description is covered separately below: its publisher
+#: ships with the page's own script, and the server is shown to accept its words.
 PAGES = [
     ("screened_market", "/dashboard/market"),
     ("opportunities", "/dashboard/opportunities"),
     ("watch_plans", "/dashboard/monitors"),
-    ("passport", "/dashboard/market/sol?methodology_id={methodology_id}"),
     ("watchlist", "/dashboard/market"),
     ("connections", "/dashboard/connections"),
     ("research", "/dashboard/research"),
@@ -71,17 +70,16 @@ def test_every_page_carries_its_own_description_and_the_server_accepts_it(
     seeded = seed_sharia_screened_market(browser_app.database_url, email)
     # The Passport and the report are reached under the seeded standard, the way the
     # market page links them: without it there is no current assessment to open.
-    pages = [
-        (name, path.format(methodology_id=seeded["methodology_id"]))
-        for name, path in PAGES
-    ]
+    pages = [(name, path.format(methodology_id=seeded["methodology_id"])) for name, path in PAGES]
 
     sent: list[dict] = []
     page.on(
         "request",
-        lambda request: sent.append(request.post_data_json)
-        if request.url.endswith("/dashboard/hilal/message") and request.post_data
-        else None,
+        lambda request: (
+            sent.append(request.post_data_json)
+            if request.url.endswith("/dashboard/hilal/message") and request.post_data
+            else None
+        ),
     )
 
     for name, path in pages:
@@ -116,27 +114,27 @@ def test_the_report_page_description_is_wired_and_accepted(
 ) -> None:
     """R15 for the printable report: no chat window lives there, so nothing can
     snapshot — but the page's own script already publishes its words, and the
-    server accepts them. Asked directly, with the dashboard's own form token."""
+    server accepts them. Asked directly, with the dashboard's own form token, which
+    is read from a dashboard page: the report is a public page and carries none."""
 
     email = signup(page, base_url)
     assert browser_app.database_url, "this test needs the auto-started server"
     seeded = seed_sharia_screened_market(browser_app.database_url, email)
     page.goto(
-        f"{base_url}/dashboard/market/sol/report"
-        f"?methodology_id={seeded['methodology_id']}",
+        f"{base_url}/passports/sol/report?methodology_id={seeded['methodology_id']}",
         wait_until="domcontentloaded",
     )
     close_any_open_guide(page)
     # The publisher ships with the page's own script, and the words it reads are
     # really on the page: the coin heading and its numbered sections.
-    scripts = page.evaluate(
-        "() => [...document.querySelectorAll('script')].map(n => n.src)"
-    )
+    scripts = page.evaluate("() => [...document.querySelectorAll('script')].map(n => n.src)")
     assert any("hm-passport-test.js" in src for src in scripts)
     heading = page.locator("h1").first.inner_text().strip()
     assert heading
     sections = page.locator(".t-report h2").all_inner_texts()
     assert len(sections) >= 8, sections
+    page.goto(f"{base_url}/dashboard/market", wait_until="domcontentloaded")
+    close_any_open_guide(page)
 
     answer = page.evaluate(
         """async ([heading, sections]) => {
@@ -164,18 +162,18 @@ def test_the_report_page_description_is_wired_and_accepted(
     assert answer["body"]["mode"] == "REFUSAL", answer["body"]
 
 
-def test_an_over_long_heading_is_cut_down_never_refused(
-    page: Page, base_url: str
-) -> None:
+def test_an_over_long_heading_is_cut_down_never_refused(page: Page, base_url: str) -> None:
     """R21 in front of a person: a page that grew too many words still gets an answer."""
 
     signup(page, base_url)
     sent: list[dict] = []
     page.on(
         "request",
-        lambda request: sent.append(request.post_data_json)
-        if request.url.endswith("/dashboard/hilal/message") and request.post_data
-        else None,
+        lambda request: (
+            sent.append(request.post_data_json)
+            if request.url.endswith("/dashboard/hilal/message") and request.post_data
+            else None
+        ),
     )
     _open_chat(page, base_url, "/dashboard/market")
     page.evaluate("() => { document.querySelector('h1').textContent = 'x'.repeat(500); }")

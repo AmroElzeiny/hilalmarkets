@@ -9,6 +9,7 @@ from ai_market_monitor.core.startup import (
 )
 from ai_market_monitor.services.agent_control import OpenAIAgentResponsesClient
 from ai_market_monitor.services.ai_model_routing import select_setup_model
+from ai_market_monitor.services.ai_provider import OPENAI_MODELS
 from ai_market_monitor.services.ai_setup_evaluator_control import (
     AISetupEvaluatorControlError,
     consume_evaluator_llm_fault,
@@ -68,10 +69,18 @@ def test_payload_faults_are_one_shot(fault):
 
 
 async def test_fault_is_applied_at_the_real_responses_client_boundary():
+    """The fault stands in for the provider's reply, after the request is built.
+
+    The request still names a real model: since the client refuses an unknown model
+    before anything is sent (`services/ai_provider.py`), an empty payload was refused
+    there and never reached the fault — the check is right, the payload was not.
+    """
+
     settings = _settings()
     client = OpenAIAgentResponsesClient(settings)
+    model = sorted(OPENAI_MODELS)[0]
     with evaluator_turn(settings, fault="empty_once", target_version=None):
-        assert await client.create({}, timeout_seconds=1) == {}
+        assert await client.create({"model": model}, timeout_seconds=1) == {}
 
 
 def test_target_version_selects_only_server_configured_model_and_prompt():

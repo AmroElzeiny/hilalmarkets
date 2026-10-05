@@ -8,8 +8,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.app_links import passport_link
 from ai_market_monitor.core.config import Settings
-from ai_market_monitor.core.dashboard_paths import COMPLIANCE_CHANGES_PATH
+from ai_market_monitor.core.dashboard_paths import COMPLIANCE_CHANGES_PATH, passport_path
 from ai_market_monitor.db.models import (
     Alert,
     ApprovedWatchlist,
@@ -369,9 +370,7 @@ class ComplianceWatchService:
                         if row.status == ComplianceChangeStatus.AWAITING_REVIEW
                         else "Triage"
                     ),
-                    "passport_path": (
-                        f"/dashboard/market/{row.canonical_asset.lower()}"
-                    ),
+                    "passport_path": passport_link(self.settings, row.canonical_asset),
                 }
                 for row in pending
             ],
@@ -636,7 +635,7 @@ class ComplianceWatchService:
             "review_state": change.status.value,
             "reason": change.summary,
             "next_user_action": next_user_action,
-            "evidence_passport_path": f"/dashboard/market/{change.canonical_asset.lower()}",
+            "evidence_passport_path": passport_path(change.canonical_asset),
             "authoritative_source": event_source,
             "provisional_safety_hold": provisional_safety_hold,
             "ai_generated_ruling": False,
@@ -693,7 +692,7 @@ class ComplianceWatchService:
                 title=title,
                 body=body,
                 action_label="View evidence",
-                action_url=f"/dashboard/market/{change.canonical_asset.lower()}",
+                action_url=passport_path(change.canonical_asset),
                 created_at=now,
             )
         )

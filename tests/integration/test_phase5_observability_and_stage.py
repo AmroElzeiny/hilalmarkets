@@ -182,7 +182,7 @@ async def test_a_pre_launch_stage_never_advertises_pricing_or_checkout(
 async def test_the_shipped_stage_shows_pricing_because_the_product_has_launched(
     test_context: dict,
 ) -> None:
-    """The site is live, so pricing is a page a visitor can reach and find.
+    """The site is live, so prices are a section a visitor can reach and find.
 
     This used to assert the opposite, and it was right to at the time. It asserted it
     by reading the shipped default rather than by naming the stage it meant, so on the
@@ -196,11 +196,16 @@ async def test_the_shipped_stage_shows_pricing_because_the_product_has_launched(
 
     landing = await client.get("/")
     assert landing.status_code == 200
+    assert 'id="pricing"' in landing.text or '"plans": [' in landing.text
+    # Prices live in the home page's Pricing section. The separate /pricing page was
+    # taken down on 4 October 2026: it is not in the sitemap, and its old address only
+    # forwards, permanently, to that section.
     sitemap = (await client.get("/sitemap.xml")).text
-    assert "/pricing" in sitemap
+    assert "/pricing" not in sitemap
 
     pricing = await client.get("/pricing", follow_redirects=False)
-    assert pricing.status_code == 200
+    assert pricing.status_code == 301
+    assert pricing.headers["location"] == "/#pricing"
 
 
 async def test_pricing_redirects_to_the_waitlist_when_the_site_is_pulled_back(

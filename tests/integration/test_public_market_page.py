@@ -614,7 +614,7 @@ HALAL_QUESTIONS = [
 
 
 @pytest.mark.parametrize("question", HALAL_QUESTIONS)
-async def test_a_visitor_asking_if_a_shown_coin_is_halal_is_sent_to_the_market_page(
+async def test_a_visitor_asking_if_a_shown_coin_is_halal_is_sent_to_its_passport(
     test_context, question
 ):
     _hidden, shown = await _hidden_and_shown(test_context)
@@ -627,7 +627,10 @@ async def test_a_visitor_asking_if_a_shown_coin_is_halal_is_sent_to_the_market_p
     assert result.mode != "SAFETY_REFUSAL"
     assert result.message.startswith(f"I can't tell you myself that {shown} is halal.")
     assert "different Shariah screening standards" in result.message
-    assert [card.key for card in result.sources] == ["market"]
+    # The Passport is public, so a visitor is sent to the coin's own Passport.
+    assert "free account" not in result.message
+    assert [card.key for card in result.sources] == ["passport"]
+    assert result.sources[0].url.endswith(f"/passports/{shown.lower()}")
 
 
 @pytest.mark.parametrize("question", HALAL_QUESTIONS)
@@ -640,7 +643,7 @@ async def test_a_member_asking_if_a_coin_is_halal_gets_its_passport(test_context
     assert result.intent == "coin_shariah_question"
     assert result.message.startswith(f"I can't tell you myself that {hidden} is halal.")
     assert [card.key for card in result.sources] == ["passport"]
-    assert result.sources[0].url.endswith(f"/dashboard/market/{hidden.lower()}")
+    assert result.sources[0].url.endswith(f"/passports/{hidden.lower()}")
 
 
 @pytest.mark.parametrize("question", HALAL_QUESTIONS)

@@ -80,7 +80,9 @@ def test_a_coin_page_needs_its_coin():
     card = source_preview("passport", _settings(), asset="link")
     assert card is not None
     assert card.title == "LINK Evidence Passport"
-    assert card.url == "/dashboard/market/link"
+    # The Passport is a public page on the website now, one address per coin.
+    assert card.url == "/passports/link"
+    assert not SOURCE_PAGES["passport"].account_only
 
 
 def test_an_unknown_key_is_no_card():
@@ -99,15 +101,59 @@ def test_account_pages_open_on_the_product_hostname(key):
     assert card.address.startswith("app.hilalmarkets.com/")
 
 
-def test_public_pages_stay_on_the_public_hostname():
+@pytest.mark.parametrize(
+    "key", sorted(k for k, page in SOURCE_PAGES.items() if not page.account_only)
+)
+def test_public_pages_stay_on_the_public_hostname(key):
+    """Every public card names the website's hostname, not a bare path.
+
+    Hilal answers inside the dashboard, on the product's own hostname. A bare path there
+    opened the public page on `app.hilalmarkets.com` — so a Passport card kept the reader
+    inside the dashboard instead of sending them to the website, where the page lives.
+    """
+
     settings = _settings(
         public_base_url="https://hilalmarkets.com",
         app_base_url="https://app.hilalmarkets.com",
     )
-    card = source_preview("market", settings)
+    card = source_preview(key, settings, asset="btc")
     assert card is not None
-    assert card.url == "/markets"
-    assert card.address == "hilalmarkets.com/markets"
+    assert card.url.startswith("https://hilalmarkets.com/")
+    assert card.address.startswith("hilalmarkets.com")
+
+
+def test_the_passport_card_opens_the_coin_on_the_website():
+    settings = _settings(
+        public_base_url="https://hilalmarkets.com",
+        app_base_url="https://app.hilalmarkets.com",
+    )
+    card = source_preview("passport", settings, asset="btc")
+    assert card is not None
+    assert card.url == "https://hilalmarkets.com/passports/btc"
+    assert card.address == "hilalmarkets.com/passports/btc"
+
+
+@pytest.mark.parametrize("key", ["home", "pricing"])
+def test_home_page_cards_open_the_website_not_the_dashboard(key):
+    """`/` on the product's own hostname is the dashboard, so the home page and its
+    sections must be built on the marketing hostname."""
+
+    settings = _settings(
+        public_base_url="https://hilalmarkets.com",
+        app_base_url="https://app.hilalmarkets.com",
+    )
+    card = source_preview(key, settings)
+    assert card is not None
+    assert card.url.startswith("https://hilalmarkets.com/")
+    assert card.address.startswith("hilalmarkets.com")
+
+
+def test_the_pricing_card_opens_the_home_page_section_not_the_retired_page():
+    card = source_preview("pricing", _settings())
+    assert card is not None
+    assert card.url == "/#pricing"
+    assert card.address.endswith("/#pricing")
+    assert all(page.path != "/pricing" for page in SOURCE_PAGES.values())
 
 
 def test_cards_are_capped_and_never_repeated():
@@ -124,8 +170,8 @@ def test_cards_are_capped_and_never_repeated():
 
 #: Each kind of evidence row Hilal can say it rests on, and the page that shows it.
 HILAL_EVIDENCE = [
-    ("asset:LINK", "passport", "/dashboard/market/link"),
-    ("passport:LINK:AAOIFI", "passport", "/dashboard/market/link"),
+    ("asset:LINK", "passport", "/passports/link"),
+    ("passport:LINK:AAOIFI", "passport", "/passports/link"),
     ("methodology:HILAL_MARKETS_AUTOMATED_SCREEN", "hilal_methodology", "/hilal-methodology"),
     ("plan:pro", "subscription", "/dashboard/subscription"),
     ("account:plan", "subscription", "/dashboard/subscription"),

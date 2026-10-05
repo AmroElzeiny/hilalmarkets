@@ -19,6 +19,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import (
+    _run_async_in_thread,
     assert_no_raw_traceback,
     close_any_open_guide,
     seed_sharia_screened_market,
@@ -220,6 +221,72 @@ def test_every_configured_target_is_unique_on_its_own_page(
     assert checked >= 15, f"only {checked} steps were checked; the registry looks truncated"
 
 
+def _published_passport_version(database_url: str, asset: str = "SOL") -> str:
+    """Publish the seeded assessment for `asset` and return its stored version's address.
+
+    The guided Passport page is the *stored version* of a record
+    (`/passports/<asset id>/versions/<version id>`), which is a dashboard page. The
+    current Passport is a public page on the website since 5 October 2026 and carries no
+    dashboard guide. The browser seed writes no published record, so one is written here.
+    """
+
+    async def _publish() -> str:
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from ai_market_monitor.db.models import (
+            AssetShariaAssessment,
+            CanonicalAsset,
+            PublishedAssetAssessment,
+        )
+
+        engine = create_async_engine(database_url)
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                assessment = await session.scalar(
+                    select(AssetShariaAssessment)
+                    .where(AssetShariaAssessment.canonical_asset == asset)
+                    .limit(1)
+                )
+                assert assessment is not None, f"the browser seed wrote no {asset} review"
+                coin = CanonicalAsset(
+                    symbol=asset,
+                    name=assessment.asset_name or asset,
+                    asset_type="native",
+                    contract_addresses={},
+                    provider_ids={},
+                    identity_hash=uuid4().hex * 2,
+                    mapping_state="verified",
+                    mapping_evidence={},
+                )
+                session.add(coin)
+                await session.flush()
+                version = PublishedAssetAssessment(
+                    canonical_asset_id=coin.id,
+                    external_assessment_id=uuid4(),
+                    dossier_id=uuid4(),
+                    review_decision_id=uuid4(),
+                    asset_assessment_id=assessment.id,
+                    version=1,
+                    publication_state="published",
+                    passport_snapshot={},
+                    integrity_hash=uuid4().hex,
+                    is_active=True,
+                    published_by_user_id=uuid4(),
+                    published_at=datetime.now(UTC),
+                )
+                session.add(version)
+                await session.commit()
+                return f"/passports/{coin.id}/versions/{version.id}"
+        finally:
+            await engine.dispose()
+
+    return _run_async_in_thread(_publish)
+
+
 def test_the_passport_guide_targets_resolve_on_a_real_passport(
     page: Page,
     base_url: str,
@@ -228,18 +295,12 @@ def test_the_passport_guide_targets_resolve_on_a_real_passport(
     """The Passport is the one guided page whose URL carries an asset slug."""
 
     email = signup(page, base_url, unique_email("guide-passport-registry"))
-    seeded = seed_sharia_screened_market(browser_app.database_url, email)
+    seed_sharia_screened_market(browser_app.database_url, email)
     page.set_viewport_size(DESKTOP)
     page.goto(
-        f"{base_url}/dashboard/market?methodology_id={seeded['methodology_id']}",
+        f"{base_url}{_published_passport_version(browser_app.database_url)}",
         wait_until="domcontentloaded",
     )
-
-    link = page.locator('a[href^="/dashboard/market/"]').first
-    if link.count() == 0:
-        pytest.skip("no screened asset was seeded, so there is no Passport to check")
-    link.click()
-    page.wait_for_url(re.compile(r".*/dashboard/market/.+"), timeout=15_000)
 
     assert _page_key(page) == "asset-passport"
     for step in _registry(page)["asset-passport"]["steps"]:
@@ -473,18 +534,12 @@ def test_the_evidence_passport_guide_explains_the_published_record(
     browser_app,
 ) -> None:
     email = signup(page, base_url, unique_email("guide-passport"))
-    seeded = seed_sharia_screened_market(browser_app.database_url, email)
+    seed_sharia_screened_market(browser_app.database_url, email)
     page.set_viewport_size(DESKTOP)
     page.goto(
-        f"{base_url}/dashboard/market?methodology_id={seeded['methodology_id']}",
+        f"{base_url}{_published_passport_version(browser_app.database_url)}",
         wait_until="domcontentloaded",
     )
-
-    passport_link = page.locator('a[href^="/dashboard/market/"]').first
-    if passport_link.count() == 0:
-        pytest.skip("no screened asset was seeded, so no Passport page exists to guide")
-    passport_link.click()
-    page.wait_for_url(re.compile(r".*/dashboard/market/.+"), timeout=15_000)
 
     assert _page_key(page) == "asset-passport"
     _start_guide(page)
@@ -552,9 +607,7 @@ def test_next_back_done_skip_escape_and_the_counter_all_behave(
     page.locator("[data-hm-guide-next]").click()
     expect(page.locator("[data-hm-guide-popover]")).to_be_hidden()
 
-    stored = page.evaluate(
-        "() => window.localStorage.getItem('hm-guide:settings:v1')"
-    )
+    stored = page.evaluate("() => window.localStorage.getItem('hm-guide:settings:v1')")
     assert stored == "done", stored
 
     # Escape closes a restarted guide, and focus returns to the launcher.
@@ -708,9 +761,7 @@ def test_the_spotlight_matches_the_target_rectangle_after_scrolling(
         # milliseconds. A step can involve a smooth scroll of unknown length, and a
         # guessed wait measures the outline while the page is still gliding — which
         # reports the guide as misaligned when it is simply not finished.
-        page.wait_for_selector(
-            '[data-hm-guide-root][data-hm-guide-busy="false"]', timeout=10_000
-        )
+        page.wait_for_selector('[data-hm-guide-root][data-hm-guide-busy="false"]', timeout=10_000)
         # The outline then glides to its new box over the shared 120ms motion token.
         # That part has a known length, so a short fixed wait is honest here; the
         # unknown-length part is the scroll, and the signal above covers that.
@@ -786,6 +837,7 @@ def test_reduced_motion_removes_the_animation_but_keeps_the_guide(
         "() => [...document.querySelectorAll('[data-hm-guide-panel], [data-hm-guide-spotlight],"
         " [data-hm-guide-popover]')].map(n => getComputedStyle(n).transitionDuration)"
     )
+
     # Asserted as imperceptible, not as exactly "0s".
     #
     # This assertion used to require the literal string "0s" and had been failing. The
@@ -877,7 +929,7 @@ def test_the_guide_leaves_the_page_and_its_scrolling_untouched(
         " return window.HilalMarketsGuide.registry[key].steps[0].target; }"
     )
     before = page.evaluate(
-        "(name) => { const t = document.querySelector(`[data-hm-guide-target=\"${name}\"]`);"
+        '(name) => { const t = document.querySelector(`[data-hm-guide-target="${name}"]`);'
         " const r = t.getBoundingClientRect();"
         " const s = getComputedStyle(t);"
         " return { w: document.body.scrollWidth, h: r.height,"
@@ -888,7 +940,7 @@ def test_the_guide_leaves_the_page_and_its_scrolling_untouched(
     during = page.evaluate(
         "(name) => { const t = window.HilalMarketsGuide.engine.target;"
         " const s = getComputedStyle(t);"
-        " return { same: t === document.querySelector(`[data-hm-guide-target=\"${name}\"]`),"
+        ' return { same: t === document.querySelector(`[data-hm-guide-target="${name}"]`),'
         "          h: t.getBoundingClientRect().height, position: s.position,"
         "          zIndex: s.zIndex, filter: s.filter }; }",
         first_target,

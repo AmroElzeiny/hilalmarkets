@@ -1,19 +1,61 @@
 /* Behaviour for the Passport page and its printable report.
  *
  * The page is readable and complete without any of this: every section is server
- * rendered, and the disclosures are real <details> elements that open without help.
- * What runs here is only what improves the reading — the section a person is in,
- * copy buttons, and the problem-report form.
+ * rendered, the disclosures are real <details> elements that open without help, and
+ * the standard picker is a plain form with its own button. What runs here is only what
+ * improves the reading — the section a person is in, the standard opening as soon as
+ * it is picked, copy buttons, and the problem-report form.
  */
 
+import { followSections, holdBelowFixedHeader } from "./hm-jump.js";
 import { settleIn, whenSeen } from "./hm-motion.js";
 import { publish } from "./hm-page-context.js";
 import { pageNote } from "./hm-page-notes.js";
 
+/* On the public website the sticky section links stop under the site's fixed header.
+   In the dashboard the topbar's own stylesheet already says where that is. */
+if (document.body.classList.contains("hm-public-market")) holdBelowFixedHeader();
+
+setUpStandardPicker();
 setUpSectionTracking();
 setUpCopyButtons();
 setUpProblemForm();
 setUpReportActions();
+
+/** A short "done" or "that failed" line: the dashboard's toast, or the button's own words. */
+function say(message, failed = false, button = null) {
+  if (window.showDashToast) {
+    window.showDashToast(message, failed);
+    return;
+  }
+  if (!button) return;
+  const original = button.dataset.originalLabel || button.innerHTML;
+  button.dataset.originalLabel = original;
+  button.textContent = message;
+  window.setTimeout(() => {
+    button.innerHTML = original;
+  }, 2000);
+}
+
+/* One Passport per coin, and the standard is picked on it. Picking one opens the same
+ * page on that standard straight away; the address each option opens was written by the
+ * server, so this never builds one. Without scripting the form's own button does it. */
+function setUpStandardPicker() {
+  const form = document.querySelector("[data-passport-standard]");
+  const select = form?.querySelector("[data-passport-standard-select]");
+  if (!form || !select) return;
+  form.classList.add("is-enhanced");
+  select.addEventListener("change", () => {
+    const chosen = select.selectedOptions[0];
+    const target = chosen?.dataset.href;
+    if (!target) {
+      form.submit();
+      return;
+    }
+    select.disabled = true;
+    window.location.assign(target);
+  });
+}
 
 /* The Passport in front of them, in the page's own words: which coin, what the
  * answer reads as, and under which standard. Facts still come from the records;
@@ -49,25 +91,9 @@ function setUpSectionTracking() {
     .filter(Boolean);
   if (!sections.length) return;
 
-  const mark = (id) => {
-    links.forEach((link) => {
-      const current = link.getAttribute("href") === `#${id}`;
-      if (current) link.setAttribute("aria-current", "true");
-      else link.removeAttribute("aria-current");
-    });
-  };
-
-  if (!("IntersectionObserver" in window)) return;
-  const observer = new IntersectionObserver(
-    (entries) => {
-      const visible = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-      if (visible) mark(visible.target.id);
-    },
-    { rootMargin: "-88px 0px -60% 0px", threshold: 0 },
-  );
-  sections.forEach((section) => observer.observe(section));
+  /* The shared tracker, measured against the bar itself: it is held under the topbar
+     or the site's header, so a fixed margin would be wrong on one of them. */
+  followSections(links, document, { bar: tabs });
 
   /* Each section's panels settle in the first time they are reached, so a long
      document reveals itself as it is read rather than all at once. */
@@ -84,21 +110,22 @@ function setUpCopyButtons() {
     if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
-      window.showDashToast?.("Copied.");
+      say("Copied.", false, button);
     } catch {
-      window.showDashToast?.("This browser did not allow copying.", true);
+      say("This browser did not allow copying.", true, button);
     }
   });
 }
 
 function setUpReportActions() {
   document.querySelector("[data-print]")?.addEventListener("click", () => window.print());
-  document.querySelector("[data-copy-link]")?.addEventListener("click", async () => {
+  document.querySelector("[data-copy-link]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
     try {
       await navigator.clipboard.writeText(window.location.href);
-      window.showDashToast?.("Link copied.");
+      say("Link copied.", false, button);
     } catch {
-      window.showDashToast?.("This browser did not allow copying.", true);
+      say("This browser did not allow copying.", true, button);
     }
   });
 }
@@ -124,7 +151,9 @@ function setUpProblemForm() {
           credentials: "same-origin",
           headers: {
             "Content-Type": "application/json",
-            "X-CSRF-Token": document.body.dataset.csrfToken || "",
+            // On the public page the reader's token rides on the form; in the dashboard
+            // it is on the body.
+            "X-CSRF-Token": form.dataset.csrfToken || document.body.dataset.csrfToken || "",
             Accept: "application/json",
           },
           body: JSON.stringify({
@@ -142,7 +171,7 @@ function setUpProblemForm() {
       }
       form.reset();
       status.textContent = "Thank you. A reviewer will look at this. The published result has not changed.";
-      window.showDashToast?.("Your report was sent.");
+      say("Your report was sent.");
     } catch (error) {
       status.textContent = `${error.message} Nothing was sent. Please try again.`;
     } finally {

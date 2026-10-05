@@ -113,9 +113,10 @@ async def _pages(test_context) -> dict[str, str]:
     client = test_context["client"]
     market = await client.get("/dashboard/market")
     assert market.status_code == 200, market.text[:800]
-    passport = await client.get("/dashboard/market/btc")
+    # The Passport and its report are public pages on the website now.
+    passport = await client.get("/passports/btc")
     assert passport.status_code == 200, passport.text[:800]
-    report = await client.get("/dashboard/market/btc/report")
+    report = await client.get("/passports/btc/report")
     assert report.status_code == 200, report.text[:800]
     return {"market": market.text, "passport": passport.text, "report": report.text}
 
@@ -249,16 +250,17 @@ async def test_the_new_market_page_works_without_javascript(test_context):
     fallback = market[start : market.index("</noscript>", start)]
     for asset, _name in SEEDED_ASSETS:
         assert asset in fallback
-    assert "/dashboard/market/btc" in fallback
+    assert "/passports/btc" in fallback
 
 
-async def test_the_passport_links_back_to_the_market_it_was_opened_from(test_context):
-    """One market page, so there is one place "back" can mean."""
+async def test_the_passport_links_back_to_the_market_list(test_context):
+    """The Passport is on the website, so "back" is the website's Markets list."""
     await _signed_in_with_screening(test_context, email="dash-test-links@example.com")
-    passport = (await test_context["client"].get("/dashboard/market/btc")).text
+    passport = (await test_context["client"].get("/passports/btc")).text
 
-    assert 'href="/dashboard/market"' in passport
-    assert "/dashboard/market/btc/report" in passport
+    assert 'href="/markets"' in passport
+    assert "/passports/btc/report?methodology_id=" in passport
+    assert "/dashboard/market/btc" not in passport
     # And nothing on it reaches for the address the redesigned pages used to answer at.
     assert "/dashboard-test" not in passport
 
@@ -266,7 +268,7 @@ async def test_the_passport_links_back_to_the_market_it_was_opened_from(test_con
 async def test_the_report_states_the_limits_of_the_result(test_context):
     """A printed page is read away from the product, so it must carry its own scope."""
     await _signed_in_with_screening(test_context, email="dash-test-report@example.com")
-    report = (await test_context["client"].get("/dashboard/market/btc/report")).text
+    report = (await test_context["client"].get("/passports/btc/report")).text
 
     assert "not a universal religious ruling" in report
     assert "does not execute trades" in report
@@ -291,7 +293,7 @@ async def test_only_one_passport_popup_is_ever_on_the_page(test_context):
 
 async def test_the_report_page_carries_no_popup_at_all(test_context):
     await _signed_in_with_screening(test_context, email="dash-test-report-popup@example.com")
-    report = (await test_context["client"].get("/dashboard/market/btc/report")).text
+    report = (await test_context["client"].get("/passports/btc/report")).text
 
     assert "data-passport-dialog" not in report
     assert "data-passport-quick-dialog" not in report

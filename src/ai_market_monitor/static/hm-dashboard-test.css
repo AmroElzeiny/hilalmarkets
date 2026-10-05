@@ -1394,10 +1394,128 @@ body.hilal-dashboard .hm-t .t-seal {
 
 body.hilal-dashboard .hm-t .t-seal .icon { width: 16px; height: 16px; color: var(--t-accent); }
 
-/* Sticky in-page navigation. Long documents need a way back to the top level. */
+/* The Shariah standard a Passport is showing, and the control that changes it.
+ *
+ * One Passport per coin: a coin reviewed under several standards has one page, and the
+ * standard is chosen here. Every result on the page belongs to that choice, so it is
+ * the header's one apple-green focal point (`brand guide.md` §9 "selected labels",
+ * §12 "one strong focal element") — a pale apple ground and a full apple border. The
+ * words on it stay near-black: bright green is never small text on white (§9, §18). */
+body.hilal-dashboard .hm-t .t-standard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--t-3) var(--t-4);
+  padding: var(--t-4);
+  border: 2px solid var(--t-accent);
+  border-radius: var(--t-r-lg);
+  background: var(--t-accent-soft);
+}
+
+body.hilal-dashboard .hm-t .t-standard-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: var(--t-1);
+}
+
+body.hilal-dashboard .hm-t .t-standard-copy > :where(label, .t-standard-label) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  margin: 0;
+  color: var(--t-ink-strong);
+  font-size: .95rem;
+  font-weight: 600;
+}
+
+body.hilal-dashboard .hm-t .t-standard-copy > p:not(.t-standard-label) {
+  margin: 0;
+  color: var(--t-copy);
+  font-size: .82rem;
+  line-height: 1.5;
+}
+
+body.hilal-dashboard .hm-t .t-standard-copy .icon,
+body.hilal-dashboard .hm-t .t-standard-copy .icon-sm { width: 16px; height: 16px; }
+
+body.hilal-dashboard .hm-t .t-standard-pick {
+  display: flex;
+  flex: 1 1 320px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-2);
+}
+
+body.hilal-dashboard .hm-t .t-standard-field {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+/* 48px tall, the full standard name readable, and the native control underneath — a
+   real <select> keeps the keyboard, the screen reader and the phone's own picker. */
+body.hilal-dashboard .hm-t .t-standard-field select {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 44px 0 var(--t-4);
+  border: 1px solid var(--t-ink);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  color: var(--t-ink-strong);
+  cursor: pointer;
+  font: inherit;
+  font-size: .92rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+body.hilal-dashboard .hm-t .t-standard-field select:hover { border-color: var(--t-ink-strong); }
+
+body.hilal-dashboard .hm-t .t-standard-field select:focus-visible {
+  outline: var(--hm-focus-ring);
+  outline-offset: 2px;
+  box-shadow: var(--hm-focus-halo);
+}
+
+body.hilal-dashboard .hm-t .t-standard-caret {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: 16px;
+  display: grid;
+  color: var(--t-ink);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+body.hilal-dashboard .hm-t .t-standard-caret .icon-sm { width: 16px; height: 16px; }
+
+/* With scripting the choice opens the page straight away, so the button is only for a
+   browser without it. */
+body.hilal-dashboard .hm-t .t-standard.is-enhanced [data-passport-standard-submit] { display: none; }
+
+body.hilal-dashboard .hm-t .t-standard-only {
+  padding: var(--t-2) var(--t-4);
+  border: 1px solid var(--t-ink);
+  border-radius: var(--t-r-md);
+  background: var(--t-surface);
+  color: var(--t-ink-strong);
+  font-size: .92rem;
+  font-weight: 600;
+}
+
+/* Sticky in-page navigation. Long documents need a way back to the top level.
+ *
+ * It stops just under whatever is held at the top of the window — the dashboard's
+ * topbar, or the website's header — never at `top: 0`, where that bar covered it. */
 body.hilal-dashboard .hm-t .t-tabs {
   position: sticky;
-  top: 0;
+  top: var(--hm-sticky-top, 0px);
   z-index: 4;
   display: flex;
   overflow-x: auto;
@@ -1434,7 +1552,15 @@ body.hilal-dashboard .hm-t .t-tabs a[aria-current="true"] { background: var(--t-
 body.hilal-dashboard .hm-t .t-tabs a .icon,
 body.hilal-dashboard .hm-t .t-tabs a .icon-sm { width: 15px; height: 15px; }
 
-body.hilal-dashboard .hm-t .t-section { display: flex; flex-direction: column; gap: var(--t-4); scroll-margin-top: 88px; }
+/* A section reached from a link lands below the held bars, not underneath them.
+   `--hm-jump-clear` is measured by `hm-jump.js` from the real bars; the fallback is
+   their usual height. */
+body.hilal-dashboard .hm-t .t-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-4);
+  scroll-margin-top: var(--hm-jump-clear, calc(var(--hm-sticky-top, 0px) + 76px));
+}
 body.hilal-dashboard .hm-t .t-section-head { display: flex; flex-direction: column; gap: var(--t-1); }
 
 body.hilal-dashboard .hm-t .t-panel {
@@ -1580,6 +1706,14 @@ body.hilal-dashboard .hm-t.t-report th[scope="row"] { width: 1%; white-space: no
   body.hilal-dashboard .app-shell { display: block !important; padding: 0 !important; }
 
   body.hilal-dashboard .app-content { padding: 0 !important; }
+
+  /* A Passport on the public website: the site's header, footer and assistant stay off
+     the paper, and the room kept for the fixed header goes with them. */
+  body.hm-public-passport #root,
+  body.hm-public-passport #hm-site-footer,
+  body.hm-public-passport .public-chat-launcher,
+  body.hm-public-passport .figma-bypass-link { display: none !important; }
+  body.hm-public-passport .hm-public-market-body { padding: 0 !important; }
   body.hilal-dashboard .hm-t .t-report-block { break-inside: avoid; }
   body.hilal-dashboard .hm-t .t-panel,
   body.hilal-dashboard .hm-t .t-card { box-shadow: none; }
@@ -1633,6 +1767,12 @@ body.hm-public-market .hm-public-market-body {
 }
 
 body.hm-public-market .hm-public-market-body:focus { outline: none; }
+
+/* Where a sticky bar on a public page stops: under the website's fixed header. The
+   header is 14px + its 48px bar + 14px, and 8px + bar + 8px once scrolled; this is the
+   taller of the two plus a gap. `hm-jump.js` replaces it with the header's measured
+   height, so a header that changes size is followed exactly. */
+body.hm-public-market { --hm-sticky-top: 84px; }
 
 /* Headings that keep their look and do not sort. Default cursor and no hover change, so
    nothing suggests a click will do something. */

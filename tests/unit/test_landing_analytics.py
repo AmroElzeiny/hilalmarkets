@@ -102,7 +102,6 @@ def test_every_page_shell_uses_the_root_dark_favicon():
 
     template_paths = (
         "src/ai_market_monitor/templates/auth.html",
-        "src/ai_market_monitor/templates/dashboard_public.html",
         "src/ai_market_monitor/templates/hilal/base_dashboard.html",
         "src/ai_market_monitor/templates/hilal/base_public.html",
         "src/ai_market_monitor/templates/hilal/public/react_site.html",
@@ -178,7 +177,6 @@ def test_social_preview_is_a_real_1200_by_630_png_in_both_public_asset_roots():
 def test_non_dashboard_image_elements_have_descriptive_alt_text():
     files = [
         ROOT / "src/ai_market_monitor/templates/auth.html",
-        ROOT / "src/ai_market_monitor/templates/dashboard_public.html",
         ROOT / "src/ai_market_monitor/templates/hilal/partials/public_header.html",
         ROOT / "src/ai_market_monitor/templates/hilal/partials/public_footer.html",
         *(ROOT / "src/ai_market_monitor/templates/hilal/public").glob("*.html"),

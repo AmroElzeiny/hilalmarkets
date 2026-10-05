@@ -24,7 +24,9 @@ body.hilal-dashboard .hm-t .a-section {
   display: flex;
   flex-direction: column;
   gap: var(--t-4);
-  scroll-margin-top: 96px;
+  /* Below the held bars, not underneath them. `--hm-jump-clear` is measured by
+     `hm-jump.js` from the real bars; the fallback is their usual height. */
+  scroll-margin-top: var(--hm-jump-clear, calc(var(--hm-sticky-top, 0px) + 76px));
 }
 
 body.hilal-dashboard .hm-t .a-section-head {
@@ -37,10 +39,14 @@ body.hilal-dashboard .hm-t .a-section-head h2 { color: var(--t-ink-strong); }
 
 /* Sticky jump links. A long account page needs a way back to the top level, and the
    same control already exists on the Passport page as `.t-tabs`; this is that control
-   with its own hit area, used for in-page anchors. */
+   with its own hit area, used for in-page anchors.
+
+   It stops just under the topbar (`--hm-sticky-top`, from `hm-shell.css`). It used to
+   stop at `top: 0`, where the topbar — held at the same place and drawn above it —
+   covered it. */
 body.hilal-dashboard .hm-t .a-jump {
   position: sticky;
-  top: 0;
+  top: var(--hm-sticky-top, 0px);
   z-index: 5;
   display: flex;
   overflow-x: auto;
@@ -605,7 +611,7 @@ body.hilal-dashboard .hm-g .g-group {
   border: 1px solid var(--t-line);
   border-radius: var(--t-r-lg);
   background: var(--t-surface);
-  scroll-margin-top: 96px;
+  scroll-margin-top: var(--hm-jump-clear, calc(var(--hm-sticky-top, 0px) + 140px));
 }
 
 body.hilal-dashboard .hm-g .g-group-head { display: flex; align-items: flex-start; gap: var(--t-3); }
@@ -888,10 +894,20 @@ body.hilal-dashboard .hm-g .g-chip-empty { color: var(--t-copy); font-size: .82r
  * saving, saved, or "nothing was saved".
  */
 
-body.hilal-dashboard .hm-g .g-saved {
+/* The save line and the jump links are held together, as one block, just under the
+   topbar. Held separately, both stuck at the same place and one covered the other. */
+body.hilal-dashboard .hm-g .g-sticky {
   position: sticky;
-  top: 0;
+  top: var(--hm-sticky-top, 0px);
   z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-2);
+}
+
+body.hilal-dashboard .hm-g .g-sticky .a-jump { position: static; }
+
+body.hilal-dashboard .hm-g .g-saved {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

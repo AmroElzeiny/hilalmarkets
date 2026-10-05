@@ -30,6 +30,17 @@ body.dashboard-body.hilal-dashboard {
   --hm-nav-row: 46px;
   --hm-top-h: 72px;
   --hm-shell-gap: 16px;
+  /* How far from the top of the window the topbar is held while the page scrolls. */
+  --hm-top-stick: var(--hm-shell-gap);
+  /* Where anything else that sticks while scrolling must stop: just under the topbar.
+   *
+   * The Passport's section links and the Settings page's jump links were both written
+   * with `top: 0`, so once the page scrolled they slid up *under* the topbar, which is
+   * held at the same place and drawn above them — the bar covered the links. Every
+   * sticky bar on a dashboard page reads this one value, and it follows the topbar's
+   * own size and position on every screen width, because both come from the same two
+   * tokens above. */
+  --hm-sticky-top: calc(var(--hm-top-stick) + var(--hm-top-h) + 8px);
 }
 
 /* ── The grid ──────────────────────────────────────────────────────────────── */
@@ -613,7 +624,7 @@ body.hilal-dashboard .hm-nav-account-row.is-leave:hover {
 
 body.hilal-dashboard .hm-top {
   position: sticky;
-  top: var(--hm-shell-gap);
+  top: var(--hm-top-stick);
   z-index: 50;
   display: flex;
   height: var(--hm-top-h);
@@ -1000,7 +1011,7 @@ body.hilal-dashboard .sidebar-backdrop { display: none; }
   body.hilal-dashboard .hm-nav.is-open { transform: none; }
   body.hilal-dashboard .hm-nav-icon-btn.sidebar-close { display: grid; }
   body.hilal-dashboard .hm-nav-toggle { display: none; }
-  body.hilal-dashboard .hm-top { top: 10px; }
+  body.dashboard-body.hilal-dashboard { --hm-top-stick: 10px; }
   body.hilal-dashboard .hm-top-icon-btn.hm-top-menu { display: grid; }
   body.hilal-dashboard .hm-top-here-group { display: none; }
 
@@ -1019,9 +1030,8 @@ body.hilal-dashboard .sidebar-backdrop { display: none; }
 
 @media (max-width: 760px) {
   body.hilal-dashboard .app-shell { padding: 8px; }
+  body.dashboard-body.hilal-dashboard { --hm-top-stick: 8px; --hm-top-h: 60px; }
   body.hilal-dashboard .hm-top {
-    top: 8px;
-    height: 60px;
     margin-bottom: 10px;
     padding: 0 8px;
     border-radius: 16px;

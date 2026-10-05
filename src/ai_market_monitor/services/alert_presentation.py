@@ -6,6 +6,7 @@ from ai_market_monitor.core.dashboard_paths import (
     COMPLIANCE_CHANGES_PATH,
     LIFECYCLES_PATH,
     OPPORTUNITIES_PATH,
+    passport_path,
 )
 from ai_market_monitor.db.models import Alert
 from ai_market_monitor.db.models.enums import AlertType
@@ -179,7 +180,7 @@ class AlertPresentation:
         if alert.alert_type == AlertType.COMPLIANCE:
             base = (public_base_url or "").rstrip("/")
             asset = str(proof.get("canonical_asset") or "Asset")
-            passport_url = f"{base}/dashboard/market/{asset.lower()}" if base else None
+            passport_url = f"{base}{passport_path(asset)}" if base else None
             activity_url = (
                 f"{base}{COMPLIANCE_CHANGES_PATH}" if base else None
             )
@@ -277,7 +278,7 @@ class AlertPresentation:
         sharia_reviewed_at = screening_asset.get("reviewed_at")
         screening_asset_code = screening_asset.get("canonical_asset") or proof.get("symbol")
         sharia_passport_url = (
-            f"{base}/dashboard/market/{str(screening_asset_code).partition('/')[0].lower()}"
+            f"{base}{passport_path(str(screening_asset_code))}"
             if base and screening_asset_code and sharia_status
             else None
         )
