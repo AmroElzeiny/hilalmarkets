@@ -119,14 +119,14 @@ const OUTCOME: Record<
   { label: string; line: string; icon: IconName; tone: string }
 > = {
   admitted: {
-    label: 'Looks clean',
-    line: 'Nothing in the approved conditions refused it.',
+    label: 'Admitted',
+    line: 'A regulator publishes it as Shariah-compliant.',
     icon: 'check',
     tone: 'hm-m-tone--good',
   },
   refused: {
-    label: 'Has a problem',
-    line: "The project's own words describe a business a condition refuses.",
+    label: 'Not suitable',
+    line: "Refused under one of this standard's own rules.",
     icon: 'close',
     tone: 'hm-m-tone--bad',
   },
@@ -238,13 +238,7 @@ function CrawlArt({ budget }: { budget: number }) {
 /* -------------------------------------------------------------------------- */
 /*  Illustration 2 — the two ways in                                           */
 /* -------------------------------------------------------------------------- */
-function DoorsArt({
-  regulatorCoins,
-  machineCoins,
-}: {
-  regulatorCoins: number
-  machineCoins: number
-}) {
+function DoorsArt({ regulatorCoins }: { regulatorCoins: number }) {
   return (
     <div className="hm-m-doors">
       <div className="hm-m-door">
@@ -268,13 +262,14 @@ function DoorsArt({
 
       <div className="hm-m-door">
         <IconBadge name="scan" tone="apple" />
-        <h3>Or the machine read the website</h3>
+        <h3>Or our reviewer checked it</h3>
         <p>
-          For a coin no authority has ruled on, the screen opens the project's own pages and
-          applies every approved condition it can settle from them. If nothing refuses it,
-          it comes in — with the reading attached.
+          For a coin no authority has ruled on, the screen reads the project's own pages and
+          applies every approved condition it can settle. A Hilal Markets reviewer reads
+          that report and approves or rejects the coin. Nothing the machine decides alone
+          is published.
         </p>
-        <span className="hm-m-door-count tnum">{machineCoins} coins</span>
+        <span className="hm-m-door-count">One coin at a time</span>
       </div>
     </div>
   )
@@ -376,7 +371,6 @@ export default function MethodologyPage() {
   const { counts } = data
   const admitted = data.coins.filter((coin) => coin.outcome === 'admitted')
   const regulatorCoins = admitted.filter((coin) => coin.admission === 'regulator_floor')
-  const machineCoins = admitted.filter((coin) => coin.admission === 'automated_screen')
   const shownFamilies =
     family === 'all' ? data.families : data.families.filter((item) => item.key === family)
   const shownCoins =
@@ -411,8 +405,9 @@ export default function MethodologyPage() {
                   <p className="hm-m-lede">
                     It reads what a project writes about itself and applies{' '}
                     <b className="tnum">{counts.approved}</b> conditions, each carrying the
-                    verse, hadith or standard behind it. It is a machine reading a website —
-                    not a ruling, and not a person's judgement.
+                    verse, hadith or standard behind it. A machine does the reading; for a coin
+                    no authority has ruled on, a Hilal Markets reviewer makes the decision. It
+                    is not a fatwa.
                   </p>
                 </Reveal>
 
@@ -546,10 +541,7 @@ export default function MethodologyPage() {
               </Reveal>
 
               <Reveal delay={80}>
-                <DoorsArt
-                  regulatorCoins={regulatorCoins.length}
-                  machineCoins={machineCoins.length}
-                />
+                <DoorsArt regulatorCoins={regulatorCoins.length} />
               </Reveal>
 
               <Reveal delay={120}>
@@ -872,7 +864,7 @@ export default function MethodologyPage() {
                           <td className="hm-m-how">
                             {coin.admission === 'regulator_floor'
                               ? 'A regulator published it'
-                              : 'The machine read its site'}
+                              : 'The meme-coin rule'}
                           </td>
                           <td className="hm-m-num tnum">
                             {coin.admission === 'regulator_floor' ? '—' : coin.pagesRead}

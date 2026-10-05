@@ -578,8 +578,9 @@ def methodology_description() -> str:
         f"{counts['applied']} of them can be settled by reading up to 80 pages of a "
         f"project's own website, and {counts['out_of_reach']} cannot and are skipped "
         "rather than guessed. It admits a coin by one of two routes: the Malaysian "
-        "regulator publishes it as Shariah-compliant, or the automatic reading found "
-        f"nothing that refuses it. {MEME_RULE} {UNDER_DEVELOPMENT_NOTICE} "
+        "regulator publishes it as Shariah-compliant, or a Hilal Markets reviewer reads "
+        "the automatic report on the project's own pages and approves it. Nothing the "
+        f"machine decides alone is published. {MEME_RULE} {UNDER_DEVELOPMENT_NOTICE} "
         f"{AUTOMATED_DISCLOSURE}"
     )
 
