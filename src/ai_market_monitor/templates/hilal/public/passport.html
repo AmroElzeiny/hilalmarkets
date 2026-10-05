@@ -18,8 +18,8 @@
 {% set tz = passport_timezone %}
 {% block body_class %} hilal-dashboard hm-public-market hm-public-passport{% endblock %}
 {% block page_styles %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261005-analytics-fix">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261005-analytics-fix">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261005-red-flags">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261005-red-flags">
 {% endblock %}
 {% block body %}
 <a class="figma-bypass-link" href="#top">Skip to content</a>
@@ -344,7 +344,13 @@
         <div class="t-kv"><span>Who decided</span><strong>{{ tone.humanize(passport.decision_record.actor_role) }}</strong></div>
         <div class="t-kv"><span>When</span><strong>{{ passport.decision_record.decided_at|short_dt(tz) if passport.decision_record.decided_at else 'Not recorded' }}</strong></div>
         <div class="t-kv"><span>Published</span><strong>{{ passport.decision_record.published_at|short_dt(tz) if passport.decision_record.published_at else 'Not published' }}</strong></div>
+        {#- The reasons the reviewer confirmed for readers. Older decisions have none, and
+            show the note as it was written. -#}
+        {% if passport.decision_record.public_reasons %}
+        <ul data-testid="passport-public-reasons">{% for item in passport.decision_record.public_reasons %}<li>{{ item }}</li>{% endfor %}</ul>
+        {% else %}
         <p>{{ passport.decision_record.reason }}</p>
+        {% endif %}
         {% if passport.decision_record.qualifications %}
         <div class="t-banner"><span data-icon="alert" data-icon-class="icon"></span><div class="t-banner-body"><strong>Conditions</strong><p>{{ passport.decision_record.qualifications|join(' · ') }}</p></div></div>
         {% endif %}
@@ -420,6 +426,6 @@
 {% endblock %}
 
 {% block page_scripts %}
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261005-analytics-fix"></script>
-  <script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20261005-analytics-fix"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261005-red-flags"></script>
+  <script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20261005-red-flags"></script>
 {% endblock %}

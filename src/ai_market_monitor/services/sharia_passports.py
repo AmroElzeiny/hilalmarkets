@@ -664,6 +664,11 @@ class ShariaPassportReadService:
         use_coverage = self._use_coverage(base, last_verified)
         criteria = self._criteria(base, decision, last_verified)
         evidence_details = self._evidence_details(base, source_snapshots, analysis)
+        if publication is None and decision is None:
+            # A coin checked by a Hilal Markets reviewer under the Hilal Markets
+            # Methodology has no publication record — that standard has none — but it
+            # has a real decision, named on its assessment. Show that decision.
+            decision = await self._reviewer_decision(base)
         decision_record = await self._decision_record(
             base=base,
             publication=publication,
@@ -1012,7 +1017,9 @@ class ShariaPassportReadService:
         decision: ReviewDecision | None,
         publisher: User | None,
     ) -> PassportDecisionRecord | None:
-        if publication is None or decision is None:
+        if decision is None:
+            return None
+        if publication is None and not is_automated(base.assessment.methodology_code):
             return None
         reviewer = await self.session.get(User, decision.admin_user_id)
         return PassportDecisionRecord(
@@ -1030,16 +1037,38 @@ class ShariaPassportReadService:
             methodology_criteria_hash=decision.methodology_criteria_hash,
             decision=decision.decision,
             reason=decision.reason,
+            public_reasons=list(decision.public_reasons or []),
             qualifications=list(decision.qualifications or base.assessment.qualifications),
             evidence_snapshot_ids=list(decision.evidence_snapshot_ids or []),
             criterion_decisions=list(decision.criterion_decisions or []),
             use_case_decisions=list(decision.use_case_decisions or []),
             acknowledged_gaps=list(decision.acknowledged_gaps or []),
             decided_at=decision.created_at,
-            published_by_user_id=publication.published_by_user_id,
-            published_at=publication.published_at,
-            integrity_hash=decision.integrity_hash or publication.integrity_hash,
+            published_by_user_id=(
+                publication.published_by_user_id if publication else decision.admin_user_id
+            ),
+            published_at=publication.published_at if publication else decision.created_at,
+            integrity_hash=decision.integrity_hash
+            or (publication.integrity_hash if publication else None),
         )
+
+    async def _reviewer_decision(self, base: AssetPassportResponse) -> ReviewDecision | None:
+        """The reviewer's decision behind a Hilal Markets Methodology assessment, if any.
+
+        Only that standard is asked: every other standard proves its decision through a
+        publication record, and a decision found any other way would bypass that gate.
+        """
+
+        if not is_automated(base.assessment.methodology_code):
+            return None
+        assessment = await self.session.get(AssetShariaAssessment, base.assessment.id)
+        raw = (assessment.evidence_snapshot or {}).get("review_decision_id") if assessment else None
+        if not raw:
+            return None
+        try:
+            return await self.session.get(ReviewDecision, UUID(str(raw)))
+        except ValueError:
+            return None
 
     @staticmethod
     def _timeline(

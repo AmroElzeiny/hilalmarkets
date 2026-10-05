@@ -437,21 +437,22 @@ DASHBOARD_NAVIGATION = (
                     "the reasons and the sources."
                 ),
             ),
-            #: Coins no authority has ruled on, and what a machine read about them.
+            #: Coins no outside authority has ruled on, that a Hilal Markets reviewer
+            #: approved or rejected.
             #:
             #: Directly below Halal Assets and never inside it. The two lists answer
-            #: different questions — "what did a scholar decide" and "what did a machine
-            #: read" — and a person who cannot tell which one they are looking at has
-            #: been misled by the menu before they reach the page.
+            #: different questions — "what did an outside authority decide" and "what did
+            #: our own reviewer decide" — and a person who cannot tell which one they are
+            #: looking at has been misled by the menu before they reach the page.
             NavigationItem(
-                "Coins we researched",
+                "Reviewed new coins",
                 "automated_research_page",
                 "research",
                 "search",
                 path=RESEARCH_PATH,
                 about=(
-                    "Coins no authority has ruled on yet, and what a machine read on each "
-                    "project's own website. No scholar reviewed these results."
+                    "New coins no outside Shariah authority has ruled on, approved or "
+                    "rejected by a Hilal Markets reviewer, with the reasons."
                 ),
             ),
         ),

@@ -233,17 +233,18 @@ async def screened_market_page(
 @router.get(RESEARCH_PATH, response_class=HTMLResponse, include_in_schema=False)
 async def automated_research_page(
     request: Request,
-    verdict: str = Query(default="all", pattern="^(all|eligible|not_eligible|not_enough_data)$"),
+    # Any short word: an old bookmark naming a machine verdict that is no longer shown
+    # (`eligible`, `not_eligible`, `not_enough_data`) opens the whole list, not an error.
+    verdict: str = Query(default="all", pattern="^[a-z_]{1,20}$"),
     user: User = Depends(_require_user),
     session: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    """What the machine read about coins no authority has ruled on.
+    """Coins no authority has ruled on, that a Hilal Markets reviewer decided.
 
     A separate page from Market on purpose. Market lists coins an authority assessed;
-    this lists proposals a machine made from a project's own pages. Mixing them would
-    put two different kinds of claim in one list with no way for a reader to tell which
-    is which — and the whole product is the difference between those two claims.
+    this lists coins our own reviewer approved or rejected under the Hilal Markets
+    Methodology. Nothing the machine decided alone is shown here.
     """
 
     context = await _context(
@@ -252,7 +253,7 @@ async def automated_research_page(
         settings=settings,
         user=user,
         page="research",
-        title="Coins we researched",
+        title="New coins our reviewer checked",
     )
     context.update(await AutomatedResearchReader(session).page(verdict=verdict))
     context.update(_PATH_CHROME)
@@ -282,7 +283,7 @@ async def automated_research_detail_page(
     detail = await AutomatedResearchReader(session).detail(symbol)
     if detail is None:
         raise HTTPException(
-            status_code=404, detail="We have not researched this coin yet."
+            status_code=404, detail="No reviewer has decided this coin yet."
         )
     context = await _context(
         request=request,
@@ -290,7 +291,7 @@ async def automated_research_detail_page(
         settings=settings,
         user=user,
         page="research",
-        title=f"{detail['symbol']} — what we read",
+        title=f"{detail['symbol']} — our reviewer's decision",
     )
     context.update(detail)
     context.update(_PATH_CHROME)

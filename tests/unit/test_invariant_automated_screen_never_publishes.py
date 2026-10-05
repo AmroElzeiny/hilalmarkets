@@ -152,25 +152,35 @@ def test_the_passport_payload_says_no_scholar_reviewed_it():
     assert payload["disclosure"] == AUTOMATED_DISCLOSURE
 
 
-def test_the_page_has_words_for_every_verdict_the_screen_can_return():
-    """A verdict with no wording would reach a reader as a raw field name."""
+def test_the_page_has_words_for_every_reviewer_decision_and_none_for_the_machine():
+    """A decision with no wording would reach a reader as a raw field name.
 
-    assert set(VERDICT_PRESENTATION) == {item.value for item in EvidenceVerdict}
-    assert set(VERDICT_ORDER) == {item.value for item in EvidenceVerdict}
+    And since 5 October 2026 the page shows only a person's decision: the screen's own
+    verdicts have no wording here at all, so none of them can be drawn.
+    """
+
+    from ai_market_monitor.services.automated_research_reader import _verdict
+    from ai_market_monitor.services.reviewer_passports import STATUS_FOR
+
+    decisions = {_verdict(status) for status in STATUS_FOR.values()}
+    assert set(VERDICT_PRESENTATION) == decisions
+    assert set(VERDICT_ORDER) == decisions
+    assert not set(VERDICT_PRESENTATION) & {item.value for item in EvidenceVerdict}
 
 
 def test_the_list_view_never_selects_the_evidence_columns():
     """Five list views once loaded full evidence JSON and read 1.6 GB to draw twelve rows.
 
     The list must name the columns it draws. `select(AutomatedScreenRun)` would load the
-    reasons, the quotations and the activity lists for every row on the page.
+    reasons, the quotations and the activity lists for every row on the page, and
+    `select(AssetShariaAssessment)` every stored review's evidence.
     """
 
     from ai_market_monitor.services.automated_research_reader import (
         AutomatedResearchReader,
     )
 
-    source = textwrap.dedent(inspect.getsource(AutomatedResearchReader.rows))
+    source = textwrap.dedent(inspect.getsource(AutomatedResearchReader._decided))
     tree = ast.parse(source)
     # Strip the docstring before looking: this method's own docstring explains the rule
     # by naming the forbidden call, and matching on text refused the explanation.
@@ -182,7 +192,9 @@ def test_the_list_view_never_selects_the_evidence_columns():
         for inner in ast.walk(node):
             if isinstance(inner, ast.Call) and getattr(inner.func, "id", "") == "select":
                 whole_model = [
-                    arg for arg in inner.args if getattr(arg, "id", "") == "AutomatedScreenRun"
+                    arg
+                    for arg in inner.args
+                    if getattr(arg, "id", "") in {"AutomatedScreenRun", "AssetShariaAssessment"}
                 ]
                 assert not whole_model, (
                     "The list view selects the whole row, which loads the reasons, the "

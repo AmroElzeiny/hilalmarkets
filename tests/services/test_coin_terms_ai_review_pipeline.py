@@ -20,7 +20,7 @@ from ai_market_monitor.db.models import (
     ReviewDecision,
     User,
 )
-from ai_market_monitor.db.models.enums import ReviewCaseType, UserRole
+from ai_market_monitor.db.models.enums import ReviewCaseType, ShariaAssetStatus, UserRole
 from ai_market_monitor.services.automated_screen_pipeline import AutomatedScreenPipeline
 from ai_market_monitor.services.coin_terms_ai_review import AIReview
 from ai_market_monitor.services.coinmarketcap import CoinLinks
@@ -141,17 +141,38 @@ async def _reviewer(session) -> User:
     return admin
 
 
-async def test_keep_it_out_stores_the_decision_and_publishes_nothing(test_context):
+async def test_reject_stores_the_decision_and_publishes_a_not_approved_passport(test_context):
+    """The owner's rule from 5 October 2026: every decided coin has a Passport.
+
+    Rejecting used to publish nothing. It now writes the coin's Passport under the Hilal
+    Markets Methodology — never an authority-backed publication — saying a Hilal Markets
+    reviewer did not approve it, with the reasons the reviewer confirmed.
+    """
+
     async with test_context["session_factory"]() as session:
         _r, _run_row, case = await _run(session, test_context["settings"], _held_review())
         admin = await _reviewer(session)
         await ShariaGovernanceService(session, test_context["settings"]).reject_and_store(
-            case.id, admin_user_id=admin.id, reason="The project lends money; keep it out."
+            case.id,
+            admin_user_id=admin.id,
+            reason="The project lends money; keep it out.",
+            public_reasons=["The project's own pages say it lends money to its users."],
         )
         await session.flush()
         assert case.state == "rejected" and case.done_at is not None
+        assert case.publication_state == "published"
+        # No authority-backed publication: only the reviewer's own result.
         assert await session.scalar(select(func.count(PublishedAssetAssessment.id))) == 0
-        assert await session.scalar(select(func.count(AssetShariaAssessment.id))) == 0
+        rows = (await session.scalars(select(AssetShariaAssessment))).all()
+        assert len(rows) == 1
+        assert rows[0].status == ShariaAssetStatus.EXCLUDED
+        assert rows[0].evidence_snapshot["human_reviewed"] is True
+        assert rows[0].exclusion_reasons == [
+            {
+                "code": "reviewer_decision",
+                "reason": "The project's own pages say it lends money to its users.",
+            }
+        ]
 
         # A decided task is never reopened by a later reading.
         _r, _again, after = await _run(session, test_context["settings"], _held_review())

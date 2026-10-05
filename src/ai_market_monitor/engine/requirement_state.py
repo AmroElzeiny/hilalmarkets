@@ -59,6 +59,7 @@ from ai_market_monitor.schemas.strategy_draft_v2 import (
     StrategyDraftV2,
     UnresolvedFieldV2,
     UnresolvedTargetType,
+    is_unresolved_target_type,
 )
 
 
@@ -247,19 +248,9 @@ def reconcile_requirement_state(
         active_clarification is not None
         and active_clarification.mutating
         and not already_open
-        and active_clarification.target_type
-        in {
-            "draft_field",
-            "condition_field",
-            "condition_creation",
-            "universe",
-            "market_scope",
-            "sharia_policy",
-            "boolean_structure",
-            "capability_parameter",
-            "reference_definition",
-            "unsupported_resolution",
-        }
+        # The owner's list, never a copy: a copy is how a new kind of target was once
+        # accepted here and refused by the field it became.
+        and is_unresolved_target_type(active_clarification.target_type)
     ):
         try:
             expected_schema = json.loads(active_clarification.expected_answer_schema)

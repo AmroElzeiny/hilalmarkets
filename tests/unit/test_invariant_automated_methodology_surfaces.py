@@ -127,12 +127,14 @@ def test_the_compact_form_keeps_the_warning_and_drops_only_the_detail():
 # Reach: an admitted coin appears wherever it trades
 # --------------------------------------------------------------------------------
 
-#: What each exchange listed against USDT on 31 August 2026, for the ten coins that were
-#: newly researched. Recorded rather than fetched: a test that called an exchange would
-#: fail on a train, and the point here is the *rule*, not today's listings.
+#: A recorded slice of what each exchange lists against USDT: admitted coins, a refused
+#: one (PEPE) and coins the standard does not cover. Recorded rather than fetched: a test
+#: that called an exchange would fail on a train, and the point here is the *rule*, not
+#: today's listings. (Until 5 October 2026 this used ten coins the machine had judged
+#: alone; those now go to a reviewer instead.)
 LISTED_ON = {
-    "binance": {"ZEC", "USD1", "ENSO", "PUMP", "RLUSD", "XAUT", "PEPE", "ZKC", "PROM", "U"},
-    "bybit": {"USD1", "ENSO", "PUMP", "RLUSD", "XAUT", "PEPE", "ZKC"},
+    "binance": {"BTC", "ETH", "SOL", "LINK", "XRP", "PEPE", "ZEC", "DOGE"},
+    "bybit": {"BTC", "SOL", "PEPE", "ZEC"},
 }
 
 

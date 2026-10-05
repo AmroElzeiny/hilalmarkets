@@ -11,8 +11,8 @@
 {% set tz = passport_timezone %}
 {% block body_class %} hilal-dashboard hm-public-market hm-public-passport{% endblock %}
 {% block page_styles %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261005-analytics-fix">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261005-analytics-fix">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261005-red-flags">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261005-red-flags">
 {% endblock %}
 {% block body %}
 <a class="figma-bypass-link" href="#top">Skip to content</a>
@@ -184,7 +184,7 @@
         <tr><th scope="row">Who decided</th><td>{{ tone.humanize(passport.decision_record.actor_role) }}</td></tr>
         <tr><th scope="row">When</th><td>{{ passport.decision_record.decided_at|short_dt(tz) if passport.decision_record.decided_at else 'Not recorded' }}</td></tr>
         <tr><th scope="row">Published</th><td>{{ passport.decision_record.published_at|short_dt(tz) if passport.decision_record.published_at else 'Not published' }}</td></tr>
-        <tr><th scope="row">Reason</th><td>{{ passport.decision_record.reason }}</td></tr>
+        <tr><th scope="row">Reason</th><td>{% if passport.decision_record.public_reasons %}{{ passport.decision_record.public_reasons|join(' ') }}{% else %}{{ passport.decision_record.reason }}{% endif %}</td></tr>
         {% if passport.decision_record.qualifications %}<tr><th scope="row">Conditions</th><td>{{ passport.decision_record.qualifications|join(' · ') }}</td></tr>{% endif %}
         <tr><th scope="row">Integrity fingerprint</th><td class="t-code">{{ passport.decision_record.integrity_hash or 'Not kept for this older version' }}</td></tr>
       </tbody>
@@ -234,6 +234,6 @@
 {% endblock %}
 
 {% block page_scripts %}
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261005-analytics-fix"></script>
-  <script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20261005-analytics-fix"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261005-red-flags"></script>
+  <script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20261005-red-flags"></script>
 {% endblock %}

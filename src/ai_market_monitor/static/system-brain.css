@@ -284,6 +284,8 @@ tbody tr:hover { background: var(--hm-apple-soft); }
 /* The flex item is the <i> the icon is drawn into, not the svg inside it. Without this
    a long sentence squeezed the <i>, and the icon shrank beside every long finding. */
 .brain-findings li > i[data-icon] { flex: 0 0 auto; display: inline-flex; }
+/* A red flag: stronger than a doubt (amber), weaker than a proven term. Danger tokens, same as a rejected status. */
+.brain-findings li.flag { border-color: var(--hm-danger-line); background: var(--hm-danger-bg); color: var(--hm-danger); }
 .brain-findings li.clear { border-color: var(--hm-apple-pale); background: var(--hm-apple-pale); color: var(--hm-success); }
 .brain-plain-list li { position: relative; padding-left: 15px; color: var(--hm-copy); }
 .brain-plain-list li::before { position: absolute; left: 0; content: "•"; color: var(--hm-apple-deep); }
@@ -1951,3 +1953,12 @@ tr.is-selected { background: var(--hm-apple-pale); }
 @media (max-width: 640px) {
   .brain-timelog-entry { padding: 10px 11px; }
 }
+
+/* Reasons readers will see on the Passport. Same box as the criteria fieldsets. */
+.brain-public-reasons { display: grid; gap: 7px; min-width: 0; margin: 12px 0 0; padding: 11px; border: 1px solid var(--hm-hairline); border-radius: 12px; background: var(--hm-surface-soft); }
+.brain-public-reasons legend { padding: 0 5px; color: var(--hm-apple-deep); font-size: 11px; font-weight: 650; }
+.brain-public-reasons p { margin: 0; font-size: 11px; }
+.brain-public-reasons textarea { display: block; width: 100%; min-height: 78px; }
+.brain-public-reasons-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.brain-public-reasons-actions small { color: var(--hm-muted); font-size: 11px; }
+.brain-public-reasons-actions button[aria-busy="true"] { opacity: 0.6; cursor: progress; }

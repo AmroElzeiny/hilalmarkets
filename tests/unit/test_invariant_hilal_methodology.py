@@ -40,7 +40,9 @@ REPO = Path(__file__).resolve().parents[2]
 def test_the_standard_covers_at_least_one_coin():
     """Without this, every rule below passes by having nothing to check."""
 
-    assert len(ASSETS) >= 20
+    # The regulator floor alone is fifteen coins. Since 5 October 2026 nothing else may
+    # be admitted from this file — a machine reading goes to a reviewer instead.
+    assert len(hm.admitted_by(hm.Admission.REGULATOR_FLOOR)) >= 10
     assert hm.admitted_symbols()
 
 

@@ -52,6 +52,7 @@ from ai_market_monitor.services.sharia_source_catalog import (
 #: actually stops it.
 SOURCES_MISSING = "sources_missing"
 HELD_BACK = "held_back"
+RED_FLAGS = "red_flags"
 NEW_COIN_REPORT = "new_coin_report"
 ACTIVITY_TO_CHECK = "activity_to_check"
 IDENTITY_UNCLEAR = "identity_unclear"
@@ -94,7 +95,17 @@ TAG_DEFINITIONS: dict[str, CaseTagDefinition] = {
         meaning=(
             "The automatic check of a new coin found a term against our methodology on "
             "the project's own pages. The coin has no status and stays out of every "
-            "screened list until you confirm or release it."
+            "screened list until you approve or reject it."
+        ),
+    ),
+    RED_FLAGS: CaseTagDefinition(
+        key=RED_FLAGS,
+        label="Red flags",
+        tone="attention",
+        meaning=(
+            "The automatic check of a new coin found warning signs it could quote but "
+            "not prove — more than a doubt, less than a term. They do not hold the coin "
+            "back. Read them before you decide."
         ),
     ),
     NEW_COIN_REPORT: CaseTagDefinition(
@@ -185,6 +196,8 @@ _FINISHED_STATES = frozenset(
 #: reads free text looking for words like "interest" or "gambling" — that would be a
 #: heuristic deciding a Shariah question, which this product never does.
 _SEVERITIES_WORTH_READING = frozenset({"high", "critical"})
+#: What the new-coin pipeline writes when its report carries red flags and no term.
+_RED_FLAG_SEVERITY = "medium"
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,7 +335,13 @@ def classify(
             return CaseSignal(
                 HELD_BACK,
                 f"A term against our methodology was found on {name}'s own pages. "
-                "Confirm it or release the coin.",
+                "Read it, then approve or reject the coin.",
+            )
+        if risk_severity == _RED_FLAG_SEVERITY:
+            return CaseSignal(
+                RED_FLAGS,
+                f"The automatic check found red flags for {name}: warning signs it "
+                "could not prove. Read them before you decide.",
             )
         return CaseSignal(
             NEW_COIN_REPORT,

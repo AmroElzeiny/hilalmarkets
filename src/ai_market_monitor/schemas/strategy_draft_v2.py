@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, TypeGuard, get_args
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -598,6 +598,16 @@ UnresolvedTargetType = Literal[
     "reference_definition",
     "unsupported_resolution",
 ]
+
+#: The same list, as values. Read it — never a hand-written copy — when a wider kind of
+#: target (a clarification's) has to be checked before it becomes an unresolved field.
+UNRESOLVED_TARGET_TYPES: frozenset[str] = frozenset(get_args(UnresolvedTargetType))
+
+
+def is_unresolved_target_type(value: object) -> TypeGuard[UnresolvedTargetType]:
+    """Whether ``value`` is a kind of target an unresolved field may carry."""
+
+    return value in UNRESOLVED_TARGET_TYPES
 
 
 def _seed_completion_contract(migrated: dict[str, object]) -> dict[str, object]:

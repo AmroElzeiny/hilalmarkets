@@ -45,7 +45,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from functools import lru_cache
@@ -250,6 +250,17 @@ class AdmittedAsset:
                 "meme_coin_not_refused",
                 f"{self.symbol} is on the meme list, so this standard must record it as "
                 f"refused under {MEME_CONDITION}, with the meme rule as its first reason.",
+            )
+        if self.admission is Admission.AUTOMATED_SCREEN and not self.is_meme_refusal:
+            # The owner's rule from 5 October 2026: a machine reading is research for a
+            # reviewer, never a published result. A coin read by machine reaches the
+            # public only through a reviewer's decision in System Brain
+            # (``services/reviewer_passports.py``). The one exception is the meme rule,
+            # which is the owner's own decision, not the machine's.
+            raise AdmissionError(
+                "machine_route_needs_a_reviewer",
+                f"{self.symbol}: a machine reading cannot be published from this file. "
+                "Decide it in System Brain instead.",
             )
 
     @property
@@ -910,6 +921,8 @@ class PublishResult:
     assessments_written: int = 0
     assessments_unchanged: int = 0
     sources_written: int = 0
+    #: Coins whose result this file no longer carries and nobody reviewed: taken down.
+    withdrawn: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -917,6 +930,7 @@ class PublishResult:
             "assessments_written": self.assessments_written,
             "assessments_unchanged": self.assessments_unchanged,
             "sources_written": self.sources_written,
+            "withdrawn": list(self.withdrawn),
         }
 
 
@@ -997,10 +1011,25 @@ async def publish(session: AsyncSession) -> PublishResult:
         )
     }
 
+    # A result this file published once and no longer carries is taken down — unless a
+    # reviewer decided it, in which case it was never the file's to remove. Nothing is
+    # deleted: the row keeps its dates, so the history shows it was live.
+    in_file = {asset.symbol for asset in admitted_assets()}
+    for symbol, row in sorted(existing.items()):
+        if symbol in in_file or is_reviewer_checked(row):
+            continue
+        row.valid_until = now
+        result.withdrawn.append(symbol)
+
     for asset in admitted_assets():
         fingerprint = _fingerprint(asset)
         current = existing.get(asset.symbol)
         if current is not None and _stored_fingerprint(current) == fingerprint:
+            result.assessments_unchanged += 1
+            continue
+        if is_reviewer_checked(current):
+            # A Hilal Markets reviewer decided this coin in System Brain. A file the
+            # machine's reading was copied into never replaces a person's decision.
             result.assessments_unchanged += 1
             continue
         if current is not None:
@@ -1079,6 +1108,26 @@ async def publish(session: AsyncSession) -> PublishResult:
             result.sources_written += 1
     await session.flush()
     return result
+
+
+def is_reviewer_checked(
+    assessment: AssetShariaAssessment | Mapping[str, Any] | None,
+) -> bool:
+    """Whether a person, not the machine, decided this row. The one predicate.
+
+    Written by ``services/reviewer_passports.py`` when a reviewer approves or rejects a
+    coin in System Brain: the snapshot names the decision behind it. Takes the row or
+    just its ``evidence_snapshot``, for a list that selected only that column.
+    """
+
+    if assessment is None:
+        return False
+    snapshot = (
+        assessment
+        if isinstance(assessment, Mapping)
+        else assessment.evidence_snapshot or {}
+    )
+    return bool(snapshot.get("human_reviewed")) and bool(snapshot.get("review_decision_id"))
 
 
 def _source_summary(asset: AdmittedAsset, source: Source) -> str:

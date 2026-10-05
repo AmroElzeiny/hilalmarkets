@@ -777,6 +777,19 @@ async def _coin_passport(
             except ShariaScreeningError:
                 continue
             return passport, comparison
+        # Last, and only when no other standard covers the coin: a result under the
+        # Hilal Markets Methodology that a Hilal Markets reviewer decided. That is a
+        # person's decision, not the machine's, so it may open on its own — the rule
+        # above keeps out only what nobody reviewed.
+        for item in comparison.results:
+            if item.status is None or not is_automated(item.methodology.code):
+                continue
+            try:
+                passport = await reader.current(asset, methodology_id=item.methodology.id)
+            except ShariaScreeningError:
+                continue
+            if passport.decision_record is not None:
+                return passport, comparison
         raise refused from None
 
 

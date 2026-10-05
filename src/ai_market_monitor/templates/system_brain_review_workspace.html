@@ -1,3 +1,18 @@
+{#- The reasons readers will see on the coin's Passport. The reviewer's own reason stays
+    the record; this box is the plain version. "Write with AI" drafts it from that reason
+    and the reviewer edits it — only what is in the box when Approve or Reject is pressed
+    is published. -#}
+{% macro public_reasons_box(case) %}
+<fieldset class="brain-public-reasons" data-testid="public-reasons">
+  <legend>Reasons readers will see</legend>
+  <p class="brain-muted">One reason per line, shown on the coin's Passport. Your own reason above stays in the history.</p>
+  <textarea name="public_reasons" data-public-reasons maxlength="3500" rows="4" placeholder="Press “Write with AI”, then check every line."></textarea>
+  <div class="brain-public-reasons-actions">
+    <button type="button" class="brain-secondary-button" data-draft-reasons data-draft-url="/dashboard/system-brain/cases/{{ case.id }}/public-reasons-draft"><i data-icon="spark"></i>Write with AI</button>
+    <small data-draft-note role="status" hidden></small>
+  </div>
+</fieldset>
+{% endmacro %}
 {% set case = detail.case %}
 {% set asset = detail.asset %}
 {% set external = detail.external %}
@@ -117,6 +132,19 @@
         {% for term in report.terms_found or [] %}
         <li><i data-icon="alert"></i><span>{{ term.reason }} <strong>{{ 'Fixed rules' if term.source == 'rule' else 'AI reader' }}</strong>{% if term.quote %} “{{ term.quote }}”{% endif %}{% if term.url %} <a href="{{ term.url }}" target="_blank" rel="noopener">Open page</a>{% endif %}</span></li>
         {% else %}<li class="clear"><i data-icon="check"></i><span>None found on the project's own pages.</span></li>{% endfor %}
+      </ul>
+
+      {#- Between a term and a doubt: a warning sign the reader can point at but not
+          prove. Never holds the coin back; shown first so it is read first. A report
+          written before red flags existed says so, rather than claiming "none". -#}
+      <h4>Red flags</h4>
+      <ul class="brain-findings brain-red-flags" data-testid="coin-report-red-flags">
+        {% for flag in report.red_flags or [] %}
+        <li class="flag"><i data-icon="alert"></i><span>{{ flag.text }} <strong>{{ {'rule': 'Fixed rules', 'ai': 'AI reader', 'links': 'Link check', 'news': 'News page'}.get(flag.source, 'Check') }}</strong>{% if flag.quote %} “{{ flag.quote }}”{% endif %}{% if flag.url %} <a href="{{ flag.url }}" target="_blank" rel="noopener">Open page</a>{% endif %}</span></li>
+        {% else %}
+        {% if (report.version or 1) < 2 %}<li><i data-icon="info"></i><span>This report was made before red flags were checked. It is read again on the next run.</span></li>
+        {% else %}<li class="clear"><i data-icon="check"></i><span>No red flags found.</span></li>{% endif %}
+        {% endfor %}
       </ul>
 
       <div class="brain-detail-grid">
@@ -324,7 +352,8 @@
     <div class="brain-decision-state">
       <h3>{{ case.state.replace('_',' ').title() }}</h3>
       {% if case.case_type == 'automated_coin_review' %}
-      <p>Nothing here publishes a status. "Keep it out" confirms the coin stays out of every screened list. "Release" closes the report; the coin still has no status.</p>
+      <p>Approving or rejecting publishes this coin's Passport under the Hilal Markets Methodology, marked as checked by a Hilal Markets reviewer — not an outside Shariah authority.</p>
+      {% if detail.full_review %}<p><a href="/dashboard/system-brain/cases/{{ detail.full_review.id }}">This coin also has a full review against {{ detail.full_review.authority }}</a> ({{ detail.full_review.state.replace('_',' ') }}).</p>{% endif %}
       {% else %}
       <p>Approving publishes this Passport. Rejecting keeps the evidence and shows nothing.</p>
       {% endif %}
@@ -360,10 +389,11 @@
     <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form data-testid="coin-report-decision">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label class="brain-decision-reason">Your reason<textarea name="reason" minlength="10" maxlength="5000" required placeholder="Say what you read in the report and why you decided this."></textarea></label>
+      {{ public_reasons_box(case) }}
       <details class="brain-decision-extras"><summary>Evidence requests</summary><textarea name="requested_evidence" placeholder="One evidence request per line"></textarea></details>
       <div class="brain-decision-actions brain-terminal-action">
-        <button name="action" value="reject_and_store" data-confirm="Keep this coin out and store the report?" class="danger">Keep it out</button>
-        <button name="action" value="dismiss_false_positive" data-confirm="Release this coin? It still has no Shariah status." class="secondary">Release</button>
+        <button name="action" value="approve_new_coin" data-confirm="Approve this coin and publish its Passport under the Hilal Markets Methodology?" class="approve">Approve &amp; publish</button>
+        <button name="action" value="reject_and_store" data-confirm="Reject this coin and publish a Passport saying it was not approved?" class="danger">Reject &amp; publish</button>
         <button name="action" value="request_more_evidence" class="secondary">Ask for evidence</button>
       </div>
     </form>
@@ -417,6 +447,7 @@
         <button type="button" data-accept-ai-rationale>Copy into my reason</button>
       </details>
       {% endif %}
+      {{ public_reasons_box(case) }}
       <details class="brain-decision-extras" data-decision-extras><summary>Qualifications, gaps, evidence requests</summary><textarea name="qualifications" placeholder="One qualification per line"></textarea><textarea name="acknowledged_gaps" placeholder="One known gap per line"></textarea><textarea name="requested_evidence" placeholder="One evidence request per line"></textarea></details>
       <div class="brain-decision-actions brain-terminal-action">
         <button name="action" value="approve" data-confirm="Approve and publish this Passport?" class="approve" {{ 'disabled' if detail.methodology_contract_error or decision_blocker else '' }}>Approve &amp; publish</button>
@@ -425,7 +456,7 @@
         <button name="action" value="request_more_evidence" class="secondary">Ask for evidence</button>
         <button name="action" value="return_to_research" class="secondary">Back to research</button>
         {% if case.case_type in ['material_source_change','user_factual_report'] %}<button name="action" value="dismiss_false_positive" data-confirm="Close this as a false alarm and keep the record?" class="secondary">False alarm</button>{% endif %}
-        <button name="action" value="reject_and_store" data-confirm="Reject and keep the evidence?" class="danger">Reject</button>
+        <button name="action" value="reject_and_store" data-confirm="Reject this coin and publish a Passport saying it was not approved?" class="danger">Reject &amp; publish</button>
       </div>
     </form>
     {% if external and external.source_row_id and not external.commercial_display_allowed %}
@@ -446,7 +477,7 @@
     </form>
 
     {% elif case.done_at or case.state in ['published','rejected','stored','superseded'] %}
-    <div class="brain-terminal"><strong>{{ case.state.replace('_',' ').title() }}</strong><small>{{ case.publication_state.replace('_',' ').title() }}</small></div>
+    <div class="brain-terminal"><strong>{{ case.state.replace('_',' ').title() }}</strong><small>{{ case.publication_state.replace('_',' ').title() }}</small>{% if detail.passport_url and case.publication_state == 'published' %}<a href="{{ detail.passport_url }}" target="_blank" rel="noopener">Open the Passport</a>{% endif %}</div>
     <form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="reopen"><label>Why reopen<textarea name="reason" minlength="10" maxlength="5000" required></textarea></label><button class="brain-action-button brain-terminal-action" type="submit" data-confirm="Reopen as a new review? History stays.">Reopen</button></form>
     {% if detail.active_publication %}<form method="post" action="/dashboard/system-brain/cases/{{ case.id }}/decision" data-decision-form><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="place_safety_hold"><label>Why hold<textarea name="reason" minlength="10" maxlength="5000" required></textarea></label><button class="brain-action-button danger brain-terminal-action" type="submit" data-confirm="Put the public Passport on hold?">Safety hold</button></form>{% endif %}
 
@@ -465,6 +496,14 @@
         <button name="action" value="add_admin_note" class="secondary">Add note</button>
       </div>
     </form>
+    {#- Always visible, so a reviewer never wonders where publishing went. It is not a
+        shortcut: it opens only when the evidence is ready, and says what is missing. -#}
+    {% if case.case_type != 'official_source_gap' %}
+    <div class="brain-terminal pending" data-testid="publish-not-ready">
+      <button class="brain-action-button" type="button" disabled><i data-icon="passport"></i>Publish</button>
+      <small>{{ detail.publish_hint }}</small>
+    </div>
+    {% endif %}
     {% endif %}
   </aside>
 

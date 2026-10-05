@@ -11,7 +11,8 @@ missed by the product.
 * which :class:`Activity` the project carries on — the same buckets the screen uses;
 * what holding the token pays — the same :class:`HolderReturn` answer;
 * for every official and news link the provider lists, whether it is the project's own;
-* its doubts and its trust points, as plain sentences for the reviewer to read.
+* its red flags — warning signs it can quote but not prove — and its doubts and trust
+  points, as plain sentences for the reviewer to read.
 
 Whether any of that is a term against the methodology is then answered by
 :func:`sharia_automated_screen.blocking_terms`, the one owner of that rule. The model is
@@ -29,8 +30,15 @@ same rule the screen keeps: a project's newsroom writes about the whole market, 
 news page that mentions lending is not a project that lends. A term found on a news page
 goes into the report as a doubt for the reviewer, and never holds the coin back alone.
 
+**A red flag sits between a doubt and a term.** A doubt is a question ("the team is
+not named"). A red flag is a warning sign the reader can point at but cannot prove: a
+lending page on the project's blog, a provider link that belongs to somebody else, an
+approved condition seen once where the rule needs it on several pages. Each one carries
+the sentence and the page it rests on. A red flag never holds a coin back — only a
+proven term does — but it raises the task's priority so a person reads it first.
+
 **Holding back is not a status.** A coin held back simply has no Shariah status, which is
-what it had before; it stays out of every halal list, and a person confirms or releases
+what it had before; it stays out of every halal list, and a person approves or rejects
 it in the task this report is filed under.
 """
 
@@ -70,7 +78,9 @@ from ai_market_monitor.services.sharia_automated_screen import (
 from ai_market_monitor.services.sharia_conditions import (
     Activity,
     HolderReturn,
+    Status,
     blocking_activities,
+    status_of,
 )
 from ai_market_monitor.services.sharia_evidence_screen import (
     ACTIVITY_IN_PLAIN_WORDS,
@@ -84,7 +94,7 @@ logger = logging.getLogger(__name__)
 
 #: The version of the question asked. Stored on every report so a reviewer reading an
 #: old one knows it was asked differently.
-PROMPT_VERSION = "coin-terms-v2"
+PROMPT_VERSION = "coin-terms-v3"
 
 #: How much of each page, and of all pages together, the model is given. A dozen pages
 #: of documentation is far more than one answer needs, and the grounding check reads the
@@ -175,6 +185,12 @@ class NewsNote(_Strict):
     quote: str
 
 
+class RedFlagClaim(_Strict):
+    what: str
+    quote: str
+    page_url: str
+
+
 class CoinTermsAnswer(_Strict):
     """Everything the model may say. Nothing in it is a verdict."""
 
@@ -183,6 +199,7 @@ class CoinTermsAnswer(_Strict):
     holder_return: HolderReturnClaim
     link_checks: list[LinkCheck]
     news: list[NewsNote]
+    red_flags: list[RedFlagClaim]
     doubts: list[str]
     trust_points: list[str]
 
@@ -212,9 +229,15 @@ _INSTRUCTIONS = (
     "5. news: one entry for every supplied page whose kind is official_news or "
     "official_community. Say in one sentence what it says, whether it touches any "
     "activity in the supplied list, and copy one exact sentence from it.\n"
-    "6. doubts: anything a careful reviewer should check — contradictions, missing "
-    "information, vague claims, signs the pages are not the project's own.\n"
-    "7. trust_points: concrete things that make the pages trustworthy, such as a "
+    "6. red_flags: warning signs that are stronger than a question but that the pages "
+    "do not prove — for example a hint that the project lends, borrows, pays a fixed "
+    "yield for holding, runs games of chance, copies another project, or promises "
+    "returns. For each, say it in one plain sentence, copy one sentence of at least "
+    f"{MIN_QUOTE_WORDS} words EXACTLY as written on one supplied page, and give that "
+    "page's url. If you cannot copy a sentence that shows it, put it under doubts.\n"
+    "7. doubts: smaller questions a careful reviewer should check — contradictions, "
+    "missing information, vague claims.\n"
+    "8. trust_points: concrete things that make the pages trustworthy, such as a "
     "published audit, open source code, or a clear team and company.\n"
     "Use only the supplied pages. Do not use outside knowledge for any claim."
 )
@@ -255,6 +278,8 @@ class AIReview:
     holder_return_primary: bool = False
     link_checks: list[dict[str, Any]] = field(default_factory=list)
     news: list[dict[str, Any]] = field(default_factory=list)
+    #: Warning signs, each ``{"text", "quote", "url", "source"}``. Never a term.
+    red_flags: list[dict[str, Any]] = field(default_factory=list)
     doubts: list[str] = field(default_factory=list)
     trust_points: list[str] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
@@ -271,18 +296,32 @@ class AIReview:
         page cannot hold a coin back.
         """
 
-        own = [claim for claim in self.claims if claim.primary]
-        holder_return = self.holder_return if self.holder_return_primary else None
+        return self._terms(own_pages=True)
+
+    def unproven_terms(self) -> list[dict[str, Any]]:
+        """The same terms, read only from pages that are *not* the project's own.
+
+        Asked of the same owner, so a red flag and a held-back coin can never disagree
+        about which activities count. These are red flags: they never hold a coin back.
+        """
+
+        return self._terms(own_pages=False)
+
+    def _terms(self, *, own_pages: bool) -> list[dict[str, Any]]:
+        chosen = [claim for claim in self.claims if claim.primary is own_pages]
+        holder_return = (
+            self.holder_return if self.holder_return_primary is own_pages else None
+        )
         facts = AssetFacts(
             canonical_symbol="-",
             asset_name="",
-            activities=frozenset(claim.activity for claim in own),
+            activities=frozenset(claim.activity for claim in chosen),
             holder_return=holder_return,
         )
         blocking, reasons = blocking_terms(facts)
         terms: list[dict[str, Any]] = []
         for activity, reason in zip(blocking, reasons, strict=True):
-            support = next((c for c in own if c.activity is activity), None)
+            support = next((c for c in chosen if c.activity is activity), None)
             terms.append(
                 {
                     "source": "ai",
@@ -304,6 +343,7 @@ class AIReview:
             "what_it_does": self.what_it_does,
             "activities": [claim.as_dict() for claim in self.claims],
             "refused_claims": list(self.refused),
+            "red_flags": [dict(item) for item in self.red_flags],
             "holder_return": {
                 "answer": self.holder_return.value if self.holder_return else None,
                 "quote": self.holder_return_quote,
@@ -320,6 +360,32 @@ def _sentence(value: Any) -> str:
 
 def _sentences(values: Sequence[Any]) -> list[str]:
     return [s for s in (_sentence(v) for v in values) if s][:MAX_SENTENCES]
+
+
+def red_flag(text: str, *, quote: str = "", url: str = "", source: str) -> dict[str, Any]:
+    """One warning sign, in the shape every red flag has. Capped, never raising."""
+
+    return {
+        "text": _sentence(text),
+        "quote": _sentence(quote),
+        "url": (url or "")[:MAX_SENTENCE_CHARS],
+        "source": source,
+    }
+
+
+def red_flags(items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Red flags without repeats and without empties, at most :data:`MAX_SENTENCES`."""
+
+    kept: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items:
+        text = str(item.get("text") or "")
+        key = text.casefold()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        kept.append(dict(item))
+    return kept[:MAX_SENTENCES]
 
 
 def _url_key(url: str) -> str:
@@ -637,10 +703,14 @@ def ground(
         if check is None:
             review.doubts.append(_sentence(f"The AI did not check the {kind} link {url}."))
         elif check.judgement == "not_official":
-            review.doubts.append(
-                _sentence(
-                    f"The AI thinks the {kind} link {url} is not the project's own: "
-                    f"{check.reason}"
+            # A link the provider lists for this coin that belongs to somebody else is
+            # how a copied or fake project shows itself. More than a question.
+            review.red_flags.append(
+                red_flag(
+                    f"The AI thinks the {kind} link is not the project's own: "
+                    f"{check.reason}",
+                    url=url,
+                    source="links",
                 )
             )
         elif check.judgement == "unclear":
@@ -667,25 +737,45 @@ def ground(
             }
         )
         if note.touches_methodology:
-            review.doubts.append(
-                _sentence(
-                    f"A news page may touch our methodology: {note.what_it_says} "
-                    f"({found[0]})"
+            review.red_flags.append(
+                red_flag(
+                    f"A news page may touch our methodology: {note.what_it_says}",
+                    quote=note.quote,
+                    url=found[0],
+                    source="news",
                 )
             )
+
+    for flag in answer.red_flags:
+        found = located(flag.page_url)
+        if found is None or not quote_is_grounded(flag.quote, found[1]):
+            # Not dropped: the reviewer still sees what the model tried to say, as a
+            # doubt, because a warning nobody can find on the page is only a question.
+            review.refused.append(
+                _sentence(
+                    f"The AI raised a red flag ('{flag.what}'), but the words it quoted "
+                    f"are not on the page it named ({flag.page_url or 'no page'})."
+                )
+            )
+            continue
+        review.red_flags.append(
+            red_flag(flag.what, quote=flag.quote, url=found[0], source="ai")
+        )
 
     # Terms found only on news or commentary pages. They cannot hold a coin back, and
-    # that is exactly why the reviewer must see them.
-    refusing = blocking_activities()
-    for kept in review.claims:
-        if not kept.primary and kept.activity in refusing:
-            review.doubts.append(
-                _sentence(
-                    f"A page that is not the project's own description says "
-                    f"'{kept.quote}' ({kept.url}). This alone does not hold the coin back."
-                )
+    # that is exactly why the reviewer must see them — as red flags.
+    for term in review.unproven_terms():
+        review.red_flags.append(
+            red_flag(
+                f"{term['reason']} This was said on a page that is not the project's own "
+                "description, so it does not hold the coin back alone.",
+                quote=term["quote"],
+                url=term["url"],
+                source="ai",
             )
+        )
 
+    review.red_flags = red_flags(review.red_flags)
     review.doubts = _sentences([*review.doubts, *answer.doubts])
     review.trust_points = _sentences(answer.trust_points)
     review.refused = _sentences(review.refused)
@@ -712,11 +802,68 @@ def rule_terms(decision: EvidenceDecision) -> list[dict[str, Any]]:
     return terms
 
 
+def rule_red_flags(decision: EvidenceDecision) -> list[dict[str, Any]]:
+    """What the fixed rules saw but could not count, as red flags.
+
+    An approved condition only refuses a coin when the project says it on its own pages,
+    often enough (``sharia_evidence_screen._activities_from``). A sign seen once, or seen
+    only on somebody else's page, is dropped there — rightly, for a refusal. It is still
+    a warning a reviewer should read, so it comes back here. Whether the sign *would*
+    refuse is asked of :func:`blocking_terms`, never decided again here.
+    """
+
+    already = set(decision.blocking_activities)
+    counted = set(decision.matched_conditions)
+    flags: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    # The project's own pages first, so the quote shown is the strongest one.
+    for finding in sorted(decision.findings, key=lambda item: not item.primary):
+        code = finding.condition_code
+        if not code or code in counted or code in seen:
+            continue
+        if status_of(code) is not Status.APPROVED:
+            continue
+        holder_return: HolderReturn | None = None
+        if finding.return_kind:
+            try:
+                holder_return = HolderReturn(finding.return_kind)
+            except ValueError:
+                holder_return = None
+        facts = AssetFacts(
+            canonical_symbol="-",
+            asset_name="",
+            activities=frozenset({finding.activity}) if finding.activity else frozenset(),
+            holder_return=holder_return,
+        )
+        blocking, reasons = blocking_terms(facts)
+        if not blocking or set(blocking) <= already:
+            continue
+        seen.add(code)
+        where = (
+            "only a few times on the project's own pages — not often enough"
+            if finding.primary
+            else "on a page that is not the project's own description"
+        )
+        flags.append(
+            red_flag(
+                f"{reasons[0]} The fixed rules saw this {where} to hold the coin back.",
+                quote=finding.quote,
+                url=finding.url,
+                source="rule",
+            )
+        )
+    return flags
+
+
 @dataclass(frozen=True, slots=True)
 class CoinReport:
     hold_state: HoldState
     summary: str
     body: dict[str, Any]
+
+    @property
+    def red_flag_count(self) -> int:
+        return len(self.body.get("red_flags") or [])
 
     @property
     def held_back(self) -> bool:
@@ -746,7 +893,7 @@ def build_report(
             f"Held back. {len(terms)} {'term' if len(terms) == 1 else 'terms'} against "
             f"our methodology {'was' if len(terms) == 1 else 'were'} found on "
             f"{name}'s own pages. It stays out of every screened list until a person "
-            "confirms or releases it."
+            "approves or rejects it."
         )
     elif decision.verdict is EvidenceVerdict.NOT_ENOUGH_DATA:
         hold_state = "not_enough_data"
@@ -772,6 +919,14 @@ def build_report(
             f"{len(folder.failures)} page(s) could not be read. They are listed below."
         )
 
+    flags = red_flags([*rule_red_flags(decision), *review.red_flags])
+    if hold_state == "for_review" and flags:
+        summary = (
+            f"No term against our methodology was proven on {name}'s own pages, but "
+            f"{len(flags)} red {'flag needs' if len(flags) == 1 else 'flags need'} a "
+            "careful look. This is not an approval: a person must review it."
+        )
+
     trust: list[str] = []
     if decision.primary_documents_read:
         trust.append(
@@ -784,10 +939,12 @@ def build_report(
     trust.extend(review.trust_points)
 
     body = {
-        "version": 1,
+        # 2: red flags are their own list. A version-1 report never looked for them.
+        "version": 2,
         "hold_state": hold_state,
         "summary": summary,
         "terms_found": terms,
+        "red_flags": flags,
         "doubts": _sentences(doubts),
         "trust_points": _sentences(trust),
         "link_checks": list(review.link_checks),
@@ -839,5 +996,8 @@ __all__ = [
     "ground",
     "methodology_payload",
     "provider_links",
+    "red_flag",
+    "red_flags",
+    "rule_red_flags",
     "rule_terms",
 ]

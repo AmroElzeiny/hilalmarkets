@@ -15,6 +15,7 @@ from ai_market_monitor.db.models import (
     AssetResearchDossier,
     AssetShariaAssessment,
     AuditEvent,
+    AutomatedScreenRun,
     CanonicalAsset,
     ExternalAssessment,
     MonitorShariaAssetState,
@@ -46,6 +47,20 @@ from ai_market_monitor.schemas.sharia_methodology import (
     UseCoverageDecisionInput,
 )
 from ai_market_monitor.services import sharia_dossier_state as dossier_state
+from ai_market_monitor.services.decision_reasons import clean_public_reasons
+from ai_market_monitor.services.hilal_methodology import (
+    ensure_methodology as ensure_hilal_methodology,
+)
+from ai_market_monitor.services.reviewer_passports import (
+    CitedPage,
+    ReviewerPassportError,
+    ReviewerPassportResult,
+    audit_payload,
+    coin_pages,
+    retract_reviewer_passport,
+    reviewer_assessment_for,
+    write_reviewer_passport,
+)
 from ai_market_monitor.services.sharia_screening import (
     ShariaScreeningError,
     ShariaScreeningService,
@@ -156,6 +171,9 @@ class ShariaGovernanceService:
     def __init__(self, session: AsyncSession, settings: Settings):
         self.session = session
         self.settings = settings
+        #: Why the last rejection wrote no Passport, in one plain sentence; empty when
+        #: it wrote one. Read by the route that tells the reviewer what happened.
+        self.last_passport_note = ""
 
     async def approve_for_publication(
         self,
@@ -169,6 +187,7 @@ class ShariaGovernanceService:
         qualifications: list[str] | None = None,
         acknowledged_gaps: list[str] | None = None,
         internal_only: bool = False,
+        public_reasons: list[str] | None = None,
     ) -> ReviewDecision:
         admin = await self._require_permission(admin_user_id, "REVIEWER")
         case = await self._open_case(case_id)
@@ -227,6 +246,7 @@ class ShariaGovernanceService:
             acknowledged_gaps=acknowledged_gaps or [],
             ai_analysis_snapshot_id=context.analysis.id,
             actor_role="REVIEWER",
+            public_reasons=public_reasons,
         )
         now = datetime.now(UTC)
         case.state = "stored" if internal_only else "approved"
@@ -298,6 +318,7 @@ class ShariaGovernanceService:
         use_case_decisions: list[dict] | None = None,
         qualifications: list[str] | None = None,
         acknowledged_gaps: list[str] | None = None,
+        public_reasons: list[str] | None = None,
     ) -> CaseDecisionOutcome:
         """Approve this case and put the Passport in front of customers.
 
@@ -322,6 +343,7 @@ class ShariaGovernanceService:
             use_case_decisions=use_case_decisions,
             qualifications=qualifications,
             acknowledged_gaps=acknowledged_gaps,
+            public_reasons=public_reasons,
         )
         if self.settings.require_second_reviewer:
             return CaseDecisionOutcome(
@@ -803,7 +825,18 @@ class ShariaGovernanceService:
         *,
         admin_user_id: UUID,
         reason: str,
+        public_reasons: list[str] | None = None,
     ) -> ReviewDecision:
+        """Record that a reviewer did not approve this coin, and show it on its Passport.
+
+        The rejection is the record and is always kept. The Passport is written by
+        :func:`reviewer_passports.write_reviewer_passport`, under the Hilal Markets
+        Methodology, because a Hilal Markets reviewer — not an outside authority — made
+        this decision. When that module declines to write one (a regulator-floor coin, a
+        coin with no page to cite), the rejection still stands and the reason is kept
+        in the audit and returned on :attr:`ReviewDecision.passport_note`.
+        """
+
         admin = await self._require_permission(admin_user_id, "REVIEWER")
         case = await self._open_case(case_id)
         if len(reason.strip()) < 10:
@@ -817,10 +850,14 @@ class ShariaGovernanceService:
             decision="reject_and_store",
             reason=reason,
             evidence_snapshot_ids=await self._case_evidence_ids(case),
+            public_reasons=public_reasons,
         )
+        passport = await self._reviewer_passport(case, decision, approved=False)
         now = datetime.now(UTC)
         case.state = "rejected"
-        case.publication_state = "stored_not_published"
+        case.publication_state = (
+            "published" if passport.assessment is not None else "stored_not_published"
+        )
         case.done_at = now
         case.next_reminder_at = None
         self._audit(
@@ -831,7 +868,7 @@ class ShariaGovernanceService:
             {
                 "decision_id": str(decision.id),
                 "decision_reason_recorded": True,
-                "public_assessment_created": False,
+                **audit_payload(passport),
             },
         )
         await ShariaAdminTelegramService(self.session, self.settings).enqueue(
@@ -840,7 +877,127 @@ class ShariaGovernanceService:
             idempotency_key=f"rejection:{decision.id}",
         )
         await self.session.flush()
+        self.last_passport_note = passport.skipped_reason
         return decision
+
+    async def approve_new_coin(
+        self,
+        case_id: UUID,
+        *,
+        admin_user_id: UUID,
+        reason: str,
+        public_reasons: list[str] | None = None,
+    ) -> ReviewDecision:
+        """A reviewer approves a new coin, and its Passport is published.
+
+        Only for a new-coin case: a coin no outside authority has ruled on. The result is
+        written under the Hilal Markets Methodology and says a Hilal Markets reviewer
+        checked it (see ``reviewer_passports``). A coin with an authority ruling goes
+        through the full review instead, which this never replaces.
+
+        Fails closed: no public reasons, no page to cite, or a meme coin, and nothing is
+        recorded at all.
+        """
+
+        admin = await self._require_permission(admin_user_id, "REVIEWER")
+        case = await self._open_case(case_id)
+        if case.case_type != ReviewCaseType.AUTOMATED_COIN_REVIEW:
+            raise ShariaGovernanceError(
+                "new_coin_approval_wrong_case",
+                "Only a new-coin report can be approved this way. Use the full review.",
+            )
+        if case.state not in {"ready_for_review", "needs_evidence"}:
+            raise ShariaGovernanceError(
+                "case_not_ready", "Only a research-complete case can be approved."
+            )
+        if len(reason.strip()) < 10:
+            raise ShariaGovernanceError(
+                "decision_reason_required", "Provide a clear decision reason."
+            )
+        if not clean_public_reasons(public_reasons or []):
+            raise ShariaGovernanceError(
+                "public_reasons_required",
+                "Write the reasons readers will see on the Passport before approving.",
+            )
+        methodology, _created = await ensure_hilal_methodology(self.session)
+        decision = await self._decision(
+            case,
+            admin_user_id=admin.id,
+            methodology_id=methodology.id,
+            methodology_version=methodology.version,
+            decision="approved",
+            reason=reason,
+            evidence_snapshot_ids=await self._case_evidence_ids(case),
+            public_reasons=public_reasons,
+        )
+        try:
+            passport = await self._reviewer_passport(case, decision, approved=True)
+        except ReviewerPassportError as exc:
+            raise ShariaGovernanceError(exc.code, str(exc)) from exc
+        now = datetime.now(UTC)
+        case.state = "published"
+        case.publication_state = "published"
+        case.methodology_id = methodology.id
+        case.done_at = now
+        case.due_at = None
+        case.next_reminder_at = None
+        self._audit(
+            admin.id,
+            "sharia.new_coin_approved_and_published",
+            "sharia_review_case",
+            str(case.id),
+            {"decision_id": str(decision.id), **audit_payload(passport)},
+        )
+        await self.session.flush()
+        return decision
+
+    async def _reviewer_passport(
+        self,
+        case: ReviewCase,
+        decision: ReviewDecision,
+        *,
+        approved: bool,
+    ) -> ReviewerPassportResult:
+        """Which coin this case is about, and the pages it rests on, handed to the owner."""
+
+        run = await self.session.scalar(
+            select(AutomatedScreenRun).where(AutomatedScreenRun.review_case_id == case.id)
+        )
+        asset = (
+            await self.session.get(CanonicalAsset, case.canonical_asset_id)
+            if case.canonical_asset_id
+            else None
+        )
+        symbol = (run.symbol if run else asset.symbol if asset else "") or ""
+        name = (run.asset_name if run else asset.name if asset else "") or symbol
+        pages = await coin_pages(self.session, symbol.upper()) if symbol else []
+        if not pages and case.external_assessment_id:
+            external = await self.session.get(ExternalAssessment, case.external_assessment_id)
+            if external is not None and external.source_url:
+                pages = [
+                    CitedPage(
+                        url=external.source_url,
+                        title=f"{external.source_authority} reference",
+                        category="official_external_reference",
+                        own=False,
+                        read_at=None,
+                    )
+                ]
+        if not symbol:
+            return ReviewerPassportResult(
+                assessment=None,
+                skipped_reason="No Passport was written: this case is not linked to a coin.",
+            )
+        return await write_reviewer_passport(
+            self.session,
+            symbol=symbol,
+            name=name,
+            approved=approved,
+            decision=decision,
+            # Never the reviewer's email: this is printed on a public page.
+            reviewer_label="Hilal Markets reviewer",
+            pages=pages,
+        )
 
     async def request_more_evidence(
         self,
@@ -2142,7 +2299,13 @@ class ShariaGovernanceService:
                 "A newer decision was recorded on this case, so the earlier one can no "
                 "longer be undone. Reopen the case instead.",
             )
-        if case.state == "published" or case.publication_state == "published":
+        # A Passport a reviewer decision wrote under the Hilal Markets Methodology is
+        # taken back down with the decision. An authority-backed publication is not: its
+        # recorded way back is a safety hold.
+        reviewer_row = await reviewer_assessment_for(self.session, latest)
+        if reviewer_row is None and (
+            case.state == "published" or case.publication_state == "published"
+        ):
             raise ShariaGovernanceError(
                 "undo_published_blocked",
                 "This Passport is already published to customers. Place a safety hold "
@@ -2153,6 +2316,7 @@ class ShariaGovernanceService:
                 "undo_state_unknown",
                 "The state this case came from cannot be restored automatically.",
             )
+        passport_retracted = await retract_reviewer_passport(self.session, latest)
         now = datetime.now(UTC)
         restored_from = case.state
         case.state = previous_state
@@ -2184,6 +2348,7 @@ class ShariaGovernanceService:
                 "restored_from": restored_from,
                 "restored_to": previous_state,
                 "decision_record_retained": True,
+                "reviewer_passport_retracted": passport_retracted,
             },
         )
         await self.session.flush()
@@ -2219,6 +2384,7 @@ class ShariaGovernanceService:
         ai_analysis_snapshot_id: UUID | None = None,
         actor_role: str = "REVIEWER",
         security_metadata: dict[str, Any] | None = None,
+        public_reasons: list[str] | None = None,
     ) -> ReviewDecision:
         version = int(
             await self.session.scalar(
@@ -2242,6 +2408,7 @@ class ShariaGovernanceService:
             use_case_decisions=use_case_decisions or [],
             qualifications=qualifications or [],
             acknowledged_gaps=acknowledged_gaps or [],
+            public_reasons=clean_public_reasons(public_reasons or []),
             ai_analysis_snapshot_id=ai_analysis_snapshot_id,
             actor_role=actor_role,
             application_version=getattr(
@@ -2271,6 +2438,7 @@ class ShariaGovernanceService:
                 "use_case_decisions": row.use_case_decisions,
                 "qualifications": row.qualifications,
                 "acknowledged_gaps": row.acknowledged_gaps,
+                "public_reasons": row.public_reasons,
                 "decision_version": version,
                 "created_at": row.created_at.isoformat(),
             }

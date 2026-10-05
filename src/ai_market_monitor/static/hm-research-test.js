@@ -1,6 +1,6 @@
-/* The research pages at /dashboard/research: what the machine read, in its own words.
+/* The research pages at /dashboard/research: new coins a Hilal Markets reviewer decided.
  *
- * Nothing here decides a fact. The server rendered every row, every verdict and every
+ * Nothing here decides a fact. The server rendered every row, every decision and every
  * sentence; this file only hands the page's own words to the assistant, so "what did
  * you find about this coin" can be answered about the list in front of the person.
  */
@@ -8,7 +8,7 @@
 import { publish } from "./hm-page-context.js";
 import { pageNote } from "./hm-page-notes.js";
 
-/* The list of researched coins: each coin with the verdict the page carries. Only
+/* The list of reviewed coins: each coin with the reviewer's decision the page carries. Only
  * where the list table is, so the documents table on the detail page never reads
  * as coins. */
 if (document.querySelector(".t-table .t-asset-symbol")) {
@@ -20,12 +20,12 @@ if (document.querySelector(".t-table .t-asset-symbol")) {
       const line = `${symbol.trim()}: ${verdict.trim().replace(/\s+/g, " ")}`.trim();
       return line.replace(/\s+/g, " ");
     }).filter((line) => line && line !== ":");
-    const count = `${rows.length} ${rows.length === 1 ? "coin" : "coins"} researched`;
-    return pageNote({ summary: `Coins we researched: ${count}`, points: lines });
+    const count = `${rows.length} ${rows.length === 1 ? "coin" : "coins"} decided by a reviewer`;
+    return pageNote({ summary: `Reviewed new coins: ${count}`, points: lines });
   });
 }
 
-/* One coin's reading: the verdict and the sections the page lays out. Only where
+/* One coin's decision: the reviewer's answer and the sections the page lays out. Only where
  * there is no coin list, so the list description above always wins on the list. */
 if (!document.querySelector(".t-table .t-asset-symbol")) {
   publish("research", () => {

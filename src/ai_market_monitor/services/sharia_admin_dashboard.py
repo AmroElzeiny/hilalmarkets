@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.dashboard_paths import passport_path
 from ai_market_monitor.db.models import (
     AIAnalysisSnapshot,
     AssetResearchDossier,
@@ -1006,7 +1007,14 @@ class ShariaAdminDashboardService:
             if coin_run is not None
             else []
         )
+        full_review = (
+            await self._full_review_for_coin(case, coin_run) if coin_run is not None else None
+        )
+        passport_symbol = coin_run.symbol if coin_run else asset.symbol if asset else ""
         return {
+            "full_review": full_review,
+            "passport_url": passport_path(passport_symbol) if passport_symbol else None,
+            "publish_hint": _publish_hint(case),
             "coin_report": (coin_run.review_report or None) if coin_run else None,
             "coin": {
                 "symbol": coin_run.symbol,
@@ -1235,6 +1243,46 @@ class ShariaAdminDashboardService:
             ),
         }
 
+    async def _full_review_for_coin(
+        self, case: ReviewCase, coin_run: AutomatedScreenRun
+    ) -> dict | None:
+        """The coin's review against an outside authority, when it has one.
+
+        A new coin can later be ruled on by an authority, and then it has both: this
+        report, and a full review that publishes the authority-backed Passport. The
+        reviewer is told, so the two are never decided as if the other did not exist.
+        """
+
+        asset_id = case.canonical_asset_id or await self.session.scalar(
+            select(CanonicalAsset.id).where(CanonicalAsset.symbol == coin_run.symbol)
+        )
+        if asset_id is None:
+            return None
+        other = await self.session.scalar(
+            select(ReviewCase)
+            .where(
+                ReviewCase.canonical_asset_id == asset_id,
+                ReviewCase.id != case.id,
+                ReviewCase.case_type != ReviewCaseType.AUTOMATED_COIN_REVIEW,
+                ReviewCase.case_type != ReviewCaseType.OFFICIAL_SOURCE_GAP,
+                ReviewCase.state != "superseded",
+            )
+            .order_by(ReviewCase.created_at.desc())
+            .limit(1)
+        )
+        if other is None:
+            return None
+        external = (
+            await self.session.get(ExternalAssessment, other.external_assessment_id)
+            if other.external_assessment_id
+            else None
+        )
+        return {
+            "id": other.id,
+            "state": other.state,
+            "authority": external.source_authority if external else "an outside authority",
+        }
+
     async def section(self, name: str) -> dict:
         if name == "published-assets":
             published_rows = list(
@@ -1418,6 +1466,24 @@ def _case_signal(
         contradiction_count=int(dossier.contradiction_count) if dossier else 0,
         fallback_reason=case.human_review_reason,
     )
+
+
+def _publish_hint(case: ReviewCase) -> str:
+    """Why Publish is not open yet on this case, and the one step that opens it."""
+
+    requested = [str(item) for item in case.requested_evidence or [] if str(item).strip()]
+    return {
+        "draft": "Publishing opens once research has gathered the evidence. Start research first.",
+        "researching": "Research is still running. Publishing opens when it finishes.",
+        "research_failed": (
+            "Research did not finish. Retry it; publishing opens when it succeeds."
+        ),
+        "needs_evidence": (
+            "Evidence is missing"
+            + (f": {requested[0]}" if requested else "")
+            + ". Publishing opens once it is added and the case is marked ready."
+        ),
+    }.get(case.state, "Publishing opens when this case is ready for review.")
 
 
 async def _coin_runs(session: AsyncSession, rows: list[ReviewCase]) -> dict[UUID, Any]:

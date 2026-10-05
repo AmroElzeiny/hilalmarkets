@@ -163,6 +163,9 @@ class PassportDecisionRecord(BaseModel):
     methodology_criteria_hash: str | None = None
     decision: str
     reason: str
+    #: The plain reasons the reviewer confirmed for readers. Shown instead of ``reason``
+    #: when present; older decisions have none.
+    public_reasons: list[str] = Field(default_factory=list)
     qualifications: list[str] = Field(default_factory=list)
     evidence_snapshot_ids: list[str] = Field(default_factory=list)
     criterion_decisions: list[dict[str, Any]] = Field(default_factory=list)

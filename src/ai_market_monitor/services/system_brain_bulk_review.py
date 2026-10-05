@@ -66,6 +66,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import ReviewActionBatch, ReviewCase, ReviewDecision
 from ai_market_monitor.db.models.enums import ReviewCaseType
+from ai_market_monitor.services.decision_reasons import own_sentences
 from ai_market_monitor.services.sharia_governance import (
     ShariaGovernanceError,
     ShariaGovernanceService,
@@ -662,12 +663,27 @@ class BulkReviewService:
         # research that follows would be written on top of them and committed together.
         attempt = await self.session.begin_nested()
         try:
+            # One reason for many cases is typed once, so there is no per-case AI draft
+            # to confirm. The Passport shows the reviewer's own sentences instead.
             if action == "reject":
                 decision = await self.governance.reject_and_store(
                     case_id,
                     admin_user_id=admin_user_id,
                     reason=reason,
+                    public_reasons=own_sentences(reason),
                 )
+                if self.governance.last_passport_note:
+                    message = f"Rejected. {self.governance.last_passport_note}"
+            elif case.case_type == ReviewCaseType.AUTOMATED_COIN_REVIEW:
+                # A new coin has no outside authority to approve against; its approval
+                # is the reviewer's own, under the Hilal Markets Methodology.
+                decision = await self.governance.approve_new_coin(
+                    case_id,
+                    admin_user_id=admin_user_id,
+                    reason=reason,
+                    public_reasons=own_sentences(reason),
+                )
+                message = "Approved and published under the Hilal Markets Methodology."
             else:
                 criteria, use_cases = await self._all_conditions_pass(case, reason=reason)
                 outcome = await self.governance.approve_and_publish(

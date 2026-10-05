@@ -758,7 +758,15 @@ class ShariaScreeningService:
             assessment = await self.effective_assessment(methodology.id, asset)
             if assessment is None:
                 continue
-            if self.settings and self.settings.is_deployed:
+            # The Hilal Markets Methodology has no publication records — its assessment is
+            # the released artefact (see ``ShariaPassportReadService.current``, which
+            # exempts it the same way). Asking it for one hid every result under it from
+            # the standards list in production, while the Passport itself would open.
+            if (
+                self.settings
+                and self.settings.is_deployed
+                and not is_automated(methodology)
+            ):
                 publication_id = await self.session.scalar(
                     select(PublishedAssetAssessment.id).where(
                         PublishedAssetAssessment.asset_assessment_id == assessment.id,

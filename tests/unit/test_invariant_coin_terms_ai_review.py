@@ -28,6 +28,7 @@ from ai_market_monitor.services.coin_terms_ai_review import (
     ground,
     methodology_payload,
     provider_links,
+    rule_red_flags,
 )
 from ai_market_monitor.services.coinmarketcap import CoinLinks
 from ai_market_monitor.services.sharia_automated_screen import (
@@ -38,13 +39,17 @@ from ai_market_monitor.services.sharia_automated_screen import (
 from ai_market_monitor.services.sharia_conditions import (
     Activity,
     HolderReturn,
+    Status,
+    approved_conditions,
     blocking_activities,
+    conditions_by_status,
 )
 from ai_market_monitor.services.sharia_evidence_screen import (
     EvidenceDecision,
     EvidenceVerdict,
     GroundedReason,
 )
+from ai_market_monitor.services.sharia_evidence_vocabulary import Finding
 from ai_market_monitor.services.sharia_source_catalog import NEWS, WEBSITE
 
 SITE = "https://project.example"
@@ -82,6 +87,7 @@ def _answer(**overrides) -> CoinTermsAnswer:
         "holder_return": {"answer": None, "quote": "", "page_url": ""},
         "link_checks": [],
         "news": [],
+        "red_flags": [],
         "doubts": [],
         "trust_points": [],
     }
@@ -196,13 +202,17 @@ def test_a_grounded_term_on_the_projects_own_page_holds_the_coin_back(activity):
 
 
 @pytest.mark.parametrize("activity", BLOCKING, ids=lambda a: a.value)
-def test_the_same_term_on_a_news_page_is_a_doubt_and_never_holds_the_coin_back(activity):
+def test_the_same_term_on_a_news_page_is_a_red_flag_and_never_holds_the_coin_back(activity):
     review = _grounded(
         _answer(activities=[{"activity": activity, "quote": SENTENCE, "page_url": NEWS_PAGE}])
     )
     assert review.blocked_terms() == []
-    assert any("does not hold the coin back" in doubt for doubt in review.doubts)
-    assert build_report(_decision(), review, _folder(), None).hold_state == "for_review"
+    flags = [f for f in review.red_flags if "does not hold the coin back" in f["text"]]
+    assert flags and flags[0]["quote"] == SENTENCE and flags[0]["url"] == NEWS_PAGE
+    report = build_report(_decision(), review, _folder(), None)
+    assert report.hold_state == "for_review"
+    assert report.red_flag_count >= 1
+    assert "red flag" in report.summary
 
 
 @pytest.mark.parametrize("activity", BLOCKING, ids=lambda a: a.value)
@@ -316,10 +326,15 @@ def test_every_listed_link_is_in_the_report_even_when_the_ai_skipped_it(kind):
 
 
 @pytest.mark.parametrize(
-    ("judgement", "doubted"),
-    [("official", False), ("not_official", True), ("unclear", True)],
+    ("judgement", "doubted", "flagged"),
+    [("official", False, False), ("not_official", False, True), ("unclear", True, False)],
 )
-def test_a_link_the_ai_doubts_becomes_a_doubt(judgement, doubted):
+def test_a_link_that_is_somebody_elses_is_a_red_flag_and_an_unclear_one_a_doubt(
+    judgement, doubted, flagged
+):
+    """A provider link that belongs to somebody else is how a fake project shows itself:
+    more than a question. A link the AI could not place is only a question."""
+
     url = f"{SITE}/whitepaper.pdf"
     review = _grounded(
         _answer(link_checks=[{"url": url, "judgement": judgement, "reason": "Because."}]),
@@ -328,6 +343,7 @@ def test_a_link_the_ai_doubts_becomes_a_doubt(judgement, doubted):
     assert review.link_checks[0]["judgement"] == judgement
     assert review.link_checks[0]["on_project_site"] is True
     assert any(url in doubt for doubt in review.doubts) is doubted
+    assert any(flag["url"] == url for flag in review.red_flags) is flagged
 
 
 CONTRACT = "0x32353a6c91143bfd6c7d363b546e62a9a2489a20"
@@ -362,9 +378,10 @@ def test_an_explorer_page_showing_the_coins_contract_is_not_a_doubt(url, judgeme
     assert review.link_checks[0]["shows_contract"] is True
     assert review.link_checks[0]["judgement"] == judgement
     assert not any(url in doubt for doubt in review.doubts)
+    assert not any(flag["url"] == url for flag in review.red_flags)
 
 
-def test_an_explorer_page_for_another_contract_is_still_doubted():
+def test_an_explorer_page_for_another_contract_is_still_flagged():
     url = "https://etherscan.io/token/0x1111111111111111111111111111111111111111"
     folder = _folder()
     pages, texts = _pages(folder)
@@ -377,7 +394,7 @@ def test_an_explorer_page_for_another_contract_is_still_doubted():
         contract_addresses=(CONTRACT,),
     )
     assert review.link_checks[0]["shows_contract"] is False
-    assert any(url in doubt for doubt in review.doubts)
+    assert any(flag["url"] == url for flag in review.red_flags)
 
 
 def test_a_link_the_ai_invented_is_not_in_the_report():
@@ -404,16 +421,83 @@ def test_a_news_page_note_is_kept_only_when_grounded_and_flagged_when_it_matters
     review = _grounded(_answer(news=[good, bad]))
     assert len(review.news) == 1
     assert len(review.refused) == 1
-    assert any("news page may touch" in doubt for doubt in review.doubts) is touches
+    flagged = [f for f in review.red_flags if "news page may touch" in f["text"]]
+    assert bool(flagged) is touches
+    if touches:
+        assert flagged[0]["quote"] == SENTENCE and flagged[0]["url"] == NEWS_PAGE
 
 
 # --- Diagnostics never become the failure --------------------------------------------
 
 
 def test_very_long_model_sentences_are_cut_never_refused():
-    review = _grounded(_answer(doubts=["x" * 50_000] * 40, trust_points=["y" * 50_000]))
+    long_flags = [
+        {"what": f"{i} " + "z" * 50_000, "quote": SENTENCE, "page_url": OWN} for i in range(40)
+    ]
+    review = _grounded(
+        _answer(
+            doubts=["x" * 50_000] * 40, trust_points=["y" * 50_000], red_flags=long_flags
+        )
+    )
     assert len(review.doubts) <= 12
+    assert len(review.red_flags) <= 12
     assert all(len(item) <= 500 for item in [*review.doubts, *review.trust_points])
+    assert all(len(flag["text"]) <= 500 for flag in review.red_flags)
+
+
+# --- Red flags: more than a doubt, never a term ------------------------------------
+
+
+def test_a_grounded_red_flag_from_the_ai_is_kept_with_its_quote_and_page():
+    review = _grounded(
+        _answer(red_flags=[{"what": "It hints at lending.", "quote": SENTENCE, "page_url": OWN}])
+    )
+    assert review.red_flags == [
+        {"text": "It hints at lending.", "quote": SENTENCE, "url": OWN, "source": "ai"}
+    ]
+    assert review.blocked_terms() == []
+    report = build_report(_decision(), review, _folder(), None)
+    assert report.hold_state == "for_review"
+    assert report.body["red_flags"][0]["text"] == "It hints at lending."
+
+
+@pytest.mark.parametrize(
+    ("quote", "page"),
+    [
+        ("Our protocol lends money to every member.", OWN),
+        (SENTENCE, f"{SITE}/somewhere-else"),
+        (SENTENCE, ""),
+    ],
+    ids=["invented-quote", "unknown-page", "no-page"],
+)
+def test_an_ungrounded_red_flag_is_only_a_doubt(quote, page):
+    review = _grounded(
+        _answer(red_flags=[{"what": "It hints at lending.", "quote": quote, "page_url": page}])
+    )
+    assert review.red_flags == []
+    assert any("raised a red flag" in item for item in review.refused)
+    report = build_report(_decision(), review, _folder(), None)
+    assert any("raised a red flag" in doubt for doubt in report.body["doubts"])
+
+
+@pytest.mark.parametrize("activity", BLOCKING, ids=lambda a: a.value)
+def test_red_flags_never_hold_a_coin_back(activity):
+    review = _grounded(
+        _answer(
+            activities=[{"activity": activity, "quote": SENTENCE, "page_url": NEWS_PAGE}],
+            red_flags=[{"what": "A warning.", "quote": SENTENCE, "page_url": OWN}],
+        )
+    )
+    report = build_report(_decision(), review, _folder(), None)
+    assert report.red_flag_count >= 2
+    assert report.hold_state == "for_review"
+    assert report.body["terms_found"] == []
+
+
+def test_the_report_records_its_version_so_old_reports_are_not_read_as_flag_free():
+    report = build_report(_decision(), AIReview(state="completed"), _folder(), None)
+    assert report.body["version"] == 2
+    assert report.body["red_flags"] == []
 
 
 # --- The call itself ---------------------------------------------------------------
@@ -517,3 +601,56 @@ async def test_any_provider_failure_is_a_failed_review_never_an_exception(respon
     assert review.state == "failed"
     assert review.error_code
     assert review.claims == []
+
+
+REFUSING_CONDITIONS = [
+    item for item in approved_conditions() if item.activity in blocking_activities()
+]
+
+
+def _finding(code: str, activity: Activity, *, primary: bool) -> Finding:
+    return Finding(
+        activity=activity,
+        return_kind=None,
+        phrase="lend",
+        quote=SENTENCE,
+        url=OWN if primary else NEWS_PAGE,
+        category=WEBSITE if primary else NEWS,
+        primary=primary,
+        condition_code=code,
+    )
+
+
+@pytest.mark.parametrize("primary", [True, False], ids=["own-page-once", "other-page"])
+@pytest.mark.parametrize("rule", REFUSING_CONDITIONS, ids=lambda c: c.code)
+def test_an_approved_condition_the_rule_saw_but_could_not_count_is_a_red_flag(rule, primary):
+    decision = _decision(findings=[_finding(rule.code, rule.activity, primary=primary)])
+    flags = rule_red_flags(decision)
+    assert len(flags) == 1
+    assert flags[0]["source"] == "rule"
+    assert flags[0]["quote"] == SENTENCE
+    assert flags[0]["url"] == (OWN if primary else NEWS_PAGE)
+    report = build_report(decision, AIReview(state="completed"), _folder(), None)
+    assert report.hold_state == "for_review"
+    assert report.red_flag_count == 1
+
+
+@pytest.mark.parametrize("rule", REFUSING_CONDITIONS, ids=lambda c: c.code)
+def test_a_condition_that_did_hold_the_coin_back_is_a_term_not_a_red_flag(rule):
+    decision = _decision(
+        EvidenceVerdict.NOT_ELIGIBLE,
+        blocking_activities=[rule.activity],
+        matched_conditions=[rule.code],
+        findings=[_finding(rule.code, rule.activity, primary=True)],
+    )
+    assert rule_red_flags(decision) == []
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [item for item in conditions_by_status(Status.PROPOSED) if item.activity is not None],
+    ids=lambda c: c.code,
+)
+def test_a_condition_the_owner_has_not_approved_is_never_a_red_flag(rule):
+    decision = _decision(findings=[_finding(rule.code, rule.activity, primary=True)])
+    assert rule_red_flags(decision) == []

@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -428,6 +429,11 @@ class ReviewDecision(UUIDPrimaryKeyMixin, Base):
     )
     qualifications: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     acknowledged_gaps: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    #: The reasons a reader sees on the Passport, as the reviewer confirmed them. The
+    #: AI may draft them from ``reason``; only the reviewer's submission is stored here.
+    public_reasons: Mapped[list[str]] = mapped_column(
+        JSON, default=list, server_default=text("'[]'"), nullable=False
+    )
     ai_analysis_snapshot_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("sharia_ai_analysis_snapshots.id", ondelete="SET NULL")
     )

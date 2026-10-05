@@ -31,6 +31,27 @@ _EXPLANATIONS: dict[str, tuple[str, str]] = {
         "This case already has a final decision.",
         "Open it and reopen the case if it needs deciding again.",
     ),
+    # --- a reviewer's own decision on a coin ----------------------------------------
+    "new_coin_approval_wrong_case": (
+        "This case is a full review against an outside authority, not a new-coin report.",
+        "Use Approve & publish in the full review's decision panel instead.",
+    ),
+    "public_reasons_required": (
+        "The reasons readers will see on the Passport are empty.",
+        "Press “Write with AI”, check every line, then approve again.",
+    ),
+    "reviewer_passport_meme_coin": (
+        "This is a meme coin, and the Hilal Markets Methodology does not cover meme coins.",
+        "Reject it instead; its Passport will say it was not approved.",
+    ),
+    "reviewer_passport_no_source": (
+        "Not one page about this coin could be read, so an approval would cite nothing.",
+        "Press Ask for evidence and add a page the project publishes about itself.",
+    ),
+    "reviewer_passport_symbol_missing": (
+        "This case is not linked to a coin, so no Passport can be written for it.",
+        "Check the case's coin, or reject it with your reasons.",
+    ),
     "case_not_ready": (
         "This case is not ready for a decision yet.",
         "Open it and start or finish its research first.",

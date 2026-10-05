@@ -226,6 +226,56 @@ document.querySelectorAll("[data-accept-ai-rationale]").forEach((button) => {
   });
 });
 
+/* "Write with AI", in the box of reasons readers will see on the Passport.
+ *
+ * It sends the reviewer's own reason to the server, which drafts plain reasons from it
+ * and checks them, and puts the draft into the box for the reviewer to read and edit.
+ * It never submits and never decides: the reviewer still presses Approve or Reject, and
+ * only what is in the box at that moment is published.
+ */
+document.querySelectorAll("[data-draft-reasons]").forEach((button) => {
+  const form = button.closest("form");
+  if (!form) return;
+  const target = form.querySelector("[data-public-reasons]");
+  const note = form.querySelector("[data-draft-note]");
+  const source = form.querySelector("textarea[name='reason']");
+  const token = form.querySelector("input[name='csrf_token']");
+  if (!target || !source || !token) return;
+  const say = (text) => {
+    if (!note) return;
+    note.textContent = text || "";
+    note.hidden = !text;
+  };
+  button.addEventListener("click", async () => {
+    if (button.disabled) return;
+    const body = new URLSearchParams({ reason: source.value, csrf_token: token.value });
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    say("Writing…");
+    try {
+      const response = await fetch(button.dataset.draftUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+        credentials: "same-origin",
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      const data = await response.json();
+      if (Array.isArray(data.reasons) && data.reasons.length) {
+        target.value = data.reasons.join("\n");
+        target.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      say(data.note || (data.by_ai ? "Read the draft and change anything that is not right." : ""));
+      target.focus();
+    } catch (error) {
+      say("The draft could not be written. Type the reasons yourself, one per line.");
+    } finally {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+    }
+  });
+});
+
 /* "Mark all as passed", on one review case.
  *
  * It selects "pass" on every condition that allows it and "covered" on every use rule

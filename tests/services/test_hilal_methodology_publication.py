@@ -210,11 +210,13 @@ async def test_it_is_still_selectable_on_purpose(test_context):
 @pytest.mark.parametrize(
     ("exchange", "listed"),
     [
-        # What each exchange listed against USDT on 31 August 2026, for the ten newly
-        # researched coins. Recorded rather than fetched: this is about the rule, and a
-        # test that called an exchange would fail on a train.
-        ("binance", {"ZEC", "USD1", "ENSO", "PUMP", "RLUSD", "XAUT", "PEPE", "ZKC", "PROM", "U"}),
-        ("bybit", {"USD1", "ENSO", "PUMP", "RLUSD", "XAUT", "PEPE", "ZKC"}),
+        # A recorded slice of what each exchange lists against USDT: coins the standard
+        # admits, a coin it refuses (PEPE, a meme coin) and coins it never covered.
+        # Recorded rather than fetched: this is about the rule, and a test that called an
+        # exchange would fail on a train. (Until 5 October 2026 this used ten coins the
+        # machine had judged alone; those now go to a reviewer instead.)
+        ("binance", {"BTC", "ETH", "SOL", "LINK", "PEPE", "ZEC", "DOGE"}),
+        ("bybit", {"XRP", "ADA", "AVAX", "PEPE", "ENSO"}),
     ],
 )
 async def test_an_admitted_coin_is_listed_for_every_exchange_that_trades_it(
@@ -223,9 +225,9 @@ async def test_an_admitted_coin_is_listed_for_every_exchange_that_trades_it(
     """Through the real list, with the statuses the market page really asks for.
 
     `screened_market_context` builds the scope from `provider.list_symbols(exchange)` and
-    hands it, plus `DEFAULT_ALLOWED_STATUSES`, to `list_screened_assets`. Seven of the ten
-    new coins also trade on Bybit, and they have to appear there without a second
-    admission — an admission names a coin, never a coin-on-an-exchange.
+    hands it, plus `DEFAULT_ALLOWED_STATUSES`, to `list_screened_assets`. A coin listed on
+    two exchanges has to appear on both without a second admission — an admission names
+    a coin, never a coin-on-an-exchange.
 
     The status filter is part of the check, not a detail: a refused coin and one nobody
     could read are both *in* this standard, and neither may show up in the list a person

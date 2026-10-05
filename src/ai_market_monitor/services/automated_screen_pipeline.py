@@ -397,13 +397,17 @@ class AutomatedScreenPipeline:
 
         await self._store_documents(run, decision.symbol, folder)
         await self._store_passport(decision, record, folder)
-        await self._file_review_task(run, decision, report)
+        await self._file_review_task(
+            run, symbol=decision.symbol, name=decision.name, report=report
+        )
         self._record_ai_usage(review)
 
     async def _file_review_task(
         self,
         run: AutomatedScreenRun,
-        decision: EvidenceDecision,
+        *,
+        symbol: str,
+        name: str,
         report: CoinReport,
     ) -> None:
         """Put the report in the reviewers' task list. One task per coin.
@@ -413,9 +417,9 @@ class AutomatedScreenPipeline:
         open task is brought up to date, so a reviewer never reads a report older than
         the one on the run.
 
-        The task carries no verdict and cannot publish one. Its approval path is the
-        governed one, which refuses a case with no authority assessment behind it, and
-        the review screen offers only "keep it out", "release" and "ask for evidence".
+        The task carries no verdict and cannot publish one. Only a reviewer's decision on
+        it does — "Approve & publish" or "Reject & publish" — and that writes the coin's
+        Passport under the Hilal Markets Methodology (``reviewer_passports``).
         """
 
         case = (
@@ -423,7 +427,7 @@ class AutomatedScreenPipeline:
             if run.review_case_id is not None
             else None
         )
-        key = f"automated-coin-review:{decision.symbol}"
+        key = f"automated-coin-review:{symbol}"
         if case is None:
             case = await self.session.scalar(
                 select(ReviewCase).where(ReviewCase.idempotency_key == key)
@@ -435,19 +439,19 @@ class AutomatedScreenPipeline:
         held = report.held_back
         body = report.body
         now = datetime.now(UTC)
-        name = (decision.name or decision.symbol)[:180]
+        name = (name or symbol)[:180]
         if case is None:
             asset = await self.session.scalar(
-                select(CanonicalAsset).where(CanonicalAsset.symbol == decision.symbol)
+                select(CanonicalAsset).where(CanonicalAsset.symbol == symbol)
             )
             case = ReviewCase(
-                case_reference=f"NEW-{decision.symbol}"[:40],
+                case_reference=f"NEW-{symbol}"[:40],
                 case_type=ReviewCaseType.AUTOMATED_COIN_REVIEW,
                 state="ready_for_review",
                 publication_state="unpublished",
                 canonical_asset_id=asset.id if asset is not None else None,
                 idempotency_key=key[:128],
-                title=f"New coin check: {name} ({decision.symbol})"[:300],
+                title=f"New coin check: {name} ({symbol})"[:300],
                 human_review_reason="",
                 requested_evidence=[],
                 due_at=now
@@ -455,14 +459,75 @@ class AutomatedScreenPipeline:
                 next_reminder_at=now,
             )
             self.session.add(case)
+        flagged = report.red_flag_count > 0
         case.priority = (
-            "high" if held else "low" if report.hold_state == "not_enough_data" else "normal"
+            "high"
+            if held or flagged
+            else "low"
+            if report.hold_state == "not_enough_data"
+            else "normal"
         )
-        case.risk_severity = "high" if held else "none"
+        # ``medium`` is the research vocabulary's word for "read this first, nothing is
+        # proven" — exactly a red flag. ``sharia_case_tags`` reads it; never the text.
+        case.risk_severity = "high" if held else "medium" if flagged else "none"
         case.human_review_reason = report.summary
-        case.requested_evidence = list(body.get("doubts") or [])
+        case.requested_evidence = [
+            *(f"Red flag: {item.get('text')}" for item in body.get("red_flags") or []),
+            *(body.get("doubts") or []),
+        ]
         await self.session.flush()
         run.review_case_id = case.id
+
+    async def send_to_review(self, symbols: Sequence[str]) -> dict[str, str]:
+        """Put coins in front of a reviewer, from the report already stored for each.
+
+        For a coin whose machine result was taken down because no person decided it
+        (5 October 2026: the owner's rule that nothing is shown until a reviewer decides).
+        Nothing is read again and nothing is decided. Returns, per coin, what happened:
+
+        * ``filed`` — a task is open for it now (a new one, or the open one brought up
+          to date);
+        * ``already_decided`` — a person already decided it; that decision stands;
+        * ``queued`` — its stored reading has no report yet, so the next sweep reads it
+          again and files the task then;
+        * ``never_read`` — the machine never read it; nothing to file.
+        """
+
+        outcome: dict[str, str] = {}
+        for raw in symbols:
+            symbol = raw.strip().upper()
+            run = await self.session.scalar(
+                select(AutomatedScreenRun).where(AutomatedScreenRun.symbol == symbol)
+            )
+            if run is None:
+                outcome[symbol] = "never_read"
+                continue
+            existing = (
+                await self.session.get(ReviewCase, run.review_case_id)
+                if run.review_case_id is not None
+                else None
+            )
+            if existing is not None and existing.done_at is not None:
+                outcome[symbol] = "already_decided"
+                continue
+            body = dict(run.review_report or {})
+            if not body.get("hold_state"):
+                # A reading from before reports existed. Owed a fresh read: the sweep
+                # takes it on its next run, and files the task from that report.
+                run.ai_review_state = "pending"
+                run.ai_review_attempts = 0
+                run.decided_at = None
+                outcome[symbol] = "queued"
+                continue
+            report = CoinReport(
+                hold_state=body["hold_state"], summary=str(body.get("summary") or ""), body=body
+            )
+            await self._file_review_task(
+                run, symbol=symbol, name=run.asset_name or symbol, report=report
+            )
+            outcome[symbol] = "filed"
+        await self.session.flush()
+        return outcome
 
     def _record_ai_usage(self, review: AIReview) -> None:
         """One row in the AI spending ledger for each answer the model gave.

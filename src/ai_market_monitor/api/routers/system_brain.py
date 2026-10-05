@@ -62,6 +62,10 @@ from ai_market_monitor.services.affiliate import (
 )
 from ai_market_monitor.services.affiliate_attribution import REFERRAL_LINK_QUERY_KEY
 from ai_market_monitor.services.affiliate_payout_options import MINIMUM_PAYOUT_USD
+from ai_market_monitor.services.decision_reasons import (
+    PublicReasonWriter,
+    clean_public_reasons,
+)
 from ai_market_monitor.services.sharia_admin_dashboard import (
     ShariaAdminDashboardService,
 )
@@ -1952,6 +1956,50 @@ async def system_brain_section(
     )
 
 
+#: Decision actions that put a reviewer's decision on a public Passport, and so need the
+#: reasons readers will see. "Approve, keep private" is not one: nothing is shown.
+PUBLIC_REASON_ACTIONS = frozenset(
+    {"approve", "approve_with_qualification", "reject_and_store", "approve_new_coin"}
+)
+
+
+@router.post(
+    "/dashboard/system-brain/cases/{case_id}/public-reasons-draft",
+    include_in_schema=False,
+)
+async def system_brain_public_reasons_draft(
+    case_id: UUID,
+    reason: str = Form(default=""),
+    decision: str = Form(default=""),
+    csrf_token: str = Form(...),
+    principal: UserPrincipal = Depends(_require_application_admin),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Draft the Passport reasons from the reviewer's own words. Decides nothing.
+
+    The answer goes back into the reviewer's form, where they read and edit it; only
+    what they then submit with the decision is ever stored or shown.
+    """
+
+    _verify_csrf(settings, principal.user_id, csrf_token)
+    case = await session.get(ReviewCase, case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Review case not found.")
+    draft = await PublicReasonWriter(settings).draft(
+        note=reason,
+        decision=decision if decision in {"approve", "reject"} else "",
+        coin=case.title,
+    )
+    event = draft.usage_event(settings)
+    if event is not None:
+        session.add(event)
+        await session.commit()
+    return _protect(
+        JSONResponse({"reasons": draft.reasons, "by_ai": draft.by_ai, "note": draft.note})
+    )
+
+
 @router.post(
     "/system-brain/reviews/{case_id}/decision",
     include_in_schema=False,
@@ -1976,6 +2024,7 @@ async def system_brain_review_decision(
     use_decision: list[str] = Form(default=[]),
     use_reason: list[str] = Form(default=[]),
     use_scope: list[str] = Form(default=[]),
+    public_reasons: str = Form(default=""),
     csrf_token: str = Form(...),
     principal: UserPrincipal = Depends(_require_application_admin),
     session: AsyncSession = Depends(get_db_session),
@@ -1983,6 +2032,19 @@ async def system_brain_review_decision(
 ):
     _verify_csrf(settings, principal.user_id, csrf_token)
     service = ShariaGovernanceService(session, settings)
+    # What readers will see on the Passport, as the reviewer confirmed it. Every action
+    # that puts a decision on a Passport needs it; the AI may draft it, never send it.
+    reader_reasons = clean_public_reasons(public_reasons)
+    if action in PUBLIC_REASON_ACTIONS and not reader_reasons:
+        query = urlencode(
+            {
+                "error": "Write the reasons readers will see on the Passport first. "
+                "Press “Write with AI” to draft them from your reason, then check them."
+            }
+        )
+        return RedirectResponse(
+            f"/dashboard/system-brain/cases/{case_id}?{query}", status_code=303
+        )
     try:
         criteria = [
             {
@@ -2027,6 +2089,7 @@ async def system_brain_review_decision(
                 criterion_decisions=criteria,
                 use_case_decisions=use_cases,
                 acknowledged_gaps=gap_rows,
+                public_reasons=reader_reasons,
             )
             outcome_message = (
                 "Approved and published. Customers can see this Passport now."
@@ -2046,6 +2109,7 @@ async def system_brain_review_decision(
                 criterion_decisions=criteria,
                 use_case_decisions=use_cases,
                 acknowledged_gaps=gap_rows,
+                public_reasons=reader_reasons,
             )
             outcome_message = (
                 "Approved with a note, and published. Customers can see this Passport now."
@@ -2082,6 +2146,24 @@ async def system_brain_review_decision(
                 case_id,
                 admin_user_id=principal.user_id,
                 reason=reason,
+                public_reasons=reader_reasons,
+            )
+            outcome_message = (
+                f"Rejected. {service.last_passport_note}"
+                if service.last_passport_note
+                else "Rejected and published. The coin's Passport now says it was not "
+                "approved, with your reasons."
+            )
+        elif action == "approve_new_coin":
+            await service.approve_new_coin(
+                case_id,
+                admin_user_id=principal.user_id,
+                reason=reason,
+                public_reasons=reader_reasons,
+            )
+            outcome_message = (
+                "Approved and published under the Hilal Markets Methodology. Customers "
+                "can see this Passport now."
             )
         elif action == "request_more_evidence":
             evidence = [line.strip() for line in requested_evidence.splitlines() if line.strip()]

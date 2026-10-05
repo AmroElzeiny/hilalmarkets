@@ -1,24 +1,23 @@
 {% extends "hilal/base_dashboard.html" %}
 {% from "hilal/macros/coin_logo.html" import coin_logo %}
-{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261005-analytics-fix">{% endblock %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261005-red-flags">{% endblock %}
 {% block content %}
 
-{#- One coin's reading, and the words it rests on.
+{#- One coin a Hilal Markets reviewer decided: the decision, the reasons, and the pages.
 
-    This page is the reason the reading is worth storing. A verdict a reader cannot check
-    is an assertion. A verdict with the sentence behind it, and a link to the page that
-    sentence came from, is something a person can open and disagree with — which is the
-    only honest way to publish a machine's opinion about somebody's money. -#}
+    The machine's own verdict is not shown. It was research for the reviewer; what a
+    customer reads is what a person decided and why, with every page the decision rests
+    on, so they can open it and disagree. -#}
 
 <div class="hm-t">
 
-  <header class="t-head" data-hm-part="The coin and what we found">
+  <header class="t-head" data-hm-part="The coin and the decision">
     <div class="t-head-copy">
       <p class="t-eyebrow">
-        <a href="/dashboard/research"><span data-icon="arrow_left" data-icon-class="icon-sm"></span>Coins we researched</a>
+        <a href="/dashboard/research"><span data-icon="arrow_left" data-icon-class="icon-sm"></span>New coins our reviewer checked</a>
       </p>
       <h1>
-        {{ coin_logo(symbol, class='t-logo', decorative=true) }}
+        {{ coin_logo(symbol, provider_url=logo_url, class='t-logo', decorative=true) }}
         {{ symbol }} — {{ name }}
       </h1>
     </div>
@@ -28,52 +27,29 @@
   <div class="t-banner" data-tone="info" role="status">
     <span data-icon="info" data-icon-class="icon"></span>
     <div class="t-banner-body">
-      <strong>A machine read this, not a scholar</strong>
-      <p>{{ disclosure }} {{ presentation.meaning }}</p>
+      <strong>{{ presentation.label }}{% if decided_at %} · {{ decided_at | short_dt(user.timezone if user else 'UTC') }}{% endif %}</strong>
+      <p>{{ presentation.meaning }}</p>
+      <p><a href="{{ passport_url }}">Open the Passport</a></p>
     </div>
   </div>
 
-  {#- The full notice, on the one page that shows a single coin's machine verdict in
-      detail. Compact would be wrong here: this is where somebody decides what to do
-      about this coin, so the sentence about skipped rules belongs on the screen. -#}
   {% with automated_methodology_selected = true %}
     {% include "hilal/partials/automated_methodology_notice.html" %}
   {% endwith %}
 
-  {% if reasons %}
-  <section data-hm-part="Why we said this">
-    <h2>Why we said this</h2>
-    {% for reason in reasons %}
-    <div class="t-banner" data-tone="{{ 'warning' if verdict == 'not_eligible' else 'neutral' }}">
-      <span data-icon="{{ 'alert' if verdict == 'not_eligible' else 'check' }}" data-icon-class="icon"></span>
-      <div class="t-banner-body">
-        <strong>{{ reason.text }}</strong>
-        {#- The quotation is the whole point. Shown as the project's own words, with the
-            page it came from, so a reader can check it rather than trust us. -#}
-        {% if reason.quote %}<p><em>“{{ reason.quote }}”</em></p>{% endif %}
-        {% if reason.url %}
-        <p><a href="{{ reason.url }}" rel="noopener noreferrer" target="_blank">
-          Open the page this came from<span data-icon="external" data-icon-class="icon-sm"></span>
-        </a></p>
-        {% endif %}
-      </div>
-    </div>
-    {% endfor %}
-  </section>
-  {% endif %}
-
-  {% if open_questions %}
-  <section data-hm-part="What the pages never answered">
-    <h2>What the project's pages never answer</h2>
+  <section data-hm-part="Why the reviewer decided this">
+    <h2>Why the reviewer decided this</h2>
+    {% if reasons %}
     <ul>
-      {% for question in open_questions %}<li>{{ question }}</li>{% endfor %}
+      {% for reason in reasons %}<li>{{ reason }}</li>{% endfor %}
     </ul>
-    {% if holder_return_basis %}<p>{{ holder_return_basis|capitalize }}.</p>{% endif %}
+    {% else %}
+    <p>The reviewer's reasons are on the Passport.</p>
+    {% endif %}
   </section>
-  {% endif %}
 
   <section data-hm-part="Every page we read">
-    <h2>Every page we read</h2>
+    <h2>Pages the decision rests on</h2>
     {% if documents %}
     <div class="t-table-wrap">
       <table class="t-table">
@@ -120,4 +96,4 @@
 
 </div>
 {% endblock %}
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-research-test.js') }}?v=20261005-analytics-fix"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-research-test.js') }}?v=20261005-red-flags"></script>{% endblock %}

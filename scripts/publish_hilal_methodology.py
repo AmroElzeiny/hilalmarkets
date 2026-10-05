@@ -11,6 +11,9 @@ nothing: everything it writes is already in git, signed and dated.
 prints what would be written, and stops. Running it is how you check a change to the
 admissions file before it reaches anybody.
 
+A coin the file no longer carries is taken down (unless a reviewer decided it) and sent
+to System Brain as a new-coin task, from the report already stored for it.
+
 Safe to run twice. A coin whose reasons and sources have not changed is left exactly as
 it is, so a repeat run does not stamp every coin with a fresh review date and make the
 whole list look re-read when nothing was read.
@@ -70,12 +73,25 @@ def _preview() -> None:
 
 
 async def _write() -> int:
+    from ai_market_monitor.core.config import get_settings
     from ai_market_monitor.core.database import SessionFactory
+    from ai_market_monitor.services.automated_screen_pipeline import AutomatedScreenPipeline
 
     async with SessionFactory() as session:
         result = await publish(session)
+        # A result taken down because nobody reviewed it goes to a reviewer, from the
+        # report already stored for it. Nothing is read again and nothing is decided.
+        review = (
+            await AutomatedScreenPipeline(session, get_settings()).send_to_review(
+                result.withdrawn
+            )
+            if result.withdrawn
+            else {}
+        )
         await session.commit()
     print("published:", result.as_dict())
+    for symbol, what in review.items():
+        print(f"sent to review: {symbol:<8}{what}")
     return 0
 
 
