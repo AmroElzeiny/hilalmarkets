@@ -5,11 +5,11 @@
   {#- First script on the page, deliberately. It puts a time limit on every request this
       product sends to its own server, and it can only do that for a request sent after
       it has run. See `static/hm-request.js`. -#}
-  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20261005-reviewer-standard"></script>
+  <script src="{{ url_for('static', path='/hm-request.js') }}?v=20261008-event-params"></script>
   {#- A page the browser brings back with Back is loaded fresh, so no button comes back
       still locked from the click that took the person away. See
       `static/hm-restored-page.js`. -#}
-  <script src="{{ url_for('static', path='/hm-restored-page.js') }}?v=20261005-reviewer-standard"></script>
+  <script src="{{ url_for('static', path='/hm-restored-page.js') }}?v=20261008-event-params"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     // No custom-code tag in the Tag Manager container may run. The X pixel was one, and it
@@ -41,30 +41,30 @@
   <meta name="description" content="Hilal Markets - Shariah-screened crypto spot intelligence and guided monitoring.">
   <title>{{ title }} | Hilal Markets</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', path='/favicon-dark.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20261005-reviewer-standard">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-fonts.css') }}?v=20261008-event-params">
   {# One owner for the cookie banner and its settings window, which this template includes below. #}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20261005-reviewer-standard">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20261005-reviewer-standard">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-cookie.css') }}?v=20261008-event-params">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets.css') }}?v=20261008-event-params">
   {#- Hilal is on every dashboard page, so the sheet its dialogs are styled by is too.
       Loaded this early on purpose: every rule in it is scoped to Hilal and the
       redesigned pages' own classes, so it changes nothing on an older page, and a page
       that loads it again later keeps its own order exactly as before. -#}
   {% set hilal_chat_on = hilal_chat_gate(hilal_chat|default(true), settings) %}
-  {% if hilal_chat_on %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261005-reviewer-standard">{% endif %}
+  {% if hilal_chat_on %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261008-event-params">{% endif %}
   {% block page_styles %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261005-reviewer-standard">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20261005-reviewer-standard">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261008-event-params">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-dashboard-v2.css') }}?v=20261008-event-params">
   {#- The shell — the side menu and the topbar — after the sheet it replaces, because it
       is the one owner of both and nothing above may still be describing them. -#}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20261005-reviewer-standard">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20261005-reviewer-standard">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-shell.css') }}?v=20261008-event-params">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-guide.css') }}?v=20261008-event-params">
   {#- A page whose styles must win over the shared dashboard sheets loads them here.
       `page_styles` above is deliberately kept before them for pages that only add. -#}
   {% block page_styles_late %}{% endblock %}
   {% if hilal_chat_on %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20261005-reviewer-standard">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-ask-tag.css') }}?v=20261005-reviewer-standard">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-source-cards.css') }}?v=20261005-reviewer-standard">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-hilal-chat.css') }}?v=20261008-event-params">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-ask-tag.css') }}?v=20261008-event-params">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-source-cards.css') }}?v=20261008-event-params">
   {% endif %}
 </head>
 {#- The page guide's identity is decided on the server, not parsed from the URL. -#}
@@ -201,20 +201,20 @@
   {% set marketing_consent_enabled = settings.marketing_consent_enabled %}
   {% include "hilal/partials/cookie_banner.html" %}
   <div class="dash-toast" id="dash-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20261005-reviewer-standard"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20261005-reviewer-standard"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-icons.js') }}?v=20261008-event-params"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets.js') }}?v=20261008-event-params"></script>
   {#- The side menu and the topbar. One owner for their state: `hilalmarkets.js` and
       `dashboard.js` each used to run their own copy of the minimize logic against the
       same class, from two different stored values. -#}
-  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20261005-reviewer-standard"></script>
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261005-reviewer-standard"></script>
-  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20261005-reviewer-standard"></script>
-  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20261005-reviewer-standard"></script>{% endif %}
-  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20261005-reviewer-standard"></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20261005-reviewer-standard" defer></script>
-  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20261005-reviewer-standard" defer></script>
-  {% if hilal_chat_on %}<script src="{{ url_for('static', path='/hm-source-cards.js') }}?v=20261005-reviewer-standard"></script>{% endif %}
-  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20261005-reviewer-standard"></script>{% endif %}
+  <script type="module" src="{{ url_for('static', path='/hm-shell.js') }}?v=20261008-event-params"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261008-event-params"></script>
+  {% if quick_view_variant == 'live' %}<script src="{{ url_for('static', path='/passport-quick-view.js') }}?v=20261008-event-params"></script>
+  {% elif quick_view_variant == 'test' %}<script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20261008-event-params"></script>{% endif %}
+  <script src="{{ url_for('static', path='/hilalmarkets-consent.js') }}?v=20261008-event-params"></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-offer.js') }}?v=20261008-event-params" defer></script>
+  <script src="{{ url_for('static', path='/hilalmarkets-guide.js') }}?v=20261008-event-params" defer></script>
+  {% if hilal_chat_on %}<script src="{{ url_for('static', path='/hm-source-cards.js') }}?v=20261008-event-params"></script>{% endif %}
+  {% if hilal_chat_on %}<script type="module" src="{{ url_for('static', path='/hm-hilal-chat.js') }}?v=20261008-event-params"></script>{% endif %}
   <script>
     (() => {
       const pageStatus = document.querySelector("[data-page-status]");

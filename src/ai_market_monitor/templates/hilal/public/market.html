@@ -12,8 +12,8 @@
     on; every one of them is scoped under it, so none reaches the header or footer. -#}
 {% block body_class %} hilal-dashboard hm-public-market{% endblock %}
 {% block page_styles %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261005-reviewer-standard">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261005-reviewer-standard">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261008-event-params">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261008-event-params">
 {% endblock %}
 {% block body %}
   <a class="figma-bypass-link" href="#top">Skip to content</a>
@@ -30,7 +30,7 @@
   <div id="hm-site-footer"></div>
 {% endblock %}
 {% block page_scripts %}
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261005-reviewer-standard"></script>
-  <script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20261005-reviewer-standard"></script>
-  <script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20261005-reviewer-standard"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261008-event-params"></script>
+  <script type="module" src="{{ url_for('static', path='/hm-dialogs-test.js') }}?v=20261008-event-params"></script>
+  <script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20261008-event-params"></script>
 {% endblock %}

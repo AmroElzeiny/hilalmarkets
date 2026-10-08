@@ -423,6 +423,32 @@ function loadX() {
   )
 }
 
+/**
+ * Every parameter any event on this site can carry.
+ *
+ * Tag Manager keeps one merged copy of everything ever pushed to the data layer, and a
+ * data-layer variable reads that copy. So a parameter one event did not send still had
+ * the *previous* event's value: on 8 October 2026 a header button click reached Google
+ * Analytics with `section_name: faq`, the last section scrolled past. Each push now
+ * clears every parameter it does not set. `hilalmarkets-commerce-analytics.js` clears
+ * the same list; `test_invariant_analytics_accuracy.py` keeps the two equal.
+ */
+export const EVENT_PARAMETER_KEYS = [
+  'page_location',
+  'page_path',
+  'page_title',
+  'cta_name',
+  'cta_location',
+  'destination',
+  'section_name',
+  'faq_id',
+  'form_location',
+  'error_type',
+  'plan_code',
+  'billing_interval',
+  'debug_mode',
+] as const
+
 function emitGoogle(event: string, parameters: EventParameters): boolean {
   if (!runtimeConfig().enabled || !consent.analytics) return false
   loadGoogle()
@@ -430,7 +456,8 @@ function emitGoogle(event: string, parameters: EventParameters): boolean {
   const clean = sanitizeParameters(parameters)
   if (runtimeConfig().debug) clean.debug_mode = true
   if (VALID_GTM.test(String(runtimeConfig().gtmId ?? '').trim().toUpperCase())) {
-    window.dataLayer?.push({ event, ...clean })
+    const cleared = Object.fromEntries(EVENT_PARAMETER_KEYS.map((key) => [key, undefined]))
+    window.dataLayer?.push({ event, ...cleared, ...clean })
   } else {
     window.gtag?.('event', event, clean)
   }

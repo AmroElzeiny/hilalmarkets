@@ -13,6 +13,25 @@
     "checkout_cancelled",
     "checkout_failed",
   ]);
+  // Every parameter any event on this site can carry, cleared on each push. Tag Manager
+  // keeps the last value of a key until something replaces it, so an event that did not
+  // send `section_name` arrived carrying the previous event's. The same list lives in
+  // `Hilal-Markets-Website/src/analytics.ts` as `EVENT_PARAMETER_KEYS`.
+  const EVENT_PARAMETER_KEYS = [
+    "page_location",
+    "page_path",
+    "page_title",
+    "cta_name",
+    "cta_location",
+    "destination",
+    "section_name",
+    "faq_id",
+    "form_location",
+    "error_type",
+    "plan_code",
+    "billing_interval",
+    "debug_mode",
+  ];
   const allowedPlans = new Set(["demo", "trader", "pro"]);
   const allowedIntervals = new Set(["monthly", "annual"]);
   const eventName = String(marker.dataset.commerceEvent || "");
@@ -50,10 +69,9 @@
     if (sent || wasSent()) return;
     if (document.documentElement.dataset.consentAnalytics !== "granted") return;
     window.dataLayer = window.dataLayer || [];
-    const payload = {
-      event: eventName,
-      page_path: window.location.pathname,
-    };
+    const payload = { event: eventName };
+    for (const key of EVENT_PARAMETER_KEYS) payload[key] = undefined;
+    payload.page_path = window.location.pathname;
     if (planCode) payload.plan_code = planCode;
     if (billingInterval) payload.billing_interval = billingInterval;
     window.dataLayer.push(payload);

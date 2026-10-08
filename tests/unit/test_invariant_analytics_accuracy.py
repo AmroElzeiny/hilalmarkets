@@ -12,6 +12,7 @@ Problems measured on the live site on 5 October 2026, each closed here as a clas
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -179,3 +180,42 @@ def test_the_page_script_reports_the_page_before_and_returns_by_back():
     assert "openedFrom = window.location.origin + lastPath" in script
     assert 'addEventListener("pageshow"' in script
     assert "event.persisted" in script
+
+
+# --------------------------------------------------------------------------------
+# One event's parameters never ride along on the next
+# --------------------------------------------------------------------------------
+
+ANALYTICS_TS = ROOT / "Hilal-Markets-Website/src/analytics.ts"
+COMMERCE_JS = STATIC / "hilalmarkets-commerce-analytics.js"
+
+
+def _key_list(text: str, start: str) -> list[str]:
+    block = text[text.index(start) :]
+    block = block[: block.index("]")]
+    return re.findall(r"""['"]([a-z_]+)['"]""", block)
+
+
+def _parameters_sent(text: str) -> set[str]:
+    """Every parameter name an event in `analytics.ts` is sent with."""
+
+    keys: set[str] = set()
+    for payload in re.findall(r"emitGoogle\([^,{]+,\s*\{(.*?)\}\)", text, re.S):
+        keys |= set(re.findall(r"^\s*([a-z_]+):", payload, re.M))
+    keys |= set(re.findall(r"parameters\.([a-z_]+) =", text))
+    keys |= set(re.findall(r"clean\.([a-z_]+) =", text))
+    keys |= set(re.findall(r"\{ ([a-z_]+): pagePath\(\) \}", text))
+    return keys
+
+
+def test_every_push_clears_every_parameter_it_does_not_set():
+    analytics = ANALYTICS_TS.read_text(encoding="utf-8")
+    commerce = COMMERCE_JS.read_text(encoding="utf-8")
+    react_keys = _key_list(analytics, "export const EVENT_PARAMETER_KEYS = [")
+    page_keys = _key_list(commerce, "const EVENT_PARAMETER_KEYS = [")
+    assert react_keys == page_keys
+    sent = _parameters_sent(analytics)
+    assert {"cta_name", "section_name", "plan_code", "page_title"} <= sent
+    assert sent <= set(react_keys)
+    assert "...cleared, ...clean" in analytics
+    assert "for (const key of EVENT_PARAMETER_KEYS) payload[key] = undefined;" in commerce
