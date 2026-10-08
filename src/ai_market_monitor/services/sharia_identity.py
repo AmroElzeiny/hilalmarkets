@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_market_monitor.core.asset_kinds import NATIVE_COIN, NETWORK, RECORDED_KINDS, TOKEN
 from ai_market_monitor.db.models import (
     AuditEvent,
     CanonicalAsset,
@@ -555,11 +556,11 @@ class CanonicalAssetMappingService:
             problems.append("Imported name does not match the canonical name.")
         if external.asset_symbol.upper() not in accepted_symbols:
             problems.append("Imported symbol does not match the canonical symbol.")
-        if candidate.asset_type not in {"native_coin", "token", "network"}:
+        if candidate.asset_type not in RECORDED_KINDS:
             problems.append("Native coin versus token status is missing.")
-        if candidate.asset_type in {"native_coin", "network"} and not candidate.native_chain:
+        if candidate.asset_type in {NATIVE_COIN, NETWORK} and not candidate.native_chain:
             problems.append("Native chain is missing.")
-        if candidate.asset_type == "token" and not candidate.contract_addresses:
+        if candidate.asset_type == TOKEN and not candidate.contract_addresses:
             problems.append("Token contract addresses are missing.")
         if not is_official_url(candidate.official_website):
             problems.append("A valid HTTPS official website is required.")

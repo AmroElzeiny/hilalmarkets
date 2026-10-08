@@ -7,6 +7,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.app_links import passport_link
+from ai_market_monitor.core.asset_kinds import is_native_coin
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.dashboard_paths import LIFECYCLES_PATH
@@ -874,7 +875,9 @@ class ShariaPassportReadService:
             symbol=asset.symbol,
             network=asset.native_chain,
             asset_type=asset.asset_type,
-            native_asset=asset.asset_type.casefold() in {"native", "coin", "native_asset"},
+            # The identity check's own vocabulary. A private list here knew only older
+            # spellings, so every coin it recorded as `native_coin` read as a token.
+            native_asset=is_native_coin(asset.asset_type),
             contract_addresses=dict(asset.contract_addresses or {}),
             official_website=asset.official_website,
             official_documentation=asset.official_documentation,

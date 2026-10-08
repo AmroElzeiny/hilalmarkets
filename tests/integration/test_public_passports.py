@@ -17,9 +17,12 @@ What the move promised, each checked through the real app:
 
 from __future__ import annotations
 
+import asyncio
+import json
 import re
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime, timedelta
+from html import unescape
 from uuid import uuid4
 
 import pytest
@@ -60,10 +63,13 @@ async def _seed(
     codes: tuple[str, ...] = (),
     symbol: str = "BTC",
     name: str = "Bitcoin",
+    asset_type: str = "native_coin",
+    network: str = "Bitcoin",
 ) -> list[ShariaMethodology]:
     """`symbol` reviewed under `count` standards, each published and in force.
 
     `codes` names the standards' codes in order, where a test needs a particular one.
+    `asset_type` is the kind the identity check writes (`core/asset_kinds.py`).
     """
 
     now = datetime.now(UTC)
@@ -72,8 +78,8 @@ async def _seed(
         coin = CanonicalAsset(
             symbol=symbol,
             name=name,
-            asset_type="native",
-            native_chain="Bitcoin",
+            asset_type=asset_type,
+            native_chain=network,
             contract_addresses={},
             provider_ids={},
             identity_hash=uuid4().hex + uuid4().hex,
@@ -82,10 +88,12 @@ async def _seed(
         )
         session.add(coin)
         await session.flush()
-        for index, (name, status, _label) in enumerate(STANDARDS[:count]):
+        # `standard`, not `name`: reusing `name` here once wrote the standard's name into
+        # the coin's assessment as if it were the coin's.
+        for index, (standard, status, _label) in enumerate(STANDARDS[:count]):
             methodology = ShariaMethodology(
                 code=codes[index] if index < len(codes) else f"PASSPORT_{uuid4().hex[:12].upper()}",
-                name=name,
+                name=standard,
                 version=f"{index + 1}.0",
                 description="Evidence-backed test standard for the public Passport.",
                 status=ShariaMethodologyStatus.ACTIVE,
@@ -103,7 +111,7 @@ async def _seed(
                 asset_name=name,
                 methodology_id=methodology.id,
                 status=status,
-                summary=f"A qualified reviewer recorded this under {name}.",
+                summary=f"A qualified reviewer recorded this under {standard}.",
                 qualifications=(
                     ["Spot holding only."]
                     if status == ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS
@@ -188,7 +196,7 @@ async def test_a_visitor_opens_a_passport_without_an_account(test_context):
 
     assert page.status_code == 200, page.text[:600]
     html = page.text
-    assert "<h1>Bitcoin</h1>" in html
+    assert "<h1>Is Bitcoin (BTC) Halal?</h1>" in html
     # The website's own header and footer, not the dashboard's.
     assert '<div id="root"></div>' in html
     assert '<div id="hm-site-footer"></div>' in html
@@ -474,3 +482,281 @@ async def test_before_launch_the_sitemap_lists_no_passport(waitlist_context):
     await _seed(waitlist_context, count=1)
     locations = await _sitemap(waitlist_context)
     assert not any("/passports/" in location for location in locations)
+
+
+# -- one template for every coin: question, answer, title, links ---------------------------
+
+#: (symbol, name, kind as written, network as stored, heading, identity line). A native
+#: coin, a token whose network is a platform id, and a coin named by its own symbol.
+COINS = [
+    ("BTC", "Bitcoin", "native_coin", "Bitcoin", "Is Bitcoin (BTC) Halal?",
+     "BTC · Bitcoin · Native coin"),
+    ("USDC", "USD Coin", "token", "ethereum", "Is USD Coin (USDC) Halal?",
+     "USDC · Ethereum · Token"),
+    ("XRP", "XRP", "native_coin", "XRP", "Is XRP Halal?", "XRP · XRP · Native coin"),
+]
+
+NOT_A_RULING = (
+    "This is a methodology-specific screening result, not a universal religious ruling."
+)
+
+
+def _head(html: str) -> dict[str, object]:
+    """What a search engine reads first: title, description, canonical, previews, data."""
+
+    def meta(attribute: str, key: str) -> str:
+        found = re.search(rf'<meta {attribute}="{re.escape(key)}" content="([^"]*)"', html)
+        assert found, key
+        return unescape(found.group(1))
+
+    canonical = re.search(r'<link rel="canonical" href="([^"]+)">', html)
+    title = re.search(r"<title>([^<]*)</title>", html)
+    assert canonical and title
+    return {
+        "title": unescape(title.group(1)),
+        "description": meta("name", "description"),
+        "canonical": canonical.group(1),
+        "og_title": meta("property", "og:title"),
+        "og_description": meta("property", "og:description"),
+        "json_ld": [
+            json.loads(block)
+            for block in re.findall(
+                r'<script type="application/ld\+json">(.*?)</script>', html, flags=re.S
+            )
+        ],
+    }
+
+
+def _text(html: str, marker: str) -> str:
+    """The text of the element carrying ``marker``, without its tags."""
+
+    found = re.search(rf"<[a-z0-9]+ [^>]*{marker}[^>]*>(.*?)</(?:p|h1)>", html, flags=re.S)
+    assert found, marker
+    return unescape(re.sub(r"<[^>]+>", "", found.group(1))).strip()
+
+
+@pytest.mark.parametrize(("symbol", "name", "kind", "network", "heading", "line"), COINS)
+async def test_every_coin_opens_with_its_own_question_and_answer(
+    test_context, symbol, name, kind, network, heading, line
+):
+    await _seed(
+        test_context, count=1, symbol=symbol, name=name, asset_type=kind, network=network
+    )
+    html = (await test_context["client"].get(f"/passports/{symbol.lower()}")).text
+
+    assert f"<h1>{heading}</h1>" in html
+    assert html.count("<h1>") == 1
+    assert f"{symbol} Evidence Passport" in _text(html, 'class="t-eyebrow"')
+    assert _text(html, "data-passport-identity-line") == line
+    answer = _text(html, "data-passport-answer")
+    assert answer == (
+        f"Under First test standard v1.0, {name} is currently classified as Eligible. "
+        f"{NOT_A_RULING}"
+    )
+    # The answer comes before the standard picker and the result, as the page is read.
+    assert html.index("data-passport-answer") < html.index('class="t-standard')
+    assert html.index("data-passport-answer") < html.index('class="t-pq-answer"')
+
+    head = _head(html)
+    base = str(test_context["settings"].public_base_url).rstrip("/")
+    assert head["title"] == (
+        f"Is {name} Halal? {symbol} Shariah Screening & Evidence | Hilal Markets"
+    )
+    assert head["og_title"] == f"Is {name} Halal? {symbol} Shariah Screening & Evidence"
+    for fact in (symbol, "Eligible", "First test standard v1.0", "Hilal Markets"):
+        assert fact in head["description"], fact
+    assert head["og_description"] == head["description"]
+    assert head["canonical"] == f"{base}/passports/{symbol.lower()}"
+
+
+@pytest.mark.parametrize("index", range(len(STANDARDS)))
+async def test_the_answer_follows_the_standard_and_the_canonical_does_not(test_context, index):
+    """Each standard answers for itself; every standard's page names the one clean URL."""
+
+    methodologies = await _seed(test_context, count=len(STANDARDS))
+    chosen = methodologies[index]
+    standard, _status, label = STANDARDS[index]
+    html = (await test_context["client"].get(f"/passports/btc?methodology_id={chosen.id}")).text
+
+    answer = _text(html, "data-passport-answer")
+    assert answer.startswith(f"Under {standard} v{chosen.version}, Bitcoin is currently")
+    assert f"classified as {label}" in answer
+    for other, _other_status, _other_label in STANDARDS:
+        if other != standard:
+            assert other not in answer
+    head = _head(html)
+    base = str(test_context["settings"].public_base_url).rstrip("/")
+    assert head["canonical"] == f"{base}/passports/btc"
+    assert label in str(head["description"])
+
+
+async def test_no_two_passports_share_their_words(test_context):
+    """One template, but never one generic page copied under several addresses."""
+
+    for symbol, name, kind, network, _heading, _line in COINS:
+        await _seed(
+            test_context, count=1, symbol=symbol, name=name, asset_type=kind, network=network
+        )
+    pages = [
+        (await test_context["client"].get(f"/passports/{symbol.lower()}")).text
+        for symbol, *_rest in COINS
+    ]
+    for field in ("title", "description", "og_title", "canonical"):
+        values = [_head(page)[field] for page in pages]
+        assert len(set(values)) == len(values), field
+    answers = [_text(page, "data-passport-answer") for page in pages]
+    assert len(set(answers)) == len(answers)
+
+
+async def test_the_breadcrumb_runs_home_market_passport(test_context):
+    await _seed(test_context, count=1)
+    html = (await test_context["client"].get("/passports/btc")).text
+    base = str(test_context["settings"].public_base_url).rstrip("/")
+
+    data = _head(html)["json_ld"]
+    assert isinstance(data, list)
+    (crumbs,) = [item for item in data if item["@type"] == "BreadcrumbList"]
+    trail = [
+        (item["position"], item["name"], item["item"]) for item in crumbs["itemListElement"]
+    ]
+    assert trail == [
+        (1, "Home", f"{base}/"),
+        (2, "Market", f"{base}/markets"),
+        (3, "BTC Evidence Passport", f"{base}/passports/btc"),
+    ]
+    # Site-wide data stays as it is; nothing invents a "halal" type.
+    types = {item["@type"] for item in data}
+    assert {"Organization", "WebSite", "WebPage", "BreadcrumbList"} <= types
+    assert not any("halal" in str(item["@type"]).casefold() for item in data)
+
+
+def _links(html: str) -> list[str]:
+    return re.findall(r'<a [^>]*href="([^"]+)"', html)
+
+
+async def test_the_page_links_on_to_screening_the_market_and_similar_coins(test_context):
+    """Plain links in the page as sent — a crawler needs no script to follow them."""
+
+    await _seed(test_context, count=1)
+    await _seed(test_context, count=1, symbol="ETH", name="Ethereum", network="Ethereum")
+    await _seed(
+        test_context, count=1, symbol="USDC", name="USD Coin", asset_type="token",
+        network="ethereum",
+    )
+    client = test_context["client"]
+    html = (await client.get("/passports/btc")).text
+    read_next = html[html.index("data-passport-read-next") :]
+    links = _links(read_next)
+
+    assert "/how-we-screen" in links
+    assert "/markets" in links
+    assert "/how-we-screen" in _links(html[: html.index("data-passport-tabs")])
+    related = [link for link in links if link.startswith("/passports/")]
+    # ETH first: a native coin like BTC. Never BTC itself.
+    assert related == ["/passports/eth", "/passports/usdc"]
+    for link in related:
+        assert (await client.get(link, follow_redirects=False)).status_code == 200, link
+    # A visitor is offered a free account, coming back to the Halal Assets list.
+    assert any("/signup?next=" in link for link in links)
+    assert "Follow BTC with a free account" in read_next
+
+
+async def test_a_signed_in_reader_is_sent_to_their_dashboard_instead(test_context):
+    await _signup_and_verify(test_context, email="passport-cta@example.com")
+    await _seed(test_context, count=1)
+    html = (await test_context["client"].get("/passports/btc")).text
+    read_next = html[html.index("data-passport-read-next") :]
+
+    assert "Open Halal Assets" in read_next
+    assert not any("/signup" in link for link in _links(read_next))
+
+
+async def test_the_report_names_the_coin_and_carries_the_same_answer(test_context):
+    await _seed(test_context, count=1, symbol="USDC", name="USD Coin", asset_type="token",
+                network="ethereum")
+    html = (await test_context["client"].get("/passports/usdc/report")).text
+
+    assert "<h1>USD Coin (USDC)</h1>" in html
+    assert _head(html)["title"] == "USD Coin (USDC) Evidence report | Hilal Markets"
+    assert _text(html, "data-passport-answer").startswith(
+        "Under First test standard v1.0, USD Coin is currently classified as Eligible."
+    )
+    assert "<td>Ethereum</td>" in html
+    assert "<td>Token</td>" in html
+
+
+# -- the links never make a reader wait --------------------------------------------------
+
+
+def _related(html: str) -> list[str]:
+    read_next = html[html.index("data-passport-read-next") :]
+    return [link for link in _links(read_next) if link.startswith("/passports/")]
+
+
+async def test_an_old_list_is_used_at_once_and_refreshed_beside_the_page(
+    test_context, monkeypatch
+):
+    clock = [1000.0]
+    monkeypatch.setattr(public_passports, "monotonic", lambda: clock[0])
+    await _seed(test_context, count=1)
+    await _seed(test_context, count=1, symbol="ETH", name="Ethereum", network="Ethereum")
+    client = test_context["client"]
+    assert _related((await client.get("/passports/btc")).text) == ["/passports/eth"]
+
+    await _seed(test_context, count=1, symbol="SOL", name="Solana", network="Solana")
+    clock[0] += public_passports._PUBLIC_PASSPORTS_SECONDS + 1
+    # Out of date: the page is sent with the list it has, and a new one is built.
+    assert _related((await client.get("/passports/btc")).text) == ["/passports/eth"]
+    for task in list(public_passports._building.values()):
+        await task
+    assert _related((await client.get("/passports/btc")).text) == [
+        "/passports/eth",
+        "/passports/sol",
+    ]
+
+
+async def test_with_no_list_yet_the_page_waits_only_briefly(test_context, monkeypatch):
+    await _seed(test_context, count=1)
+    await _seed(test_context, count=1, symbol="ETH", name="Ethereum", network="Ethereum")
+    collect = public_passports._collect
+    release = asyncio.Event()
+
+    async def slow_collect(session, settings):
+        await release.wait()
+        return await collect(session, settings)
+
+    monkeypatch.setattr(public_passports, "_collect", slow_collect)
+    monkeypatch.setattr(public_passports, "_LINKS_WAIT_SECONDS", 0.05)
+    client = test_context["client"]
+    page = await client.get("/passports/btc")
+    # The page is complete, only without the links to other Passports.
+    assert page.status_code == 200
+    assert "Is Bitcoin (BTC) Halal?" in page.text
+    assert _related(page.text) == []
+    assert "/how-we-screen" in _links(page.text)
+
+    release.set()
+    for task in list(public_passports._building.values()):
+        await task
+    assert _related((await client.get("/passports/btc")).text) == ["/passports/eth"]
+
+
+async def test_a_failed_refresh_keeps_the_old_list(test_context, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(public_passports, "monotonic", lambda: clock[0])
+    await _seed(test_context, count=1)
+    await _seed(test_context, count=1, symbol="ETH", name="Ethereum", network="Ethereum")
+    client = test_context["client"]
+    assert _related((await client.get("/passports/btc")).text) == ["/passports/eth"]
+
+    async def broken(session, settings):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr(public_passports, "_collect", broken)
+    clock[0] += public_passports._PUBLIC_PASSPORTS_SECONDS + 1
+    for _attempt in range(2):
+        page = await client.get("/passports/btc")
+        assert page.status_code == 200
+        assert _related(page.text) == ["/passports/eth"]
+        for task in list(public_passports._building.values()):
+            await task

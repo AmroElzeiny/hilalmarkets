@@ -82,12 +82,14 @@ from ai_market_monitor.services.billing import (
     plan_sale_payload,
 )
 from ai_market_monitor.services.hilal_methodology import (
-    is_automated,
-)
-from ai_market_monitor.services.hilal_methodology import (
     page_payload as hilal_page_payload,
 )
 from ai_market_monitor.services.interfaces import MarketDataProvider
+from ai_market_monitor.services.passport_page import (
+    passport_headline,
+    related_passports,
+    standard_name,
+)
 from ai_market_monitor.services.public_market import (
     MARKET_EXCHANGE_PATTERN,
     MARKET_EXCHANGES,
@@ -96,7 +98,11 @@ from ai_market_monitor.services.public_market import (
     PublicMarketService,
     market_account_links,
 )
-from ai_market_monitor.services.public_passports import open_passport, public_passport_assets
+from ai_market_monitor.services.public_passports import (
+    linkable_passports,
+    open_passport,
+    public_passport_assets,
+)
 from ai_market_monitor.services.public_site import PublicSiteReadService
 from ai_market_monitor.services.screened_market import followed_coins
 from ai_market_monitor.services.sharia_screening import (
@@ -121,26 +127,21 @@ def _absolute_url(settings: Settings, path: str) -> str:
 
 def _breadcrumb_json_ld(
     settings: Settings,
-    *,
-    page_title: str,
-    page_path: str,
+    trail: Sequence[tuple[str, str]],
 ) -> dict[str, Any]:
+    """Home, then each (name, path) in ``trail``: the way down to this page."""
+
     return {
         "@context": "https://schema.org",
         "@type": "BreadcrumbList",
         "itemListElement": [
             {
                 "@type": "ListItem",
-                "position": 1,
-                "name": "Home",
-                "item": _absolute_url(settings, "/"),
-            },
-            {
-                "@type": "ListItem",
-                "position": 2,
-                "name": page_title,
-                "item": _absolute_url(settings, page_path),
-            },
+                "position": position,
+                "name": name,
+                "item": _absolute_url(settings, path),
+            }
+            for position, (name, path) in enumerate([("Home", "/"), *trail], start=1)
         ],
     }
 
@@ -194,8 +195,15 @@ def _public_context(
     description: str,
     path: str,
     legal_review_required: bool = False,
+    breadcrumbs: Sequence[tuple[str, str]] | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
+    """What every public page is rendered with.
+
+    ``breadcrumbs`` is the way down from the home page, as (name, path) pairs, when it
+    is longer than "Home, then this page" — a Passport sits under the Market page.
+    """
+
     waitlist_mode = settings.waitlist_mode
     # One owner for the preview address, in core/site_content.py. It forces HTTPS for
     # any real host, which the previous inline expression did not: it copied
@@ -212,13 +220,7 @@ def _public_context(
     )
     json_ld = _base_json_ld(settings)
     if path != "/":
-        json_ld.append(
-            _breadcrumb_json_ld(
-                settings,
-                page_title=title,
-                page_path=path,
-            )
-        )
+        json_ld.append(_breadcrumb_json_ld(settings, breadcrumbs or [(title, path)]))
     help_categories = public_help_categories(waitlist_mode=waitlist_mode)
     # Resolved once: the Jinja footer and the React footer are handed the same groups,
     # so a page hidden by the stage is hidden in both or in neither.
@@ -731,15 +733,13 @@ async def market(
     return page
 
 
-def _standard_label(name: str, version: str, status_label: str, *, automated: bool) -> str:
+def _standard_label(name: str, version: str, code: str, status_label: str) -> str:
     """One line in the standard picker: which standard, and what it decided.
 
-    The machine-made standard says so in its own line, so nobody picks it believing a
-    Shariah board decided the result.
+    Named by :func:`standard_name`, the same words the answer under the heading uses.
     """
 
-    kind = " (automated, no Shariah advisor)" if automated else ""
-    return f"{name} v{version}{kind} \u00b7 {status_label}"
+    return f"{standard_name(name, version, code)} \u00b7 {status_label}"
 
 
 async def _passport_page(
@@ -804,8 +804,8 @@ async def _passport_page(
             "label": _standard_label(
                 item.methodology.name,
                 item.methodology.version,
+                item.methodology.code,
                 STATUS_LABELS[item.status],
-                automated=is_automated(item.methodology.code),
             ),
             "href": passport_path(asset, methodology_id=item.methodology.id, report=report),
             "selected": item.methodology.id == chosen_id,
@@ -824,24 +824,38 @@ async def _passport_page(
                 "label": _standard_label(
                     passport.assessment.methodology_name,
                     passport.assessment.methodology_version,
+                    passport.assessment.methodology_code,
                     passport.assessment.status_label,
-                    automated=is_automated(passport.assessment.methodology_code),
                 ),
                 "href": passport_path(asset, methodology_id=chosen_id, report=report),
                 "selected": True,
             },
         )
-    name = (
-        passport.identity.name
-        if passport.identity
-        else passport.assessment.asset_name or asset
-    )
-    title = f"{name} ({asset}) Evidence {'report' if report else 'Passport'}"
-    description = (
-        f"How {name} ({asset}) was screened under a published Shariah standard: the result, "
-        "the reasons, the sources and the date it was reviewed."
-    )
+    # The page's words are made from this record by one owner (`services/passport_page.py`),
+    # the same for every coin: nothing on a Passport is written for one coin by hand.
+    headline = passport_headline(passport)
+    if report:
+        title = headline.report_title
+        description = (
+            f"How {headline.coin} was screened under a published Shariah standard: the "
+            "result, the reasons, the sources and the date it was reviewed."
+        )
+    else:
+        title = headline.page_title
+        description = headline.description
     page_path = passport_path(asset)
+    market_page = PUBLIC_PAGE_BY_PAGE["market"]
+    # Other pages worth reading next, each only while the stage shows it.
+    read_next = [
+        PUBLIC_PAGE_BY_PAGE[key]
+        for key in ("how_we_screen", "market")
+        if key not in settings.stage_exposure.hidden_pages
+    ]
+    related = (
+        []
+        if report
+        else related_passports(asset, await linkable_passports(session, settings))
+    )
     context = _public_context(
         request,
         settings,
@@ -849,6 +863,31 @@ async def _passport_page(
         title=title,
         description=description,
         path=page_path,
+        breadcrumbs=[
+            (market_page.title, market_page.path),
+            (headline.eyebrow, page_path),
+        ],
+        # A shared Passport link previews as this coin's Passport, not as the home page.
+        social_title=title,
+        social_description=description,
+        passport_headline=headline,
+        passport_read_next=[
+            {
+                "title": item.title,
+                "description": item.description,
+                "href": request.url_for(item.endpoint).path,
+            }
+            for item in read_next
+        ],
+        passport_related=related,
+        passport_signed_in=user is not None,
+        passport_account_links=market_account_links(settings),
+        passport_dashboard_href=app_link(settings, MARKET_PATH),
+        passport_how_we_screen_href=(
+            None
+            if "how_we_screen" in settings.stage_exposure.hidden_pages
+            else request.url_for("public_how_we_screen").path
+        ),
         passport=passport,
         passport_standards=standards,
         passport_timezone=user.timezone if user and user.timezone else "UTC",

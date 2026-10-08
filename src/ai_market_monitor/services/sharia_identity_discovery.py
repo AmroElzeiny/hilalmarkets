@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from ai_market_monitor.core.asset_kinds import NATIVE_COIN, TOKEN
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.db.models import ExternalAssessment
 from ai_market_monitor.services.provider_reliability import ProviderCallError
@@ -438,7 +439,7 @@ class CoinGeckoIdentityDiscovery:
         return CanonicalAssetCandidate(
             name=name,
             symbol=symbol,
-            asset_type="token" if is_token else "native_coin",
+            asset_type=TOKEN if is_token else NATIVE_COIN,
             native_chain=native_chain,
             official_website=homepage,
             official_documentation=documentation,

@@ -1509,6 +1509,59 @@ body.hilal-dashboard .hm-t .t-standard-only {
   font-weight: 600;
 }
 
+/* The one-line answer under a Passport's heading: the standard shown, its result, and
+ * that it is not a ruling. Plain near-black body text, no box — the result block under
+ * the standard picker already carries the colour, and the picker stays the header's one
+ * apple-green focal point (`brand guide.md` §12, §19). */
+body.hilal-dashboard .hm-t .t-direct-answer {
+  max-width: 72ch;
+  color: var(--t-ink);
+  font-size: 1.02rem;
+  line-height: 1.6;
+}
+
+/* "Read next" at the foot of a Passport: plain links a reader and a crawler can follow. */
+body.hilal-dashboard .hm-t .t-read-next {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-1);
+  padding-bottom: var(--t-3);
+  border-bottom: 1px solid var(--t-line);
+  color: var(--t-copy);
+  text-decoration: none;
+}
+
+body.hilal-dashboard .hm-t .t-read-next strong {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-2);
+  color: var(--t-ink-strong);
+}
+
+body.hilal-dashboard .hm-t .t-read-next:hover strong,
+body.hilal-dashboard .hm-t .t-read-next:focus-visible strong { text-decoration: underline; }
+
+body.hilal-dashboard .hm-t .t-related {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: var(--t-2) var(--t-4);
+  margin: var(--t-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+body.hilal-dashboard .hm-t .t-related li { display: flex; flex-direction: column; min-width: 0; }
+
+body.hilal-dashboard .hm-t .t-related a {
+  overflow: hidden;
+  color: var(--t-ink-strong);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.hilal-dashboard .hm-t .t-related small { color: var(--t-muted); font-size: .8rem; }
+
 /* Sticky in-page navigation. Long documents need a way back to the top level.
  *
  * It stops just under whatever is held at the top of the window — the dashboard's

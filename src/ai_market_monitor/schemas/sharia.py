@@ -2,8 +2,18 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
+from ai_market_monitor.core.asset_kinds import asset_kind_label
+from ai_market_monitor.core.asset_kinds import network_label as readable_network
 from ai_market_monitor.db.models.enums import (
     ComplianceChangeBehavior,
     ComplianceChangeSeverity,
@@ -116,6 +126,19 @@ class PassportIdentity(BaseModel):
     identity_state: str = "unavailable"
     identity_verified_at: datetime | None = None
     aliases: list[str] = Field(default_factory=list)
+
+    # Worked out from the fields above, never passed in, so every page and popup that
+    # shows a Passport names the coin's kind and network in the same words
+    # (`core/asset_kinds.py`).
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def kind_label(self) -> str:
+        return asset_kind_label(self.asset_type)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def network_label(self) -> str | None:
+        return readable_network(self.network)
 
 
 class PassportUseCoverage(BaseModel):

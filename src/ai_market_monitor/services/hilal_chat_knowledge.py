@@ -32,6 +32,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.cockpit_service import StrategyCockpitService
+from ai_market_monitor.core.asset_kinds import asset_kind_label
 from ai_market_monitor.core.config import Settings
 from ai_market_monitor.core.plans import (
     PLAN_DEFINITIONS,
@@ -434,7 +435,8 @@ class HilalChatKnowledge:
             symbol=wanted,
             name=(assessment.asset_name if assessment else None)
             or (identity.name if identity else None),
-            category=identity.asset_type if identity else None,
+            # In the Passport's own words ("Native coin"), so Hilal and the page agree.
+            category=asset_kind_label(identity.asset_type) if identity else None,
             status=assessment.status.value if assessment else None,
             status_words=(
                 STATUS_LABELS.get(assessment.status, assessment.status.value)
@@ -806,7 +808,7 @@ class HilalChatKnowledge:
             .scalars()
             .all()
         )
-        return [str(item).replace("_", " ") for item in names if item]
+        return sorted({asset_kind_label(str(item)) for item in names if item})
 
     def _plans(self) -> list[dict[str, Any]]:
         """What each publicly offered plan costs, from the plan catalogue itself.

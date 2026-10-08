@@ -194,10 +194,12 @@ function setUpQuickView() {
     loadCoinLogo(find("[data-pq-logo]"), asset, identity);
 
     find("[data-pq-name]").textContent = identity.name || assessment.asset_name || asset;
+    // The kind and the network in the server's words (`core/asset_kinds.py`), the same
+    // ones the Passport page prints. A copy of the rule here read native coins as tokens.
     find("[data-pq-identity]").textContent = [
       asset,
-      identity.network,
-      identity.native_asset === true ? "Native coin" : identity.native_asset === false ? "Token" : null,
+      identity.network_label,
+      identity.kind_label,
     ].filter(Boolean).join(" · ");
 
     const tone = assetTone(assessment.status);

@@ -11,8 +11,8 @@
 {% set tz = passport_timezone %}
 {% block body_class %} hilal-dashboard hm-public-market hm-public-passport{% endblock %}
 {% block page_styles %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261008-event-params">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261008-event-params">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261008-passport-seo">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261008-passport-seo">
 {% endblock %}
 {% block body %}
 <a class="figma-bypass-link" href="#top">Skip to content</a>
@@ -33,7 +33,7 @@
   <header class="t-report-head">
     <div class="t-head-copy">
       <p class="t-eyebrow">{{ coin.logo(asset_symbol, passport.identity) }}<span data-icon="passport" data-icon-class="icon-sm"></span>Hilal Markets &middot; Shariah Evidence report</p>
-      <h1>{{ passport.identity.name if passport.identity else passport.assessment.asset_name or passport.assessment.canonical_asset }} ({{ asset_symbol }})</h1>
+      <h1>{{ passport_headline.coin }}</h1>
       <p>{{ passport.assessment.methodology_name }} v{{ passport.assessment.methodology_version }}{% if passport.passport_version %} &middot; Passport version {{ passport.passport_version }}{% endif %}</p>
     </div>
     <div class="t-head-copy" style="align-items:flex-start;">
@@ -51,6 +51,7 @@
 
   <section class="t-report-block">
     <h2>1. The result</h2>
+    <p data-passport-answer>{{ passport_headline.answer }}</p>
     <p>{{ passport.why_this_status }}</p>
     <table>
       <tbody>
@@ -104,8 +105,8 @@
       <tbody>
         <tr><th scope="row">Official name</th><td>{{ passport.identity.name }}</td></tr>
         <tr><th scope="row">Symbol</th><td>{{ passport.identity.symbol }}</td></tr>
-        <tr><th scope="row">Network</th><td>{{ passport.identity.network or 'Not recorded' }}</td></tr>
-        <tr><th scope="row">Type</th><td>{% if passport.identity.native_asset %}Native coin{% elif passport.identity.native_asset == false %}Token{% else %}{{ tone.humanize(passport.identity.asset_type) }}{% endif %}</td></tr>
+        <tr><th scope="row">Network</th><td>{{ passport.identity.network_label or 'Not recorded' }}</td></tr>
+        <tr><th scope="row">Type</th><td>{{ passport.identity.kind_label }}</td></tr>
         <tr><th scope="row">Identity state</th><td>{{ tone.humanize(passport.identity.identity_state) }}</td></tr>
         <tr><th scope="row">Identity checked</th><td>{{ passport.identity.identity_verified_at|short_dt(tz) if passport.identity.identity_verified_at else 'Date not kept' }}</td></tr>
         {% for network, address in (passport.identity.contract_addresses or {}).items() %}
@@ -234,6 +235,6 @@
 {% endblock %}
 
 {% block page_scripts %}
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261008-event-params"></script>
-  <script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20261008-event-params"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261008-passport-seo"></script>
+  <script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20261008-passport-seo"></script>
 {% endblock %}

@@ -65,8 +65,9 @@
     const assessment = payload.assessment;
     const historical = payload.historical || {};
     const symbol = identity.symbol || assessment.canonical_asset;
-    const kind = identity.native_asset === true ? "Native asset" : identity.native_asset === false ? "Token" : label(identity.asset_type);
-    const network = identity.network || "Network not recorded";
+    // In the server's words (`core/asset_kinds.py`), the same the Passport page prints.
+    const kind = identity.kind_label || label(identity.asset_type);
+    const network = identity.network_label || "Network not recorded";
     text("[data-passport-quick-logo]", symbol.slice(0, 3));
     window.HilalAssetLogos?.load(
       dialog.querySelector("[data-passport-quick-logo]"),
