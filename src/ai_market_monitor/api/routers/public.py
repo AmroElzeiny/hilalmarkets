@@ -48,6 +48,7 @@ from ai_market_monitor.core.site_content import (
     PUBLIC_PAGE_BY_PAGE,
     PUBLIC_PAGES,
     PURCHASE_FAQS,
+    SHARIA_STATUS_PRESENTATION,
     SITE_DESCRIPTION,
     SITE_NAME,
     SOCIAL_LINKS,
@@ -61,6 +62,7 @@ from ai_market_monitor.core.site_content import (
     HelpArticle,
     PurchaseFaq,
     footer_navigation,
+    market_screener_faqs,
     public_help_categories,
     public_navigation,
 )
@@ -186,6 +188,16 @@ def _faq_json_ld(
     }
 
 
+def _status_definitions() -> list[tuple[str, dict[str, str]]]:
+    """Every Shariah status with its name and plain meaning, as (status, words) pairs.
+
+    How We Screen and the Market page both explain the statuses from this one table
+    (`core/site_content.SHARIA_STATUS_PRESENTATION`), in its order.
+    """
+
+    return list(SHARIA_STATUS_PRESENTATION.items())
+
+
 def _public_context(
     request: Request,
     settings: Settings,
@@ -227,6 +239,9 @@ def _public_context(
     footer_groups = footer_navigation(hidden_pages=settings.stage_exposure.hidden_pages)
     if page == "landing":
         json_ld.append(_faq_json_ld(PURCHASE_FAQS))
+    elif page == "market":
+        # The same questions the page answers in its own FAQ section, from one list.
+        json_ld.append(_faq_json_ld(market_screener_faqs(PUBLIC_MARKET_VISIBLE_COUNT)))
     elif page == "help":
         json_ld.append(
             _faq_json_ld(
@@ -493,6 +508,13 @@ async def _render_public_page(
         extra["active_methodology"] = (
             service.methodology_view(methodology) if methodology else None
         )
+        extra["status_definitions"] = _status_definitions()
+        # The public screener, when the stage shows it: the list this page explains.
+        extra["public_market_href"] = (
+            None
+            if "market" in settings.stage_exposure.hidden_pages
+            else request.url_for("public_market").path
+        )
     if page == "hilal_methodology":
         # Handed to the page at render time, never built into the bundle. The page says
         # how many conditions are approved and which coins were judged; both change when
@@ -506,7 +528,7 @@ async def _render_public_page(
             request,
             settings,
             page=metadata.page,
-            title=metadata.title,
+            title=metadata.page_title,
             description=metadata.description,
             path=metadata.path,
             legal_review_required=metadata.legal_review_required,
@@ -708,13 +730,35 @@ async def market(
     methodologies = await service.methodologies()
     chosen = await service.choose(methodologies, requested)
     metadata = PUBLIC_PAGE_BY_PAGE["market"]
+    hidden = settings.stage_exposure.hidden_pages
     context = _public_context(
         request,
         settings,
         page=metadata.page,
-        title=metadata.title,
+        title=metadata.page_title,
         description=metadata.description,
         path=metadata.path,
+        # The breadcrumb keeps the page's name, the one the Passports' breadcrumbs use.
+        breadcrumbs=[(metadata.title, metadata.path)],
+        # A shared link previews as the screener, not as the home page.
+        social_title=metadata.page_title,
+        social_description=metadata.description,
+        # Plain links in the page as sent, so a crawler reaches every Passport from the
+        # screener: the same list, and the same rule, as the sitemap.
+        market_passports=await linkable_passports(session, settings),
+        market_faqs=market_screener_faqs(PUBLIC_MARKET_VISIBLE_COUNT),
+        status_definitions=_status_definitions(),
+        market_read_next=[
+            {
+                "title": item.title,
+                "description": item.description,
+                "href": request.url_for(item.endpoint).path,
+            }
+            for item in (
+                PUBLIC_PAGE_BY_PAGE[key] for key in ("how_we_screen", "hilal_methodology")
+            )
+            if item.page not in hidden
+        ],
         methodologies=methodologies,
         selected_methodology_id=chosen.id if chosen else None,
         selected_exchange=exchange,

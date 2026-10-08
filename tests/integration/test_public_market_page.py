@@ -237,7 +237,7 @@ async def test_the_page_keeps_the_list_and_drops_what_a_visitor_cannot_use(test_
     assert 'data-audience="public"' in html
     assert 'data-endpoint="/api/v1/public-market/quotes"' in html
     assert f'data-methodology-id="{methodology_id}"' in html
-    assert "<h1>Market</h1>" in html
+    assert "<h1>Halal Crypto Screener</h1>" in html
     # No dashboard chrome and no search.
     assert "hm-top" not in html
     assert "dashboard-sidebar" not in html
@@ -253,9 +253,12 @@ async def test_the_page_keeps_the_list_and_drops_what_a_visitor_cannot_use(test_
     # Sign-up and sign-in bring the visitor back to the full list.
     assert "/signup?next=%2Fdashboard%2Fmarket" in html
     assert "/signin?next=%2Fdashboard%2Fmarket" in html
-    # The locked rows are drawn by the script: no coin is written into the page.
+    # The locked rows are drawn by the script: no coin is written into the list. (The
+    # Passport links under it name every coin with a public Passport on purpose — every
+    # Passport is open to everyone — so the rule is about the list, not the whole page.)
+    market_list = html[html.index("data-market-root") : html.index("data-market-guide")]
     for coin in COINS:
-        assert coin not in html
+        assert coin not in market_list
     # The one Ask AI button opens the public assistant.
     assert "data-public-chat-open" in html
 
@@ -273,7 +276,7 @@ async def test_a_signed_in_member_stays_on_the_public_page_with_nothing_locked(t
     # The public page, in the public chrome — not the dashboard.
     assert 'data-audience="public"' in html
     assert 'data-unlocked="true"' in html
-    assert "<h1>Market</h1>" in html
+    assert "<h1>Halal Crypto Screener</h1>" in html
     assert 'id="hm-site-footer"' in html
     assert "hm-top" not in html
     assert "dashboard-sidebar" not in html

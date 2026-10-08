@@ -11,6 +11,7 @@ from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from ai_market_monitor.api.head_requests import HeadAsGetMiddleware
 from ai_market_monitor.api.request_guards import apply_request_guards
 from ai_market_monitor.api.routers import (
     activity_router,
@@ -134,6 +135,10 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
     # `text/event-stream` alone by default, so the System Brain's live stream is
     # unaffected, and a client that does not offer gzip still receives plain bytes.
     application.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+    # Outside GZip, so a HEAD request is a GET all the way to the route, and its body is
+    # dropped only after the compressed headers are written. The request guards below
+    # still see HEAD, which they already treat as a safe method.
+    application.add_middleware(HeadAsGetMiddleware)
 
     @application.exception_handler(StarletteHTTPException)
     async def sign_in_instead_of_raw_refusal(

@@ -65,11 +65,12 @@
       <p class="t-eyebrow"><span data-icon="shield_check" data-icon-class="icon-sm"></span>Shariah screened</p>
       {#- "Halal Assets" is the product's own name for this feature, used by the side
           menu, the plans table and the chat. Sentence-casing it only here would make
-          the page disagree with the menu that led to it. The public page is named by
-          the site's menu instead, which calls it Markets. -#}
+          the page disagree with the menu that led to it. The public page is the site's
+          halal crypto screener, and its heading says so in the words people search
+          with. -#}
       {% if is_public %}
-      <h1>Market</h1>
-      <p class="t-lede">Every coin here passed a published Shariah standard. Prices are live from the exchange, and the review behind each coin is shown beside it.</p>
+      <h1>Halal Crypto Screener</h1>
+      <p class="t-lede" data-market-intro>Every coin in this list passed a published Shariah standard. Each result belongs to one standard and its version, and it is never a religious ruling for everyone. Prices are live from the exchange, and every coin has an Evidence Passport that shows the reasons and the sources behind its result.</p>
       {% else %}
       <h1>Halal Assets</h1>
       {% endif %}

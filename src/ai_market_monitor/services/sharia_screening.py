@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.core.asset_logos import asset_logo
 from ai_market_monitor.core.config import Settings
+from ai_market_monitor.core.site_content import SHARIA_STATUS_PRESENTATION
 from ai_market_monitor.db.models import (
     AssetShariaAssessment,
     AssetShariaStatusHistory,
@@ -52,13 +53,11 @@ DEFAULT_ALLOWED_STATUSES = {
     ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS,
 }
 
+#: Each status's name, read from the one table that also explains it
+#: (`core/site_content.SHARIA_STATUS_PRESENTATION`). Built for every member of the enum,
+#: so a status added without a name fails at import rather than on a customer's page.
 STATUS_LABELS = {
-    ShariaAssetStatus.ELIGIBLE: "Eligible",
-    ShariaAssetStatus.ELIGIBLE_WITH_QUALIFICATIONS: "Eligible with qualifications",
-    ShariaAssetStatus.DISPUTED: "Disputed",
-    ShariaAssetStatus.UNDER_REVIEW: "Under review",
-    ShariaAssetStatus.EXCLUDED: "Excluded",
-    ShariaAssetStatus.INSUFFICIENT_INFORMATION: "Insufficient information",
+    status: SHARIA_STATUS_PRESENTATION[status.value]["label"] for status in ShariaAssetStatus
 }
 
 DEVELOPMENT_METHODOLOGY_PREFIX = "TRACEDGE_DEV_TEST_"

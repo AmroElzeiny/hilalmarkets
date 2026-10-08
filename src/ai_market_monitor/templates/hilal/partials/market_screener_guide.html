@@ -1,0 +1,123 @@
+{#- Under the public screener's list: what the list means, in words a beginner can read,
+    and a plain link to every Evidence Passport.
+
+    All of it is in the page as sent, so a search engine reads it without running a
+    script. The list above it is drawn by script; this part never is.
+
+    The words come from their owners, never from here:
+
+    * the statuses and what each means — `core/site_content.SHARIA_STATUS_PRESENTATION`,
+      the same table How We Screen draws its definitions from;
+    * the questions and answers — `core/site_content.market_screener_faqs`, the same list
+      the page sends as FAQ data;
+    * the Passports — `services/public_passports`, the list and the rule the sitemap uses,
+      so no link here leads to a page that would not open.
+
+    Nothing here names a result for any one coin. Each Passport says that for itself. -#}
+{% import "hilal/dashboard_test/macros/tone.html" as tone %}
+<div class="hm-t" data-market-guide style="margin-top:var(--t-6);">
+
+  <section class="t-section" id="how-screening-works">
+    <div class="t-section-head">
+      <h2>How the screening works</h2>
+    </div>
+    <div class="t-panel">
+      <p>A Shariah standard is a written set of rules. It says what a crypto project must do, and must not do, to pass. Each standard is published by the group behind it, and each one has a version number.</p>
+      <p>You choose the standard above the list. Choose one standard to see only the coins that passed it. Choose All to see every coin that passed at least one approved standard. A coin's Evidence Passport says which standard gave its result.</p>
+      <p>A result is a screening result under one standard and its version. It is not a fatwa, and it is not advice to buy or sell.</p>
+    </div>
+  </section>
+
+  <section class="t-section" id="statuses">
+    <div class="t-section-head">
+      <h2>What each status means</h2>
+      <p class="t-lede">The list shows coins with the first two results. An Evidence Passport can show any of them.</p>
+    </div>
+    <div class="t-panel">
+      <ul style="display:grid;gap:var(--t-4);margin:0;padding:0;list-style:none;">
+        {% for key, status in status_definitions %}
+        <li data-status-definition="{{ key }}">
+          <span class="t-pill" data-tone="{{ tone.asset_tone(key) }}">{{ status.label }}</span>
+          <p style="margin:var(--t-1) 0 0;">{{ status.plain_language }}</p>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </section>
+
+  <section class="t-section" id="why-standards-disagree">
+    <div class="t-section-head">
+      <h2>Why standards can disagree</h2>
+    </div>
+    <div class="t-panel">
+      <p>Standards do not always agree. They can use different rules, or read the same evidence in a different way. So one coin can be Eligible under one standard and Excluded under another.</p>
+      <p>Hilal Markets keeps each standard's result separate, with its own evidence. A coin's Evidence Passport lets you switch between the standards that reviewed it.</p>
+    </div>
+  </section>
+
+  <section class="t-section" id="evidence-passport">
+    <div class="t-section-head">
+      <h2>What an Evidence Passport is</h2>
+    </div>
+    <div class="t-panel">
+      <p>Every screened coin has one Evidence Passport. It is a public page with its own address, and you can open it without an account. It shows:</p>
+      <ul style="margin:0;padding-inline-start:1.2em;">
+        <li>the coin's result under each standard that reviewed it;</li>
+        <li>the reasons the reviewer recorded;</li>
+        <li>the sources that were used, and the date each one was checked;</li>
+        <li>what the result covers, and which coin exactly was reviewed.</li>
+      </ul>
+      <p>If something on a Passport looks wrong, you can report it from the Passport.</p>
+    </div>
+  </section>
+
+  <section class="t-section" id="questions">
+    <div class="t-section-head">
+      <h2>Questions people ask</h2>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:var(--t-2);">
+      {% for item in market_faqs %}
+      <details class="t-more" data-market-faq>
+        <summary>{{ item.question }}<span data-icon="chevron" data-icon-class="icon-sm"></span></summary>
+        <div class="t-more-body"><p>{{ item.answer }}</p></div>
+      </details>
+      {% endfor %}
+    </div>
+  </section>
+
+  {% if market_read_next %}
+  <section class="t-section" id="read-next" data-market-read-next>
+    <div class="t-section-head">
+      <h2>Read next</h2>
+    </div>
+    <div class="t-panel">
+      {% for item in market_read_next %}
+      <a class="t-read-next" href="{{ item.href }}">
+        <strong>{{ item.title }}<span data-icon="arrow" data-icon-class="icon-sm"></span></strong>
+        <span>{{ item.description }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {#- Every coin with a public Passport, alphabetically: screened coins of every result,
+      not only those in the list above, so it is headed as Passports, never as a list of
+      coins that passed. Empty only on a new worker's first request, which the list is
+      never kept waiting for (`linkable_passports`); then the section is left out. -#}
+  {% if market_passports %}
+  <section class="t-section" id="passports" data-market-passports>
+    <div class="t-section-head">
+      <h2>Evidence Passports for every screened coin</h2>
+      <p class="t-lede">{{ market_passports|length }} {{ 'coin' if market_passports|length == 1 else 'coins' }}, from A to Z. Each Passport shows the coin's result under each standard that reviewed it.</p>
+    </div>
+    <div class="t-panel">
+      <ul class="t-related">
+        {% for item in market_passports %}
+        <li><a href="{{ item.path }}">{{ item.coin }}</a><small>{{ item.kind }}{% if item.network and item.kind != 'Native coin' %} &middot; {{ item.network }}{% endif %}</small></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </section>
+  {% endif %}
+</div>

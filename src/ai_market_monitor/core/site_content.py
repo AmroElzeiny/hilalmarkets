@@ -83,6 +83,14 @@ class PublicPageMetadata:
     #: old `/faq` address redirects there — and an assistant asked "where is the FAQ"
     #: has to know that, or it says the FAQ does not exist.
     also_called: tuple[str, ...] = ()
+    #: The browser title and search-result title, when it is not the page's name. The
+    #: name (``title``) is what the menus, the breadcrumbs and the assistant call the
+    #: page; this is the words a search engine shows for it.
+    search_title: str | None = None
+
+    @property
+    def page_title(self) -> str:
+        return self.search_title or self.title
 
 
 class PurchaseFaq(TypedDict):
@@ -661,15 +669,22 @@ PUBLIC_PAGES = (
     PublicPageMetadata(
         # The dashboard's Halal Assets list, opened to visitors without an account. It
         # shows the first twenty coins in full and asks for a free account for the rest.
+        #
+        # It is also the site's one page for "halal crypto screener", "halal crypto
+        # list" and "Shariah compliant crypto". There is deliberately no second page for
+        # those words (no `/halal-crypto-screener`): two pages answering the same search
+        # would compete with each other, and this one already holds the list.
         "market",
         "public_market",
         "/markets",
         "Market",
         (
-            "See Shariah-screened crypto coins with live spot prices, the review status "
-            "of each one, and the standard that screened it."
+            "A halal crypto screener: see which crypto coins pass a published Shariah "
+            "standard, what each status means, and the evidence behind every result."
         ),
         "hilal/public/market.html",
+        also_called=("Halal Crypto Screener", "Halal crypto list"),
+        search_title="Halal Crypto Screener — Shariah-Screened Assets With Evidence",
     ),
     PublicPageMetadata(
         "help",
@@ -907,38 +922,111 @@ def public_help_categories(*, waitlist_mode: bool) -> tuple[HelpCategory, ...]:
     return tuple(categories)
 
 
+#: What each Shariah status is called and what it means, in plain words.
+#:
+#: The one owner. `services/sharia_screening.STATUS_LABELS` is read from here, and the
+#: status definitions on How We Screen and on the Market page are drawn from here, so a
+#: status cannot be named one way on one page and explained another way on the next.
+#: In the order a reader meets them: the two results the market list shows first.
 SHARIA_STATUS_PRESENTATION = {
     "eligible": {
         "label": "Eligible",
         "badge": "eligible",
-        "plain_language": "Screened as eligible under the stated methodology.",
+        "plain_language": (
+            "The coin meets the rules of the chosen standard, based on the evidence "
+            "that was checked."
+        ),
     },
     "eligible_with_qualifications": {
         "label": "Eligible with qualifications",
         "badge": "qualified",
-        "plain_language": "Included with qualification context that should be reviewed.",
+        "plain_language": (
+            "The coin meets the rules, with a condition you should read first. The "
+            "condition is written on its Evidence Passport."
+        ),
     },
     "under_review": {
         "label": "Under review",
         "badge": "review",
-        "plain_language": "Not included in default monitoring while evidence is reviewed.",
+        "plain_language": (
+            "The evidence or the review is not finished. The coin stays out of the "
+            "default list until it is."
+        ),
     },
     "disputed": {
         "label": "Disputed",
         "badge": "review",
-        "plain_language": "Approved methodologies or reviewers have a material disagreement.",
+        "plain_language": (
+            "Reviewers or standards disagree in an important way. The disagreement is "
+            "shown, not hidden."
+        ),
     },
     "excluded": {
         "label": "Excluded",
         "badge": "excluded",
-        "plain_language": "Excluded under the stated methodology and version.",
+        "plain_language": "The coin does not meet the rules of the chosen standard and version.",
     },
     "insufficient_information": {
         "label": "Insufficient information",
         "badge": "neutral",
-        "plain_language": "Required evidence is not complete enough for a status.",
+        "plain_language": "There is not enough evidence yet to give the coin a result.",
     },
 }
+
+
+def market_screener_faqs(visible_count: int) -> tuple[PurchaseFaq, ...]:
+    """The questions answered on the Market page, shown there and sent as FAQ data.
+
+    One list for both, so the answers a search engine reads are the answers on the page.
+    ``visible_count`` is how many coins a visitor sees without an account
+    (`services/public_market.PUBLIC_MARKET_VISIBLE_COUNT`).
+    """
+
+    return (
+        {
+            "question": "Is this a list of halal cryptocurrencies?",
+            "answer": (
+                "It is a list of crypto coins that passed a published Shariah standard. "
+                "Here, a passing result always means \"eligible under the standard you "
+                "chose\". It is not a religious ruling for every scholar or every person. "
+                "Open a coin's Evidence Passport to see why it got its result."
+            ),
+        },
+        {
+            "question": "Who decides a coin's status?",
+            "answer": (
+                "Each status comes from one published Shariah standard and its review. "
+                "Every Evidence Passport names the standard, its version and who checked "
+                "the coin. Hilal Markets does not average standards into one score."
+            ),
+        },
+        {
+            "question": "Why is a coin missing from the list?",
+            "answer": (
+                "The list shows only coins that passed the standard you chose and that "
+                "trade on the exchange you chose. A coin can be missing because it did not "
+                "pass, because its review is not finished, or because that standard has "
+                "not looked at it yet. Try another standard, or open the coin's Evidence "
+                "Passport below if it has one."
+            ),
+        },
+        {
+            "question": "Is this buy or sell advice?",
+            "answer": (
+                "No. Hilal Markets shows screening results and their evidence. It does not "
+                "tell you to buy or sell, it does not trade for you, and it does not "
+                "promise any return. You make your own decisions."
+            ),
+        },
+        {
+            "question": "Do I need an account?",
+            "answer": (
+                f"No. The first {visible_count} coins and every Evidence Passport are open "
+                "to everyone. A free account shows the full list and lets you follow "
+                "coins, so you are told when a coin's status changes."
+            ),
+        },
+    )
 
 
 LIFECYCLE_PRESENTATION = {

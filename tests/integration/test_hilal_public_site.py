@@ -130,7 +130,9 @@ async def test_every_public_page_renders_unique_metadata_without_prototype_conte
         content = response.text
         title = re.search(r"<title>([^<]+)</title>", content)
         canonical = re.search(r'<link rel="canonical" href="([^"]+)">', content)
-        assert title and page.title in html.unescape(title.group(1)), page.path
+        assert title and html.unescape(title.group(1)) == f"{page.page_title} | Hilal Markets", (
+            page.path
+        )
         assert canonical and canonical.group(1).endswith(page.path), page.path
         assert f'<meta name="description" content="{page.description}">' in content
         assert (
@@ -138,10 +140,16 @@ async def test_every_public_page_renders_unique_metadata_without_prototype_conte
             'content="index,follow,max-image-preview:large,max-snippet:-1,'
             'max-video-preview:-1">'
         ) in content
-        assert f'<meta property="og:title" content="{SOCIAL_PREVIEW_TITLE}">' in content
+        # A page with its own search title (the Market page, which is the site's halal
+        # crypto screener) previews as itself when shared; every other page as the site.
+        social_title = page.page_title if page.search_title else SOCIAL_PREVIEW_TITLE
+        social_description = (
+            page.description if page.search_title else SOCIAL_PREVIEW_DESCRIPTION
+        )
+        assert f'<meta property="og:title" content="{social_title}">' in html.unescape(content)
         assert (
-            f'<meta property="og:description" content="{SOCIAL_PREVIEW_DESCRIPTION}">'
-            in content
+            f'<meta property="og:description" content="{social_description}">'
+            in html.unescape(content)
         )
         assert '<meta property="og:site_name" content="Hilal Markets">' in content
         assert '<meta property="og:image:type" content="image/png">' in content
@@ -149,12 +157,12 @@ async def test_every_public_page_renders_unique_metadata_without_prototype_conte
         assert '<meta property="og:image:height" content="630">' in content
         assert 'property="og:image:alt"' in content
         assert '<meta name="twitter:card" content="summary_large_image">' in content
-        assert f'<meta name="twitter:title" content="{SOCIAL_PREVIEW_TITLE}">' in content
+        assert f'<meta name="twitter:title" content="{social_title}">' in html.unescape(content)
         twitter_description = (
             f'<meta name="twitter:description" '
-            f'content="{SOCIAL_PREVIEW_DESCRIPTION}">'
+            f'content="{social_description}">'
         )
-        assert twitter_description in content
+        assert twitter_description in html.unescape(content)
         assert 'name="twitter:image"' in content
         assert 'name="twitter:image:alt"' in content
         assert '/static/hilalmarkets-social-preview.png' in content
@@ -412,8 +420,10 @@ async def test_launched_mode_restores_the_product_routes_the_waitlist_hides(test
     assert '"plans": []' not in landing.text
 
     screening = html.unescape((await test_context["client"].get("/how-we-screen")).text)
-    assert ">Explore Halal Assets</a>" in screening
-    assert "/dashboard/market" in screening
+    # The button opens the public screener, which a visitor without an account can use.
+    assert '<a class="btn btn-primary" href="/markets">Open the Halal Crypto Screener</a>' in (
+        screening
+    )
 
     help_page = html.unescape((await test_context["client"].get("/help")).text)
     assert ">Dashboard support</a>" in help_page

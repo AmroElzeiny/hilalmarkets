@@ -39,6 +39,9 @@ PRODUCT_NAMES = (
     "Halal Asset",
     "Shariah Evidence Passport",
     "Evidence Passport",
+    # The public Market page's name in search and in its own heading
+    # (`core/site_content.py`, the "market" page's `search_title`).
+    "Halal Crypto Screener",
     "Asset Passport",
     "Strategy Guard",
     "Trading Assistant",
