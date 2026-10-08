@@ -202,10 +202,10 @@ async def test_a_visitor_opens_a_passport_without_an_account(test_context):
     assert '<div id="hm-site-footer"></div>' in html
     assert "data-hm-shell-top" not in html
     assert "data-hm-shell-nav" not in html
-    # A report needs an account; a visitor is asked to sign in and brought back.
-    assert "data-problem-form" not in html
-    assert "Sign in to report a problem" in html
-    assert "next=%2Fpassports%2Fbtc%23report-problem" in html
+    # A visitor gets the same report form, with an email address to be answered at.
+    assert 'data-problem-form' in html and 'data-visitor="true"' in html
+    assert 'id="t-problem-email" name="email" type="email"' in html
+    assert "Sign in to report a problem" not in html
     # One canonical address, on the website, whatever standard is being read.
     assert re.search(r'<link rel="canonical" href="[^"]*/passports/btc">', html)
 
@@ -313,7 +313,9 @@ async def test_a_signed_in_reader_gets_the_problem_form_with_their_own_token(tes
     assert page.status_code == 200
     assert "data-problem-form" in page.text
     assert re.search(r'data-csrf-token="[0-9a-f]{64}"', page.text)
-    assert "Sign in to report a problem" not in page.text
+    # A member's report is tied to their account: no email field and no visitor mode.
+    assert 'data-visitor="true"' not in page.text
+    assert 'id="t-problem-email"' not in page.text
     # The token is this reader's own, so no shared cache may keep the page.
     assert "no-store" in page.headers["cache-control"]
 

@@ -1,10 +1,8 @@
 """The price feed behind the public Market page.
 
-Anonymous on purpose, and narrow on purpose. It answers with the first
-:data:`PUBLIC_MARKET_VISIBLE_COUNT` screened coins and only a *count* of the rest, so a
-visitor who opens the network tab learns nothing the page does not already show. The
-full list is sent only to a reader with a valid session: the page is the same page for
-them, and the line it draws is the one an account removes.
+Anonymous on purpose. It answers with every screened coin, the same list for a visitor
+and for a member: a visitor is treated like a member on the free plan, who always saw
+every coin.
 
 Every reply is served from a short in-process cache in :class:`PublicMarketService`, so
 however many visitors keep the page open, the database and the exchange are asked at
@@ -15,7 +13,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_market_monitor.api.dependencies import get_market_data_provider
@@ -32,7 +30,6 @@ from ai_market_monitor.services.public_market import (
 )
 from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
 from ai_market_monitor.services.sharia_screening import ShariaScreeningError
-from ai_market_monitor.services.web_auth import SESSION_COOKIE_NAME, WebAuthService
 
 #: The page key the launch stage hides before accounts can be opened. Read here so the
 #: feed is closed whenever the page is.
@@ -43,11 +40,10 @@ router = APIRouter(prefix="/public-market", tags=["public-market"])
 
 @router.get("/quotes", response_model=PublicMarketResponse)
 @public_api(
-    "Publishes the first screened coins of the public Market page and only a count of "
-    "the rest; the full list is sent only with a valid session."
+    "Publishes every screened coin of the public Market page, the same list for "
+    "visitors and members."
 )
 async def public_market_quotes(
-    request: Request,
     response: Response,
     methodology_id: UUID | None = None,
     exchange: str = Query(default=MARKET_EXCHANGES[0], pattern=MARKET_EXCHANGE_PATTERN),
@@ -57,14 +53,8 @@ async def public_market_quotes(
 ) -> PublicMarketResponse:
     if PUBLIC_MARKET_PAGE in settings.stage_exposure.hidden_pages:
         raise HTTPException(status_code=404, detail="Not found")
-    # The answer depends on who is asking, so no shared cache in front of the site may
-    # keep one reader's copy for the next: a member's full list must never be served
-    # to a visitor.
+    # Live prices: no cache in front of the site may keep an old copy.
     response.headers["Cache-Control"] = "private, no-store"
-    response.headers["Vary"] = "Cookie"
-    user = await WebAuthService(session, settings).current_user(
-        request.cookies.get(SESSION_COOKIE_NAME)
-    )
     service = PublicMarketService(session, settings, provider)
     methodologies = await service.methodologies()
     if methodology_id is None:
@@ -79,9 +69,7 @@ async def public_market_quotes(
             )
         methodology_id = chosen.id
     try:
-        return await service.view(
-            methodology_id=methodology_id, exchange=exchange, unlocked=user is not None
-        )
+        return await service.view(methodology_id=methodology_id, exchange=exchange)
     except (PublicMarketUnavailable, ShariaScreeningError) as exc:
         raise HTTPException(
             status_code=404,

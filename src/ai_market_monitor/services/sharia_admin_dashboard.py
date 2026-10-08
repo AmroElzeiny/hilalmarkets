@@ -24,6 +24,7 @@ from ai_market_monitor.db.models import (
     ShariaGovernanceRoleGrant,
     ShariaMethodology,
     ShariaMonitoringRun,
+    ShariaPassportProblemReport,
     ShariaReviewAssignmentEvent,
     SourceSnapshot,
     TelegramNotificationAttempt,
@@ -35,6 +36,7 @@ from ai_market_monitor.db.models.enums import (
     UserRole,
 )
 from ai_market_monitor.schemas.sharia_methodology import MethodologyRulesDefinition
+from ai_market_monitor.services.alert_emails import alert_email_address
 from ai_market_monitor.services.sharia_case_tags import (
     EMPTY_COVERAGE,
     classify,
@@ -751,6 +753,34 @@ class ShariaAdminDashboardService:
             result = [item for item in result if item["tag"] == tag]
         return result
 
+    async def _reporter(self, case: ReviewCase) -> dict[str, str] | None:
+        """Who sent a reader's Passport report, and where a reviewer can write back.
+
+        A member's account address, or the address a visitor without an account typed on
+        the Passport. None for every other kind of case.
+        """
+
+        if case.case_type != ReviewCaseType.USER_FACTUAL_REPORT:
+            return None
+        report = await self.session.scalar(
+            select(ShariaPassportProblemReport).where(
+                ShariaPassportProblemReport.review_case_id == case.id
+            )
+        )
+        if report is None:
+            return None
+        if report.reporter_user_id is not None:
+            # The account's own verified address, chosen by the one owner of that rule.
+            address = await alert_email_address(self.session, report.reporter_user_id)
+            return {
+                "who": "A member",
+                "email": address or "No verified email on the account",
+            }
+        return {
+            "who": "A visitor without an account",
+            "email": report.reporter_email or "Not given",
+        }
+
     async def case_detail(self, case_id: UUID) -> dict:
         case = await self.session.get(ReviewCase, case_id)
         if case is None:
@@ -1062,6 +1092,7 @@ class ShariaAdminDashboardService:
                 asset,
                 coin_name=(coin_run.asset_name or coin_run.symbol) if coin_run else None,
             ),
+            "reporter": await self._reporter(case),
             "why_case": {
                 "trigger": case.human_review_reason,
                 "assessment_area": (

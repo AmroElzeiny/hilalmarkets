@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import (
     BaseModel,
     ConfigDict,
+    EmailStr,
     Field,
     HttpUrl,
     computed_field,
@@ -334,6 +335,23 @@ class PassportProblemReportRequest(BaseModel):
     passport_version_id: UUID | None = None
 
 
+class VisitorPassportProblemReportRequest(PassportProblemReportRequest):
+    """The same report from a visitor without an account, who says where to write back.
+
+    ``company_website`` is the public forms' hidden trap field: a person never sees it,
+    so anything in it was filled in by a script.
+    """
+
+    email: EmailStr
+    company_website: str = Field(default="", max_length=300)
+
+    @model_validator(mode="after")
+    def reject_honeypot(self) -> "VisitorPassportProblemReportRequest":
+        if self.company_website.strip():
+            raise ValueError("Invalid form submission")
+        return self
+
+
 class PassportProblemReportResponse(BaseModel):
     id: UUID
     state: str
@@ -445,21 +463,12 @@ class LiveSpotMarketResponse(BaseModel):
 
 
 class PublicMarketResponse(LiveSpotMarketResponse):
-    """The Market page a signed-out visitor sees: the first coins, and a count of the rest.
+    """The public Market page's list: every screened coin, the same for everyone.
 
-    ``items`` holds only the coins a visitor may see. The rest are never sent — not
-    blurred on the page, not hidden with a style, simply absent — so reading the network
-    tab reveals no more than the page does. What *is* sent about them is how many there
-    are, and how many hold each status, because those are the numbers the page's four
-    counters show and they name no coin.
+    A visitor without an account is sent exactly what a member is sent. The page used to
+    send a visitor only the first twenty coins and counts of the rest; that line was
+    removed on 8 October 2026.
     """
-
-    #: How many coins a visitor may see. The page says this number out loud.
-    visible_limit: int
-    #: How many screened coins are not shown. The locked rows count up to this.
-    hidden_count: int
-    #: Every screened coin under this standard, counted by its recorded status.
-    status_counts: dict[str, int]
 
 
 class ShariaUniverseExclusion(BaseModel):

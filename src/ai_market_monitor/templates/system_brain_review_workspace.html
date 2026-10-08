@@ -98,6 +98,9 @@
           {% if detail.why_case.trigger and detail.why_case.trigger != detail.tag.reason %}
           <p class="brain-muted">{{ detail.why_case.trigger }}</p>
           {% endif %}
+          {% if detail.reporter %}
+          <p class="brain-muted" data-testid="case-reporter">Reported by {{ detail.reporter.who|lower }}.{% if '@' in detail.reporter.email %} Write back to <a href="mailto:{{ detail.reporter.email }}">{{ detail.reporter.email }}</a>.{% else %} {{ detail.reporter.email }}.{% endif %}</p>
+          {% endif %}
         </div>
       </div>
       <dl class="brain-facts brain-facts-four">

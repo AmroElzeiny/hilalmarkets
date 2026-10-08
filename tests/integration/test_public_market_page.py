@@ -1,21 +1,22 @@
-"""The public Market page, its price feed, and the assistant's line at the same place.
+"""The public Market page, its price feed, and the assistant, for everybody alike.
 
 What is asserted, as rules across the whole family:
 
-* the feed sends exactly the first 20 coins, in the dashboard's own order, on both
-  exchanges — and nothing about the rest except counts;
-* the page keeps the dashboard's list and drops only what a visitor cannot use: no
-  search, no sorting, no dashboard top bar; hearts and Favorites ask for an account and
-  bring the visitor back to what they asked for;
+* the feed sends every screened coin, in the dashboard's own order, on both exchanges —
+  the same list to a visitor without an account as to a member (a visitor is treated
+  like a member on the free plan; the page used to stop after twenty coins);
+* the page shows the dashboard's list with search and sorting for everybody; only what
+  is stored on an account — following a coin, Favorites — asks a visitor to sign up and
+  brings them back to what they asked for;
 * "See the evidence" opens the dashboard's own Passport popup for everybody, read from
   an open feed that answers for every screened coin exactly as the dashboard does;
-* a signed-in member who opens the page stays on it and sees every coin, with nothing
-  locked and no sign-up prompt — the "Markets" link must not drop them in the dashboard;
+* a signed-in member who opens the page stays on it — the "Markets" link must not drop
+  them in the dashboard;
 * the page answers at ``/markets``; the first address, ``/market``, forwards there;
 * every public page carries "Markets" in its header and footer, and none does while the
   launch stage hides the page;
-* the assistant asks a visitor to sign in before it says anything about a coin the page
-  does not show — however the coin was named — and never for one it does show.
+* the assistant talks about every coin to everybody once the site has launched, and
+  about none to a visitor before launch — never "sign in first" because of a list limit.
 """
 
 from __future__ import annotations
@@ -42,14 +43,14 @@ from ai_market_monitor.schemas.sharia import (
 from ai_market_monitor.services.public_chat import PublicChatService
 from ai_market_monitor.services.public_market import (
     MARKET_EXCHANGES,
-    PUBLIC_MARKET_VISIBLE_COUNT,
     PublicMarketService,
 )
 from ai_market_monitor.services.sharia_screening import ShariaScreeningService
 from tests.factories import methodology_evidence_requirements, methodology_rules
 
-#: 26 screened coins, so six sit behind the line. Named so no symbol is a substring of
-#: another — "is this coin anywhere in the response?" must be an exact question.
+#: 26 screened coins — more than the twenty the page used to stop at, so a list that
+#: still stopped there would fail. Named so no symbol is a substring of another — "is
+#: this coin anywhere in the response?" must be an exact question.
 COINS = [f"Q{chr(65 + index)}{chr(65 + index)}X" for index in range(26)]
 CONDITIONAL = set(COINS[::4])
 
@@ -57,8 +58,8 @@ CONDITIONAL = set(COINS[::4])
 class VolumeProvider:
     """Every coin listed, with volumes that differ by exchange so the order does too.
 
-    Bybit reverses the first twenty, so the two exchanges show the same twenty coins in
-    different orders and the last six are behind the line on both.
+    Bybit reverses the first twenty, so the two exchanges show the same coins in
+    different orders.
     """
 
     async def list_symbols(self, exchange: str, quote_currencies: list[str]) -> list[str]:
@@ -68,7 +69,7 @@ class VolumeProvider:
     async def fetch_universe_metadata(self, exchange, symbols, *, include_listing_dates=False):
         del include_listing_dates
         values = {}
-        limit = PUBLIC_MARKET_VISIBLE_COUNT
+        limit = 20
         for position, symbol in enumerate(symbols):
             rank = (
                 position
@@ -172,7 +173,7 @@ async def _signup(test_context, email: str) -> None:
 
 
 @pytest.mark.parametrize("exchange", MARKET_EXCHANGES)
-async def test_the_feed_sends_the_first_twenty_in_the_dashboards_order(test_context, exchange):
+async def test_the_feed_sends_every_coin_in_the_dashboards_order(test_context, exchange):
     methodology_id = await _screen_every_coin(test_context)
     test_context["app"].dependency_overrides[get_market_data_provider] = VolumeProvider
     client = test_context["client"]
@@ -192,18 +193,12 @@ async def test_the_feed_sends_the_first_twenty_in_the_dashboards_order(test_cont
     assert member.status_code == 200, member.text
     everything = [item["canonical_asset"] for item in member.json()["items"]]
 
-    shown = [item["canonical_asset"] for item in payload["items"]]
-    assert shown == everything[:PUBLIC_MARKET_VISIBLE_COUNT]
-    assert payload["visible_limit"] == PUBLIC_MARKET_VISIBLE_COUNT
+    assert len(everything) == len(COINS)
+    assert [item["canonical_asset"] for item in payload["items"]] == everything
     assert payload["total"] == len(COINS)
-    assert payload["hidden_count"] == len(COINS) - PUBLIC_MARKET_VISIBLE_COUNT
-    assert payload["status_counts"] == {
-        "eligible": len(COINS) - len(CONDITIONAL),
-        "eligible_with_qualifications": len(CONDITIONAL),
-    }
-    # Nothing about a coin behind the line is sent — not even its name.
-    for coin in everything[PUBLIC_MARKET_VISIBLE_COUNT:]:
-        assert coin not in public.text
+    # Nothing in the answer describes a line any more.
+    for gone in ("visible_limit", "hidden_count", "status_counts"):
+        assert gone not in payload, gone
 
 
 async def test_the_feed_opens_on_the_default_standard_and_refuses_one_it_does_not_offer(
@@ -215,7 +210,7 @@ async def test_the_feed_opens_on_the_default_standard_and_refuses_one_it_does_no
 
     default = await client.get("/api/v1/public-market/quotes")
     assert default.status_code == 200
-    assert len(default.json()["items"]) == PUBLIC_MARKET_VISIBLE_COUNT
+    assert len(default.json()["items"]) == len(COINS)
 
     unknown = await client.get(
         "/api/v1/public-market/quotes",
@@ -226,7 +221,7 @@ async def test_the_feed_opens_on_the_default_standard_and_refuses_one_it_does_no
     assert bad_exchange.status_code == 422
 
 
-async def test_the_page_keeps_the_list_and_drops_what_a_visitor_cannot_use(test_context):
+async def test_a_visitor_gets_the_whole_list_with_search_and_sorting(test_context):
     methodology_id = await _screen_every_coin(test_context)
     test_context["app"].dependency_overrides[get_market_data_provider] = VolumeProvider
 
@@ -238,32 +233,30 @@ async def test_the_page_keeps_the_list_and_drops_what_a_visitor_cannot_use(test_
     assert 'data-endpoint="/api/v1/public-market/quotes"' in html
     assert f'data-methodology-id="{methodology_id}"' in html
     assert "<h1>Halal Crypto Screener</h1>" in html
-    # No dashboard chrome and no search.
+    # No dashboard chrome, and the search a member on the free plan has.
     assert "hm-top" not in html
     assert "dashboard-sidebar" not in html
-    assert "data-search" not in html
-    # Every column heading keeps its look and does not sort.
+    assert "data-search" in html
+    # Every column heading sorts, as in the dashboard.
     headings = re.findall(r"<button[^>]*data-sort=\"[a-z0-9]+\"[^>]*>", html)
     assert len(headings) == 6
-    assert all("disabled" in heading for heading in headings)
-    # Hearts, Favorites and the follow counter ask for an account instead.
+    assert not any("disabled" in heading for heading in headings)
+    # Nothing is locked, and no limit is announced.
+    assert "data-locked" not in html
+    assert "data-visible-limit" not in html
+    assert "more screened coins are waiting" not in html
+    # Only what is stored on an account — following a coin, Favorites — asks for one.
     assert 'data-account-gate="favorites"' in html
     assert 'data-account-gate="follow"' in html
     assert "data-account-dialog" in html
     # Sign-up and sign-in bring the visitor back to the full list.
     assert "/signup?next=%2Fdashboard%2Fmarket" in html
     assert "/signin?next=%2Fdashboard%2Fmarket" in html
-    # The locked rows are drawn by the script: no coin is written into the list. (The
-    # Passport links under it name every coin with a public Passport on purpose — every
-    # Passport is open to everyone — so the rule is about the list, not the whole page.)
-    market_list = html[html.index("data-market-root") : html.index("data-market-guide")]
-    for coin in COINS:
-        assert coin not in market_list
     # The one Ask AI button opens the public assistant.
     assert "data-public-chat-open" in html
 
 
-async def test_a_signed_in_member_stays_on_the_public_page_with_nothing_locked(test_context):
+async def test_a_signed_in_member_stays_on_the_public_page(test_context):
     await _screen_every_coin(test_context)
     test_context["app"].dependency_overrides[get_market_data_provider] = VolumeProvider
     await _signup(test_context, "member-public-page@example.com")
@@ -275,17 +268,16 @@ async def test_a_signed_in_member_stays_on_the_public_page_with_nothing_locked(t
     html = response.text
     # The public page, in the public chrome — not the dashboard.
     assert 'data-audience="public"' in html
-    assert 'data-unlocked="true"' in html
+    assert 'data-signed-in="true"' in html
     assert "<h1>Halal Crypto Screener</h1>" in html
     assert 'id="hm-site-footer"' in html
     assert "hm-top" not in html
     assert "dashboard-sidebar" not in html
-    # Same public design: no search, headings that do not sort.
-    assert "data-search" not in html
+    # The same page a visitor gets: search, and headings that sort.
+    assert "data-search" in html
     headings = re.findall(r"<button[^>]*data-sort=\"[a-z0-9]+\"[^>]*>", html)
-    assert headings and all("disabled" in heading for heading in headings)
-    # Nothing is locked and nothing asks a member to open an account.
-    assert "data-locked" not in html
+    assert headings and not any("disabled" in heading for heading in headings)
+    # Nothing asks a member to open an account.
     assert "data-account-gate" not in html
     assert "data-account-dialog" not in html
     assert "/signup?" not in html
@@ -355,46 +347,26 @@ async def test_the_popup_feed_refuses_a_coin_with_no_passport_and_invents_nothin
     assert "assessment" not in response.json()
 
 
-async def test_the_feed_sends_a_signed_in_member_every_coin(test_context):
+async def test_a_visitor_and_a_member_are_sent_the_same_list(test_context):
     methodology_id = await _screen_every_coin(test_context)
     test_context["app"].dependency_overrides[get_market_data_provider] = VolumeProvider
     client = test_context["client"]
 
-    visitor = await client.get(
-        "/api/v1/public-market/quotes", params={"methodology_id": methodology_id}
-    )
-    assert len(visitor.json()["items"]) == PUBLIC_MARKET_VISIBLE_COUNT
-
-    await _signup(test_context, "member-full-feed@example.com")
-    for exchange in MARKET_EXCHANGES:
-        member = await client.get(
+    async def feed(exchange: str) -> list[str]:
+        response = await client.get(
             "/api/v1/public-market/quotes",
             params={"methodology_id": methodology_id, "exchange": exchange},
         )
-        assert member.status_code == 200, member.text
-        payload = member.json()
-        full = await client.get(
-            "/api/v1/sharia/market-quotes",
-            params={"methodology_id": methodology_id, "exchange": exchange, "quote_asset": "USDT"},
-        )
-        # The whole list, in the dashboard's own order, and nothing behind the line.
-        assert [item["canonical_asset"] for item in payload["items"]] == [
-            item["canonical_asset"] for item in full.json()["items"]
-        ]
-        assert payload["total"] == len(COINS)
-        assert payload["hidden_count"] == 0
-        assert payload["visible_limit"] == len(COINS)
-        # One reader's answer must never be kept for the next one.
-        assert member.headers["cache-control"] == "private, no-store"
-        assert "Cookie" in member.headers["vary"].split(", ")
+        assert response.status_code == 200, response.text
+        assert response.headers["cache-control"] == "private, no-store"
+        return [item["canonical_asset"] for item in response.json()["items"]]
 
-    # The cached list is shared; a member's read must not unlock the next visitor's.
-    client.cookies.clear()
-    after = await client.get(
-        "/api/v1/public-market/quotes", params={"methodology_id": methodology_id}
-    )
-    assert len(after.json()["items"]) == PUBLIC_MARKET_VISIBLE_COUNT
-    assert after.json()["hidden_count"] == len(COINS) - PUBLIC_MARKET_VISIBLE_COUNT
+    as_visitor = {exchange: await feed(exchange) for exchange in MARKET_EXCHANGES}
+    await _signup(test_context, "member-full-feed@example.com")
+    as_member = {exchange: await feed(exchange) for exchange in MARKET_EXCHANGES}
+    assert as_visitor == as_member
+    for exchange in MARKET_EXCHANGES:
+        assert sorted(as_visitor[exchange]) == sorted(COINS), exchange
 
 
 async def test_both_pages_mark_the_same_followed_coins(test_context):
@@ -492,7 +464,7 @@ async def test_before_launch_the_page_its_feed_and_its_links_are_closed(waitlist
 
 
 # --------------------------------------------------------------------------------
-# The assistant, at the same line.
+# The assistant: every coin, for everybody, once the site has launched.
 # --------------------------------------------------------------------------------
 
 
@@ -545,7 +517,7 @@ async def _ask(test_context, question: str, fake: _FakeAI | None = None, *, user
     slug = re.sub(r"[^A-Za-z0-9]", "_", question)[:40]
     async with test_context["session_factory"]() as session:
         result = await PublicChatService(
-            session, settings, ai_client=fake, market_provider=VolumeProvider()
+            session, settings, ai_client=fake
         ).answer(
             PublicChatAnswerRequest(
                 question=question,
@@ -559,102 +531,88 @@ async def _ask(test_context, question: str, fake: _FakeAI | None = None, *, user
     return result
 
 
-async def _hidden_and_shown(test_context) -> tuple[str, str]:
-    """One coin behind the line on every exchange, and one on the page."""
+async def _first_and_last(test_context) -> tuple[str, str]:
+    """The first coin of the list, and the last one — far past the old line of twenty."""
 
     methodology_id = await _screen_every_coin(test_context)
-    shown: set[str] = set()
     async with test_context["session_factory"]() as session:
         service = PublicMarketService(session, test_context["settings"], VolumeProvider())
-        for exchange in MARKET_EXCHANGES:
-            view = await service.view(methodology_id=UUID(methodology_id), exchange=exchange)
-            shown |= {item.canonical_asset for item in view.items}
-    hidden = [coin for coin in COINS if coin not in shown]
-    assert hidden, "the fixture must leave a coin behind the line on every exchange"
-    return hidden[0], sorted(shown)[0]
+        view = await service.view(methodology_id=UUID(methodology_id), exchange="binance")
+    order = [item.canonical_asset for item in view.items]
+    assert len(order) > 20
+    return order[0], order[-1]
 
 
+async def _member_id(test_context):
+    async with test_context["session_factory"]() as session:
+        return (await session.scalar(select(User))).id
+
+
+#: Each coin, asked about by each kind of reader. Every one gets the same treatment.
+READERS = ["visitor", "member"]
+POSITIONS = ["first", "last"]
+
+
+@pytest.mark.parametrize("reader", READERS)
+@pytest.mark.parametrize("position", POSITIONS)
 @pytest.mark.parametrize("spelling", ["{coin}", "${coin}"])
-async def test_a_marked_hidden_coin_is_answered_with_sign_in_and_no_model_call(
-    test_context, spelling
+async def test_a_marked_coin_is_never_answered_with_sign_in_first(
+    test_context, reader, position, spelling
 ):
-    hidden, _shown = await _hidden_and_shown(test_context)
-    fake = _FakeAI([])
-    # Asked for the record. "Is X halal?" about a hidden coin reaches the same "sign in
-    # first" answer — see the halal-question tests below.
+    first, last = await _first_and_last(test_context)
+    coin = first if position == "first" else last
+    user_id = await _member_id(test_context) if reader == "member" else None
     result = await _ask(
-        test_context, f"What does the review of {spelling.format(coin=hidden)} say?", fake
+        test_context, f"What does the review of {spelling.format(coin=coin)} say?", None,
+        user_id=user_id,
     )
-
-    assert fake.payloads == []
-    assert result.intent == "account_needed"
-    assert hidden in result.message
-    assert "free account" in result.message
-    assert result.account_prompt is not None
-    assert "next=%2Fdashboard%2Fmarket" in result.account_prompt.signup_href
-    assert result.sources == []
+    assert result.intent != "account_needed"
+    assert result.account_prompt is None
+    assert "free account" not in result.message
 
 
-@pytest.mark.parametrize("spelling", ["{lower} network", "{lower}"])
-async def test_a_hidden_coin_named_in_words_is_refused_by_the_passport_lookup(
-    test_context, spelling
-):
-    """Written in lower case, so it is not a marked symbol and reaches the model."""
-
-    hidden, _shown = await _hidden_and_shown(test_context)
-    question = f"what does the review say about {spelling.format(lower=hidden.lower())}"
-    fake = _FakeAI([_ai("Let me check.", tools=["public_passport"])])
-    result = await _ask(test_context, question, fake)
-
-    # One model call only: the lookup refused the coin, so there is no second call and
-    # nothing the model could say about it.
-    assert len(fake.payloads) == 1
-    assert result.intent == "account_needed"
-    assert result.account_prompt is not None
-    assert "Let me check." not in result.message
-
-
-async def test_the_model_flagging_a_hidden_coin_replaces_its_answer(test_context):
-    await _hidden_and_shown(test_context)
-    fake = _FakeAI(
-        [
-            _ai(
-                "Some words about a coin.",
-                intent="coin_needs_account",
-                mode="PRODUCT_CONVERSATION",
-            )
-        ]
-    )
-    result = await _ask(test_context, "tell me about some coin", fake)
-    assert result.intent == "account_needed"
-    assert "Some words about a coin." not in result.message
-
-
-async def test_a_coin_on_the_page_is_answered_normally(test_context):
-    _hidden, shown = await _hidden_and_shown(test_context)
+@pytest.mark.parametrize("position", POSITIONS)
+async def test_a_visitor_gets_the_passport_lookup_for_any_coin(test_context, position):
+    first, last = await _first_and_last(test_context)
+    coin = first if position == "first" else last
     fake = _FakeAI(
         [
             _ai("Let me check.", tools=["public_passport"]),
-            _ai(f"{shown} has a recorded review."),
+            _ai(f"{coin} has a recorded review."),
         ]
     )
-    result = await _ask(test_context, f"What does the review of {shown} say?", fake)
+    result = await _ask(test_context, f"what does the review say about {coin.lower()}", fake)
+
+    # Two model calls: the lookup ran and its result went back to the model.
+    assert len(fake.payloads) == 2
     assert result.intent != "account_needed"
     assert result.account_prompt is None
-    # The model was told which coins it may talk about.
-    evidence = json.dumps(fake.payloads[0])
-    assert "coins_open_without_an_account" in evidence
+    # The model is no longer handed a list of coins it may talk about. (The words stay in
+    # its fixed instructions, for the time before launch; only the state would carry it.)
+    assert not re.search(r'coins_open_without_an_account\\*"\s*:', json.dumps(fake.payloads[0]))
 
 
-async def test_a_signed_in_member_is_never_asked_to_sign_in(test_context):
-    hidden, _shown = await _hidden_and_shown(test_context)
-    async with test_context["session_factory"]() as session:
-        member = await session.scalar(select(User))
-    result = await _ask(
-        test_context, f"What does the review of {hidden} say?", None, user_id=member.id
+async def test_after_launch_the_model_cannot_turn_an_answer_into_sign_in_first(test_context):
+    await _first_and_last(test_context)
+    fake = _FakeAI(
+        [_ai("Some words about a coin.", intent="coin_needs_account", mode="PRODUCT_CONVERSATION")]
     )
+    result = await _ask(test_context, "tell me about some coin", fake)
     assert result.intent != "account_needed"
     assert result.account_prompt is None
+
+
+async def test_before_launch_a_visitor_hears_about_no_coin(waitlist_context):
+    """The launch stage, not sign-in, is what still closes coins: nothing is public yet."""
+
+    await _screen_every_coin(waitlist_context)
+    fake = _FakeAI([])
+    result = await _ask(waitlist_context, f"What does the review of {COINS[0]} say?", fake)
+    assert fake.payloads == []
+    assert result.intent == "account_needed"
+    assert "opens up at launch" in result.message
+    assert result.account_prompt is None
+    assert result.sources == []
 
 
 @pytest.mark.parametrize(
@@ -662,7 +620,7 @@ async def test_a_signed_in_member_is_never_asked_to_sign_in(test_context):
     ["Why can I not sign in?", "How much does Hilal Markets cost?", "What is RSI?"],
 )
 async def test_a_question_that_names_no_coin_is_never_gated(test_context, question):
-    await _hidden_and_shown(test_context)
+    await _first_and_last(test_context)
     result = await _ask(test_context, question, None)
     assert result.intent != "account_needed"
 
@@ -682,56 +640,38 @@ HALAL_QUESTIONS = [
 ]
 
 
+@pytest.mark.parametrize("reader", READERS)
+@pytest.mark.parametrize("position", POSITIONS)
 @pytest.mark.parametrize("question", HALAL_QUESTIONS)
-async def test_a_visitor_asking_if_a_shown_coin_is_halal_is_sent_to_its_passport(
-    test_context, question
+async def test_anyone_asking_if_any_coin_is_halal_is_sent_to_its_passport(
+    test_context, question, position, reader
 ):
-    _hidden, shown = await _hidden_and_shown(test_context)
+    first, last = await _first_and_last(test_context)
+    coin = first if position == "first" else last
+    user_id = await _member_id(test_context) if reader == "member" else None
     fake = _FakeAI([])
-    result = await _ask(test_context, question.format(coin=shown), fake)
+    result = await _ask(test_context, question.format(coin=coin), fake, user_id=user_id)
 
     assert fake.payloads == [], "a fixed answer needs no model call"
     assert result.status == "answered"
     assert result.intent == "coin_shariah_question"
     assert result.mode != "SAFETY_REFUSAL"
-    assert result.message.startswith(f"I can't tell you myself that {shown} is halal.")
+    assert result.message.startswith(f"I can't tell you myself that {coin} is halal.")
     assert "different Shariah screening standards" in result.message
-    # The Passport is public, so a visitor is sent to the coin's own Passport.
     assert "free account" not in result.message
     assert [card.key for card in result.sources] == ["passport"]
-    assert result.sources[0].url.endswith(f"/passports/{shown.lower()}")
-
-
-@pytest.mark.parametrize("question", HALAL_QUESTIONS)
-async def test_a_member_asking_if_a_coin_is_halal_gets_its_passport(test_context, question):
-    hidden, _shown = await _hidden_and_shown(test_context)
-    async with test_context["session_factory"]() as session:
-        member = await session.scalar(select(User))
-    result = await _ask(test_context, question.format(coin=hidden), None, user_id=member.id)
-
-    assert result.intent == "coin_shariah_question"
-    assert result.message.startswith(f"I can't tell you myself that {hidden} is halal.")
-    assert [card.key for card in result.sources] == ["passport"]
-    assert result.sources[0].url.endswith(f"/passports/{hidden.lower()}")
-
-
-@pytest.mark.parametrize("question", HALAL_QUESTIONS)
-async def test_a_visitor_asking_about_a_hidden_coin_is_asked_to_sign_in(test_context, question):
-    hidden, _shown = await _hidden_and_shown(test_context)
-    result = await _ask(test_context, question.format(coin=hidden), _FakeAI([]))
-    assert result.intent == "account_needed"
-    assert result.sources == []
+    assert result.sources[0].url.endswith(f"/passports/{coin.lower()}")
 
 
 async def test_advice_still_wins_over_the_halal_question(test_context):
-    _hidden, shown = await _hidden_and_shown(test_context)
-    result = await _ask(test_context, f"Should I buy {shown}, is it halal?", _FakeAI([]))
+    first, _last = await _first_and_last(test_context)
+    result = await _ask(test_context, f"Should I buy {first}, is it halal?", _FakeAI([]))
     assert result.status == "refused"
     assert result.intent == "investment_advice"
 
 
 async def test_a_halal_question_with_no_coin_offers_to_look_one_up(test_context):
-    await _hidden_and_shown(test_context)
+    await _first_and_last(test_context)
     result = await _ask(test_context, "is crypto halal?", _FakeAI([]))
     assert result.intent == "religious_ruling"
     assert "does not issue religious rulings" not in result.message

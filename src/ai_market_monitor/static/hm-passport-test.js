@@ -136,6 +136,20 @@ function setUpProblemForm() {
   const status = form.querySelector("[data-problem-status]");
   const submit = form.querySelector("button[type='submit']");
 
+  /* A visitor without an account sends the form through the public forms' guard: a
+     token from its bootstrap, their email address and the hidden trap field. A member
+     sends it as themselves, with their own token. */
+  const isVisitor = form.dataset.visitor === "true";
+
+  async function visitorToken() {
+    const response = await fetch("/api/v1/public-forms/bootstrap", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error("The report form is not available just now.");
+    return (await response.json()).csrf_token || "";
+  }
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const details = form.querySelector("[name='details']");
@@ -144,25 +158,32 @@ function setUpProblemForm() {
     status.textContent = "Sending...";
     try {
       const versionId = form.querySelector("[name='passport_version_id']").value;
-      const response = await fetch(
-        `/api/v1/sharia/passports/${encodeURIComponent(form.dataset.canonicalAssetId)}/problem-reports`,
-        {
-          method: "POST",
-          credentials: "same-origin",
-          headers: {
-            "Content-Type": "application/json",
-            // On the public page the reader's token rides on the form; in the dashboard
-            // it is on the body.
-            "X-CSRF-Token": form.dataset.csrfToken || document.body.dataset.csrfToken || "",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({
-            report_type: form.querySelector("[name='report_type']").value,
-            details: details.value,
-            ...(versionId ? { passport_version_id: versionId } : {}),
-          }),
+      const assetId = encodeURIComponent(form.dataset.canonicalAssetId);
+      const body = {
+        report_type: form.querySelector("[name='report_type']").value,
+        details: details.value,
+        ...(versionId ? { passport_version_id: versionId } : {}),
+      };
+      let address = `/api/v1/sharia/passports/${assetId}/problem-reports`;
+      // On the public page the reader's token rides on the form; in the dashboard it is
+      // on the body.
+      let token = form.dataset.csrfToken || document.body.dataset.csrfToken || "";
+      if (isVisitor) {
+        address = `/api/v1/public-forms/passports/${assetId}/problem-reports`;
+        token = await visitorToken();
+        body.email = form.querySelector("[name='email']").value;
+        body.company_website = form.querySelector("[name='company_website']")?.value || "";
+      }
+      const response = await fetch(address, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": token,
+          Accept: "application/json",
         },
-      );
+        body: JSON.stringify(body),
+      });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(
@@ -170,7 +191,9 @@ function setUpProblemForm() {
         );
       }
       form.reset();
-      status.textContent = "Thank you. A reviewer will look at this. The published result has not changed.";
+      status.textContent = isVisitor
+        ? "Thank you. A reviewer will look at this and may write to you by email. The published result has not changed."
+        : "Thank you. A reviewer will look at this. The published result has not changed.";
       say("Your report was sent.");
     } catch (error) {
       status.textContent = `${error.message} Nothing was sent. Please try again.`;

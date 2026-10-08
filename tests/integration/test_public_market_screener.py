@@ -31,7 +31,6 @@ from ai_market_monitor.core.site_content import (
     market_screener_faqs,
 )
 from ai_market_monitor.db.models.enums import ShariaAssetStatus
-from ai_market_monitor.services.public_market import PUBLIC_MARKET_VISIBLE_COUNT
 from ai_market_monitor.services.sharia_screening import STATUS_LABELS
 from tests.integration.test_public_market_page import VolumeProvider
 from tests.integration.test_public_passports import _head, _seed, _sitemap
@@ -156,7 +155,7 @@ async def test_how_we_screen_sends_a_visitor_to_the_public_screener(test_context
 async def test_every_question_is_on_the_page_and_in_its_faq_data(test_context):
     await _three_passports(test_context)
     html = await _page(test_context)
-    faqs = market_screener_faqs(PUBLIC_MARKET_VISIBLE_COUNT)
+    faqs = market_screener_faqs()
     (data,) = [item for item in _head(html)["json_ld"] if item["@type"] == "FAQPage"]
 
     assert [(item["name"], item["acceptedAnswer"]["text"]) for item in data["mainEntity"]] == [
@@ -168,7 +167,10 @@ async def test_every_question_is_on_the_page_and_in_its_faq_data(test_context):
     assert [(unescape(q), unescape(a)) for q, a in shown] == [
         (item["question"], item["answer"]) for item in faqs
     ]
-    assert f"The first {PUBLIC_MARKET_VISIBLE_COUNT} coins" in faqs[-1]["answer"]
+    # Nothing is described as held back from a visitor any more.
+    assert "The whole list, every Evidence Passport and the Ask AI chat" in faqs[-1]["answer"]
+    for item in faqs:
+        assert "first 20" not in item["answer"] and "full list" not in item["answer"]
 
 
 # -- links ------------------------------------------------------------------------------

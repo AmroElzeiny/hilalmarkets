@@ -162,9 +162,9 @@ def social_image_url(base_url: str, configured: str | None = None) -> str:
 PUBLIC_NAVIGATION = (
     NavigationItem("Features", "public_features", "features"),
     NavigationItem("How It Works", "public_how_it_works", "how_it_works"),
-    # The screened coins, open to everybody. The first twenty are shown in full and the
-    # rest ask for a free account — see `services/public_market.py`. Hidden with Pricing
-    # before launch, because an invitation to sign up is all the page ends with.
+    # The screened coins, every one of them, open to everybody — see
+    # `services/public_market.py`. Hidden with Pricing before launch, with the rest of
+    # what only opens at launch.
     NavigationItem("Markets", "public_market", "market"),
     # A section of the home page, not a page: the separate Pricing page went stale and
     # was taken down on 4 October 2026. The React header links to the same section.
@@ -667,8 +667,8 @@ PUBLIC_PAGES = (
         "hilal/public/hilal_methodology.html",
     ),
     PublicPageMetadata(
-        # The dashboard's Halal Assets list, opened to visitors without an account. It
-        # shows the first twenty coins in full and asks for a free account for the rest.
+        # The dashboard's Halal Assets list, opened to visitors without an account: every
+        # screened coin, exactly as a member on the free plan sees it.
         #
         # It is also the site's one page for "halal crypto screener", "halal crypto
         # list" and "Shariah compliant crypto". There is deliberately no second page for
@@ -974,12 +974,10 @@ SHARIA_STATUS_PRESENTATION = {
 }
 
 
-def market_screener_faqs(visible_count: int) -> tuple[PurchaseFaq, ...]:
+def market_screener_faqs() -> tuple[PurchaseFaq, ...]:
     """The questions answered on the Market page, shown there and sent as FAQ data.
 
     One list for both, so the answers a search engine reads are the answers on the page.
-    ``visible_count`` is how many coins a visitor sees without an account
-    (`services/public_market.PUBLIC_MARKET_VISIBLE_COUNT`).
     """
 
     return (
@@ -1021,9 +1019,9 @@ def market_screener_faqs(visible_count: int) -> tuple[PurchaseFaq, ...]:
         {
             "question": "Do I need an account?",
             "answer": (
-                f"No. The first {visible_count} coins and every Evidence Passport are open "
-                "to everyone. A free account shows the full list and lets you follow "
-                "coins, so you are told when a coin's status changes."
+                "No. The whole list, every Evidence Passport and the Ask AI chat are open "
+                "to everyone. A free account lets you follow coins, so you are told when a "
+                "coin's status changes."
             ),
         },
     )

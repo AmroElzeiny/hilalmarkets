@@ -57,14 +57,8 @@ from ai_market_monitor.services.agent_control import AgentResponsesClient
 from ai_market_monitor.services.coin_mentions import CoinListingIndex, tickers_in
 from ai_market_monitor.services.email_branding import plain_text_block
 from ai_market_monitor.services.email_delivery import AuthEmailService, EmailDeliveryError
-from ai_market_monitor.services.interfaces import MarketDataProvider
-from ai_market_monitor.services.market_provider import market_data_provider
 from ai_market_monitor.services.notion_knowledge import NotionKnowledgeService
-from ai_market_monitor.services.public_market import (
-    PUBLIC_MARKET_VISIBLE_COUNT,
-    PublicMarketService,
-    market_account_links,
-)
+from ai_market_monitor.services.public_market import market_account_links
 from ai_market_monitor.services.public_support_ai import (
     COIN_NEEDS_ACCOUNT_INTENT,
     PublicSupportAICall,
@@ -823,71 +817,36 @@ class PublicChatService:
         settings: Settings,
         *,
         ai_client: AgentResponsesClient | None = None,
-        market_provider: MarketDataProvider | None = None,
     ):
         self.session = session
         self.settings = settings
         self.knowledge = PublicKnowledgeService(settings)
         self.notion_knowledge = NotionKnowledgeService(settings)
         self.ai_client = ai_client
-        self.market_provider = market_provider
 
     # -- what a visitor without an account may hear about -----------------------
 
-    async def _public_coins(self) -> frozenset[str]:
-        """The coins the public Market page shows, in any of its views.
+    def _coins_closed(self, user_id: UUID | None) -> bool:
+        """Whether a coin's details are closed to this reader.
 
-        Empty when the page is hidden by the launch stage, and empty when the list
-        cannot be read. Both are the fail-closed direction: a coin is public only when
-        a visitor could really have seen it.
+        Only before launch, and only for somebody who is not signed in: while the launch
+        stage hides the Market page and its Passports, the assistant cannot describe a
+        coin the site itself would not show. After launch every reader may hear about
+        every coin — a visitor is treated like a member on the free plan, who always
+        could. (Until 8 October 2026 a visitor heard only about the twenty coins the
+        Market page then showed, and was asked to sign in for any other.)
         """
 
-        if "market" in self.settings.stage_exposure.hidden_pages:
-            return frozenset()
-        provider = self.market_provider or market_data_provider(self.settings)
-        try:
-            market = PublicMarketService(self.session, self.settings, provider)
-            return await market.visible_symbols()
-        except Exception:
-            logger.warning("public_market_visible_coins_unavailable", exc_info=True)
-            return frozenset()
-
-    async def _coins_needing_account(
-        self, question: str, index: CoinListingIndex
-    ) -> list[str]:
-        """Coins a visitor marked as a symbol (``$XRP``, ``XRP``) that the page does not show.
-
-        Checked before the model is asked anything, so a question about a hidden coin
-        costs no model call and cannot be answered by one. Only symbols the visitor
-        *marked* count here: "why can I not sign in?" must not read "not" as a coin. A
-        coin named in plain words is caught one step later, by the Passport lookup.
-        """
-
-        marked = tickers_in(question)
-        if not marked:
-            return []
-        named = index.symbols_in(marked)
-        if not named:
-            return []
-        public = await self._public_coins()
-        return [symbol for symbol in named if symbol.upper() not in public]
+        return user_id is None and "market" in self.settings.stage_exposure.hidden_pages
 
     def _account_needed_message(self, symbols: list[str]) -> str:
         names = [item.upper() for item in symbols[:3]]
         subject = ", ".join(names) if names else "that coin"
         exposure = self.settings.stage_exposure
-        if not exposure.assistant_may_offer_account:
-            return (
-                f"I can't share details about {subject} yet. Every coin Hilal Markets has "
-                "reviewed opens up once accounts do. "
-                f"{exposure.primary_cta_label} and we will tell you when that happens."
-            )
-        verb = "is not one of them" if len(names) <= 1 else "are not among them"
         return (
-            f"Before you sign in, I can only talk about the {PUBLIC_MARKET_VISIBLE_COUNT} "
-            f"coins shown on the Market page, and {subject} {verb}. Open a free account, "
-            "or sign in, and I can tell you what Hilal Markets has recorded about it, with "
-            "the evidence behind it."
+            f"I can't share details about {subject} yet. Every coin Hilal Markets has "
+            "reviewed opens up at launch. "
+            f"{exposure.primary_cta_label} and we will tell you when that happens."
         )
 
     async def _coin_shariah_question(self, question: str) -> list[str]:
@@ -1005,15 +964,21 @@ class PublicChatService:
         #: Set when the answer must be "sign in first": the coins it was about, or an
         #: empty list when the model recognised a coin the server could not name.
         account_needed: list[str] | None = None
-        #: The listed coins a visitor's question names. Read once, and only for somebody
-        #: who is not signed in — a member may hear about every coin.
+        #: Before launch a visitor may hear about no coin (`_coins_closed`). After launch
+        #: everybody may hear about every coin, signed in or not.
+        coins_closed = self._coins_closed(user_id)
+        #: The listed coins the question names. Read only while coins are closed.
         mentioned: list[str] = []
-        if boundary is None and user_id is None:
+        if boundary is None and coins_closed:
             index = await CoinListingIndex.load(self.session)
             mentioned = index.asked_about(payload.question)
-            hidden = await self._coins_needing_account(payload.question, index)
-            if hidden:
-                account_needed = hidden
+            # A coin marked as a symbol (``$XRP``, ``XRP``) is refused before the model is
+            # asked anything, so it costs no model call and cannot be answered by one.
+            # Only marked symbols: "why can I not sign in?" must not read "not" as a coin.
+            marked = tickers_in(payload.question)
+            named = index.symbols_in(marked) if marked else []
+            if named:
+                account_needed = list(named)
         validation_failure: str | None = None
         safety_boundary: str | None = None
         authenticated_context_used = False
@@ -1042,17 +1007,9 @@ class PublicChatService:
             clarification, answer_complete, follow_ups = None, True, []
         elif shariah_coins:
             # A fixed answer, with no model call: what it may say is fully decided, and
-            # a model could only add a ruling to it. A visitor may hear only about coins
-            # the public Market page shows; anything else becomes "sign in first" below.
-            shown = (
-                shariah_coins
-                if user_id is not None
-                else [
-                    symbol
-                    for symbol in shariah_coins
-                    if symbol.upper() in await self._public_coins()
-                ]
-            )
+            # a model could only add a ruling to it. Before launch a visitor hears about
+            # no coin; that becomes the "not yet" answer below.
+            shown = [] if coins_closed else shariah_coins
             status, score, source_ids, route_ids, gap = "answered", 1.0, [], [], None
             stage, mode, intent = "ANSWER", "PRODUCT_FACT", COIN_SHARIAH_QUESTION
             clarification, answer_complete, follow_ups = None, True, []
@@ -1107,18 +1064,13 @@ class PublicChatService:
                 account_name = greeting_name(user.display_name) if user is not None else ""
                 if account_name:
                     ai_state["visitor_profile"] = {"name": account_name}
-            public_coins: frozenset[str] | None = None
-            if user_id is None:
-                # Read only when the question names a listed coin: the list costs a
-                # price lookup, and a question about alerts should not wait for one.
-                # With no coin named the Passport lookup finds nothing to show, and an
-                # empty set keeps it closed all the same.
-                public_coins = await self._public_coins() if mentioned else frozenset()
-                if mentioned:
-                    # The model is told which coins it may talk about, and the Passport
-                    # lookup below refuses every other one — so the rule holds even if
-                    # the model does not follow it.
-                    ai_state["coins_open_without_an_account"] = sorted(public_coins)
+            # None: every coin may be read. An empty set: none may (before launch).
+            public_coins: frozenset[str] | None = frozenset() if coins_closed else None
+            if coins_closed and mentioned:
+                # The model is told it may talk about no coin yet, and the Passport
+                # lookup below refuses every one — so the rule holds even if the model
+                # does not follow it.
+                ai_state["coins_open_without_an_account"] = []
             allowed_tools = ["public_passport"]
             if user_id is not None:
                 allowed_tools.extend(
@@ -1255,7 +1207,7 @@ class PublicChatService:
                         stage = "KNOWLEDGE_GAP"
                         answer_complete = False
                         gap = gap or "low_confidence"
-                if user_id is None and generated.intent == COIN_NEEDS_ACCOUNT_INTENT:
+                if coins_closed and generated.intent == COIN_NEEDS_ACCOUNT_INTENT:
                     account_needed = account_needed or []
             except PublicSupportAIUnavailable as exc:
                 validation_failure = type(exc).__name__

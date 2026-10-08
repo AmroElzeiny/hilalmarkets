@@ -1,5 +1,5 @@
 {% extends "hilal/base_dashboard.html" %}
-{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261008-passport-seo">{% endblock %}
+{% block page_styles_late %}<link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261008-open-list">{% endblock %}
 {% block content %}
 {#- The list itself is shared with the public Market page. See the partial for what a
     visitor without an account sees differently. -#}
@@ -9,4 +9,4 @@
 {% include "hilal/dashboard_test/partials/favorites_dialog.html" %}
 {% endblock %}
 
-{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20261008-passport-seo"></script>{% endblock %}
+{% block page_scripts %}<script type="module" src="{{ url_for('static', path='/hm-market-test.js') }}?v=20261008-open-list"></script>{% endblock %}

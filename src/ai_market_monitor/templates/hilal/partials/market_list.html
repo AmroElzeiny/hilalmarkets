@@ -6,31 +6,24 @@
     markup. Two copies would be two places for the page to change, and the public copy
     is the one nobody signed in would ever look at.
 
-    What differs for a visitor without an account, and only this:
+    Every screened coin is shown to everybody, with search and sorting, exactly as a
+    member on the free plan sees it. (Until 8 October 2026 a visitor saw only the first
+    twenty, without search or sorting, and the rest were locked behind a sign-up.)
 
-    * the list stops after `market_visible_limit` coins, and the rest are drawn as
-      locked, blurred rows under a banner that asks for a free account;
-    * there is no search box — searching a list you cannot see is a promise the page
-      cannot keep;
-    * the table's column headings do not sort, for the same reason;
-    * the hearts and Favorites open a sign-up prompt instead of following a coin.
+    What differs for a visitor without an account is only what is stored on an account:
+    the hearts and Favorites open a sign-up prompt instead of following a coin.
+    Somebody already signed in who opens the public page (`market_signed_in`) has the
+    coins they follow marked, and the hearts and Favorites open in their dashboard,
+    where following a coin really happens.
 
     A coin's Passport opens for everybody, on the public website (`/passports/<coin>`).
     Each coin's address arrives with it, built on the server by `core.app_links`, so this
-    list never assembles one itself.
-
-    Somebody already signed in who opens the public page (`market_unlocked`) keeps the
-    public page's look — no search, no sorting — but nothing is locked: every coin is
-    sent, the coins they follow are marked, and the hearts and Favorites open in their
-    dashboard, where following a coin really happens.
-
-    The coins themselves are never in this markup for a visitor. They arrive from
-    `/api/v1/public-market/quotes`, which sends the visible ones and only a count of the
-    rest.
+    list never assembles one itself. On the public page the coins arrive from
+    `/api/v1/public-market/quotes`.
 -#}
 {%- set is_public = market_audience == 'public' -%}
-{%- set is_unlocked = is_public and (market_unlocked | default(false)) -%}
-{%- set is_gated = is_public and not is_unlocked -%}
+{%- set is_signed_in_public = is_public and (market_signed_in | default(false)) -%}
+{%- set is_visitor = is_public and not is_signed_in_public -%}
 <div
   class="hm-t"
   data-market-root
@@ -40,12 +33,11 @@
   data-methodology-id="{{ selected_methodology_id or '' }}"
   data-exchange="{{ selected_exchange }}"
   data-quote="{{ selected_quote_asset }}"
-  {% if is_unlocked %}
-  data-unlocked="true"
+  {% if is_signed_in_public %}
+  data-signed-in="true"
   data-favorite-assets='{{ favorite_assets | tojson }}'
   data-favorite-watchlist-id="{{ favorite_watchlist_id or '' }}"
   {% elif is_public %}
-  data-visible-limit="{{ market_visible_limit }}"
   data-signup-href="{{ market_account_links.signup }}"
   data-signin-href="{{ market_account_links.signin }}"
   data-favorite-assets='[]'
@@ -125,22 +117,20 @@
       <span class="t-tile-note">Passed, but read the condition first</span>
       <span class="t-tile-bar" aria-hidden="true"></span>
     </button>
-    <button class="t-tile" type="button" data-filter="following" aria-pressed="false"{% if is_gated %} data-account-gate="follow"{% endif %}>
+    <button class="t-tile" type="button" data-filter="following" aria-pressed="false"{% if is_visitor %} data-account-gate="follow"{% endif %}>
       <span class="t-tile-top"><span data-icon="heart" data-icon-class="icon-sm"></span>You follow</span>
-      <span class="t-tile-value t-figure" data-count="following">{{ 0 if is_gated else favorite_assets|length }}</span>
-      <span class="t-tile-note">{{ 'Sign up free to follow coins' if is_gated else 'You get told when the status changes' }}</span>
+      <span class="t-tile-value t-figure" data-count="following">{{ 0 if is_visitor else favorite_assets|length }}</span>
+      <span class="t-tile-note">{{ 'Sign up free to follow coins' if is_visitor else 'You get told when the status changes' }}</span>
       <span class="t-tile-bar" aria-hidden="true"></span>
     </button>
   </div>
 
   <div class="t-controls" data-hm-part="The search box and the exchange and standard pickers">
-    {% if not is_public %}
     <div class="t-search">
       <span data-icon="search" data-icon-class="icon"></span>
       <label class="sr-only" for="t-market-search">Search by coin name or symbol</label>
-      <input id="t-market-search" type="search" placeholder="Search BTC, Ethereum, SOL..." value="{{ market_search }}" data-search autocomplete="off">
+      <input id="t-market-search" type="search" placeholder="Search BTC, Ethereum, SOL..." value="{{ market_search | default('') }}" data-search autocomplete="off">
     </div>
-    {% endif %}
 
     <div class="t-segment" role="radiogroup" aria-label="Exchange">
       <button type="button" role="radio" data-exchange="binance" aria-checked="{{ 'true' if selected_exchange == 'binance' else 'false' }}">
@@ -181,7 +171,7 @@
       </button>
     </div>
 
-    {% if is_unlocked %}
+    {% if is_signed_in_public %}
     {#- A link, not the popup: the Favorites popup and what it changes live in the
         dashboard, and `saved_assets=1` opens it there. -#}
     <a class="t-action" href="{{ market_dashboard_href }}?saved_assets=1" style="flex: 0 0 auto;" data-favorites-in-dashboard>
@@ -233,17 +223,13 @@
       <caption class="sr-only">Screened coins with live spot prices</caption>
       <thead>
         <tr>
-          {#- On the public page the headings keep their look and do not sort. A visitor
-              sees the first coins of a longer list, and sorting them would only reorder
-              those — "sort by price" would quietly mean "sort the twenty I was shown". -#}
-          {%- set sort_off = ' disabled aria-disabled="true"' if is_public else '' -%}
-          <th scope="col"><button type="button" data-sort="symbol"{{ sort_off|safe }}>Coin <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
+          <th scope="col"><button type="button" data-sort="symbol">Coin <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
           <th scope="col">Shariah status</th>
-          <th scope="col"><button type="button" data-sort="price"{{ sort_off|safe }}>Price <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
-          <th scope="col"><button type="button" data-sort="change"{{ sort_off|safe }}>24h change <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
-          <th scope="col"><button type="button" data-sort="change30d"{{ sort_off|safe }}>30d change <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
-          <th scope="col"><button type="button" data-sort="marketcap"{{ sort_off|safe }}>Size <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
-          <th scope="col"><button type="button" data-sort="volume"{{ sort_off|safe }}>24h volume <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
+          <th scope="col"><button type="button" data-sort="price">Price <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
+          <th scope="col"><button type="button" data-sort="change">24h change <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
+          <th scope="col"><button type="button" data-sort="change30d">30d change <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
+          <th scope="col"><button type="button" data-sort="marketcap">Size <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
+          <th scope="col"><button type="button" data-sort="volume">24h volume <span data-icon="sort" data-icon-class="icon-sm"></span></button></th>
           <th scope="col"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
@@ -251,37 +237,9 @@
     </table>
   </div>
 
-  {% if is_gated %}
-  {#- The coins after the first `market_visible_limit`, locked.
-
-      The rows under the banner are placeholders, drawn by the page script in the shape
-      of the view that is showing — cards under cards, rows under the table — and
-      blurred. They carry no coin, no price and no status: the feed never sent any, and
-      a placeholder that showed a made-up price would be inventing market data. Only the
-      count is real, and the banner says it in words. -#}
-  <section class="t-locked" data-locked hidden aria-labelledby="t-locked-title">
-    <div class="t-locked-preview" data-locked-preview aria-hidden="true" inert></div>
-    <div class="t-locked-banner" role="group" aria-labelledby="t-locked-title">
-      <span class="t-locked-icon" aria-hidden="true"><span data-icon="lock" data-icon-class="icon"></span></span>
-      <div class="t-locked-copy">
-        <h2 id="t-locked-title"><span data-locked-count>0</span> more screened coins are waiting</h2>
-        <p>You are looking at the first {{ market_visible_limit }}. Open a free account to see the whole list, follow the coins you care about, and read the evidence behind every result.</p>
-      </div>
-      <div class="t-locked-actions">
-        <a class="t-action is-primary" href="{{ market_account_links.signup }}" data-locked-signup>
-          <span data-icon="arrow" data-icon-class="icon-sm"></span>{{ settings.stage_exposure.primary_cta_label }}
-        </a>
-        <a class="t-action" href="{{ market_account_links.signin }}">
-          <span data-icon="user" data-icon-class="icon-sm"></span>Sign in
-        </a>
-      </div>
-    </div>
-  </section>
-  {% endif %}
-
   <div class="t-state" data-empty hidden>
     <div class="t-state-icon"><span data-icon="search" data-icon-class="icon"></span></div>
-    <h2>Nothing matches this {{ 'filter' if is_public else 'search' }}</h2>
+    <h2>Nothing matches this search</h2>
     <p data-empty-message>Try a shorter search, pick the other exchange, or go back to all screened coins.</p>
     <button class="t-action is-primary" type="button" data-clear-filters style="flex:0 0 auto;"><span data-icon="refresh" data-icon-class="icon-sm"></span>Show all screened coins</button>
   </div>
@@ -343,7 +301,7 @@
   </noscript>
 </div>
 
-{% if is_gated %}
+{% if is_visitor %}
 {#- The one prompt every account-only control on the public page opens. The script sets
     the heading, the sentence and where the two buttons return to, from what was
     pressed: a heart, Favorites, or a Passport. -#}

@@ -18,8 +18,8 @@
 {% set tz = passport_timezone %}
 {% block body_class %} hilal-dashboard hm-public-market hm-public-passport{% endblock %}
 {% block page_styles %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261008-passport-seo">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261008-passport-seo">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261008-open-list">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261008-open-list">
 {% endblock %}
 {% block body %}
 <a class="figma-bypass-link" href="#top">Skip to content</a>
@@ -393,10 +393,11 @@
       <h2>Something looks wrong?</h2>
       <p class="t-lede">Your report opens a review item for a person to look at. It never changes a published result by itself.</p>
     </div>
-    {#- A report is tied to an account, so a reviewer can write back. A visitor is asked
-        to sign in, and is brought straight back to this form afterwards. -#}
-    {% if passport_csrf_token %}
-    <form class="t-panel" data-problem-form data-canonical-asset-id="{{ passport.identity.canonical_asset_id }}" data-csrf-token="{{ passport_csrf_token }}">
+    {#- Open to everybody. A member's report is tied to their account; a visitor without
+        an account gives an email address instead, so a reviewer can write back. The
+        visitor's form is sent through the public forms' guard (`hm-passport-test.js`). -#}
+    {% set problem_visitor = not passport_csrf_token %}
+    <form class="t-panel" data-problem-form data-canonical-asset-id="{{ passport.identity.canonical_asset_id }}"{% if problem_visitor %} data-visitor="true"{% else %} data-csrf-token="{{ passport_csrf_token }}"{% endif %}>
       <input type="hidden" name="passport_version_id" value="{{ passport.passport_version_id or '' }}">
       <div class="t-form-row">
         <label for="t-problem-type">What kind of problem is it?</label>
@@ -413,19 +414,22 @@
         <label for="t-problem-details">What should we look at? Please give at least 20 characters.</label>
         <textarea id="t-problem-details" name="details" minlength="20" maxlength="5000" rows="4" required></textarea>
       </div>
+      {% if problem_visitor %}
+      <div class="t-form-row">
+        <label for="t-problem-email">Your email, so a reviewer can write back to you</label>
+        <input id="t-problem-email" name="email" type="email" autocomplete="email" maxlength="320" required>
+      </div>
+      {#- A trap for scripts. A person never sees it or fills it in. -#}
+      <div class="sr-only" aria-hidden="true">
+        <label for="t-problem-website">Leave this empty</label>
+        <input id="t-problem-website" name="company_website" type="text" tabindex="-1" autocomplete="off">
+      </div>
+      {% endif %}
       <div class="t-asset-actions" style="border-top:0;padding-top:0;">
         <button class="t-action is-primary" type="submit" style="flex:0 0 auto;"><span data-icon="flag" data-icon-class="icon-sm"></span>Send the report</button>
         <span class="t-foot-note" data-problem-status aria-live="polite" style="align-self:center;"></span>
       </div>
     </form>
-    {% else %}
-    <div class="t-panel">
-      <p>Sign in to send a report. It takes a free account, so a reviewer can write back to you about it.</p>
-      <div class="t-asset-actions" style="border-top:0;padding-top:0;">
-        <a class="t-action" href="{{ passport_problem_signin_href }}" style="flex:0 0 auto;"><span data-icon="user" data-icon-class="icon-sm"></span>Sign in to report a problem</a>
-      </div>
-    </div>
-    {% endif %}
   </section>
   {% endif %}
 
@@ -481,6 +485,6 @@
 {% endblock %}
 
 {% block page_scripts %}
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261008-passport-seo"></script>
-  <script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20261008-passport-seo"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261008-open-list"></script>
+  <script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20261008-open-list"></script>
 {% endblock %}

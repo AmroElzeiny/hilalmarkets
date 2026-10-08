@@ -5,9 +5,9 @@
  * number into existence, or lets a price change a Shariah status.
  *
  * One script for both audiences, told apart by `data-audience` on the root. The public
- * page is the same list cut after the first coins; what a visitor cannot do there —
- * follow a coin, sort or search a list they only partly see — opens a prompt to sign up
- * instead. A coin's evidence is open to everybody: "See the evidence" opens the same
+ * page is the same whole list, with search and sorting, for everybody. Only what is
+ * stored on an account — following a coin, Favorites — opens a prompt to sign up for a
+ * visitor. A coin's evidence is open to everybody: "See the evidence" opens the same
  * Passport popup on both pages. See `templates/hilal/partials/market_list.html`.
  */
 
@@ -69,13 +69,13 @@ function start(root) {
      following a coin happens there. */
   const dashboardHref = root.dataset.dashboardHref || "/dashboard/market";
   const methodologyId = root.dataset.methodologyId || "";
-  /* A visitor without an account. Decided by the server, which is the only side that
-     knows whether anybody is signed in. */
+  /* The public Market page. */
   const isPublic = root.dataset.audience === "public";
-  /* The public page, read by somebody already signed in: every coin is sent, and what
-     needs an account opens in their dashboard instead of asking them to sign up. */
-  const isUnlocked = isPublic && root.dataset.unlocked === "true";
-  const accountGate = isPublic && !isUnlocked ? setUpAccountGate(root) : null;
+  /* The public page, read by somebody already signed in: following a coin opens in
+     their dashboard instead of asking them to sign up. Decided by the server, which is
+     the only side that knows whether anybody is signed in. */
+  const isSignedIn = isPublic && root.dataset.signedIn === "true";
+  const accountGate = isPublic && !isSignedIn ? setUpAccountGate(root) : null;
 
   const find = (selector) => root.querySelector(selector);
   const cards = find("[data-cards]");
@@ -95,9 +95,6 @@ function start(root) {
   const liveToggleLabel = find("[data-live-toggle-label]");
   const standardSelect = find("[data-standard]");
   const standardForm = find("[data-standard-form]");
-  const locked = find("[data-locked]");
-  const lockedPreview = find("[data-locked-preview]");
-  const lockedCount = find("[data-locked-count]");
 
   const favorites = new Set(
     JSON.parse(root.dataset.favoriteAssets || "[]").map((value) => String(value).toUpperCase()),
@@ -119,11 +116,6 @@ function start(root) {
     sort: { key: "volume", direction: "desc" },
     paused: false,
     firstPaint: true,
-    /* The public feed sends only the visible coins, and these three numbers about the
-       rest. They name no coin; they are what the counters and the locked banner say. */
-    total: 0,
-    hiddenCount: 0,
-    statusCounts: null,
   };
 
   let controller = null;
@@ -364,7 +356,7 @@ function start(root) {
     button.setAttribute("aria-pressed", String(active));
     button.setAttribute(
       "aria-label",
-      isUnlocked
+      isSignedIn
         ? active
           ? `You follow ${asset}. Open its Passport in your dashboard to stop.`
           : `Follow ${asset} from its Passport in your dashboard.`
@@ -459,13 +451,9 @@ function start(root) {
     });
 
     const total = items.size;
-    const waiting = isPublic ? hiddenFor(state.filter, visible.length) : 0;
     cards.hidden = state.view !== "cards" || visible.length === 0;
     tableWrap.hidden = state.view !== "table" || visible.length === 0;
-    /* On the public page a filter that matches nothing among the visible coins may
-       still match coins behind the line. Then the locked banner is the answer, not
-       "nothing matches". */
-    emptyState.hidden = visible.length !== 0 || total === 0 || waiting > 0;
+    emptyState.hidden = visible.length !== 0 || total === 0;
 
     if (emptyMessage && visible.length === 0 && total > 0) {
       emptyMessage.textContent = state.search
@@ -477,61 +465,10 @@ function start(root) {
     if (resultNote) {
       resultNote.textContent = total === 0
         ? "No coins to show yet."
-        : `Showing ${visible.length} of ${isPublic ? state.total : total} screened coins on ${exchangeName}.`;
+        : `Showing ${visible.length} of ${total} screened coins on ${exchangeName}.`;
     }
 
-    if (isPublic) paintLocked(waiting);
     updateCounts();
-  }
-
-  /* ── The public page: what is behind the line ─────────────────────────── */
-
-  /** How many coins under one filter the visitor cannot see. From the feed's counts. */
-  function hiddenFor(filter, visibleCount) {
-    if (!state.statusCounts || filter === "following") return 0;
-    const matching = Object.entries(state.statusCounts)
-      .filter(([status]) => (filter === "clean"
-        ? assetTone(status) === "eligible" && !carriesCondition(status)
-        : filter === "conditional" ? carriesCondition(status) : true))
-      .reduce((sum, [, count]) => sum + count, 0);
-    return Math.max(0, matching - visibleCount);
-  }
-
-  /* Placeholders in the shape of the view that is showing, blurred under the banner.
-     They carry no coin, no price and no status — the feed sent none, and a made-up
-     number here would be inventing market data. Only the count in the banner is real. */
-  function paintLocked(waiting) {
-    if (!locked) return;
-    locked.hidden = waiting === 0 || items.size === 0;
-    if (locked.hidden) return;
-    lockedCount.textContent = String(waiting);
-    const shape = state.view === "table" ? "table" : "cards";
-    const count = Math.min(waiting, shape === "table" ? 6 : 8);
-    if (lockedPreview.dataset.shape === shape && Number(lockedPreview.dataset.count) === count) return;
-    lockedPreview.dataset.shape = shape;
-    lockedPreview.dataset.count = String(count);
-    const blank = '<span class="t-locked-blank" aria-hidden="true">&#8226;&#8226;&#8226;</span>';
-    if (shape === "cards") {
-      lockedPreview.innerHTML = `<div class="t-grid">${Array.from({ length: count }, () => `
-        <article class="t-asset is-decoy">
-          <div class="t-asset-top">
-            <span class="t-logo"></span>
-            <span class="t-asset-name"><span class="t-asset-symbol">${blank}</span><span class="t-asset-full">Screened coin</span></span>
-          </div>
-          <div class="t-price-row"><span class="t-price t-figure">${blank}</span><span class="t-change" data-direction="flat">${blank}</span></div>
-          <span class="t-status" data-tone="neutral">Shariah screened</span>
-          <div class="t-asset-meta"><span>24h volume ${blank}</span></div>
-          <div class="t-asset-actions"><span class="t-action is-primary">See the evidence</span><span class="t-action">Full Passport</span></div>
-        </article>`).join("")}</div>`;
-    } else {
-      lockedPreview.innerHTML = `<div class="t-table-wrap"><table class="t-table"><tbody>${Array.from({ length: count }, () => `
-        <tr>
-          <td><span class="t-cell-coin"><span class="t-logo"></span><span class="t-asset-name"><span class="t-asset-symbol">${blank}</span><span class="t-asset-full">Screened coin</span></span></span></td>
-          <td><span class="t-pill" data-tone="neutral">Shariah screened</span></td>
-          <td class="t-num">${blank}</td><td class="t-num">${blank}</td><td class="t-num">${blank}</td>
-          <td class="t-num">${blank}</td><td class="t-num">${blank}</td><td></td>
-        </tr>`).join("")}</tbody></table></div>`;
-    }
   }
 
   function updateCounts() {
@@ -543,15 +480,6 @@ function start(root) {
       conditional: conditional.length,
       following: favorites.size,
     };
-    /* A visitor is shown every screened coin in the counters, not only the ones on the
-       page — read from the feed's own counts through the same status words the list
-       uses, so a counter can never disagree with a filter. */
-    if (isPublic && state.statusCounts) {
-      tally.all = hiddenFor("all", 0);
-      tally.clean = hiddenFor("clean", 0);
-      tally.conditional = hiddenFor("conditional", 0);
-      tally.following = isUnlocked ? favorites.size : 0;
-    }
     Object.entries(tally).forEach(([key, value]) => {
       const node = root.querySelector(`[data-count="${key}"]`);
       if (node) countTo(node, value);
@@ -622,13 +550,6 @@ function start(root) {
 
   function absorb(payload) {
     const arriving = Array.isArray(payload.items) ? payload.items : [];
-    if (isPublic) {
-      state.total = Number(payload.total) || 0;
-      state.hiddenCount = Number(payload.hidden_count) || 0;
-      state.statusCounts = payload.status_counts && typeof payload.status_counts === "object"
-        ? payload.status_counts
-        : null;
-    }
     const seen = new Set();
     const fresh = [];
 
@@ -761,7 +682,7 @@ function start(root) {
         const item = favorite && itemFor(favorite);
         if (!item) return;
         event.preventDefault();
-        if (isUnlocked) window.location.assign(dashboardHref);
+        if (isSignedIn) window.location.assign(dashboardHref);
         else {
           const asset = String(item.canonical_asset || "").toUpperCase();
           accountGate.open("follow", { asset, trigger: favorite });
@@ -839,8 +760,6 @@ function start(root) {
   });
 
   root.querySelectorAll("[data-sort]").forEach((button) => {
-    /* The public page draws its headings without sorting; see the template. */
-    if (button.disabled) return;
     button.addEventListener("click", () => {
       const key = button.dataset.sort;
       state.sort = state.sort.key === key

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from urllib.parse import unquote, urlsplit
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
@@ -18,6 +19,10 @@ from ai_market_monitor.schemas.public_forms import (
     WaitlistSignupRequest,
     WaitlistSignupResponse,
 )
+from ai_market_monitor.schemas.sharia import (
+    PassportProblemReportResponse,
+    VisitorPassportProblemReportRequest,
+)
 from ai_market_monitor.services.public_forms import (
     PUBLIC_FORMS_CSRF_COOKIE,
     PublicFormConflict,
@@ -25,6 +30,8 @@ from ai_market_monitor.services.public_forms import (
     issue_public_forms_csrf,
     public_forms_csrf_matches,
 )
+from ai_market_monitor.services.sharia_passports import ShariaPassportReadService
+from ai_market_monitor.services.sharia_screening import ShariaScreeningError
 from ai_market_monitor.services.support_intake import (
     SupportIntakeGuard,
     support_intake_limits,
@@ -187,6 +194,64 @@ async def submit_contact(
         ),
         window_hours=round(guard.limits.window_hours, 2),
     )
+
+
+@router.post(
+    "/passports/{canonical_asset_id}/problem-reports",
+    response_model=PassportProblemReportResponse,
+    status_code=201,
+)
+@public_api(
+    "Records one Passport problem report from a visitor, who gives an email address to "
+    "be answered at; metered by the support intake guard."
+)
+async def report_passport_problem_as_visitor(
+    canonical_asset_id: UUID,
+    payload: VisitorPassportProblemReportRequest,
+    request: Request,
+    x_csrf_token: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> PassportProblemReportResponse:
+    """A Passport's "report a problem" form, for a visitor without an account.
+
+    The same report a member sends (`/api/v1/sharia/passports/.../problem-reports`), and
+    the same case for a reviewer; the visitor's email address stands in for the account,
+    so the reviewer can write back. Guarded like the Contact form: the public forms'
+    token, the hidden trap field, and the per-email and per-browser allowance.
+    """
+
+    _require_public_form_request(request, settings, x_csrf_token)
+    # The Passports open with the Market page; before launch neither does this form.
+    if "market" in settings.stage_exposure.hidden_pages:
+        raise HTTPException(status_code=404, detail="Not found")
+    guard = SupportIntakeGuard(session, settings)
+    fingerprint = client_fingerprint(request, settings)
+    decision = await guard.check(email=str(payload.email), client_fingerprint=fingerprint)
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            headers={"Retry-After": str(max(1, decision.retry_after_seconds))},
+            detail={"code": decision.code, "message": decision.message()},
+        )
+    try:
+        result = await ShariaPassportReadService(session, settings).report_problem(
+            user_id=None,
+            canonical_asset_id=canonical_asset_id,
+            payload=payload,
+            reporter_email=str(payload.email),
+        )
+    except ShariaScreeningError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=404 if exc.code.endswith("not_found") else 400,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    await guard.record(
+        door="passport_report", email=str(payload.email), client_fingerprint=fingerprint
+    )
+    await session.commit()
+    return result
 
 
 def _require_public_form_request(

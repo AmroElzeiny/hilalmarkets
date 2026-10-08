@@ -11,8 +11,8 @@
 {% set tz = passport_timezone %}
 {% block body_class %} hilal-dashboard hm-public-market hm-public-passport{% endblock %}
 {% block page_styles %}
-  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261008-passport-seo">
-  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261008-passport-seo">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hilalmarkets-brand.css') }}?v=20261008-open-list">
+  <link rel="stylesheet" href="{{ url_for('static', path='/hm-dashboard-test.css') }}?v=20261008-open-list">
 {% endblock %}
 {% block body %}
 <a class="figma-bypass-link" href="#top">Skip to content</a>
@@ -235,6 +235,6 @@
 {% endblock %}
 
 {% block page_scripts %}
-  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261008-passport-seo"></script>
-  <script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20261008-passport-seo"></script>
+  <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261008-open-list"></script>
+  <script type="module" src="{{ url_for('static', path='/hm-passport-test.js') }}?v=20261008-open-list"></script>
 {% endblock %}

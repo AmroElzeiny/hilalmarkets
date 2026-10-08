@@ -314,10 +314,21 @@ class ShariaPassportReadService:
     async def report_problem(
         self,
         *,
-        user_id: UUID,
+        user_id: UUID | None,
         canonical_asset_id: UUID,
         payload: PassportProblemReportRequest,
+        reporter_email: str | None = None,
     ) -> PassportProblemReportResponse:
+        """Record a reader's report about a Passport as a case for a reviewer.
+
+        From a member (``user_id``) or from a visitor without an account, who gives
+        ``reporter_email`` so a reviewer can write back. One of the two is required.
+        """
+
+        if user_id is None and not (reporter_email or "").strip():
+            raise ShariaScreeningError(
+                "reporter_required", "An email address is needed to send a report."
+            )
         asset = await self.session.get(CanonicalAsset, canonical_asset_id)
         if asset is None:
             raise ShariaScreeningError("asset_not_found", "The asset was not found.")
@@ -348,6 +359,9 @@ class ShariaPassportReadService:
         )
         row = ShariaPassportProblemReport(
             reporter_user_id=user_id,
+            reporter_email=(reporter_email or "").strip().lower() or None
+            if user_id is None
+            else None,
             canonical_asset_id=asset.id,
             asset_assessment_id=(publication.asset_assessment_id if publication else None),
             passport_version_id=publication.id if publication else None,
@@ -388,7 +402,7 @@ class ShariaPassportReadService:
         self.session.add(
             AuditEvent(
                 actor_user_id=user_id,
-                actor_type="user",
+                actor_type="user" if user_id is not None else "visitor",
                 action="sharia.passport_problem_reported",
                 target_type="sharia_review_case",
                 target_id=str(case.id),

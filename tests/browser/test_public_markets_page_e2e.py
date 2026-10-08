@@ -61,7 +61,7 @@ def test_a_signed_in_member_stays_on_the_public_market_page(
     assert re.search(r"/markets(\?|$)", page.url), page.url
     root = page.locator("[data-market-root]")
     expect(root).to_have_attribute("data-audience", "public")
-    expect(root).to_have_attribute("data-unlocked", "true")
+    expect(root).to_have_attribute("data-signed-in", "true")
     _show_the_seeded_standard(page)
     assert "/dashboard" not in page.url, page.url
 
@@ -74,6 +74,27 @@ def test_a_signed_in_member_stays_on_the_public_market_page(
     favorites = page.locator("[data-favorites-in-dashboard]")
     expect(favorites).to_have_attribute("href", re.compile(r"/dashboard/market\?saved_assets=1$"))
     _see_the_evidence_in_the_popup(page)
+
+
+def _search_and_sort_like_a_member(page: Page) -> None:
+    """A visitor searches and sorts the whole list, as a member on the free plan does."""
+
+    cards = page.locator(".t-asset:visible")
+    total = cards.count()
+    assert total >= 1
+    assert page.locator("[data-locked]").count() == 0
+    symbol = cards.first.locator(".t-asset-symbol").inner_text().strip()
+    page.fill("[data-search]", symbol)
+    expect(page.locator(".t-asset:visible").first).to_contain_text(symbol)
+    assert page.locator(".t-asset:visible").count() <= total
+    page.fill("[data-search]", "")
+    expect(page.locator(".t-asset:visible")).to_have_count(total)
+    page.locator('[data-view="table"]').click()
+    heading = page.locator('button[data-sort="symbol"]')
+    expect(heading).to_be_enabled()
+    heading.click()
+    expect(heading.locator("xpath=..")).to_have_attribute("aria-sort", "ascending")
+    page.locator('[data-view="cards"]').click()
 
 
 def _see_the_evidence_in_the_popup(page: Page) -> None:
@@ -106,7 +127,7 @@ def test_a_visitor_lands_on_the_public_market_page(page: Page, base_url: str) ->
     assert re.search(r"/markets(\?|$)", page.url), page.url
     root = page.locator("[data-market-root]")
     expect(root).to_have_attribute("data-audience", "public")
-    assert root.get_attribute("data-unlocked") is None
+    assert root.get_attribute("data-signed-in") is None
 
 
 def test_a_visitor_sees_the_evidence_in_the_popup(
@@ -120,8 +141,9 @@ def test_a_visitor_sees_the_evidence_in_the_popup(
     seed_sharia_screened_market(browser_app.database_url, email)
     page.context.clear_cookies()
     page.goto(f"{base_url}/markets", wait_until="domcontentloaded")
-    assert page.locator("[data-market-root]").get_attribute("data-unlocked") is None
+    assert page.locator("[data-market-root]").get_attribute("data-signed-in") is None
     _show_the_seeded_standard(page)
+    _search_and_sort_like_a_member(page)
     _see_the_evidence_in_the_popup(page)
 
     # On a phone the popup fits the screen and its main button can be reached.

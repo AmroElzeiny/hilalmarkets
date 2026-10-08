@@ -2,7 +2,6 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
 from uuid import UUID
 from xml.sax.saxutils import escape as xml_escape
 
@@ -96,7 +95,6 @@ from ai_market_monitor.services.public_market import (
     MARKET_EXCHANGE_PATTERN,
     MARKET_EXCHANGES,
     PUBLIC_MARKET_QUOTE,
-    PUBLIC_MARKET_VISIBLE_COUNT,
     PublicMarketService,
     market_account_links,
 )
@@ -241,7 +239,7 @@ def _public_context(
         json_ld.append(_faq_json_ld(PURCHASE_FAQS))
     elif page == "market":
         # The same questions the page answers in its own FAQ section, from one list.
-        json_ld.append(_faq_json_ld(market_screener_faqs(PUBLIC_MARKET_VISIBLE_COUNT)))
+        json_ld.append(_faq_json_ld(market_screener_faqs()))
     elif page == "help":
         json_ld.append(
             _faq_json_ld(
@@ -701,14 +699,14 @@ async def market(
 ) -> Response:
     """The screened market, open to everyone.
 
-    The dashboard's Halal Assets list, the same coins in the same order, cut after the
-    first :data:`PUBLIC_MARKET_VISIBLE_COUNT`.
+    The dashboard's Halal Assets list, the same coins in the same order — every one of
+    them, for a visitor exactly as for a member on the free plan.
 
-    Somebody who is already signed in sees this same page, with nothing behind the
-    line: the "Markets" link in the site's header is a promise of this page, and sending
-    a member to the dashboard instead broke it for exactly the people most likely to
-    press it. What needs an account — following a coin, Favorites, a Passport — opens
-    in their dashboard.
+    Somebody who is already signed in sees this same page: the "Markets" link in the
+    site's header is a promise of this page, and sending a member to the dashboard
+    instead broke it for exactly the people most likely to press it. What is stored on
+    an account — following a coin, Favorites — opens in their dashboard, and a visitor
+    pressing it is asked to open a free account.
     """
 
     if "market" in settings.stage_exposure.hidden_pages:
@@ -746,7 +744,7 @@ async def market(
         # Plain links in the page as sent, so a crawler reaches every Passport from the
         # screener: the same list, and the same rule, as the sitemap.
         market_passports=await linkable_passports(session, settings),
-        market_faqs=market_screener_faqs(PUBLIC_MARKET_VISIBLE_COUNT),
+        market_faqs=market_screener_faqs(),
         status_definitions=_status_definitions(),
         market_read_next=[
             {
@@ -763,9 +761,8 @@ async def market(
         selected_methodology_id=chosen.id if chosen else None,
         selected_exchange=exchange,
         selected_quote_asset=PUBLIC_MARKET_QUOTE,
-        market_visible_limit=PUBLIC_MARKET_VISIBLE_COUNT,
         market_account_links=market_account_links(settings),
-        market_unlocked=user is not None,
+        market_signed_in=user is not None,
         market_dashboard_href=app_link(settings, MARKET_PATH),
         favorite_assets=favorites,
         favorite_watchlist_id=favorite_watchlist_id,
@@ -941,9 +938,6 @@ async def _passport_page(
         passport_absolute_url=absolute_passport_link(settings, asset),
         passport_list_href=request.url_for("public_market").path,
         passport_csrf_token=csrf_token(settings, user.id) if user else None,
-        passport_problem_signin_href=app_link(
-            settings, f"/signin?{urlencode({'next': f'{page_path}#report-problem'})}"
-        ),
     )
     page = templates.TemplateResponse(
         request=request,

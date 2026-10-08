@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -605,11 +606,20 @@ class ShariaPassportProblemReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index("ix_sharia_passport_report_state_created", "state", "created_at"),
         Index("ix_sharia_passport_report_asset", "canonical_asset_id", "created_at"),
+        # Who to write back to: the account of a member, or the address a visitor
+        # without an account typed. Never neither.
+        CheckConstraint(
+            "reporter_user_id IS NOT NULL OR reporter_email IS NOT NULL",
+            name="reporter_present",
+        ),
     )
 
-    reporter_user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    reporter_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE")
     )
+    #: A visitor's own address, given on the Passport's problem form. Null for a member,
+    #: whose address is on their account.
+    reporter_email: Mapped[str | None] = mapped_column(String(320))
     canonical_asset_id: Mapped[UUID] = mapped_column(
         ForeignKey("canonical_assets.id", ondelete="RESTRICT"), nullable=False
     )

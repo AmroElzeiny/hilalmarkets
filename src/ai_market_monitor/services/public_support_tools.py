@@ -30,7 +30,7 @@ from ai_market_monitor.schemas.public_chat import (
 from ai_market_monitor.services.coin_mentions import CoinListingIndex
 from ai_market_monitor.services.entitlements import EntitlementService, UsageService
 
-#: Why a Passport lookup was refused for a visitor: the coin is behind an account.
+#: Why a Passport lookup was refused for a visitor: coins open at launch.
 ACCOUNT_NEEDED = "account_needed"
 
 
@@ -44,8 +44,9 @@ class PublicSupportReadTools:
         public_coins: frozenset[str] | None = None,
     ) -> None:
         self.session = session
-        #: The coins a visitor without an account may hear about — the ones the public
-        #: Market page shows. ``None`` for a signed-in person, who may hear about any.
+        #: The coins this reader may hear about. ``None`` — every coin — for everybody
+        #: once the site has launched; an empty set for a visitor before launch
+        #: (`PublicChatService._coins_closed`).
         self.public_coins = public_coins
 
     async def execute(
@@ -118,9 +119,8 @@ class PublicSupportReadTools:
             )
         symbol = symbols[0]
         if self.public_coins is not None and symbol.upper() not in self.public_coins:
-            # A visitor without an account sees the first coins of the Market page and
-            # no others. The record is not read at all, so nothing about this coin can
-            # reach the answer — the assistant can only ask them to sign in.
+            # Before launch a visitor may hear about no coin. The record is not read at
+            # all, so nothing about this coin can reach the answer.
             return PublicSupportToolResult(
                 tool_name="public_passport",
                 status="blocked",
@@ -128,8 +128,7 @@ class PublicSupportReadTools:
                     "asset": symbol,
                     "reason_code": ACCOUNT_NEEDED,
                     "reason": (
-                        "This coin is not on the public Market page. A free account, or "
-                        "signing in, is needed before anything about it is shown."
+                        "Coin details open to visitors when Hilal Markets launches."
                     ),
                 },
                 evidence_refs=[],

@@ -54,10 +54,14 @@ __all__ = [
     "support_intake_limits",
 ]
 
-#: Which form a message arrived through. Named here so a third door cannot invent a
-#: fourth spelling of an existing one.
-SupportIntakeDoor = Literal["contact", "dashboard"]
-SUPPORT_INTAKE_DOORS: Final[frozenset[str]] = frozenset({"contact", "dashboard"})
+#: Which form a message arrived through. Named here so a new door cannot invent a
+#: second spelling of an existing one. ``passport_report`` is a problem report sent from
+#: a Passport by a visitor without an account (a member's report needs no quota: it is
+#: tied to their account).
+SupportIntakeDoor = Literal["contact", "dashboard", "passport_report"]
+SUPPORT_INTAKE_DOORS: Final[frozenset[str]] = frozenset(
+    {"contact", "dashboard", "passport_report"}
+)
 
 
 @dataclass(frozen=True, slots=True)
