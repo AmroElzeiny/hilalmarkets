@@ -1,7 +1,6 @@
 import re
 from uuid import uuid4
 
-import pytest
 from playwright.sync_api import Page, expect
 
 
@@ -27,8 +26,11 @@ def _google_event_parameters(page: Page, event_name: str) -> list[dict]:
     return page.evaluate(
         """(name) => (window.dataLayer || []).flatMap((item) => {
           if (item && item.event === name) {
+            // A key pushed as `undefined` clears Tag Manager's copy; it is not sent.
             const {event, ...parameters} = item;
-            return [parameters];
+            return [Object.fromEntries(
+              Object.entries(parameters).filter(([, value]) => value !== undefined)
+            )];
           }
           if (item && item[0] === 'event' && item[1] === name) {
             return [item[2] || {}];
@@ -168,65 +170,14 @@ def test_x_pixel_loads_once_after_marketing_consent_and_not_in_system_brain(
     assert "xPixelId" not in response.text()
 
 
-def _stub_waitlist_api(
-    page: Page,
-    *,
-    created: bool = True,
-    status: int = 200,
-) -> list[dict]:
-    """Answer the public-forms endpoints in the browser and keep what was sent.
-
-    `created=False` is the address that is already on the list; `status` above 399 is a
-    submission the server refused. Neither is a new signup, so neither may be counted.
-    """
-
-    import json
-
-    submitted: list[dict] = []
-
-    page.route(
-        "**/api/v1/public-forms/bootstrap",
-        lambda route: route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(
-                {
-                    "csrf_token": "browser-test-token",
-                    "waitlist_endpoint": "/api/v1/public-forms/waitlist",
-                    "contact_endpoint": "/api/v1/public-forms/contact",
-                }
-            ),
-        ),
-    )
-
-    def _waitlist(route) -> None:
-        submitted.append(json.loads(route.request.post_data or "{}"))
-        if status >= 400:
-            route.fulfill(
-                status=status,
-                content_type="application/json",
-                body=json.dumps({"detail": "The request could not be handled."}),
-            )
-            return
-        route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(
-                {
-                    "status": "created" if created else "already_registered",
-                    "created": created,
-                    "code": "waitlist_created" if created else "duplicate_email",
-                    "sheet_delivery_status": "not_configured",
-                    "message": "You are on the waitlist.",
-                }
-            ),
-        )
-
-    page.route("**/api/v1/public-forms/waitlist", _waitlist)
-    return submitted
+# The landing page has had no waitlist since launch (`test_the_landing_page_leads_into_
+# the_product_and_never_to_a_waitlist` forbids one). The browser tests that filled in its
+# form were removed on 8 October 2026; they waited for a `#waitlist` that no longer
+# exists and failed on every run. What they also covered about analytics — consent,
+# calls to action, sections, the FAQ — is kept below without the form.
 
 
-def test_consent_cta_sections_and_waitlist_events_are_grounded_and_deduplicated(
+def test_consent_cta_and_page_views_are_grounded_and_deduplicated(
     page: Page,
     base_url: str,
 ) -> None:
@@ -256,62 +207,34 @@ def test_consent_cta_sections_and_waitlist_events_are_grounded_and_deduplicated(
     assert _event_count(page, "page_view") == 1
     assert _meta_event_count(page, "PageView") == 1
 
-    submitted = _stub_waitlist_api(page)
-
-    hero_cta = page.locator('main a[href="#waitlist"]').first
+    # The hero's call to action: counted once however often it is clicked in a burst.
+    page.wait_for_timeout(1100)
+    assert any(
+        event.get("section_name") == "hero"
+        for event in _google_event_parameters(page, "section_view")
+    )
+    hero_cta = page.locator('main a[href*="dashboard-entry"]').first
     hero_cta.evaluate(
         "(element) => element.addEventListener('click', event => event.preventDefault())"
     )
     hero_cta.evaluate("(element) => { element.click(); element.click(); }")
     assert _event_count(page, "cta_click") == 1
 
-    waitlist = page.locator("#waitlist")
-    waitlist.scroll_into_view_if_needed()
-    page.wait_for_timeout(1200)
-    assert _event_count(page, "waitlist_form_view") == 1
-    page.evaluate("window.scrollTo(0, 0)")
-    waitlist.scroll_into_view_if_needed()
-    page.wait_for_timeout(1200)
-    assert _event_count(page, "waitlist_form_view") == 1
-
-    # An email address is the only thing the form asks for.
-    expect(page.locator("#waitlist form input")).to_have_count(1)
-
-    email = page.locator("#waitlist-email")
-    email.fill(f"browser-{uuid4().hex[:8]}@example.com")
-    assert _event_count(page, "waitlist_form_start") == 1
-
-    page.get_by_role("button", name="Join the waitlist").last.click()
-    expect(page.get_by_text("You are on the waitlist.")).to_be_visible()
-    assert _event_count(page, "waitlist_submit_attempt") == 1
-    assert _event_count(page, "waitlist_signup_success") == 1
-    # The GA4 waitlist conversion: one per confirmed signup, and nothing attached to it.
-    assert _event_count(page, "waitlist_join") == 1
-    assert _google_event_parameters(page, "waitlist_join") == [{}]
-    assert _event_count(page, "waitlist_form_error") == 0
-    assert _meta_event_count(page, "Lead") == 1
-
-    # The browser sends the email and nothing about beta-testing consent, and no
-    # analytics event carries the address that was typed.
-    assert len(submitted) == 1
-    assert "beta_contact_consent" not in submitted[0]
-    success_events = _google_event_parameters(page, "waitlist_signup_success")
-    assert success_events == [{}]
-    assert "@example.com" not in str(_google_event_parameters(page, "waitlist_form_start"))
-
-    # A repeated callback for the same submission reports nothing further. This is the
-    # real duplicate: the same signup told to the page again, by a re-render, a retried
-    # promise, or a handler that ran twice.
-    page.evaluate(
-        """(key) => {
-          window.HilalAnalytics.trackWaitlistSuccess('landing_final', key);
-          window.HilalAnalytics.trackWaitlistSuccess('landing_final', key);
-        }""",
-        submitted[0]["idempotency_key"],
+    # A click carries its own details and nothing left over from the event before it.
+    # Tag Manager keeps the last value of every key, so a `section_name` the click did not
+    # send used to reach Google Analytics anyway — measured live on 8 October 2026.
+    click = _google_event_parameters(page, "cta_click")[0]
+    assert click["cta_location"] == "hero"
+    assert "section_name" not in click
+    cleared = page.evaluate(
+        """() => {
+          const item = (window.dataLayer || [])
+            .find((entry) => entry && entry.event === 'cta_click');
+          return Object.prototype.hasOwnProperty.call(item, 'section_name')
+            && item.section_name === undefined;
+        }"""
     )
-    assert _event_count(page, "waitlist_join") == 1
-    assert _event_count(page, "waitlist_signup_success") == 1
-    assert _meta_event_count(page, "Lead") == 1
+    assert cleared is True
 
 
 def test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id(
@@ -340,8 +263,9 @@ def test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id(
         "feature_build",
         "feature_monitor",
         "feature_connect",
+        "ecosystem",
         "trust_control",
-        "waitlist",
+        "pricing",
         "faq",
     ]
     for section_name in expected[1:]:
@@ -368,7 +292,7 @@ def test_sections_retry_after_consent_and_faq_tracks_only_deliberate_stable_id(
     assert "@example.com" not in serialized
 
 
-def test_long_entry_section_and_waitlist_visibility(
+def test_a_section_taller_than_the_window_is_counted_once(
     page: Page,
     base_url: str,
 ) -> None:
@@ -385,187 +309,6 @@ def test_long_entry_section_and_waitlist_visibility(
         for event in _google_event_parameters(page, "section_view")
     ]
     assert section_names.count("feature_screen") == 1
-
-    # A section taller than the window never reaches full visibility, so the form is
-    # counted as seen from the share of it that is on screen.
-    waitlist = page.locator("#waitlist")
-    waitlist.evaluate("element => { element.style.minHeight = '300vh'; }")
-    waitlist.scroll_into_view_if_needed()
-    page.wait_for_timeout(1100)
-    assert _event_count(page, "waitlist_form_view") == 1
-
-
-def test_missing_or_failed_tracking_provider_does_not_block_waitlist_submission(
-    page: Page,
-    base_url: str,
-) -> None:
-    """Analytics is never allowed to stand between a visitor and the waitlist."""
-
-    page.route(
-        "https://www.googletagmanager.com/**",
-        lambda route: route.fulfill(
-            status=200,
-            content_type="application/javascript",
-            body="/* the test dispatches the provider error explicitly */",
-        ),
-    )
-    submitted = _stub_waitlist_api(page)
-    page.goto(base_url, wait_until="domcontentloaded")
-    expect(page.locator("main h1")).to_be_visible()
-    page.evaluate(
-        """() => {
-          window.HilalMarketsRuntimeConfig.analytics = {
-            enabled: true,
-            gtmId: 'GTM-KBBHH2FV',
-            metaPixelEnabled: false,
-          };
-        }"""
-    )
-    page.locator("[data-cookie-accept-analytics]").click()
-    provider_script = page.locator('script[data-hm-provider="google-tag-manager"]')
-    expect(provider_script).to_be_attached()
-    provider_script.dispatch_event("error")
-
-    page.locator("#waitlist").scroll_into_view_if_needed()
-    page.locator("#waitlist-email").fill(f"broken-provider-{uuid4().hex[:8]}@example.com")
-    page.get_by_role("button", name="Join the waitlist").last.click()
-    expect(page.get_by_text("You are on the waitlist.")).to_be_visible()
-    assert len(submitted) == 1
-
-
-def test_the_form_shows_no_consent_box_and_sends_no_consent_answer(
-    page: Page,
-    base_url: str,
-) -> None:
-    """The withdrawn box is gone from the running page, not only from the source.
-
-    It was offered already ticked, which records an answer the person never gave. Checked
-    on the real page because the source and the served bundle are two different things.
-    """
-
-    submitted = _stub_waitlist_api(page)
-    page.goto(base_url, wait_until="domcontentloaded")
-    page.locator("#waitlist").scroll_into_view_if_needed()
-    expect(page.locator("#waitlist-beta-consent")).to_have_count(0)
-    expect(page.locator("#waitlist input[type='checkbox']")).to_have_count(0)
-    page.locator("#waitlist-email").fill(f"no-beta-{uuid4().hex[:8]}@example.com")
-    page.get_by_role("button", name="Join the waitlist").last.click()
-    expect(page.get_by_text("You are on the waitlist.")).to_be_visible()
-    assert len(submitted) == 1
-    assert "beta_contact_consent" not in submitted[0]
-
-
-def test_a_duplicate_email_is_explained_without_claiming_success(
-    page: Page,
-    base_url: str,
-) -> None:
-    _stub_waitlist_api(page, created=False)
-    page.goto(base_url, wait_until="domcontentloaded")
-    # Analytics is switched on deliberately: "no success event" only means something
-    # once the transport that would have carried one is actually loaded.
-    _configure_fake_providers(page)
-    page.locator("[data-cookie-accept-analytics]").click()
-    page.wait_for_selector(
-        'script[data-hm-provider="google-tag-manager"]', state="attached"
-    )
-    page.locator("#waitlist").scroll_into_view_if_needed()
-    page.locator("#waitlist-email").fill("already-there@example.com")
-    page.get_by_role("button", name="Join the waitlist").last.click()
-    expect(
-        page.get_by_text("This email is already on the waitlist.")
-    ).to_be_visible()
-    assert _event_count(page, "waitlist_signup_success") == 0
-    assert _event_count(page, "waitlist_join") == 0
-    assert _meta_event_count(page, "Lead") == 0
-    errors = _google_event_parameters(page, "waitlist_form_error")
-    assert [event.get("error_type") for event in errors] == ["duplicate_email"]
-
-
-@pytest.mark.deliberate_console_errors("429 (Too Many Requests)")
-def test_a_refused_submission_reports_no_waitlist_conversion(
-    page: Page,
-    base_url: str,
-) -> None:
-    """A signup that did not happen is never counted - before or after consent.
-
-    Two ways the conversion could be invented are checked together: the server refusing
-    the submission, and analytics running before the visitor allowed it. Each is checked
-    on the running page, because the count that matters is the one GTM would receive.
-
-    The refusal is a 429. A 5xx would be caught by the fixture's own check for failed
-    API calls, and every refusal reaches the same branch of the submit handler.
-    """
-
-    _stub_waitlist_api(page, status=429)
-    page.goto(base_url, wait_until="domcontentloaded")
-
-    # First: no consent yet. Nothing may be pushed at all.
-    page.locator("#waitlist").scroll_into_view_if_needed()
-    page.locator("#waitlist-email").fill(f"refused-{uuid4().hex[:8]}@example.com")
-    page.get_by_role("button", name="Join the waitlist").last.click()
-    expect(page.get_by_text("You are on the waitlist.")).to_have_count(0)
-    assert _event_count(page, "waitlist_join") == 0
-
-    # Then with analytics switched on, so "no event" means the transport was there and
-    # stayed silent rather than being absent.
-    _configure_fake_providers(page)
-    page.locator("[data-cookie-accept-analytics]").click()
-    page.wait_for_selector(
-        'script[data-hm-provider="google-tag-manager"]', state="attached"
-    )
-    page.locator("#waitlist-email").fill(f"refused-{uuid4().hex[:8]}@example.com")
-    page.get_by_role("button", name="Join the waitlist").last.click()
-    errors = _google_event_parameters(page, "waitlist_form_error")
-    assert [event.get("error_type") for event in errors] == ["rate_limited"]
-    assert _event_count(page, "waitlist_join") == 0
-    assert _event_count(page, "waitlist_signup_success") == 0
-    assert _meta_event_count(page, "Lead") == 0
-
-    # A retry of the refused submission is still not a signup.
-    page.get_by_role("button", name="Join the waitlist").last.click()
-    assert _event_count(page, "waitlist_join") == 0
-
-
-def test_the_waitlist_is_responsive_keyboard_accessible_and_offers_no_account(
-    page: Page,
-    base_url: str,
-) -> None:
-    for width in (1440, 768, 390, 320):
-        page.set_viewport_size({"width": width, "height": 900})
-        page.goto(base_url, wait_until="domcontentloaded")
-        waitlist = page.locator("#waitlist")
-        waitlist.scroll_into_view_if_needed()
-        expect(waitlist).to_be_visible()
-        expect(page.locator("#waitlist-email")).to_be_visible()
-        assert page.evaluate(
-            "() => document.documentElement.scrollWidth <= window.innerWidth"
-        )
-
-    page.set_viewport_size({"width": 390, "height": 844})
-    page.goto(base_url, wait_until="domcontentloaded")
-    menu = page.get_by_role("button", name="Menu")
-    menu.click()
-    mobile_menu = page.get_by_role("navigation", name="Mobile navigation")
-    # No route into the product exists on a phone either.
-    expect(mobile_menu.get_by_role("link", name="Sign in")).to_have_count(0)
-    expect(mobile_menu.get_by_role("link", name="Pricing")).to_have_count(0)
-    waitlist_link = mobile_menu.get_by_role("link", name="Join the waitlist")
-    expect(waitlist_link).to_be_visible()
-    waitlist_link.click()
-    expect(page.locator("#waitlist")).to_be_in_viewport()
-
-    # The whole form can be completed from the keyboard: type the address, one Tab to the
-    # button. There is nothing else in it to reach.
-    email = page.locator("#waitlist-email")
-    email.focus()
-    email.type("keyboard@example.com")
-    page.keyboard.press("Tab")
-    expect(page.get_by_role("button", name="Join the waitlist")).to_be_focused()
-
-    page.emulate_media(reduced_motion="reduce")
-    assert page.locator("html").evaluate(
-        "element => getComputedStyle(element).scrollBehavior"
-    ) == "auto"
 
 
 def test_the_hero_illustration_is_visible_and_fits_at_every_width(
