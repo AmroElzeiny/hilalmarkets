@@ -23,7 +23,7 @@
 {% endblock %}
 {% block body %}
 <a class="figma-bypass-link" href="#top">Skip to content</a>
-<div id="root"></div>
+<div id="root">{{ page_snapshot.get('root', '') | safe }}</div>
 <main id="top" class="hm-public-market-body" tabindex="-1">
 <div class="hm-t" data-passport-page>
 
@@ -481,7 +481,7 @@
   </section>
 </div>
 </main>
-<div id="hm-site-footer"></div>
+<div id="hm-site-footer">{{ page_snapshot.get('hm-site-footer', '') | safe }}</div>
 {% endblock %}
 
 {% block page_scripts %}

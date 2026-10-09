@@ -72,6 +72,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.testclient import TestClient
 
+from ai_market_monitor.api.routers import public as public_router
 from ai_market_monitor.api.template_env import register
 from ai_market_monitor.core import money as money_owner
 from ai_market_monitor.core.config import Settings
@@ -1020,55 +1021,56 @@ def _landing_html(plans: list[dict[str, object]]) -> str:
     templates = register(Jinja2Templates(directory=str(_SRC_ROOT / "templates")))
 
     def landing(request: Request) -> Response:
-        return templates.TemplateResponse(
-            request,
-            "hilal/public/react_site.html",
-            {
-                "title": "Halal Trading With Clarity",
-                "description": "Halal crypto monitoring.",
-                "robots_content": "index,follow",
-                "canonical_url": "http://testserver/",
-                "site_name": "Hilal Markets",
-                "social_title": "Hilal Markets",
-                "social_description": "Halal crypto monitoring.",
-                "og_image_url": "http://testserver/static/preview.png",
-                "og_image_alt": "Hilal Markets",
-                "public_chat_enabled": False,
-                "site_visit_measurement_enabled": False,
-                "cookie_consent_version": "test-1",
-                "public_analytics_enabled": False,
-                "marketing_consent_enabled": False,
-                "analytics_runtime_config": {
-                    "gtmId": None,
-                    "xPixelEnabled": False,
-                    "xPixelId": None,
-                },
-                "legal_name": "Test",
-                "company_address": "Test",
-                "governing_law": "Test",
-                "privacy_email": "privacy@example.test",
-                "support_email": "support@example.test",
-                "legal_review_required": False,
-                "site_chrome_runtime_config": {},
-                "methodology_runtime_config": {},
-                "waitlist_mode": False,
-                "waitlist_eyebrow": "",
-                "waitlist_headline": "",
-                "waitlist_body": "",
-                "waitlist_cta_label": "",
-                "waitlist_url": "#waitlist",
-                "billing_enabled": True,
-                "card_checkout_available": True,
-                "crypto_checkout_available": False,
-                "whatsapp_operational": False,
-                "annual_billing_supported": False,
-                "public_pricing_plans": plans,
-                "public_plan_comparison": [],
-                "promotion_ends_at": None,
-                "promotion_active": True,
-                "json_ld": [],
+        context: dict[str, object] = {
+            "title": "Halal Trading With Clarity",
+            "description": "Halal crypto monitoring.",
+            "robots_content": "index,follow",
+            "canonical_url": "http://testserver/",
+            "site_name": "Hilal Markets",
+            "social_title": "Hilal Markets",
+            "social_description": "Halal crypto monitoring.",
+            "og_image_url": "http://testserver/static/preview.png",
+            "og_image_alt": "Hilal Markets",
+            "public_chat_enabled": False,
+            "site_visit_measurement_enabled": False,
+            "cookie_consent_version": "test-1",
+            "public_analytics_enabled": False,
+            "marketing_consent_enabled": False,
+            "analytics_runtime_config": {
+                "gtmId": None,
+                "xPixelEnabled": False,
+                "xPixelId": None,
             },
-        )
+            "legal_name": "Test",
+            "company_address": "Test",
+            "governing_law": "Test",
+            "privacy_email": "privacy@example.test",
+            "support_email": "support@example.test",
+            "legal_review_required": False,
+            "site_chrome_runtime_config": {},
+            "methodology_runtime_config": {},
+            "waitlist_mode": False,
+            "waitlist_eyebrow": "",
+            "waitlist_headline": "",
+            "waitlist_body": "",
+            "waitlist_cta_label": "",
+            "waitlist_url": "#waitlist",
+            "billing_enabled": True,
+            "card_checkout_available": True,
+            "crypto_checkout_available": False,
+            "whatsapp_operational": False,
+            "annual_billing_supported": False,
+            "public_pricing_plans": plans,
+            "public_plan_comparison": [],
+            "promotion_ends_at": None,
+            "promotion_active": True,
+            "json_ld": [],
+        }
+        # The runtime config is built by the router's own function, as on the live page.
+        context["react_runtime_config"] = public_router._react_runtime_config(context)
+        context["react_render_key"] = "0"
+        context["page_snapshot"] = {}
+        return templates.TemplateResponse(request, "hilal/public/react_site.html", context)
 
     app = Starlette(
         routes=[
@@ -1101,8 +1103,13 @@ def test_the_landing_page_embeds_prices_as_bare_exact_numbers() -> None:
     template_text = (_SRC_ROOT / "templates" / "hilal" / "public" / "react_site.html").read_text(
         encoding="utf-8"
     )
-    assert '"plans": public_pricing_plans' in template_text, "the page stopped embedding the plans"
-    assert "| tojson" in template_text, "the plans stopped travelling through tojson"
+    router_text = (_SRC_ROOT / "api" / "routers" / "public.py").read_text(encoding="utf-8")
+    assert '"plans": context["public_pricing_plans"]' in router_text, (
+        "the page stopped embedding the plans"
+    )
+    assert "react_runtime_config | tojson" in template_text, (
+        "the plans stopped travelling through tojson"
+    )
 
     plans = [{"code": code, **plan_offer_payload(code)} for code in PUBLIC_PLAN_CODES]
     html = _landing_html(plans)

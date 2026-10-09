@@ -624,10 +624,11 @@ PUBLIC_PAGES = (
         "/features",
         "Features",
         (
-            "Explore Shariah-screened discovery, guided Watchlists, evidence, "
-            "and compliance monitoring."
+            "Shariah-screened crypto listings, an Evidence Passport for every coin, "
+            "rules you approve and alerts when something changes. Spot only, no leverage."
         ),
         "hilal/public/features.html",
+        search_title="Features — Evidence Passports, Watchlists and Alerts",
     ),
     PublicPageMetadata(
         "how_it_works",

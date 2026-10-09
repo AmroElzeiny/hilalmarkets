@@ -154,6 +154,12 @@ app.conf.update(
             "task": "ai_market_monitor.process_dashboard_export_jobs",
             "schedule": 60,
         },
+        # Usually reads each React page's version key and finds nothing to do; a browser
+        # starts only for a page whose key changed (a deploy, a price, a coin decision).
+        "refresh-public-page-snapshots-every-fifteen-minutes": {
+            "task": "ai_market_monitor.refresh_public_page_snapshots",
+            "schedule": 15 * 60,
+        },
         "evaluate-strategy-health-every-hour": {
             "task": "ai_market_monitor.evaluate_strategy_health",
             "schedule": 60 * 60,
@@ -562,6 +568,15 @@ def process_dashboard_replay_jobs() -> dict:
 @app.task(name="ai_market_monitor.process_dashboard_export_jobs")
 def process_dashboard_export_jobs() -> dict:
     return _run_async_task(_process_dashboard_export_jobs())
+
+
+@app.task(name="ai_market_monitor.refresh_public_page_snapshots")
+def refresh_public_page_snapshots() -> dict:
+    """Keep the words of the React pages in the HTML that search engines read."""
+
+    from ai_market_monitor.services.public_page_snapshots import refresh_snapshots
+
+    return _run_async_task(refresh_snapshots(get_settings()))
 
 
 @app.task(name="ai_market_monitor.evaluate_strategy_health")

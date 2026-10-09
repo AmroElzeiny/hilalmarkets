@@ -17,7 +17,7 @@
 {% endblock %}
 {% block body %}
   <a class="figma-bypass-link" href="#top">Skip to content</a>
-  <div id="root"></div>
+  <div id="root">{{ page_snapshot.get('root', '') | safe }}</div>
   <main id="top" class="hm-public-market-body" tabindex="-1">
     {% set market_audience = 'public' %}
     {% include "hilal/partials/market_list.html" %}
@@ -28,7 +28,7 @@
   {% with passport_quick_view_endpoint = '/api/v1/public-market/passports/{asset}/quick-view' %}
     {% include "hilal/dashboard_test/partials/passport_quick_view.html" %}
   {% endwith %}
-  <div id="hm-site-footer"></div>
+  <div id="hm-site-footer">{{ page_snapshot.get('hm-site-footer', '') | safe }}</div>
 {% endblock %}
 {% block page_scripts %}
   <script src="{{ url_for('static', path='/asset-logos.js') }}?v=20261008-open-list"></script>

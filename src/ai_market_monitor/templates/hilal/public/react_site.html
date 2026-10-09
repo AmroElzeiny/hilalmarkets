@@ -81,39 +81,13 @@
       "xPixelEnabled": analytics_runtime_config.xPixelEnabled,
       "xPixelId": analytics_runtime_config.xPixelId
     } | tojson }};
-    window.HilalMarketsRuntimeConfig = {{ {
-      "analytics": analytics_runtime_config,
-      "legal": {
-        "legalName": legal_name,
-        "companyAddress": company_address,
-        "governingLaw": governing_law,
-        "privacyEmail": privacy_email,
-        "supportEmail": support_email,
-        "reviewRequired": legal_review_required
-      },
-      "chrome": site_chrome_runtime_config,
-      "methodology": methodology_runtime_config,
-      "waitlist": {
-        "mode": waitlist_mode,
-        "eyebrow": waitlist_eyebrow,
-        "headline": waitlist_headline,
-        "body": waitlist_body,
-        "ctaLabel": waitlist_cta_label,
-        "href": waitlist_url
-      },
-      "commerce": {
-        "billingEnabled": billing_enabled,
-        "cardCheckoutAvailable": card_checkout_available,
-        "cryptoCheckoutAvailable": crypto_checkout_available,
-        "whatsappOperational": whatsapp_operational,
-        "annualBillingSupported": annual_billing_supported,
-        "plans": public_pricing_plans,
-        "comparisonRows": public_plan_comparison,
-        "promotionEndsAt": promotion_ends_at,
-        "promotionActive": promotion_active
-      }
-    } | tojson }};
+    {#- Built by `_react_runtime_config` in `api/routers/public.py`, so the page's
+        version key below is worked out from exactly this object. -#}
+    window.HilalMarketsRuntimeConfig = {{ react_runtime_config | tojson }};
   </script>
+  {#- The version key of this page's data and bundle. A kept copy of the drawn page
+      (`services/public_page_snapshots.py`) is put in `#root` only under this key. -#}
+  <meta name="hm-render-key" content="{{ react_render_key }}">
   {% for item in json_ld %}<script type="application/ld+json">{{ item | tojson }}</script>{% endfor %}
 </head>
 <body class="hm-react-site{% block body_class %}{% endblock %}">
@@ -122,7 +96,7 @@
       for the header and adds `#hm-site-footer` for the footer. -#}
   {% block body %}
   <a class="figma-bypass-link" href="#root">Skip to content</a>
-  <div id="root"></div>
+  <div id="root">{{ page_snapshot.get('root', '') | safe }}</div>
   {% endblock %}
   {% include "hilal/partials/cookie_banner.html" %}
   {% if public_chat_enabled %}{% include "hilal/partials/public_chat.html" %}{% endif %}

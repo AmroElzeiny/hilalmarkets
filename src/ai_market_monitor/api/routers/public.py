@@ -98,6 +98,7 @@ from ai_market_monitor.services.public_market import (
     PublicMarketService,
     market_account_links,
 )
+from ai_market_monitor.services.public_page_snapshots import load_snapshot, render_key
 from ai_market_monitor.services.public_passports import (
     linkable_passports,
     open_passport,
@@ -334,7 +335,7 @@ def _public_context(
         plan_codes=PURCHASABLE_PLAN_CODES,
         billing_cycle="monthly",
     )
-    return {
+    context: dict[str, Any] = {
         "request": request,
         "settings": settings,
         "site_name": SITE_NAME,
@@ -489,6 +490,68 @@ def _public_context(
         "methodology_runtime_config": None,
         **extra,
     }
+    runtime_config = _react_runtime_config(context)
+    context["react_runtime_config"] = runtime_config
+    # The page's version key: a kept copy of the drawn page is used only under this key.
+    context["react_render_key"] = render_key(runtime_config)
+    context["page_snapshot"] = {}
+    return context
+
+
+#: What search engines are told about a Passport's Full Report.
+REPORT_ROBOTS = "noindex,follow"
+
+
+def _react_runtime_config(context: dict[str, Any]) -> dict[str, Any]:
+    """`window.HilalMarketsRuntimeConfig`: everything the landing bundle is handed.
+
+    Built here rather than in the template so the page's version key is worked out from
+    the very object the bundle receives, not from a second description of it.
+    """
+
+    return {
+        "analytics": context["analytics_runtime_config"],
+        "legal": {
+            "legalName": context["legal_name"],
+            "companyAddress": context["company_address"],
+            "governingLaw": context["governing_law"],
+            "privacyEmail": context["privacy_email"],
+            "supportEmail": context["support_email"],
+            "reviewRequired": context["legal_review_required"],
+        },
+        "chrome": context["site_chrome_runtime_config"],
+        "methodology": context["methodology_runtime_config"],
+        "waitlist": {
+            "mode": context["waitlist_mode"],
+            "eyebrow": context["waitlist_eyebrow"],
+            "headline": context["waitlist_headline"],
+            "body": context["waitlist_body"],
+            "ctaLabel": context["waitlist_cta_label"],
+            "href": context["waitlist_url"],
+        },
+        "commerce": {
+            "billingEnabled": context["billing_enabled"],
+            "cardCheckoutAvailable": context["card_checkout_available"],
+            "cryptoCheckoutAvailable": context["crypto_checkout_available"],
+            "whatsappOperational": context["whatsapp_operational"],
+            "annualBillingSupported": context["annual_billing_supported"],
+            "plans": context["public_pricing_plans"],
+            "comparisonRows": context["public_plan_comparison"],
+            "promotionEndsAt": context["promotion_ends_at"],
+            "promotionActive": context["promotion_active"],
+        },
+    }
+
+
+async def _with_page_snapshot(
+    context: dict[str, Any], settings: Settings, path: str
+) -> dict[str, Any]:
+    """``context`` with the kept copy of the drawn page, when one matches it."""
+
+    context["page_snapshot"] = await load_snapshot(
+        settings, path, context["react_render_key"]
+    )
+    return context
 
 
 async def _render_public_page(
@@ -519,19 +582,24 @@ async def _render_public_page(
         # the owner edits a decision file, and a number baked into a JavaScript bundle
         # would keep saying the old one until somebody remembered to rebuild it.
         extra["methodology_runtime_config"] = hilal_page_payload()
+    if metadata.search_title:
+        # A page with its own search title previews as itself when shared.
+        extra["social_title"] = metadata.page_title
+        extra["social_description"] = metadata.description
+    context = _public_context(
+        request,
+        settings,
+        page=metadata.page,
+        title=metadata.page_title,
+        description=metadata.description,
+        path=metadata.path,
+        legal_review_required=metadata.legal_review_required,
+        **extra,
+    )
     return templates.TemplateResponse(
         request=request,
         name=metadata.template,
-        context=_public_context(
-            request,
-            settings,
-            page=metadata.page,
-            title=metadata.page_title,
-            description=metadata.description,
-            path=metadata.path,
-            legal_review_required=metadata.legal_review_required,
-            **extra,
-        ),
+        context=await _with_page_snapshot(context, settings, metadata.path),
     )
 
 
@@ -577,17 +645,18 @@ async def landing_page(
 
     if is_app_host(request, settings):
         return RedirectResponse(MAIN_DASHBOARD_PATH, status_code=307)
+    context = _public_context(
+        request,
+        settings,
+        page="landing",
+        title=SOCIAL_PREVIEW_TITLE,
+        description=SOCIAL_PREVIEW_DESCRIPTION,
+        path="/",
+    )
     return templates.TemplateResponse(
         request=request,
         name="hilal/public/index.html",
-        context=_public_context(
-            request,
-            settings,
-            page="landing",
-            title=SOCIAL_PREVIEW_TITLE,
-            description=SOCIAL_PREVIEW_DESCRIPTION,
-            path="/",
-        ),
+        context=await _with_page_snapshot(context, settings, "/"),
     )
 
 
@@ -767,7 +836,11 @@ async def market(
         favorite_assets=favorites,
         favorite_watchlist_id=favorite_watchlist_id,
     )
-    page = templates.TemplateResponse(request=request, name=metadata.template, context=context)
+    page = templates.TemplateResponse(
+        request=request,
+        name=metadata.template,
+        context=await _with_page_snapshot(context, settings, metadata.path),
+    )
     # Who is reading decides what the page says, so no shared cache may keep it.
     page.headers["Cache-Control"] = "private, no-store"
     page.headers["Vary"] = "Cookie"
@@ -939,15 +1012,22 @@ async def _passport_page(
         passport_list_href=request.url_for("public_market").path,
         passport_csrf_token=csrf_token(settings, user.id) if user else None,
     )
+    if report:
+        # The Full Report is the Passport laid out for reading and printing, not a second
+        # page about the coin. Kept out of search results, so the coin has one page there
+        # — its Passport — and the two never compete. Links on it are still followed.
+        context["robots_content"] = REPORT_ROBOTS
     page = templates.TemplateResponse(
         request=request,
         name="hilal/public/passport_report.html" if report else "hilal/public/passport.html",
-        context=context,
+        context=await _with_page_snapshot(context, settings, page_path),
     )
     if user is not None:
         # The problem form carries this reader's own token, so no shared cache may keep it.
         page.headers["Cache-Control"] = "private, no-store"
     page.headers["Vary"] = "Cookie"
+    if report:
+        page.headers["X-Robots-Tag"] = REPORT_ROBOTS
     return page
 
 
